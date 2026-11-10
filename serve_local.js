@@ -16,8 +16,8 @@ if (CONNECTED && SELFHOST) throw new Error('Choose connected or self-hosted mode
 const PORT = Number(process.env.PORT || (CONNECTED ? 9443 : SELFHOST ? 8766 : 8765));
 const HOST = SELFHOST ? (process.env.BIND_HOST || '127.0.0.1') : '127.0.0.1';
 if (SELFHOST && HOST !== '127.0.0.1' && HOST !== '::1' &&
-    (!process.env.ZGTA_JOIN_CODE || !process.env.ZGTA_ALLOWED_HOSTS))
-  throw new Error('Network hosting requires ZGTA_JOIN_CODE and ZGTA_ALLOWED_HOSTS.');
+    (!(process.env.ZGTA_JOIN_CODE || process.env.ZGTA_JOIN_CODE_FILE) || !process.env.ZGTA_ALLOWED_HOSTS))
+  throw new Error('Network hosting requires a join code and ZGTA_ALLOWED_HOSTS.');
 const localGame = SELFHOST ? require('./selfhost_backend') : null;
 const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
   ...(process.env.ZGTA_ALLOWED_HOSTS || '').split(',').map(host => host.trim()).filter(Boolean)]);
@@ -219,7 +219,7 @@ function serve(req, res) {
   let pathname;
   try { pathname = new URL(req.url, PUBLIC_ORIGIN).pathname; }
   catch { res.writeHead(400); return res.end('Invalid URL'); }
-  if (SELFHOST && process.env.ZGTA_JOIN_CODE) {
+  if (SELFHOST && localGame.requiresJoinCode) {
     if (pathname === '/join' && req.method === 'GET') return localGame.join(req, res);
     if (pathname === '/api/local/join') return localGame.join(req, res);
     if (!localGame.authorized(req)) {
