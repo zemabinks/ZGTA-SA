@@ -10,6 +10,12 @@ original site is a live multiplayer service; its account, world, and other
 server APIs are not captured by static file downloads. A complete, working
 offline game therefore cannot be claimed from a static snapshot.
 
+The 10 November 2026 snapshot has **1,376 verified files (626,202,041 bytes)**.
+The local manifest records **62 unavailable URLs**, mostly world breakage
+files that the source returned as 404. The original server has no public file
+index, so the manifest is an audit of discoverable assets, not proof that every
+server file was copied.
+
 Run `python3 archive_site.py` to continue downloading public files. The
 archiver records each successful file with its URL, byte length, and SHA-256
 hash in `local-only/manifest.json`. It can be rerun to resume interrupted work.
