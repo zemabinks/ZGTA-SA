@@ -125,11 +125,12 @@ def discover(url, data):
         try:
             index = json.loads(data)
             for tile in index.get("tiles", []):
-                found.add(urljoin(BASE, "/game/world/" + tile["name"] + ".bin"))
+                for extension in ("bin", "webp"):
+                    found.add(urljoin(BASE, "/game/world/" + tile["name"] + "." + extension))
             for section in ("detail", "inside"):
                 for cell in index.get(section, {}).get("cells", []):
                     n = cell["cell"]
-                    for extension in ("bin", "col.bin", "brk.bin"):
+                    for extension in ("bin", "webp", "col.bin", "brk.bin"):
                         found.add(urljoin(BASE, "/game/world/c%d.%s" % (n, extension)))
         except (ValueError, KeyError, TypeError):
             pass
