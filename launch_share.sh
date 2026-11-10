@@ -91,30 +91,27 @@ except (ValueError, TypeError):
 ' "$bind_host" "$allowed_hosts" <<< "$response"
 }
 
-server_pid=''
-if ! ready; then
-  if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-    print -u2 "Port $port is in use. Stop the existing local game server, then rerun this launcher."
+if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+  print -u2 "Port $port is in use. Stop the existing local game server, then rerun this launcher."
+  exit 1
+fi
+BIND_HOST="$bind_host" ZGTA_SELFHOST=1 PORT="$port" \
+  ZGTA_JOIN_CODE_FILE="$join_file" ZGTA_ALLOWED_HOSTS="$allowed_hosts" \
+  node "$project_dir/serve_local.js" > "$local_dir/selfhost-server.log" 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+started=0
+for attempt in {1..40}; do
+  if ready; then started=1; break; fi
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    cat "$local_dir/selfhost-server.log" >&2
     exit 1
   fi
-  BIND_HOST="$bind_host" ZGTA_SELFHOST=1 PORT="$port" \
-    ZGTA_JOIN_CODE_FILE="$join_file" ZGTA_ALLOWED_HOSTS="$allowed_hosts" \
-    node "$project_dir/serve_local.js" > "$local_dir/selfhost-server.log" 2>&1 &
-  server_pid=$!
-  trap 'kill "$server_pid" 2>/dev/null || true' EXIT
-  started=0
-  for attempt in {1..40}; do
-    if ready; then started=1; break; fi
-    if ! kill -0 "$server_pid" 2>/dev/null; then
-      cat "$local_dir/selfhost-server.log" >&2
-      exit 1
-    fi
-    sleep 0.25
-  done
-  if (( ! started )); then
-    print -u2 'The shared local server did not start.'
-    exit 1
-  fi
+  sleep 0.25
+done
+if (( ! started )); then
+  print -u2 'The shared local server did not start.'
+  exit 1
 fi
 
 if [[ -n "$tailnet_host" ]]; then
@@ -137,7 +134,5 @@ print 'Share the URL and code only with people you want to invite.'
 if [[ "${ZGTA_NO_OPEN:-0}" != 1 ]]; then
   open -a '/Applications/Google Chrome.app' "http://127.0.0.1:$port/"
 fi
-if [[ -n "$server_pid" ]]; then
-  print 'Keep this Terminal window open while hosting. Press Ctrl-C to stop the local game server.'
-  wait "$server_pid"
-fi
+print 'Keep this Terminal window open while hosting. Press Ctrl-C to stop the local game server.'
+wait "$server_pid"
