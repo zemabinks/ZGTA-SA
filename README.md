@@ -94,6 +94,39 @@ The local welcome dialog also shows [ZGTA:SA community Discord](https://discord.
 That link is a community invite. The original site's login opens its own site
 in a new tab; signing in there does not authenticate the local mirror.
 
+## Independent self-hosted mode
+
+Double-click `ZGTA-SA Self-Hosted.command` in Finder, or run
+`zsh launch_selfhost.sh` in Terminal. It opens `http://127.0.0.1:8766/`.
+Keep the Terminal window open while playing; Ctrl-C stops the local server.
+The server uses the archived game client and assets on this Mac. It does not
+forward API, WebSocket, or missing-asset requests to the original site. It
+creates local player accounts automatically, with no Discord login. Names and
+settings are saved in ignored `local-only/selfhost/players.json`; type
+`/name Your Name` in chat to change a local name.
+
+This is a **work-in-progress independent server**. Two loopback clients were
+tested exchanging player state and chat. The archived browser client also
+reached its local welcome screen and showed a local player name and chat.
+The server currently implements account creation, settings, player-position
+messages, chat, and the player list. The original service's jobs, economy,
+garage, property, races, vehicles, combat, administration, and other server
+systems still need their own implementations. Their public browser code does
+not contain the original server logic or database. The 3D map and solo mode
+remain available from the local archive. Do not describe this mode as a full
+replacement for the original game yet.
+
+The default server binds only to `127.0.0.1`. For a later deployment behind
+your own HTTPS reverse proxy, the server can bind to a network interface when
+`BIND_HOST`, a long `ZGTA_JOIN_CODE`, and `ZGTA_ALLOWED_HOSTS` are configured.
+The proxy must preserve the `Host` header and forward WebSocket upgrades.
+Keep the game files on this Mac and serve them from here if you want them to
+remain local. Do not expose the raw HTTP port to the public internet; set up
+HTTPS and review the deployment before inviting other players. The self-hosted
+source files can be kept on GitHub because `local-only/` remains Git-ignored.
+On a fresh GitHub checkout, run `chmod +x 'ZGTA-SA Self-Hosted.command'`
+before double-clicking it; this Mac's local copy is already executable.
+
 This is an unofficial local archive. Grand Theft Auto: San Andreas and its
 assets remain the property of their respective owners. No copied site files
 or game data are intended for publication in this repository.
