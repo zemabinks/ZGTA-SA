@@ -60,9 +60,12 @@ profile, which stores its own login, also stays under `local-only/`. The
 original multiplayer server remains
 necessary; this is not an independent or offline multiplayer server.
 
-Before a Discord sign-in, the connected mode passed a Chrome page-load test,
-an HTTPS API test, and a WebSocket upgrade test. Authenticated multiplayer
-still needs a sign-in and an in-game check in that dedicated window.
+The connected mode passed a Chrome page-load test, an HTTPS API test, and a
+WebSocket upgrade test. On 10 November 2026, after signing in in the dedicated
+window, the player name and live chat were reported visible. Chrome maintained
+a connection to the local server while that server maintained a connection to
+the original live service. This verifies the connected sign-in and multiplayer
+path; individual jobs, vehicles, and economy actions were not all tested.
 
 For a route that does **not require Discord**, open
 `http://127.0.0.1:8765/tools/world` or choose **Solo free roam (no Discord)**
