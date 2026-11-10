@@ -30,35 +30,48 @@ fi
 spki_hash="$(openssl x509 -in "$cert_path" -pubkey -noout | \
   openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64 -A)"
 
-PORT=9443 ZGTA_CONNECTED=1 node "$project_dir/serve_local.js" \
-  > "$local_dir/connected-server.log" 2>&1 &
-server_pid=$!
-trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+connected_ready() {
+  curl --noproxy '*' --fail --silent --show-error --output /dev/null \
+    --connect-to play.samp.directory:443:127.0.0.1:9443 \
+    --cacert "$cert_path" 'https://play.samp.directory/' 2>/dev/null
+}
 
-ready=0
-for attempt in {1..40}; do
-  if curl --noproxy '*' --silent --show-error --output /dev/null \
-      --connect-to play.samp.directory:443:127.0.0.1:9443 \
-      --cacert "$cert_path" 'https://play.samp.directory/' 2>/dev/null; then
-    ready=1
-    break
-  fi
-  if ! kill -0 "$server_pid" 2>/dev/null; then
+server_pid=''
+if ! connected_ready; then
+  PORT=9443 ZGTA_CONNECTED=1 node "$project_dir/serve_local.js" \
+    > "$local_dir/connected-server.log" 2>&1 &
+  server_pid=$!
+  trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+  ready=0
+  for attempt in {1..40}; do
+    if connected_ready; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+      cat "$local_dir/connected-server.log" >&2
+      exit 1
+    fi
+    sleep 0.25
+  done
+  if [[ "$ready" -ne 1 ]]; then
     cat "$local_dir/connected-server.log" >&2
+    print -u2 'Connected mirror did not start. Port 9443 may be in use.'
     exit 1
   fi
-  sleep 0.25
-done
-if [[ "$ready" -ne 1 ]]; then
-  cat "$local_dir/connected-server.log" >&2
-  print -u2 'Connected mirror did not start.'
-  exit 1
 fi
 
 print 'Opening the ZGTA:SA connected window. Sign in there with Discord.'
-"$chrome_bin" \
+open -na '/Applications/Google Chrome.app' --args \
   --user-data-dir="$profile_dir" \
   --no-first-run --no-default-browser-check --no-proxy-server --disable-quic \
   '--host-resolver-rules=MAP play.samp.directory 127.0.0.1:9443' \
   --ignore-certificate-errors-spki-list="$spki_hash" \
+  --new-window \
   'https://play.samp.directory/'
+
+if [[ -n "$server_pid" ]]; then
+  print 'Keep this Terminal window open while playing. Press Ctrl-C here to stop the local server.'
+  wait "$server_pid"
+fi
