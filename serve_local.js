@@ -51,7 +51,7 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
   '.webmanifest': 'application/manifest+json', '.wasm': 'application/wasm',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.woff': 'font/woff',
   '.woff2': 'font/woff2', '.bin': 'application/octet-stream',
   '.dff': 'application/octet-stream', '.txd': 'application/octet-stream',
