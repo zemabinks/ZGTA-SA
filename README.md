@@ -38,12 +38,16 @@ Links to pages outside this archive open the original website.
 
 ## Connected multiplayer
 
-Run `zsh launch_connected.sh` on the Mac. It opens a separate Chrome profile at
+Double-click `ZGTA-SA Connected.command` in Finder, or run
+`zsh launch_connected.sh` in Terminal. It opens a separate Chrome profile at
 `https://play.samp.directory/`, maps only that hostname to this Mac's local
 HTTPS mirror, and keeps the original site's API and WebSocket connections
 proxied to the live service. Sign in with Discord **in that separate window**;
-the existing Chrome profile's login cannot be copied to it. Close the window
-to stop the connected server.
+the existing Chrome profile's login cannot be copied to it. Keep the Terminal
+window open while playing; press Ctrl-C there to stop the local server. If the
+Chrome window closes, run the launcher again to reopen it.
+On a fresh GitHub checkout, run `chmod +x 'ZGTA-SA Connected.command'` once
+before double-clicking it; this Mac's local copy is already executable.
 
 The launcher generates a certificate and key under `local-only/`, and pins
 that certificate only in its separate Chrome profile. It does not change Mac
