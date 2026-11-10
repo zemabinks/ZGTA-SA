@@ -77,7 +77,9 @@ function serve(req, res) {
   if (pathname.startsWith('/api/')) return proxyHttp(req, res);
   let decoded;
   try { decoded = decodeURIComponent(pathname); } catch { res.writeHead(400); return res.end(); }
-  const filename = path.resolve(ROOT, '.' + (decoded === '/' ? '/index.html' : decoded));
+  const page = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded)
+    ? (decoded.replace(/\/$/, '') + '/index.html') : decoded;
+  const filename = path.resolve(ROOT, '.' + page);
   if (!filename.startsWith(ROOT + path.sep)) { res.writeHead(403); return res.end(); }
   fs.stat(filename, (error, stat) => {
     if (error || !stat.isFile()) { res.writeHead(404); return res.end('Not in local archive'); }
