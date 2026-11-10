@@ -8,7 +8,8 @@ const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
 const STATE_FILE = path.join(__dirname, 'local-only', 'selfhost', 'players.json');
 const COOKIE = 'zgta_local';
-const JOIN_CODE = process.env.ZGTA_JOIN_CODE || '';
+const JOIN_CODE = process.env.ZGTA_JOIN_CODE || (process.env.ZGTA_JOIN_CODE_FILE
+  ? fs.readFileSync(process.env.ZGTA_JOIN_CODE_FILE, 'utf8').trim() : '');
 if (JOIN_CODE && JOIN_CODE.length < 12) throw new Error('ZGTA_JOIN_CODE must be at least 12 characters.');
 const ACCESS_TOKEN = JOIN_CODE ? crypto.createHmac('sha256', JOIN_CODE).update('ZGTA:SA local access v1').digest('hex') : '';
 
@@ -48,6 +49,8 @@ function safeName(value) {
 function finite(value, fallback = 0) { return Number.isFinite(value) ? value : fallback; }
 
 class LocalGame {
+  get requiresJoinCode() { return !!JOIN_CODE; }
+
   constructor() {
     this.players = new Map();
     this.peers = new Set();
@@ -101,6 +104,13 @@ class LocalGame {
 
   authorized(req) {
     if (!JOIN_CODE) return true;
+    const remote = req.socket.remoteAddress;
+    const localSocket = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+    const localHost = /^((127\.0\.0\.1)|(localhost)):\d+$/.test(req.headers.host || '');
+    // A local reverse proxy is still a remote visitor. Do not let a rewritten
+    // loopback Host header bypass the access code.
+    if (localSocket && localHost && !req.headers['x-forwarded-for'] &&
+        !req.headers['x-forwarded-proto']) return true;
     const match = /(?:^|;\s*)zgta_access=([0-9a-f]{64})(?:;|$)/.exec(req.headers.cookie || '');
     return !!match && crypto.timingSafeEqual(Buffer.from(match[1], 'hex'), Buffer.from(ACCESS_TOKEN, 'hex'));
   }
@@ -128,6 +138,8 @@ class LocalGame {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/api/local/status' && req.method === 'GET')
       return json(res, 200, {selfhost: true, players: [...this.peers].filter(p => p.ready).length,
+        joinCodeRequired: !!JOIN_CODE, lanAccessible: process.env.BIND_HOST === '0.0.0.0',
+        allowedHosts: (process.env.ZGTA_ALLOWED_HOSTS || '').split(',').filter(Boolean),
         features: ['local accounts', 'player positions', 'chat', 'local settings']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
