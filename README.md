@@ -36,6 +36,30 @@ original site, saves it under `local-only/site/`, and adds its hash to the local
 manifest. That first use needs internet; subsequent uses read the cached file.
 Links to pages outside this archive open the original website.
 
+## Connected multiplayer
+
+Run `zsh launch_connected.sh` on the Mac. It opens a separate Chrome profile at
+`https://play.samp.directory/`, maps only that hostname to this Mac's local
+HTTPS mirror, and keeps the original site's API and WebSocket connections
+proxied to the live service. Sign in with Discord **in that separate window**;
+the existing Chrome profile's login cannot be copied to it. Close the window
+to stop the connected server.
+
+The launcher generates a certificate and key under `local-only/`, and pins
+that certificate only in its separate Chrome profile. It does not change Mac
+DNS, the system trust store, or the normal Chrome profile. Requests to
+`play.samp.directory`, including its session cookie, pass through the local
+proxy in memory. The Discord callback stays on the publisher's real
+`samp.directory` site; only `play.samp.directory` is mapped to this Mac. No
+cookie or OAuth code is written to the archive or logs. The separate Chrome
+profile, which stores its own login, also stays under `local-only/`. The
+original multiplayer server remains
+necessary; this is not an independent or offline multiplayer server.
+
+Before a Discord sign-in, the connected mode passed a Chrome page-load test,
+an HTTPS API test, and a WebSocket upgrade test. Authenticated multiplayer
+still needs a sign-in and an in-game check in that dedicated window.
+
 For a route that does **not require Discord**, open
 `http://127.0.0.1:8765/tools/world` or choose **Solo free roam (no Discord)**
 from the local welcome screen. This archives the publisher's separate
@@ -55,8 +79,9 @@ files.
 
 Signing in on the original site makes its multiplayer world playable there,
 but the login does not carry over to `127.0.0.1`. Chrome scopes the site's
-session cookie to the original domain. The local mirror renders the world but
-remains unsigned and cannot join the live multiplayer session with that login.
+session cookie to the original domain. The plain localhost mirror renders the
+world but remains unsigned; use the connected launcher to sign in under the
+original domain while serving the local copy.
 
 The local welcome dialog also shows [ZGTA:SA community Discord](https://discord.gg/Cg39cguVUa).
 That link is a community invite. The original site's login opens its own site
