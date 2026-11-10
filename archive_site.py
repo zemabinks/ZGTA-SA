@@ -19,13 +19,14 @@ import re
 import sys
 
 BASE = "https://play.samp.directory/"
-PAGES = ("/", "/ru", "/es", "/pt", "/tr")
+SOLO_URL = "https://samp.directory/tools/world"
+PAGES = ("/", "/ru", "/es", "/pt", "/tr", "/offline")
 ROOT = Path(__file__).resolve().parent / "local-only"
 SITE = ROOT / "site"
 MANIFEST = ROOT / "manifest.json"
 USER_AGENT = "ZGTA-SA-local-preservation/1.0"
 ALLOWED_PREFIXES = ("/_next/static/", "/game/", "/reference/", "/tools/map/")
-EXTRA = ("/manifest.webmanifest", "/favicon.ico", "/icon.png", "/apple-icon.png")
+EXTRA = ("/manifest.webmanifest", "/favicon.ico", "/icon.png", "/apple-icon.png", "/sw.js", "/icons/icon-192.png")
 GAME_SEEDS = (
     "/game/world/index.json", "/game/world/collision.json",
     "/game/world/peds.json", "/game/world/fx.json",
@@ -40,20 +41,23 @@ PATH_RE = re.compile(r"(?:https://play\.samp\.directory)?(/(?:_next/static|game|
 
 
 class Assets(HTMLParser):
-    def __init__(self):
+    def __init__(self, base=BASE):
         super().__init__()
+        self.base = base
         self.urls = set()
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         for key in ("src", "href", "poster"):
             if attrs.get(key):
-                self.urls.add(urljoin(BASE, attrs[key]))
+                self.urls.add(urljoin(self.base, attrs[key]))
 
 
 def normalize(url):
     parsed = urlsplit(urljoin(BASE, url))
-    if parsed.netloc != "play.samp.directory":
+    if parsed.netloc == "samp.directory" and parsed.path == "/tools/world":
+        return SOLO_URL
+    if parsed.netloc not in ("play.samp.directory", "samp.directory"):
         return None
     path = unquote(parsed.path)
     if path in PAGES:
@@ -67,7 +71,7 @@ def normalize(url):
 
 def local_path(url):
     path = urlsplit(url).path
-    if path in PAGES:
+    if path in PAGES or path == "/tools/world":
         path = (path.rstrip("/") or "") + "/index.html"
     target = (SITE / path.lstrip("/")).resolve()
     if target != SITE.resolve() and SITE.resolve() not in target.parents:
@@ -97,13 +101,15 @@ def fetch(url):
 def discover(url, data):
     found = set()
     path = urlsplit(url).path
-    if path in PAGES:
-        parser = Assets()
+    if path in PAGES or url == SOLO_URL:
+        parser = Assets(url)
         parser.feed(data.decode("utf-8", "replace"))
         found |= parser.urls
-        found |= {urljoin(BASE, p) for p in EXTRA}
-        found |= {urljoin(BASE, p) for p in GAME_SEEDS}
-        found |= {urljoin(BASE, p) for p in PAGES}
+        if path in PAGES:
+            found |= {urljoin(BASE, p) for p in EXTRA}
+            found |= {urljoin(BASE, p) for p in GAME_SEEDS}
+            found |= {urljoin(BASE, p) for p in PAGES}
+            found.add(SOLO_URL)
     if path.endswith((".js", ".json", ".css", ".webmanifest")):
         body = data.decode("utf-8", "replace")
         found |= {urljoin(BASE, p) for p in PATH_RE.findall(body)}
@@ -151,7 +157,7 @@ def main():
     rows = {}
     if MANIFEST.exists():
         rows = json.loads(MANIFEST.read_text()).get("files", {})
-    pending = {BASE}
+    pending = {BASE, SOLO_URL}
     processed = set()
     while pending:
         batch = sorted(pending - processed)
