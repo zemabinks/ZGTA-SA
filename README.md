@@ -10,9 +10,10 @@ original site is a live multiplayer service; its account, world, and other
 server APIs are not captured by static file downloads. A complete, working
 offline game therefore cannot be claimed from a static snapshot.
 
-The 10 November 2026 snapshot has **1,387 verified files (626,373,513 bytes)**,
+The 10 November 2026 snapshot has **1,658 verified files (747,131,173 bytes)**,
 including the site's four linked language variants, its companion 3D map, and
-the service worker's offline resources.
+the service worker's offline resources. The archive also includes 271 world
+textures whose file names the browser constructs at runtime.
 The local manifest records **62 unavailable URLs**, mostly world breakage
 files that the source returned as 404. The original server has no public file
 index, so the manifest is an audit of discoverable assets, not proof that every
@@ -35,8 +36,7 @@ from the local welcome screen. This archives the publisher's separate
 [3D map tool](https://samp.directory/tools/world), which lets one person fly,
 walk, and drive around San Andreas. It is not the multiplayer game: it has no
 shared players, jobs, or live economy. It still requires a browser with WebGL.
-The local page and its scripts loaded in a browser test; that test browser had
-WebGL disabled, so rendering and controls could not be verified there.
+The local world and its map textures rendered in Chrome during testing.
 
 The original welcome screen has a **Play** button that dismisses its Discord
 prompt, but the live WebSocket then sends a login request to an unsigned
@@ -44,6 +44,11 @@ visitor. Replacing the Discord OAuth link with a Discord server invite would
 not authenticate the player. Independent play of the full game would require
 a compatible local game server, which is not present in the public website
 files.
+
+Signing in on the original site makes its multiplayer world playable there,
+but the login does not carry over to `127.0.0.1`. Chrome scopes the site's
+session cookie to the original domain. The local mirror renders the world but
+remains unsigned and cannot join the live multiplayer session with that login.
 
 The local welcome dialog also shows [ZGTA:SA community Discord](https://discord.gg/Cg39cguVUa).
 That link is a community invite. The original site's login opens its own site
