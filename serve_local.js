@@ -38,13 +38,16 @@ const COMMUNITY_SCRIPT = `<script>
       ['Welcome to samp.directory', 'Welcome to ZGTA:SA'],
       ['San Andreas, in your browser, with everybody else.', 'San Andreas, in your browser, with players on this local server.'],
       ['Log in with Discord to play: it keeps your money, levels and achievements.', 'No Discord login is needed. Local names and settings are saved on this Mac.'],
-      ['Get a job The job centre is just below the Conference Center, right where you start: walk into the yellow arrow, or type /jobs. Every job has a tutorial whenever you want one: /tutorial.', 'Explore the world Walk, drive, and meet other players on this local server.'],
-      ['Save for a car, then a home Once you’ve looked at the jobs, the First steps card under your money shows the next goal, its price and where it is.', 'Local progress This server currently saves player names and settings. More game systems are still being built.'],
-      ['Play together Everybody you see is another player. Press T to chat, and work a job side by side.', 'Play together Press T to chat with other players connected to this Mac.'],
+      ['Get a job', 'Explore the world'],
+      ['The job centre is just below the Conference Center, right where you start: walk into the yellow arrow, or type /jobs. Every job has a tutorial whenever you want one: /tutorial.', 'Walk, drive, and meet other players on this local server.'],
+      ['Save for a car, then a home', 'Local progress'],
+      ['Once you’ve looked at the jobs, the First steps card under your money shows the next goal, its price and where it is.', 'This server saves player names and settings. More game systems are still being built.'],
+      ['Everybody you see is another player. Press T to chat, and work a job side by side.', 'Press T to chat with other players connected to this Mac.'],
     ];
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
+      if (node.parentElement?.closest('script,style')) continue;
       for (const [from, to] of replacements) if (node.data.includes(from)) node.data = node.data.replace(from, to);
     }
   }
