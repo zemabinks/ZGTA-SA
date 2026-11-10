@@ -10,10 +10,11 @@ original site is a live multiplayer service; its account, world, and other
 server APIs are not captured by static file downloads. A complete, working
 offline game therefore cannot be claimed from a static snapshot.
 
-The 10 November 2026 snapshot has **1,658 verified files (747,131,173 bytes)**,
+The 10 November 2026 snapshot has **1,908 verified files (938,652,855 bytes)**,
 including the site's four linked language variants, its companion 3D map, and
 the service worker's offline resources. The archive also includes 271 world
-textures whose file names the browser constructs at runtime.
+textures and 250 high-detail textures whose file names the browser constructs
+at runtime.
 The local manifest records **62 unavailable URLs**, mostly world breakage
 files that the source returned as 404. The original server has no public file
 index, so the manifest is an audit of discoverable assets, not proof that every
