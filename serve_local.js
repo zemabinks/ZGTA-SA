@@ -9,6 +9,33 @@ const ROOT = path.join(__dirname, 'local-only', 'site');
 const PORT = Number(process.env.PORT || 8765);
 const HOST = '127.0.0.1';
 const UPSTREAM = 'play.samp.directory';
+const COMMUNITY_DISCORD = 'https://discord.gg/Cg39cguVUa';
+const COMMUNITY_SCRIPT = `<script>
+(() => {
+  const invite = ${JSON.stringify(COMMUNITY_DISCORD)};
+  function addCommunityLink() {
+    const login = document.querySelector('a[href*="/api/auth/discord/login"]');
+    if (!login) return;
+    const originalLogin = new URL(login.getAttribute('href'), 'https://play.samp.directory').href;
+    if (login.href !== originalLogin) login.href = originalLogin;
+    login.target = '_blank';
+    login.rel = 'noopener noreferrer';
+    if (login.textContent !== 'Log in on the original site') login.textContent = 'Log in on the original site';
+    if (document.getElementById('zgta-community-discord')) return;
+    const link = document.createElement('a');
+    link.id = 'zgta-community-discord';
+    link.href = invite;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = 'ZGTA:SA community Discord';
+    link.className = login.className;
+    link.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-top:8px;';
+    login.insertAdjacentElement('afterend', link);
+  }
+  new MutationObserver(addCommunityLink).observe(document.documentElement, {childList:true,subtree:true});
+  addCommunityLink();
+})();
+</script>`;
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -84,6 +111,14 @@ function serve(req, res) {
   fs.stat(filename, (error, stat) => {
     if (error || !stat.isFile()) { res.writeHead(404); return res.end('Not in local archive'); }
     const type = MIME[path.extname(filename)] || 'application/octet-stream';
+    if (type.startsWith('text/html')) {
+      const html = fs.readFileSync(filename, 'utf8');
+      const content = Buffer.from(html.replace('</body>', COMMUNITY_SCRIPT + '</body>'));
+      res.setHeader('Content-Type', type);
+      res.setHeader('Content-Length', content.length);
+      res.setHeader('Accept-Ranges', 'none');
+      return res.end(req.method === 'HEAD' ? undefined : content);
+    }
     let start = 0, end = stat.size - 1;
     const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
     if (match && (match[1] || match[2])) {
