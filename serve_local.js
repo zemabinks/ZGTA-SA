@@ -11,10 +11,18 @@ const ROOT = path.join(__dirname, 'local-only', 'site');
 const LOCAL_ONLY = path.join(__dirname, 'local-only');
 const MANIFEST = path.join(LOCAL_ONLY, 'manifest.json');
 const CONNECTED = process.env.ZGTA_CONNECTED === '1';
-const PORT = Number(process.env.PORT || (CONNECTED ? 9443 : 8765));
-const HOST = '127.0.0.1';
+const SELFHOST = process.env.ZGTA_SELFHOST === '1';
+if (CONNECTED && SELFHOST) throw new Error('Choose connected or self-hosted mode.');
+const PORT = Number(process.env.PORT || (CONNECTED ? 9443 : SELFHOST ? 8766 : 8765));
+const HOST = SELFHOST ? (process.env.BIND_HOST || '127.0.0.1') : '127.0.0.1';
+if (SELFHOST && HOST !== '127.0.0.1' && HOST !== '::1' &&
+    (!process.env.ZGTA_JOIN_CODE || !process.env.ZGTA_ALLOWED_HOSTS))
+  throw new Error('Network hosting requires ZGTA_JOIN_CODE and ZGTA_ALLOWED_HOSTS.');
+const localGame = SELFHOST ? require('./selfhost_backend') : null;
+const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
+  ...(process.env.ZGTA_ALLOWED_HOSTS || '').split(',').map(host => host.trim()).filter(Boolean)]);
 const UPSTREAM = 'play.samp.directory';
-const PUBLIC_ORIGIN = CONNECTED ? `https://${UPSTREAM}` : `http://${HOST}:${PORT}`;
+const PUBLIC_ORIGIN = CONNECTED ? `https://${UPSTREAM}` : `http://127.0.0.1:${PORT}`;
 const COMMUNITY_DISCORD = 'https://discord.gg/Cg39cguVUa';
 const pendingAssets = new Map();
 const unavailableAssets = new Set();
@@ -23,10 +31,32 @@ const COMMUNITY_SCRIPT = `<script>
 (() => {
   const invite = ${JSON.stringify(COMMUNITY_DISCORD)};
   const connected = ${CONNECTED};
+  const selfhost = ${SELFHOST};
+  function localCopy() {
+    if (!selfhost) return;
+    const replacements = [
+      ['Welcome to samp.directory', 'Welcome to ZGTA:SA'],
+      ['San Andreas, in your browser, with everybody else.', 'San Andreas, in your browser, with players on this local server.'],
+      ['Log in with Discord to play: it keeps your money, levels and achievements.', 'No Discord login is needed. Local names and settings are saved on this Mac.'],
+      ['Get a job The job centre is just below the Conference Center, right where you start: walk into the yellow arrow, or type /jobs. Every job has a tutorial whenever you want one: /tutorial.', 'Explore the world Walk, drive, and meet other players on this local server.'],
+      ['Save for a car, then a home Once you’ve looked at the jobs, the First steps card under your money shows the next goal, its price and where it is.', 'Local progress This server currently saves player names and settings. More game systems are still being built.'],
+      ['Play together Everybody you see is another player. Press T to chat, and work a job side by side.', 'Play together Press T to chat with other players connected to this Mac.'],
+    ];
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const node = walker.currentNode;
+      for (const [from, to] of replacements) if (node.data.includes(from)) node.data = node.data.replace(from, to);
+    }
+  }
   function addCommunityLink() {
     const login = document.querySelector('a[href*="/api/auth/discord/login"]');
     if (!login) return;
-    if (!connected) {
+    localCopy();
+    if (selfhost) {
+      login.href = '#';
+      login.onclick = event => event.preventDefault();
+      login.textContent = 'Local account active — no Discord required';
+    } else if (!connected) {
       const originalLogin = new URL(login.getAttribute('href'), 'https://play.samp.directory').href;
       if (login.href !== originalLogin) login.href = originalLogin;
       login.target = '_blank';
@@ -173,10 +203,38 @@ async function cachePublicAsset(req, pathname, filename) {
 
 function serve(req, res) {
   securityHeaders(res);
+  if (SELFHOST) {
+    if (!allowedHosts.has(req.headers.host || '')) {res.writeHead(421); return res.end('Host not allowed');}
+    if (req.headers.origin) {
+      try {
+        if (new URL(req.headers.origin).host !== req.headers.host) {
+          res.writeHead(403); return res.end('Origin not allowed');
+        }
+      } catch {res.writeHead(403); return res.end('Origin not allowed');}
+    }
+  }
   let pathname;
   try { pathname = new URL(req.url, PUBLIC_ORIGIN).pathname; }
   catch { res.writeHead(400); return res.end('Invalid URL'); }
-  if (pathname.startsWith('/api/')) return proxyHttp(req, res);
+  if (SELFHOST && process.env.ZGTA_JOIN_CODE) {
+    if (pathname === '/join' && req.method === 'GET') return localGame.join(req, res);
+    if (pathname === '/api/local/join') return localGame.join(req, res);
+    if (!localGame.authorized(req)) {
+      if (req.headers.accept?.includes('text/html') || req.headers['sec-fetch-dest'] === 'document') {
+        res.writeHead(302, {Location: '/join'}); return res.end();
+      }
+      res.writeHead(401); return res.end('Access code required');
+    }
+  }
+  if (SELFHOST && pathname !== '/api/local/status' && pathname !== '/api/local/diagnostics')
+    localGame.ensurePlayer(req, res);
+  if (pathname.startsWith('/api/')) {
+    if (!SELFHOST) return proxyHttp(req, res);
+    return localGame.http(req, res).catch(error => {
+      if (!res.headersSent) {res.writeHead(500); res.end('Local game error');}
+      console.error('Local API error:', error.message);
+    });
+  }
   let decoded;
   try { decoded = decodeURIComponent(pathname); } catch { res.writeHead(400); return res.end(); }
   const page = ['/', '/ru', '/es', '/pt', '/tr', '/offline', '/tools/world'].includes(decoded)
@@ -188,7 +246,7 @@ function serve(req, res) {
       if (process.env.ZGTA_DEBUG_MISSING === '1') console.error(`Missing local asset: ${pathname}`);
       const cacheable = !decoded.endsWith('/') &&
         /^\/(?:game|reference|tools\/map|_next\/static)\//.test(decoded);
-      if (cacheable && ['GET', 'HEAD'].includes(req.method) && !unavailableAssets.has(decoded)) {
+      if (!SELFHOST && cacheable && ['GET', 'HEAD'].includes(req.method) && !unavailableAssets.has(decoded)) {
         if (!pendingAssets.has(decoded)) {
           const pending = cachePublicAsset(req, pathname, filename)
             .finally(() => pendingAssets.delete(decoded));
@@ -200,7 +258,7 @@ function serve(req, res) {
           res.end('Public asset unavailable');
         });
       }
-      if (req.method === 'GET' && (req.headers['sec-fetch-dest'] === 'document' ||
+      if (!SELFHOST && req.method === 'GET' && (req.headers['sec-fetch-dest'] === 'document' ||
           (req.headers.accept || '').includes('text/html'))) {
         res.writeHead(302, {Location: `https://samp.directory${req.url}`});
         return res.end();
@@ -242,7 +300,14 @@ const server = CONNECTED
     }, serve)
   : http.createServer(serve);
 server.on('upgrade', (req, socket, head) => {
-  if (req.url.startsWith('/api/')) proxyWebSocket(req, socket, head);
+  if (SELFHOST) {
+    if (!allowedHosts.has(req.headers.host || '')) return socket.destroy();
+    if (req.headers.origin) {
+      try { if (new URL(req.headers.origin).host !== req.headers.host) return socket.destroy(); }
+      catch { return socket.destroy(); }
+    }
+  }
+  if (req.url.startsWith('/api/')) SELFHOST ? localGame.upgrade(req, socket, head) : proxyWebSocket(req, socket, head);
   else socket.destroy();
 });
 server.listen(PORT, HOST, () => console.log(`ZGTA:SA local mirror: ${PUBLIC_ORIGIN}/`));
