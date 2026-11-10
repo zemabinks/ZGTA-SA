@@ -10,11 +10,12 @@ original site is a live multiplayer service; its account, world, and other
 server APIs are not captured by static file downloads. A complete, working
 offline game therefore cannot be claimed from a static snapshot.
 
-The 10 November 2026 snapshot has **1,908 verified files (938,652,855 bytes)**,
+The 10 November 2026 snapshot has **2,126 verified files (941,058,647 bytes)**,
 including the site's four linked language variants, its companion 3D map, and
-the service worker's offline resources. The archive also includes 271 world
-textures and 250 high-detail textures whose file names the browser constructs
-at runtime.
+the service worker's offline resources. The archive includes 271 world
+textures, 250 high-detail textures, all 212 vehicle thumbnails, and the HUD
+and sound files observed during Chrome testing. The count can grow as the local
+server caches more public assets on first use.
 The local manifest records **62 unavailable URLs**, mostly world breakage
 files that the source returned as 404. The original server has no public file
 index, so the manifest is an audit of discoverable assets, not proof that every
@@ -30,6 +31,10 @@ Run `node serve_local.js` and open `http://127.0.0.1:8765/` in a browser with
 working WebGL. The server reads the local asset copy. It forwards `/api/` HTTP
 and WebSocket traffic to the original site's live service, so multiplayer
 needs an internet connection and that service to remain available.
+If a public game asset is absent locally, the server downloads it from the
+original site, saves it under `local-only/site/`, and adds its hash to the local
+manifest. That first use needs internet; subsequent uses read the cached file.
+Links to pages outside this archive open the original website.
 
 For a route that does **not require Discord**, open
 `http://127.0.0.1:8765/tools/world` or choose **Solo free roam (no Discord)**
@@ -37,7 +42,9 @@ from the local welcome screen. This archives the publisher's separate
 [3D map tool](https://samp.directory/tools/world), which lets one person fly,
 walk, and drive around San Andreas. It is not the multiplayer game: it has no
 shared players, jobs, or live economy. It still requires a browser with WebGL.
-The local world and its map textures rendered in Chrome during testing.
+The local world rendered in Chrome during testing. Fly, on-foot, vehicle
+selection, and the vehicle image were checked in the browser. The local HTTP
+server also passed page, service worker, texture, and byte-range checks.
 
 The original welcome screen has a **Play** button that dismisses its Discord
 prompt, but the live WebSocket then sends a login request to an unsigned
