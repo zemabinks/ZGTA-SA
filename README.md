@@ -116,13 +116,43 @@ not contain the original server logic or database. The 3D map and solo mode
 remain available from the local archive. Do not describe this mode as a full
 replacement for the original game yet.
 
-The default server binds only to `127.0.0.1`. For a later deployment behind
-your own HTTPS reverse proxy, the server can bind to a network interface when
-`BIND_HOST`, a long `ZGTA_JOIN_CODE`, and `ZGTA_ALLOWED_HOSTS` are configured.
-The proxy must preserve the `Host` header and forward WebSocket upgrades.
-Keep the game files on this Mac and serve them from here if you want them to
-remain local. Do not expose the raw HTTP port to the public internet; set up
-HTTPS and review the deployment before inviting other players. The self-hosted
+### Host from this Mac over LAN
+
+Double-click `ZGTA-SA Share.command` or run `zsh launch_share.sh lan` in
+Terminal. The launcher finds this Mac's `en0` IPv4 address, starts **one**
+independent server on port 8766, and prints its LAN URL. On the current network
+the URL is `http://192.168.178.33:8766/`; it can change when the Mac changes
+networks. Open that URL on a second device on the same home network. The first
+visit shows a join screen. The access code is in
+`local-only/selfhost/join-code.txt` on this Mac. Share it privately with the
+people joining your game. The file is created with owner-only permissions and
+is ignored by Git. To change the code, stop the server, delete that file, and
+start the launcher again; everyone will need the new code.
+
+Keep the Terminal window open while hosting. Ctrl-C stops the server. If
+another local server is already using port 8766, stop it before starting the
+share launcher. The Mac firewall is currently off; if you enable it, allow
+incoming connections to Node for LAN play. This LAN link uses plain HTTP, so
+use it only on a trusted home network and do not forward port 8766 through the
+router to the public internet. The game files continue to be served from
+`local-only/` on this Mac; nothing in that directory goes to GitHub.
+
+The LAN route passed a join redirect, wrong-code rejection, successful
+join-cookie, game-page, and WebSocket upgrade test. A local Chrome browser also
+connected as one player after the LAN server started. These checks establish
+the connection path; a second physical device and full game systems have not
+been verified yet. The independent server still has the feature limits above.
+
+For private access from outside the home network, `zsh launch_share.sh both`
+can also add Tailscale Serve on HTTPS port 8443 **if Tailscale is connected**.
+People joining that address must belong to the same tailnet. The launcher
+checks for an existing service on port 8443 before changing it and leaves
+other Tailscale routes alone. This optional route has not been enabled for this
+project. A publicly accessible internet link needs a separate deployment and
+security review.
+
+The default `launch_selfhost.sh` server binds only to `127.0.0.1`. The share
+launcher sets `BIND_HOST`, a long access code, and `ZGTA_ALLOWED_HOSTS`; its
 source files can be kept on GitHub because `local-only/` remains Git-ignored.
 On a fresh GitHub checkout, run `chmod +x 'ZGTA-SA Self-Hosted.command'`
 before double-clicking it; this Mac's local copy is already executable.
