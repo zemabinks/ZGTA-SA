@@ -35,6 +35,10 @@ OAuth link with a Discord server invite would not authenticate the player.
 Independent offline play would require a compatible local game server, which
 is not present in the public website files.
 
+The local welcome dialog also shows [ZGTA:SA community Discord](https://discord.gg/Cg39cguVUa).
+That link is a community invite. The original site's login opens its own site
+in a new tab; signing in there does not authenticate the local mirror.
+
 This is an unofficial local archive. Grand Theft Auto: San Andreas and its
 assets remain the property of their respective owners. No copied site files
 or game data are intended for publication in this repository.
