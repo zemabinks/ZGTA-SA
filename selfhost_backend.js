@@ -47,6 +47,10 @@ function safeName(value) {
 }
 
 function finite(value, fallback = 0) { return Number.isFinite(value) ? value : fallback; }
+function limited(value, limit, fallback = 0) {
+  return Number.isFinite(value) ? Math.max(-limit, Math.min(limit, value)) : fallback;
+}
+function rounded(value, fallback = 0) { return Math.round(finite(value, fallback) * 1000) / 1000; }
 
 class LocalGame {
   get requiresJoinCode() { return !!JOIN_CODE; }
@@ -261,6 +265,9 @@ class LocalGame {
   row(peer) {
     const s = peer.state;
     if (!s || Date.now() - peer.lastSeen > 10000) return null;
+    const driving = s.driving === true && typeof s.car === 'string';
+    const walking = !driving && s.walking === true && Number.isInteger(s.skin);
+    if (!driving && !walking) return null;
     const point = Array.isArray(s.at) ? s.at : Array.isArray(s.position) ? s.position : null;
     const x = finite(s.x, point ? finite(point[0]) : 1480);
     const y = finite(s.y, point ? finite(point[1]) : -1738);
@@ -268,31 +275,53 @@ class LocalGame {
     const row = Array(50).fill(null);
     row[0] = String(peer.player.number);
     row[1] = peer.player.name;
-    row[2] = typeof s.car === 'string' ? s.car : 's0';
-    row[3] = x; row[4] = y; row[5] = z;
-    row[6] = finite(s.heading); row[7] = finite(s.pitch); row[8] = finite(s.roll);
-    row[9] = finite(s.speed); row[10] = finite(s.steer);
+    row[2] = driving ? s.car.slice(0, 64) : `s${s.skin}`;
+    row[3] = rounded(x); row[4] = rounded(y); row[5] = rounded(z);
+    row[6] = rounded(s.heading); row[7] = rounded(s.pitch); row[8] = rounded(s.roll);
+    row[9] = rounded(limited(s.speed, 150)); row[10] = rounded(limited(s.steer, 1));
     row[11] = s.boost ? 1 : 0;
     row[12] = s.lights ? 1 : 0;
-    row[13] = finite(s.vx); row[14] = finite(s.vy); row[15] = finite(s.vz);
-    row[16] = finite(s.clock, Date.now());
-    row[17] = Number.isInteger(s.horn) ? s.horn : 0;
-    row[18] = finite(s.health, 100);
-    row[24] = finite(s.move);
-    row[25] = s.air ? 1 : 0;
+    row[13] = rounded(limited(s.vx, 150)); row[14] = rounded(limited(s.vy, 150));
+    row[15] = rounded(limited(s.vz, 150));
+    row[16] = Math.round(finite(s.clock, Date.now()));
+    row[17] = typeof s.horn === 'boolean' ? Number(s.horn) : Number.isInteger(s.horn) ? s.horn & 3 : 0;
+    row[18] = Math.round(Math.max(0, Math.min(walking ? 100 : 1000,
+      finite(s.health, walking ? 100 : 1000))));
+    row[19] = typeof s.damage === 'string' ? s.damage.slice(0, 512) : '';
+    row[20] = rounded(limited(s.wx, 30)); row[21] = rounded(limited(s.wy, 30));
+    row[22] = rounded(limited(s.wz, 30));
+    row[23] = Math.round(Math.max(0, limited(s.lag, 2000)));
+    row[24] = walking ? rounded(Math.max(0, limited(s.move, 3))) : 0;
+    row[25] = walking && s.air ? 1 : 0;
     row[26] = s.crouch ? 1 : 0;
-    row[27] = Number.isInteger(s.weapon) ? s.weapon : 0;
-    row[28] = Number.isFinite(s.aim) ? s.aim : null;
-    row[29] = finite(s.shots);
-    row[30] = finite(s.armour);
-    row[31] = Number.isInteger(s.skin) ? s.skin : 0;
+    row[27] = walking || (driving && s.aim !== undefined) ?
+      (Number.isInteger(s.weapon) ? s.weapon : 0) : 0;
+    row[28] = (walking || (driving && s.aim !== undefined)) && Number.isFinite(s.aim) ?
+      rounded(limited(s.aim, 1.6)) : null;
+    row[29] = (walking || (driving && s.aim !== undefined)) && Number.isFinite(s.shots) ?
+      Math.max(0, s.shots) : 0;
+    row[30] = Math.round(Math.max(0, Math.min(100, finite(s.armour))));
+    row[31] = driving && Number.isInteger(s.skin) ? s.skin : 0;
     row[32] = Number.isInteger(s.act) ? s.act : 0;
-    row[34] = typeof s.riding === 'string' && Number.isInteger(s.seat) ? [s.riding, s.seat] : null;
-    row[35] = typeof s.vehicle === 'string' ? s.vehicle : null;
+    const riding = walking && typeof s.riding === 'string' ?
+      [s.riding.slice(0, 64), Number.isInteger(s.seat) ? s.seat : 0] : null;
+    row[33] = walking && !riding && typeof s.car === 'string' && s.parked &&
+      typeof s.parked === 'object' ? [s.car.slice(0, 64),
+        rounded(s.parked.x), rounded(s.parked.y), rounded(s.parked.z),
+        rounded(s.parked.heading), rounded(s.parked.pitch), rounded(s.parked.roll),
+        Math.round(finite(s.parked.health, 1000)),
+        typeof s.parked.damage === 'string' ? s.parked.damage.slice(0, 512) : ''] : null;
+    row[34] = riding;
+    row[35] = typeof s.vehicle === 'string' ? s.vehicle.slice(0, 64) : null;
     row[36] = s.paused ? 1 : 0;
     row[37] = peer.player.number;
-    row[39] = Array.isArray(s.on) ? s.on : null;
-    row[43] = finite(s.life, 100);
+    row[38] = walking && !riding && Number.isInteger(s.down) ? s.down : 0;
+    row[39] = walking && !riding && s.on && typeof s.on.v === 'string' ?
+      [s.on.v.slice(0, 64), rounded(s.on.x), rounded(s.on.y), rounded(s.on.z)] : null;
+    row[40] = driving && Number.isFinite(s.smoke) && s.smoke > 0 ? rounded(s.smoke) : null;
+    row[41] = walking && !riding && typeof s.anim === 'string' ? s.anim.slice(0, 96) : null;
+    row[42] = driving && Array.isArray(s.kit) ? s.kit.slice(0, 16).map(value => rounded(value)) : null;
+    row[43] = driving ? Math.round(Math.max(0, Math.min(100, finite(s.life, 100)))) : 0;
     return row;
   }
 
