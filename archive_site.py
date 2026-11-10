@@ -26,16 +26,21 @@ SITE = ROOT / "site"
 MANIFEST = ROOT / "manifest.json"
 USER_AGENT = "ZGTA-SA-local-preservation/1.0"
 ALLOWED_PREFIXES = ("/_next/static/", "/game/", "/reference/", "/tools/map/")
-EXTRA = ("/manifest.webmanifest", "/favicon.ico", "/icon.png", "/apple-icon.png", "/sw.js", "/icons/icon-192.png")
+EXTRA = (
+    "/manifest.webmanifest", "/favicon.ico", "/icon.png", "/apple-icon.png",
+    "/sw.js", "/icons/icon-192.png",
+    "/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js",
+)
 GAME_SEEDS = (
     "/game/world/index.json", "/game/world/collision.json",
     "/game/world/peds.json", "/game/world/fx.json",
     "/game/world/pedanims.bin", "/game/particle.txd",
-    "/game/effectspc.txd", "/game/maccer.dff", "/game/maccer.txd",
+    "/game/effectspc.txd", "/game/hud.txd", "/game/maccer.dff", "/game/maccer.txd",
     "/game/desert_eagle.dff", "/game/desert_eagle.txd",
-    "/game/diamond_3.dff", "/tools/map/lights.json",
+    "/game/diamond_3.dff", "/game/sound/b59_25.wav", "/game/sound/b59_26.wav",
+    "/tools/map/lights.json",
     "/tools/map/lights.bin", "/reference/hud/font1.png",
-    "/reference/hud/font2.png",
+    "/reference/hud/font2.png", "/reference/hud/radar_centre.png",
 )
 PATH_RE = re.compile(r"(?:https://play\.samp\.directory)?(/(?:_next/static|game|reference|tools/map)/[A-Za-z0-9_./?=&%+:-]+)")
 
@@ -108,6 +113,7 @@ def discover(url, data):
         if path in PAGES:
             found |= {urljoin(BASE, p) for p in EXTRA}
             found |= {urljoin(BASE, p) for p in GAME_SEEDS}
+            found |= {urljoin(BASE, "/reference/vehicles/%d.webp" % n) for n in range(400, 612)}
             found |= {urljoin(BASE, p) for p in PAGES}
             found.add(SOLO_URL)
     if path.endswith((".js", ".json", ".css", ".webmanifest")):
