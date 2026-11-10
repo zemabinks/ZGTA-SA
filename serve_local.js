@@ -32,8 +32,10 @@ const COMMUNITY_SCRIPT = `<script>
   const invite = ${JSON.stringify(COMMUNITY_DISCORD)};
   const connected = ${CONNECTED};
   const selfhost = ${SELFHOST};
+  let copied = false;
   function localCopy() {
-    if (!selfhost) return;
+    if (!selfhost || copied) return;
+    copied = true;
     const replacements = [
       ['Welcome to samp.directory', 'Welcome to ZGTA:SA'],
       ['San Andreas, in your browser, with everybody else.', 'San Andreas, in your browser, with players on this local server.'],
@@ -88,7 +90,12 @@ const COMMUNITY_SCRIPT = `<script>
       community.insertAdjacentElement('afterend', solo);
     }
   }
-  new MutationObserver(addCommunityLink).observe(document.documentElement, {childList:true,subtree:true});
+  let scheduled = false;
+  new MutationObserver(() => {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(() => {scheduled = false; addCommunityLink();});
+  }).observe(document.documentElement, {childList:true,subtree:true});
   addCommunityLink();
 })();
 </script>`;
