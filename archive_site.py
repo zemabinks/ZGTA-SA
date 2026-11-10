@@ -19,6 +19,7 @@ import re
 import sys
 
 BASE = "https://play.samp.directory/"
+PAGES = ("/", "/ru", "/es", "/pt", "/tr")
 ROOT = Path(__file__).resolve().parent / "local-only"
 SITE = ROOT / "site"
 MANIFEST = ROOT / "manifest.json"
@@ -55,8 +56,8 @@ def normalize(url):
     if parsed.netloc != "play.samp.directory":
         return None
     path = unquote(parsed.path)
-    if path == "/":
-        return BASE
+    if path in PAGES:
+        return BASE.rstrip("/") + path
     if path.endswith("/"):
         return None
     if path.startswith(ALLOWED_PREFIXES) or path in EXTRA:
@@ -66,8 +67,8 @@ def normalize(url):
 
 def local_path(url):
     path = urlsplit(url).path
-    if path == "/":
-        path = "/index.html"
+    if path in PAGES:
+        path = (path.rstrip("/") or "") + "/index.html"
     target = (SITE / path.lstrip("/")).resolve()
     if target != SITE.resolve() and SITE.resolve() not in target.parents:
         raise ValueError("Unsafe path: " + url)
@@ -96,12 +97,13 @@ def fetch(url):
 def discover(url, data):
     found = set()
     path = urlsplit(url).path
-    if path == "/":
+    if path in PAGES:
         parser = Assets()
         parser.feed(data.decode("utf-8", "replace"))
         found |= parser.urls
         found |= {urljoin(BASE, p) for p in EXTRA}
         found |= {urljoin(BASE, p) for p in GAME_SEEDS}
+        found |= {urljoin(BASE, p) for p in PAGES}
     if path.endswith((".js", ".json", ".css", ".webmanifest")):
         body = data.decode("utf-8", "replace")
         found |= {urljoin(BASE, p) for p in PATH_RE.findall(body)}
