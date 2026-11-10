@@ -21,16 +21,27 @@ const COMMUNITY_SCRIPT = `<script>
     login.target = '_blank';
     login.rel = 'noopener noreferrer';
     if (login.textContent !== 'Log in on the original site') login.textContent = 'Log in on the original site';
-    if (document.getElementById('zgta-community-discord')) return;
-    const link = document.createElement('a');
-    link.id = 'zgta-community-discord';
-    link.href = invite;
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-    link.textContent = 'ZGTA:SA community Discord';
-    link.className = login.className;
-    link.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-top:8px;';
-    login.insertAdjacentElement('afterend', link);
+    let community = document.getElementById('zgta-community-discord');
+    if (!community) {
+      community = document.createElement('a');
+      community.id = 'zgta-community-discord';
+      community.href = invite;
+      community.target = '_blank';
+      community.rel = 'noopener noreferrer';
+      community.textContent = 'ZGTA:SA community Discord';
+      community.className = login.className;
+      community.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-top:8px;';
+      login.insertAdjacentElement('afterend', community);
+    }
+    if (!document.getElementById('zgta-solo-world')) {
+      const solo = document.createElement('a');
+      solo.id = 'zgta-solo-world';
+      solo.href = '/tools/world';
+      solo.textContent = 'Solo free roam (no Discord)';
+      solo.className = login.className;
+      solo.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;margin-top:8px;';
+      community.insertAdjacentElement('afterend', solo);
+    }
   }
   new MutationObserver(addCommunityLink).observe(document.documentElement, {childList:true,subtree:true});
   addCommunityLink();
@@ -104,7 +115,7 @@ function serve(req, res) {
   if (pathname.startsWith('/api/')) return proxyHttp(req, res);
   let decoded;
   try { decoded = decodeURIComponent(pathname); } catch { res.writeHead(400); return res.end(); }
-  const page = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded)
+  const page = ['/', '/ru', '/es', '/pt', '/tr', '/offline', '/tools/world'].includes(decoded)
     ? (decoded.replace(/\/$/, '') + '/index.html') : decoded;
   const filename = path.resolve(ROOT, '.' + page);
   if (!filename.startsWith(ROOT + path.sep)) { res.writeHead(403); return res.end(); }
