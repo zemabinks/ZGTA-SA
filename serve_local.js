@@ -229,7 +229,9 @@ function serve(req, res) {
       res.writeHead(401); return res.end('Access code required');
     }
   }
-  if (SELFHOST && pathname !== '/api/local/status' && pathname !== '/api/local/diagnostics')
+  // API handlers create or reuse their own account once. Static pages need an
+  // account cookie before their JavaScript opens the multiplayer socket.
+  if (SELFHOST && !pathname.startsWith('/api/'))
     localGame.ensurePlayer(req, res);
   if (pathname.startsWith('/api/')) {
     if (!SELFHOST) return proxyHttp(req, res);
