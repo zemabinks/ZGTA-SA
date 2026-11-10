@@ -10,9 +10,11 @@ const {pipeline} = require('stream/promises');
 const ROOT = path.join(__dirname, 'local-only', 'site');
 const LOCAL_ONLY = path.join(__dirname, 'local-only');
 const MANIFEST = path.join(LOCAL_ONLY, 'manifest.json');
-const PORT = Number(process.env.PORT || 8765);
+const CONNECTED = process.env.ZGTA_CONNECTED === '1';
+const PORT = Number(process.env.PORT || (CONNECTED ? 9443 : 8765));
 const HOST = '127.0.0.1';
 const UPSTREAM = 'play.samp.directory';
+const PUBLIC_ORIGIN = CONNECTED ? `https://${UPSTREAM}` : `http://${HOST}:${PORT}`;
 const COMMUNITY_DISCORD = 'https://discord.gg/Cg39cguVUa';
 const pendingAssets = new Map();
 const unavailableAssets = new Set();
@@ -20,14 +22,17 @@ let manifestWrite = Promise.resolve();
 const COMMUNITY_SCRIPT = `<script>
 (() => {
   const invite = ${JSON.stringify(COMMUNITY_DISCORD)};
+  const connected = ${CONNECTED};
   function addCommunityLink() {
     const login = document.querySelector('a[href*="/api/auth/discord/login"]');
     if (!login) return;
-    const originalLogin = new URL(login.getAttribute('href'), 'https://play.samp.directory').href;
-    if (login.href !== originalLogin) login.href = originalLogin;
-    login.target = '_blank';
-    login.rel = 'noopener noreferrer';
-    if (login.textContent !== 'Log in on the original site') login.textContent = 'Log in on the original site';
+    if (!connected) {
+      const originalLogin = new URL(login.getAttribute('href'), 'https://play.samp.directory').href;
+      if (login.href !== originalLogin) login.href = originalLogin;
+      login.target = '_blank';
+      login.rel = 'noopener noreferrer';
+      if (login.textContent !== 'Log in on the original site') login.textContent = 'Log in on the original site';
+    }
     let community = document.getElementById('zgta-community-discord');
     if (!community) {
       community = document.createElement('a');
@@ -85,7 +90,7 @@ function proxyHttp(req, res) {
     method: req.method, headers: proxyHeaders(req.headers)}, upstream => {
     const headers = {...upstream.headers};
     delete headers['content-security-policy'];
-    if (headers.location && headers.location.startsWith(`https://${UPSTREAM}/`)) {
+    if (!CONNECTED && headers.location && headers.location.startsWith(`https://${UPSTREAM}/`)) {
       headers.location = headers.location.replace(`https://${UPSTREAM}`, `http://${HOST}:${PORT}`);
     }
     res.writeHead(upstream.statusCode, headers);
@@ -169,7 +174,7 @@ async function cachePublicAsset(req, pathname, filename) {
 function serve(req, res) {
   securityHeaders(res);
   let pathname;
-  try { pathname = new URL(req.url, `http://${HOST}:${PORT}`).pathname; }
+  try { pathname = new URL(req.url, PUBLIC_ORIGIN).pathname; }
   catch { res.writeHead(400); return res.end('Invalid URL'); }
   if (pathname.startsWith('/api/')) return proxyHttp(req, res);
   let decoded;
@@ -230,9 +235,14 @@ function serve(req, res) {
   });
 }
 
-const server = http.createServer(serve);
+const server = CONNECTED
+  ? https.createServer({
+      key: fs.readFileSync(path.join(LOCAL_ONLY, 'connected.key')),
+      cert: fs.readFileSync(path.join(LOCAL_ONLY, 'connected.crt')),
+    }, serve)
+  : http.createServer(serve);
 server.on('upgrade', (req, socket, head) => {
   if (req.url.startsWith('/api/')) proxyWebSocket(req, socket, head);
   else socket.destroy();
 });
-server.listen(PORT, HOST, () => console.log(`ZGTA:SA local mirror: http://${HOST}:${PORT}/`));
+server.listen(PORT, HOST, () => console.log(`ZGTA:SA local mirror: ${PUBLIC_ORIGIN}/`));
