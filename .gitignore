@@ -1,0 +1,12 @@
+# Keep all copied website code, art, world data, and game files on this Mac.
+/local-only/
+*.iso
+*.img
+*.dff
+*.txd
+*.bin
+*.wasm
+*.partial
+.DS_Store
+__pycache__/
+
