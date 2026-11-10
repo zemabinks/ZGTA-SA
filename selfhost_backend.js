@@ -260,11 +260,26 @@ class LocalGame {
     row[3] = x; row[4] = y; row[5] = z;
     row[6] = finite(s.heading); row[7] = finite(s.pitch); row[8] = finite(s.roll);
     row[9] = finite(s.speed); row[10] = finite(s.steer);
+    row[11] = s.boost ? 1 : 0;
+    row[12] = s.lights ? 1 : 0;
+    row[13] = finite(s.vx); row[14] = finite(s.vy); row[15] = finite(s.vz);
     row[16] = finite(s.clock, Date.now());
+    row[17] = Number.isInteger(s.horn) ? s.horn : 0;
     row[18] = finite(s.health, 100);
     row[24] = finite(s.move);
+    row[25] = s.air ? 1 : 0;
+    row[26] = s.crouch ? 1 : 0;
     row[27] = Number.isInteger(s.weapon) ? s.weapon : 0;
+    row[28] = Number.isFinite(s.aim) ? s.aim : null;
+    row[29] = finite(s.shots);
+    row[30] = finite(s.armour);
+    row[31] = Number.isInteger(s.skin) ? s.skin : 0;
+    row[32] = Number.isInteger(s.act) ? s.act : 0;
+    row[34] = typeof s.riding === 'string' && Number.isInteger(s.seat) ? [s.riding, s.seat] : null;
+    row[35] = typeof s.vehicle === 'string' ? s.vehicle : null;
+    row[36] = s.paused ? 1 : 0;
     row[37] = peer.player.number;
+    row[39] = Array.isArray(s.on) ? s.on : null;
     row[43] = finite(s.life, 100);
     return row;
   }
