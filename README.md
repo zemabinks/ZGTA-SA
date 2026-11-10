@@ -128,6 +128,8 @@ visit shows a join screen. The access code is in
 people joining your game. The file is created with owner-only permissions and
 is ignored by Git. To change the code, stop the server, delete that file, and
 start the launcher again; everyone will need the new code.
+On a fresh GitHub checkout, run `chmod +x 'ZGTA-SA Share.command'` once before
+double-clicking it; this Mac's local copy is already executable.
 
 Keep the Terminal window open while hosting. Ctrl-C stops the server. If
 another local server is already using port 8766, stop it before starting the
