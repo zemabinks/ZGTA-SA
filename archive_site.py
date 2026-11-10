@@ -132,6 +132,8 @@ def discover(url, data):
                     n = cell["cell"]
                     for extension in ("bin", "webp", "col.bin", "brk.bin"):
                         found.add(urljoin(BASE, "/game/world/c%d.%s" % (n, extension)))
+                    if cell.get("sharp"):
+                        found.add(urljoin(BASE, "/game/world/c%d.hd.webp" % n))
         except (ValueError, KeyError, TypeError):
             pass
     if path == "/game/world/peds.json":
