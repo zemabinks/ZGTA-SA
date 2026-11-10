@@ -109,7 +109,11 @@ This is a **work-in-progress independent server**. Two loopback clients were
 tested exchanging player state and chat. The archived browser client also
 reached its local welcome screen and showed a local player name and chat.
 The server currently implements account creation, settings, player-position
-messages, chat, and the player list. The original service's jobs, economy,
+messages, chat, and the player list. Position messages now follow the archived
+client's walking, passenger, and driving row format. Run
+`node smoke_multiplayer.js` with Node.js 24 to check the local account and
+two-player wire protocol in an isolated temporary server; it does not touch
+saved player accounts. The original service's jobs, economy,
 garage, property, races, vehicles, combat, administration, and other server
 systems still need their own implementations. Their public browser code does
 not contain the original server logic or database. The 3D map and solo mode
