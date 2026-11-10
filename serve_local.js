@@ -4,12 +4,19 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const path = require('path');
+const crypto = require('crypto');
+const {pipeline} = require('stream/promises');
 
 const ROOT = path.join(__dirname, 'local-only', 'site');
+const LOCAL_ONLY = path.join(__dirname, 'local-only');
+const MANIFEST = path.join(LOCAL_ONLY, 'manifest.json');
 const PORT = Number(process.env.PORT || 8765);
 const HOST = '127.0.0.1';
 const UPSTREAM = 'play.samp.directory';
 const COMMUNITY_DISCORD = 'https://discord.gg/Cg39cguVUa';
+const pendingAssets = new Map();
+const unavailableAssets = new Set();
+let manifestWrite = Promise.resolve();
 const COMMUNITY_SCRIPT = `<script>
 (() => {
   const invite = ${JSON.stringify(COMMUNITY_DISCORD)};
@@ -109,9 +116,61 @@ function proxyWebSocket(req, socket, head) {
   remote.end();
 }
 
+function recordCachedAsset(pathname, filename, bytes, sha256, contentType) {
+  manifestWrite = manifestWrite.catch(() => {}).then(async () => {
+    const manifest = JSON.parse(await fs.promises.readFile(MANIFEST, 'utf8'));
+    manifest.files[`https://${UPSTREAM}${pathname}`] = {
+      path: path.relative(LOCAL_ONLY, filename).split(path.sep).join('/'),
+      bytes, sha256, content_type: contentType, status: 'ok',
+    };
+    manifest.captured_at = new Date().toISOString();
+    const partial = MANIFEST + '.partial';
+    await fs.promises.writeFile(partial, JSON.stringify(manifest, null, 2) + '\n');
+    await fs.promises.rename(partial, MANIFEST);
+  });
+  return manifestWrite;
+}
+
+async function cachePublicAsset(req, pathname, filename) {
+  await fs.promises.mkdir(path.dirname(filename), {recursive: true});
+  const partial = filename + `.${process.pid}.partial`;
+  try {
+    const result = await new Promise((resolve, reject) => {
+      const upstream = https.get({hostname: UPSTREAM, path: req.url,
+        headers: {'user-agent': 'ZGTA-SA-local-preservation/1.0', 'accept-encoding': 'identity'}}, response => {
+        if (response.statusCode !== 200) {
+          response.resume();
+          const error = new Error(`Source returned ${response.statusCode}`);
+          error.statusCode = response.statusCode;
+          return reject(error);
+        }
+        const hash = crypto.createHash('sha256');
+        let bytes = 0;
+        response.on('data', chunk => { hash.update(chunk); bytes += chunk.length; });
+        pipeline(response, fs.createWriteStream(partial))
+          .then(() => resolve({bytes, sha256: hash.digest('hex'),
+            contentType: response.headers['content-type'] || 'application/octet-stream'}))
+          .catch(reject);
+      });
+      upstream.on('error', reject);
+    });
+    await fs.promises.rename(partial, filename);
+    try {
+      await recordCachedAsset(pathname, filename, result.bytes, result.sha256, result.contentType);
+    } catch (error) {
+      await fs.promises.rm(filename, {force: true});
+      throw error;
+    }
+  } finally {
+    await fs.promises.rm(partial, {force: true});
+  }
+}
+
 function serve(req, res) {
   securityHeaders(res);
-  const pathname = new URL(req.url, `http://${HOST}:${PORT}`).pathname;
+  let pathname;
+  try { pathname = new URL(req.url, `http://${HOST}:${PORT}`).pathname; }
+  catch { res.writeHead(400); return res.end('Invalid URL'); }
   if (pathname.startsWith('/api/')) return proxyHttp(req, res);
   let decoded;
   try { decoded = decodeURIComponent(pathname); } catch { res.writeHead(400); return res.end(); }
@@ -120,11 +179,35 @@ function serve(req, res) {
   const filename = path.resolve(ROOT, '.' + page);
   if (!filename.startsWith(ROOT + path.sep)) { res.writeHead(403); return res.end(); }
   fs.stat(filename, (error, stat) => {
-    if (error || !stat.isFile()) { res.writeHead(404); return res.end('Not in local archive'); }
+    if (error || !stat.isFile()) {
+      if (process.env.ZGTA_DEBUG_MISSING === '1') console.error(`Missing local asset: ${pathname}`);
+      const cacheable = !decoded.endsWith('/') &&
+        /^\/(?:game|reference|tools\/map|_next\/static)\//.test(decoded);
+      if (cacheable && ['GET', 'HEAD'].includes(req.method) && !unavailableAssets.has(decoded)) {
+        if (!pendingAssets.has(decoded)) {
+          const pending = cachePublicAsset(req, pathname, filename)
+            .finally(() => pendingAssets.delete(decoded));
+          pendingAssets.set(decoded, pending);
+        }
+        return pendingAssets.get(decoded).then(() => serve(req, res), failure => {
+          if (failure.statusCode === 404) unavailableAssets.add(decoded);
+          res.writeHead(failure.statusCode || 502);
+          res.end('Public asset unavailable');
+        });
+      }
+      if (req.method === 'GET' && (req.headers['sec-fetch-dest'] === 'document' ||
+          (req.headers.accept || '').includes('text/html'))) {
+        res.writeHead(302, {Location: `https://samp.directory${req.url}`});
+        return res.end();
+      }
+      res.writeHead(404);
+      return res.end('Not in local archive');
+    }
     const type = MIME[path.extname(filename)] || 'application/octet-stream';
     if (type.startsWith('text/html')) {
       const html = fs.readFileSync(filename, 'utf8');
-      const content = Buffer.from(html.replace('</body>', COMMUNITY_SCRIPT + '</body>'));
+      const gamePage = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded);
+      const content = Buffer.from(gamePage ? html.replace('</body>', COMMUNITY_SCRIPT + '</body>') : html);
       res.setHeader('Content-Type', type);
       res.setHeader('Content-Length', content.length);
       res.setHeader('Accept-Ranges', 'none');
