@@ -207,11 +207,20 @@ class LocalGame {
       rep: {level: 1 + Math.floor(player.xp / 1000)}, licence: true};
   }
 
+  homeStatus(player) {
+    const originalHomes = player.homes.filter(id => HOME_CATALOG.some(home =>
+      home.id === id && home.source === 'archived'));
+    return {t: 'home', own: originalHomes, home: originalHomes[0] || null,
+      spawn: false, most: 32, cars: {}, skins: [], stash: {}, friends: [], open: [],
+      login: true, cash: player.cash};
+  }
+
   updatePlayer(player) {
     this.save();
     for (const peer of this.peers) if (peer.player === player && peer.ready) {
       peer.send({t: 'cash', cash: player.cash});
       peer.send(this.owned(player));
+      peer.send(this.homeStatus(player));
     }
   }
 
@@ -423,6 +432,7 @@ class LocalGame {
         zombies: false, traffic: 0, peds: 0, party: 0});
       peer.send(this.fullState(peer));
       peer.send(this.owned(peer.player));
+      peer.send(this.homeStatus(peer.player));
       return;
     }
     if (!peer.ready) return;
@@ -465,6 +475,7 @@ class LocalGame {
       return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer && message.ids.includes(String(p.player.number)))
         .map(p => this.row(p)).filter(Boolean)});
     if (message.t === 'board') return peer.send(this.board(peer));
+    if (message.t === 'home') return peer.send(this.homeStatus(peer.player));
     if (message.t === 'tongue') return;
   }
 
@@ -482,7 +493,13 @@ class LocalGame {
       return;
     }
     if (text === '/owned' || text === '/mycars' || text === '/garage')
-      return peer.send(this.owned(peer.player));
+      return peer.send(this.owned(peer.player)), peer.send(this.homeStatus(peer.player));
+    if (text === '/home' || text === '/home doors')
+      return peer.send(this.homeStatus(peer.player));
+    if (text.startsWith('/home ')) {
+      peer.send({t: 'note', text: 'Property interiors and house actions are not available on this local server yet.'});
+      return;
+    }
     if (text === '/balance' || text === '/money')
       return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
     if (text === '/jobs')
