@@ -14,12 +14,18 @@
     #zgta-local-panel button:disabled{opacity:.45;cursor:default}#zgta-local-panel .zgta-close{float:right;background:#263247}
     #zgta-local-panel select{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
+    #zgta-local-objective{position:fixed;right:16px;top:72px;z-index:1000;max-width:min(330px,calc(100vw - 32px));border:1px solid #86a9ff;border-radius:10px;background:#14264ff0;color:white;padding:10px 14px;font:600 13px/1.45 system-ui;text-align:left;cursor:pointer;box-shadow:0 4px 18px #0009}
+    #zgta-local-objective[hidden]{display:none}
   `;
   document.head.append(css);
   const openButton = document.createElement('button');
   openButton.id = 'zgta-local-open';
   openButton.type = 'button';
   openButton.textContent = 'ZGTA:SA · Local gameplay (F6)';
+  const objective = document.createElement('button');
+  objective.id = 'zgta-local-objective';
+  objective.type = 'button';
+  objective.hidden = true;
   const shade = document.createElement('div');
   shade.id = 'zgta-local-shade';
   shade.dataset.open = 'false';
@@ -28,9 +34,10 @@
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'ZGTA:SA local gameplay');
   shade.append(panel);
-  document.body.append(openButton, shade);
+  document.body.append(openButton, objective, shade);
   new MutationObserver(() => {
-    if (!openButton.isConnected || !shade.isConnected) document.body.append(openButton, shade);
+    if (!openButton.isConnected || !objective.isConnected || !shade.isConnected)
+      document.body.append(openButton, objective, shade);
   }).observe(document.documentElement, {childList: true, subtree: true});
   let visible = false;
   let state = null;
@@ -107,8 +114,15 @@
 
     section('Jobs and time trial');
     if (state.job) {
-      panel.append(element('p', `${state.job.name}: travel ${state.job.remaining} m more (${state.job.progress}/${state.job.goal} m).`, 'zgta-muted'));
-      row('Route completed?', 'job.complete', {}, 'Complete', !state.connected || state.job.remaining > 0);
+      if (state.job.mode === 'route') {
+        panel.append(element('p', `${state.job.stage === 'pickup' ? 'Collect the package' : 'Deliver the package'} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.`, 'zgta-muted'));
+        if (state.job.stage === 'pickup')
+          row('Pick up package', 'job.pickup', {}, 'Collect', !state.connected || state.job.remaining > state.job.radius);
+        else row('Deliver package', 'job.complete', {}, 'Deliver', !state.connected || state.job.remaining > state.job.radius);
+      } else {
+        panel.append(element('p', `${state.job.name}: travel ${state.job.remaining} m more (${state.job.progress}/${state.job.goal} m).`, 'zgta-muted'));
+        row('Route completed?', 'job.complete', {}, 'Complete', !state.connected || state.job.remaining > 0);
+      }
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
@@ -144,8 +158,22 @@
     panel.append(element('p', 'Your cash, cars, homes, and active job are saved on this Mac. Press F6 to open this panel again.', 'zgta-muted'));
     panel.scrollTop = scrollTop;
   }
+  function renderObjective() {
+    const route = state?.job?.mode === 'route' ? state.job : null;
+    objective.hidden = !route || visible;
+    if (!route) return;
+    let direction = '';
+    if (state.position) {
+      const dx = route.target.x - state.position.x;
+      const dy = route.target.y - state.position.y;
+      const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      direction = ` ${compass[Math.round(Math.atan2(dx, dy) / (Math.PI / 4) + 8) % 8]}`;
+    }
+    objective.textContent = `Courier: ${route.stage === 'pickup' ? 'collect package' : 'deliver package'}\n${route.target.name} · ${route.remaining ?? '?'} m${direction}\nPress F6 for details`;
+    objective.style.whiteSpace = 'pre-line';
+  }
   async function refresh() {
-    if (!visible || busy) return;
+    if (busy) return;
     try {
       const response = await fetch('/api/local/state', {credentials: 'same-origin'});
       if (!response.ok) throw new Error(`Could not load local state (${response.status}).`);
@@ -153,6 +181,7 @@
       if (JSON.stringify(next) !== JSON.stringify(state)) {
         state = next;
         render();
+        renderObjective();
       }
     } catch (failure) { result = failure.message; error = true; render(); }
   }
@@ -170,10 +199,12 @@
     } catch (failure) { result = failure.message; error = true; }
     busy = false;
     render();
+    renderObjective();
   }
   function toggle(next) {
     visible = next;
     shade.dataset.open = String(next);
+    renderObjective();
     if (next) {
       document.exitPointerLock?.();
       result = '';
@@ -182,11 +213,13 @@
     } else openButton.focus();
   }
   openButton.addEventListener('click', () => toggle(true));
+  objective.addEventListener('click', () => toggle(true));
   shade.addEventListener('click', event => {if (event.target === shade) toggle(false);});
   panel.addEventListener('keydown', event => event.stopPropagation());
   window.addEventListener('keydown', event => {
     if (event.key === 'F6') {event.preventDefault(); event.stopImmediatePropagation(); toggle(!visible);}
     else if (visible && event.key === 'Escape') {event.preventDefault(); event.stopImmediatePropagation(); toggle(false);}
   }, true);
-  setInterval(() => {if (visible) refresh();}, 3000);
+  refresh();
+  setInterval(() => {if (visible || state?.job?.mode === 'route') refresh();}, 3000);
 })();
