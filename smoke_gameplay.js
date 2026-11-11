@@ -92,7 +92,7 @@ async function main() {
   fs.mkdirSync(path.join(local, 'selfhost'));
   fs.copyFileSync(path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json'),
     path.join(local, 'selfhost', 'client-catalog.json'));
-  for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js'])
+  for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   let child, ws;
@@ -135,6 +135,8 @@ async function main() {
     ws.send({t: 'me', walking: true, skin: 7, x: 1480, y: -1738, z: 13});
     const connected = await api('/api/local/state');
     assert.equal(connected.body.connected, true);
+    assert.equal(connected.body.discord.available, false, 'guest mode works without OAuth configuration');
+    assert.equal((await api('/api/local/discord/start')).status, 404);
     assert(connected.body.catalog.cars.length > 80, 'archived vehicle catalog must load');
     assert.equal(connected.body.catalog.homes.length, 31, 'archived property catalog must load');
     const earlyBuy = await api('/api/local/action', 'POST', {action: 'car.buy', model: 410});
