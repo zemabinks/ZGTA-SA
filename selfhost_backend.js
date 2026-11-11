@@ -280,7 +280,7 @@ class LocalGame {
         if (!destination) throw new Error('Courier destinations are unavailable.');
         player.job = {id: job.id, mode: 'route', pickup: [rounded(pos.x), rounded(pos.y)],
           drop: destination.id, stage: 'pickup', started: Date.now()};
-        message = 'Courier started. Collect the package here, then deliver it to the marked address.';
+        message = 'Courier started. Collect the package here, then follow the objective box to the delivery address.';
       } else {
         player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
         message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
