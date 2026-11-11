@@ -112,9 +112,12 @@ change a local name.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
 five independent local activities: courier, taxi, mechanic, medic, and a timed
-street trial. Each currently tracks distance traveled in the world, then pays
-cash and XP when completed. Jobs are simple local substitutes, not the
-publisher's job missions. The panel sells three inexpensive starter cars and
+street trial. Courier is a staged mission: collect a package where you start,
+then travel to a real property entrance from the archived map catalog and
+deliver within 12 meters. An objective box shows the destination, distance,
+and compass direction while the panel is closed. The other four activities
+still track distance traveled, then pay cash and XP. These are independent
+local substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
 the ground vehicles listed in the archived client catalog. An owned vehicle
 can be spawned nearby and driven. It sells two starter homes and the 29
 properties listed in the archived client catalog. A purchased original
@@ -123,7 +126,7 @@ storage are not implemented. The client shows owned-house markers; its house
 entry prompt reports that interior actions are unavailable. A Chrome test of
 the extracted interior coordinates rendered an empty void, so interior entry
 is not enabled. Chat commands
-`/jobs`, `/job courier`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
+`/jobs`, `/job courier`, `/pickup`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, and `/buyhome starter` expose the same local systems.
 
 This is a **work-in-progress independent server**. It supports local accounts,
@@ -132,14 +135,15 @@ player list, job payouts, cash, vehicle ownership and spawning, and
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
 independent server's cash balance; they do not reproduce the publisher's
-dealer locations, sale rules, or economy. The original service's detailed job missions, economy rules,
+dealer locations, sale rules, or economy. The original service's job missions, economy rules,
 property interiors, races, combat, police, gangs, administration, and other
 server systems still need independent implementations. The browser download
 does not include the original server logic or database. The 3D map and solo
 mode remain available from the local archive.
 
 Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
-test the local wire protocol, two-player exchange, job travel and payout,
+test the local wire protocol, two-player exchange, courier pickup and delivery,
+other job travel and payout,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
