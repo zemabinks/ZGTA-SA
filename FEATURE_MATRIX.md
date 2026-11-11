@@ -1,6 +1,6 @@
 # ZGTA:SA feature and evidence matrix
 
-Updated 11 November 2026. This tracks the independent server in this repository.
+Updated 12 November 2026. This tracks the independent server in this repository.
 The archived browser client is under ignored `local-only/` on the host Mac.
 The publisher's private server implementation and database are unavailable.
 Client files can show a screen or a message format; they cannot establish the
@@ -14,7 +14,9 @@ complete rules or data held by that private server.
 | Vehicles | Local cash purchase, ownership, spawn, entry, and driving using the extracted vehicle catalog | Catalog and gameplay tests pass. Original dealership rules, persistent garage storage, damage, fuel, and tuning are not reproduced. |
 | Courier | Package pickup and delivery to an archived property entrance | Wrong-location actions fail; payout and unfinished-route persistence pass isolated tests. |
 | Taxi | Own a car, drive to a pickup, then drive to a different drop-off | Walking pickup/drop-off fails; driving completion and payout pass isolated tests. There is no visible passenger character or fare meter yet. |
-| Mechanic, medic, street trial | Distance-based local activities with cash and XP payouts | Payout and persistence tests pass. These are placeholders for world objectives and original-style behavior. |
+| Mechanic | Damaged roadside mission car at a property entrance; approach and repair on foot | Browser objective and isolated location, on-foot, payout, cleanup, and restart tests pass. No towing, repair animation, or vehicle damage system yet. |
+| Medic | Mission ambulance, patient pickup point, and return to starting aid station | Browser showed the ambulance and patient objective; isolated driving, pickup, payout, and cleanup tests pass. No visible patient, hospital system, or healing yet. |
+| Street time trial | Three world checkpoints in an owned car within three minutes | Order, driving requirement, timer, and payout pass isolated tests. No visible checkpoint markers or leaderboard yet. |
 | Economy | Cash, XP, job payouts, car and home prices | Transactions and saved balances pass isolated tests. Publisher rules, businesses, shops, taxes, and trading are not reproduced. |
 | Homes | Purchase, owned markers, exterior visit | Purchase and native home-status tests pass. Interiors rendered as empty space in a Chrome probe, so entry, storage, and garage actions remain disabled. |
 | Police, combat, gangs, races | No independent implementations | These advertised or client-facing systems need behavioral specifications, original code/data, or independent designs and tests. |
@@ -28,8 +30,8 @@ those files out of GitHub.
 
 ## Next acceptance targets
 
-1. Replace the remaining distance-based jobs with world actions and visible
-   objectives; verify each with a browser player and a second client.
+1. Check the new mechanic, medic, and time trial objectives in a real browser
+   and on a second physical device; add visible patient and checkpoint markers.
 2. Add server-owned vehicle state, damage, repair, and a persistent garage.
 3. Add health, combat, wanted levels, and police behavior with rules enforced
    by the server.
