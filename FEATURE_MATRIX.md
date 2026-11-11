@@ -9,7 +9,7 @@ complete rules or data held by that private server.
 | System | Independent implementation | Verification and gap |
 | --- | --- | --- |
 | 3D world and browser client | Archived client and assets served locally | Loaded in Chrome with WebGL. The archive is a discoverable snapshot, not a complete publisher asset inventory. |
-| Guest accounts | Local account cookie and saved player data; Discord is unnecessary | HTTP and WebSocket share an account in isolated tests. Optional Discord account linking and rewards are not implemented. |
+| Guest accounts | Local account cookie and saved player data; Discord is unnecessary | HTTP and WebSocket share an account in isolated tests. Optional Discord linking and a one-time $500 bonus pass a mocked test, but need host credentials, HTTPS, and a live sign-in check. |
 | Multiplayer | Shared walking and driving positions, passenger state, player list, and chat | Two simultaneous clients pass wire tests. A second physical device has not been tested. |
 | Vehicles | Local cash purchase, ownership, spawn, entry, and driving using the extracted vehicle catalog | Catalog and gameplay tests pass. Original dealership rules, persistent garage storage, damage, fuel, and tuning are not reproduced. |
 | Courier | Package pickup and delivery to an archived property entrance | Wrong-location actions fail; payout and unfinished-route persistence pass isolated tests. |
@@ -34,8 +34,8 @@ those files out of GitHub.
 3. Add health, combat, wanted levels, and police behavior with rules enforced
    by the server.
 4. Add gangs, territory control, and races as multiplayer systems.
-5. Build an original public web experience with guest accounts, optional
-   Discord linking, HTTPS, abuse controls, and a licensed asset path.
+5. Build an original public web experience with guest accounts, configure
+   optional Discord linking, HTTPS, abuse controls, and a licensed asset path.
 
 Each target needs gameplay tests and at least one real-browser check before it
 is marked complete. Feature names alone are not a substitute for behavior.
