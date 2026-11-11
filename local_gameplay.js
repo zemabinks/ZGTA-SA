@@ -87,6 +87,7 @@
   }
   function render() {
     if (!visible) return;
+    const scrollTop = panel.scrollTop;
     panel.replaceChildren();
     const close = element('button', 'Close', 'zgta-close');
     close.type = 'button';
@@ -97,7 +98,8 @@
       return;
     }
     panel.append(element('p', `${state.name} · $${state.cash.toLocaleString()} · ${state.xp} XP`));
-    panel.append(element('p', state.connected ? 'Connected to the local world' : 'Enter the game world to start jobs or spawn a car.', 'zgta-muted'));
+    panel.append(element('p', state.connected ? 'Connected to the local world' :
+      'Enter the game world to start jobs or spawn a car.', 'zgta-muted'));
     const status = element('p', result);
     status.id = 'zgta-local-result';
     status.dataset.error = String(error);
@@ -132,7 +134,7 @@
     }
     const originalHomes = state.catalog.homes.filter(item => item.source === 'archived');
     if (originalHomes.length) {
-      panel.append(element('p', `${originalHomes.length} properties from the archived client catalog`, 'zgta-muted'));
+      panel.append(element('p', `${originalHomes.length} properties from the archived client catalog. Exterior visits only; interiors are not available yet.`, 'zgta-muted'));
       catalogPicker(originalHomes, selectedHomeId, value => {selectedHomeId = value;},
         'home.buy', value => ({home: value}),
         home => !home || state.homes.some(item => item.id === home.id) || state.cash < home.price);
@@ -140,14 +142,18 @@
         row(`${home.name} · owned`, 'home.visit', {home: home.id}, 'Visit', !state.connected);
     }
     panel.append(element('p', 'Your cash, cars, homes, and active job are saved on this Mac. Press F6 to open this panel again.', 'zgta-muted'));
+    panel.scrollTop = scrollTop;
   }
   async function refresh() {
     if (!visible || busy) return;
     try {
       const response = await fetch('/api/local/state', {credentials: 'same-origin'});
       if (!response.ok) throw new Error(`Could not load local state (${response.status}).`);
-      state = await response.json();
-      render();
+      const next = await response.json();
+      if (JSON.stringify(next) !== JSON.stringify(state)) {
+        state = next;
+        render();
+      }
     } catch (failure) { result = failure.message; error = true; render(); }
   }
   async function perform(action, payload) {
