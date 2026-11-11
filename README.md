@@ -100,7 +100,10 @@ in a new tab; signing in there does not authenticate the local mirror.
 Double-click `ZGTA-SA Self-Hosted.command` in Finder, or run
 `zsh launch_selfhost.sh` in Terminal. It opens `http://127.0.0.1:8766/`.
 Keep the Terminal window open while playing; Ctrl-C stops the local server.
-The server uses the archived game client and assets on this Mac. It does not
+The launchers derive a vehicle and property catalog from the archived browser
+bundles with `extract_client_catalog.py` before starting the server. The
+catalog, like the game client and assets, stays under ignored `local-only/` on
+this Mac. The server does not
 forward API, WebSocket, or missing-asset requests to the original site. It
 creates local player accounts automatically, with no Discord login. Names,
 settings, cash, XP, owned cars, owned homes, and an active job are saved in
@@ -111,16 +114,22 @@ Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
 five original local activities: courier, taxi, mechanic, medic, and a timed
 street trial. Each currently tracks distance traveled in the world, then pays
 cash and XP when completed. Jobs are simple local substitutes, not the
-publisher's job missions. The panel also sells three car models; an owned car
-can be spawned nearby and driven. Two home purchases save ownership, but
-interiors and other property actions are not implemented. Chat commands
+publisher's job missions. The panel sells three inexpensive starter cars and
+the ground vehicles listed in the archived client catalog. An owned vehicle
+can be spawned nearby and driven. It sells two starter homes and the 29
+properties listed in the archived client catalog. A purchased original
+property can be visited at its world entrance. Property interiors and garage
+storage are not implemented. Chat commands
 `/jobs`, `/job courier`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, and `/buyhome starter` expose the same local systems.
 
 This is a **work-in-progress independent server**. It supports local accounts,
 settings, walking and driving player positions, passenger state, live chat,
-player list, job payouts, cash, garage ownership and vehicle spawning, and
-home ownership. The original service's detailed job missions, economy rules,
+player list, job payouts, cash, vehicle ownership and spawning, and
+property ownership and exterior visits. The extracted catalog contains 212
+vehicle definitions, of which 110 have listed prices. Purchases use this
+independent server's cash balance; they do not reproduce the publisher's
+dealer locations, sale rules, or economy. The original service's detailed job missions, economy rules,
 property interiors, races, combat, police, gangs, administration, and other
 server systems still need independent implementations. The browser download
 does not include the original server logic or database. The 3D map and solo
@@ -128,7 +137,8 @@ mode remain available from the local archive.
 
 Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, job travel and payout,
-vehicle spawning and entry, purchases, persistence, and car ownership after
+vehicle spawning and entry, starter and archived catalog purchases, property
+exterior teleportation, persistence, and car ownership after
 reconnect. Both tests use isolated temporary servers and leave saved players
 untouched. Chrome was also used to load the actual archived client, walk a
 courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
