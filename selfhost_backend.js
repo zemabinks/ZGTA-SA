@@ -3,10 +3,12 @@
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const OptionalDiscord = require('./optional_discord');
 
 const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
 const MAX_CASH = 100000000;
+const DISCORD_BONUS = 500;
 const JOBS = Object.freeze([
   {id: 'courier', name: 'Courier', pay: 250, distance: 38},
   {id: 'taxi', name: 'Taxi', pay: 300, distance: 48},
@@ -43,6 +45,10 @@ const HOME_CATALOG = Object.freeze([
       out: item.out, source: 'archived'})),
 ]);
 const STATE_FILE = path.join(__dirname, 'local-only', 'selfhost', 'players.json');
+const DISCORD_CONFIG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'discord-oauth.json');
+let discordConfig = {};
+try { discordConfig = JSON.parse(fs.readFileSync(DISCORD_CONFIG_FILE, 'utf8')); }
+catch (error) { if (error.code !== 'ENOENT') throw error; }
 const COOKIE = 'zgta_local';
 const JOIN_CODE = process.env.ZGTA_JOIN_CODE || (process.env.ZGTA_JOIN_CODE_FILE
   ? fs.readFileSync(process.env.ZGTA_JOIN_CODE_FILE, 'utf8').trim() : '');
@@ -110,6 +116,7 @@ class LocalGame {
   get requiresJoinCode() { return !!JOIN_CODE; }
 
   constructor() {
+    this.discord = new OptionalDiscord(discordConfig);
     this.players = new Map();
     this.peers = new Set();
     this.vehicles = new Map();
@@ -126,6 +133,9 @@ class LocalGame {
           cars: Array.isArray(value.cars) ? value.cars.filter(car => CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [],
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
+          discord: value.discord && /^\d{17,22}$/.test(String(value.discord.id || '')) ?
+            {id: String(value.discord.id), name: safeName(value.discord.name) || 'Discord player',
+              bonusClaimed: value.discord.bonusClaimed === true} : null,
           settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
       }
     } catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local players:', error.message); }
@@ -148,7 +158,7 @@ class LocalGame {
     if (this.saveTimer) {clearTimeout(this.saveTimer); this.saveTimer = null;}
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
       [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
-        cars: p.cars, homes: p.homes, job: p.job, settings: p.settings}]));
+        cars: p.cars, homes: p.homes, job: p.job, discord: p.discord, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
     fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1, players}, null, 2) + '\n', {mode: 0o600});
     fs.renameSync(STATE_FILE + '.partial', STATE_FILE);
@@ -159,7 +169,7 @@ class LocalGame {
     if (!id || !this.players.has(id)) {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
-        cash: 0, xp: 0, jobsDone: 0, cars: [], homes: [], job: null, settings: {}});
+        cash: 0, xp: 0, jobsDone: 0, cars: [], homes: [], job: null, discord: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
       if (res) res.setHeader('Set-Cookie', `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax${secure}`);
       this.save();
@@ -204,6 +214,8 @@ class LocalGame {
       remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
       radius: 12} : null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
+      discord: {available: this.discord.enabled, linked: !!player.discord,
+        name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
         ...(route || {goal: active.goal, progress: Math.floor(active.progress),
@@ -243,6 +255,55 @@ class LocalGame {
       peer.send({t: 'cash', cash: player.cash});
       peer.send(this.owned(player));
       peer.send(this.homeStatus(player));
+    }
+  }
+
+  discordStart(req, res) {
+    if (!this.discord.enabled) return json(res, 404, {error: 'Discord linking is not configured.'});
+    const id = cookieId(req);
+    if (!id || !this.players.has(id)) return json(res, 401, {error: 'Enter the game first.'});
+    if (req.headers.host !== this.discord.redirectHost)
+      return json(res, 400, {error: 'Open the game at its configured Discord sign-in address.'});
+    res.writeHead(302, {Location: this.discord.start(id), 'Cache-Control': 'no-store'});
+    res.end();
+  }
+
+  async discordCallback(req, res) {
+    if (!this.discord.enabled || req.headers.host !== this.discord.redirectHost)
+      return json(res, 400, {error: 'Discord callback is unavailable here.'});
+    const id = cookieId(req);
+    if (!id || !this.players.has(id))
+      return json(res, 400, {error: 'The game account cookie is missing. Start Discord linking again.'});
+    try {
+      const url = new URL(req.url, this.discord.redirectUri);
+      const identity = await this.discord.finish({state: url.searchParams.get('state'),
+        code: url.searchParams.get('code'), iss: url.searchParams.get('iss'), playerId: id});
+      const current = this.players.get(id);
+      const existing = [...this.players].find(([, player]) => player.discord?.id === identity.id);
+      let accountId = id;
+      if (existing && existing[0] !== id) accountId = existing[0];
+      else {
+        if (current.discord && current.discord.id !== identity.id)
+          throw new Error('This game account is already linked to another Discord account.');
+        const bonusClaimed = current.discord?.bonusClaimed === true;
+        current.discord = {id: identity.id, name: safeName(identity.name) || 'Discord player',
+          bonusClaimed: true};
+        if (!bonusClaimed) current.cash = money(current.cash + DISCORD_BONUS);
+        this.updatePlayer(current);
+        this.flushSync();
+      }
+      const secure = new URL(this.discord.redirectUri).protocol === 'https:' ? '; Secure' : '';
+      res.writeHead(302, {Location: '/', 'Cache-Control': 'no-store',
+        'Set-Cookie': `${COOKIE}=${accountId}; Path=/; HttpOnly; SameSite=Lax${secure}`});
+      res.end();
+    } catch (error) {
+      // OAuth codes, tokens, and secrets are intentionally absent from the response.
+      const html = '<!doctype html><html lang="en"><meta charset="utf-8"><title>Discord sign-in failed</title>' +
+        '<body style="font:16px system-ui;padding:2rem"><h1>Discord sign-in failed</h1>' +
+        '<p>Return to the game and try again. Guest play is still available.</p><a href="/">Return to game</a></body></html>';
+      res.writeHead(400, {'Content-Type': 'text/html; charset=utf-8',
+        'Content-Length': Buffer.byteLength(html), 'Cache-Control': 'no-store'});
+      res.end(html);
     }
   }
 
@@ -403,6 +464,7 @@ class LocalGame {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/api/local/status' && req.method === 'GET')
       return json(res, 200, {selfhost: true, players: [...this.peers].filter(p => p.ready).length,
+        discordLoginAvailable: this.discord.enabled,
         joinCodeRequired: !!JOIN_CODE, lanAccessible: process.env.BIND_HOST === '0.0.0.0',
         allowedHosts: (process.env.ZGTA_ALLOWED_HOSTS || '').split(',').filter(Boolean),
         features: ['local accounts', 'player positions', 'chat', 'local settings',
@@ -415,6 +477,8 @@ class LocalGame {
         sample: Object.fromEntries(keys.filter(k => p.state && k in p.state).map(k => [k, p.state[k]]))}))});
     }
     const {id, player} = this.ensurePlayer(req, res);
+    if (url.pathname === '/api/local/discord/start' && req.method === 'GET')
+      return this.discordStart(req, res);
     if (url.pathname === '/api/local/state' && req.method === 'GET')
       return json(res, 200, this.gameplayState(player));
     if (url.pathname === '/api/local/action' && req.method === 'POST') {
