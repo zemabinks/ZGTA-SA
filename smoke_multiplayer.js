@@ -80,6 +80,10 @@ async function main() {
     const firstApi = await fetch(`http://127.0.0.1:${port}/api/auth/me`);
     assert.equal(firstApi.status, 200);
     assert.match(firstApi.headers.get('set-cookie') || '', /^zgta_local=/);
+    const auth = await firstApi.json();
+    assert.equal(auth.loggedIn, true, 'The browser must see a playable account');
+    assert.equal(auth.available, true);
+    assert.match(auth.username, /^Local /);
     await new Promise(resolve => setTimeout(resolve, 400));
     const saved = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
     assert.equal(Object.keys(saved.players).length, 1, 'An API-first visit must create one account');
