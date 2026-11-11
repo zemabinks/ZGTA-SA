@@ -12,6 +12,7 @@
     #zgta-local-panel .zgta-row{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #29364d}
     #zgta-local-panel .zgta-row span{min-width:0}#zgta-local-panel button{border:1px solid #7797dd;border-radius:8px;background:#254785;color:white;padding:7px 10px;font:600 13px system-ui;cursor:pointer;white-space:nowrap}
     #zgta-local-panel button:disabled{opacity:.45;cursor:default}#zgta-local-panel .zgta-close{float:right;background:#263247}
+    #zgta-local-panel select{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
   `;
   document.head.append(css);
@@ -36,6 +37,8 @@
   let result = '';
   let error = false;
   let busy = false;
+  let selectedCarModel = '';
+  let selectedHomeId = '';
 
   function element(tag, text, className) {
     const item = document.createElement(tag);
@@ -54,6 +57,32 @@
     button.disabled = disabled || busy;
     button.addEventListener('click', () => perform(action, payload));
     line.append(button);
+    panel.append(line);
+  }
+  function catalogPicker(items, value, onChange, action, payload, disabled) {
+    if (!items.length) return;
+    const line = element('div', undefined, 'zgta-row');
+    const select = element('select');
+    select.setAttribute('aria-label', action === 'car.buy' ? 'Vehicle catalog' : 'Property catalog');
+    for (const item of items) {
+      const option = element('option', `${item.name} · $${item.price.toLocaleString()}`);
+      option.value = String(action === 'car.buy' ? item.model : item.id);
+      select.append(option);
+    }
+    if (items.some(item => String(action === 'car.buy' ? item.model : item.id) === String(value)))
+      select.value = String(value);
+    onChange(select.value);
+    select.addEventListener('change', () => {
+      onChange(select.value);
+      button.disabled = busy || disabled(items.find(item =>
+        String(action === 'car.buy' ? item.model : item.id) === select.value));
+    });
+    const chosen = items.find(item => String(action === 'car.buy' ? item.model : item.id) === select.value);
+    const button = element('button', 'Buy selected');
+    button.type = 'button';
+    button.disabled = busy || disabled(chosen);
+    button.addEventListener('click', () => perform(action, payload(select.value)));
+    line.append(select, button);
     panel.append(line);
   }
   function render() {
@@ -86,13 +115,29 @@
     section('Garage');
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
     state.cars.forEach((car, slot) => row(`${car.name} · owned`, 'car.spawn', {slot}, 'Spawn', !state.connected));
-    for (const car of state.catalog.cars)
+    for (const car of state.catalog.cars.filter(item => item.source === 'starter'))
       row(`${car.name} · $${car.price}`, 'car.buy', {model: car.model}, 'Buy', state.cash < car.price);
+    const originalCars = state.catalog.cars.filter(item => item.source === 'archived');
+    if (originalCars.length) {
+      panel.append(element('p', `${originalCars.length} more vehicles from the archived client catalog`, 'zgta-muted'));
+      catalogPicker(originalCars, selectedCarModel, value => {selectedCarModel = value;},
+        'car.buy', value => ({model: Number(value)}),
+        car => !car || state.cash < car.price || state.cars.length >= 12);
+    }
     section('Homes');
-    for (const home of state.catalog.homes) {
+    for (const home of state.catalog.homes.filter(item => item.source === 'starter')) {
       const owned = state.homes.some(item => item.id === home.id);
       row(`${home.name} · ${owned ? 'owned' : '$' + home.price}`,
         'home.buy', {home: home.id}, owned ? 'Owned' : 'Buy', owned || state.cash < home.price);
+    }
+    const originalHomes = state.catalog.homes.filter(item => item.source === 'archived');
+    if (originalHomes.length) {
+      panel.append(element('p', `${originalHomes.length} properties from the archived client catalog`, 'zgta-muted'));
+      catalogPicker(originalHomes, selectedHomeId, value => {selectedHomeId = value;},
+        'home.buy', value => ({home: value}),
+        home => !home || state.homes.some(item => item.id === home.id) || state.cash < home.price);
+      for (const home of state.homes.filter(item => item.source === 'archived'))
+        row(`${home.name} · owned`, 'home.visit', {home: home.id}, 'Visit', !state.connected);
     }
     panel.append(element('p', 'Your cash, cars, homes, and active job are saved on this Mac. Press F6 to open this panel again.', 'zgta-muted'));
   }
