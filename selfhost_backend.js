@@ -89,11 +89,19 @@ function limited(value, limit, fallback = 0) {
 function rounded(value, fallback = 0) { return Math.round(finite(value, fallback) * 1000) / 1000; }
 function money(value) { return Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_CASH, value)) : 0; }
 function savedJob(value) {
-  return value && JOBS.some(job => job.id === value.id) &&
-    Number.isFinite(value.started) && Date.now() - value.started < 86400000
-    ? {id: value.id, goal: JOBS.find(job => job.id === value.id).distance,
-      progress: Math.max(0, Math.min(JOBS.find(job => job.id === value.id).distance,
-        finite(value.progress))), started: value.started} : null;
+  if (!value || !JOBS.some(job => job.id === value.id) ||
+      !Number.isFinite(value.started) || Date.now() - value.started >= 86400000) return null;
+  if (value.id === 'courier' && value.mode === 'route') {
+    if (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
+        !value.pickup.every(Number.isFinite) ||
+        !HOME_CATALOG.some(home => home.id === value.drop && home.out) ||
+        !['pickup', 'delivery'].includes(value.stage)) return null;
+    return {id: 'courier', mode: 'route', pickup: value.pickup,
+      drop: value.drop, stage: value.stage, started: value.started};
+  }
+  const goal = JOBS.find(job => job.id === value.id).distance;
+  return {id: value.id, goal, progress: Math.max(0, Math.min(goal,
+    finite(value.progress))), started: value.started};
 }
 
 class LocalGame {
@@ -182,11 +190,21 @@ class LocalGame {
   gameplayState(player) {
     const pos = this.position(player);
     const active = player.job;
+    const routeHome = active?.mode === 'route' ?
+      HOME_CATALOG.find(home => home.id === active.drop && home.out) : null;
+    const target = active?.mode === 'route' ?
+      (active.stage === 'pickup' ? active.pickup : routeHome?.out) : null;
+    const route = target ? {mode: 'route', stage: active.stage,
+      target: {x: rounded(target[0]), y: rounded(target[1]),
+        name: active.stage === 'pickup' ? 'Package pickup' : routeHome.name},
+      remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
+      radius: 12} : null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
-        goal: active.goal, progress: Math.floor(active.progress),
-        remaining: Math.max(0, Math.ceil(active.goal - active.progress)), started: active.started} : null,
+        ...(route || {goal: active.goal, progress: Math.floor(active.progress),
+          remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
+        started: active.started} : null,
       cars: player.cars.map(model => CAR_CATALOG.find(car => car.model === model)).filter(Boolean),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
       catalog: {jobs: JOBS,
@@ -253,14 +271,40 @@ class LocalGame {
       if (!job) throw new Error('Unknown job.');
       if (!pos) throw new Error('Enter the game before starting a job.');
       if (player.job) throw new Error('Finish or cancel your current job first.');
-      player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
-      message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
+      if (job.id === 'courier') {
+        const destinations = HOME_CATALOG.filter(home => home.out &&
+          Math.hypot(home.out[0] - pos.x, home.out[1] - pos.y) >= 120);
+        const destination = destinations.sort((a, b) =>
+          Math.hypot(a.out[0] - pos.x, a.out[1] - pos.y) -
+          Math.hypot(b.out[0] - pos.x, b.out[1] - pos.y))[0];
+        if (!destination) throw new Error('Courier destinations are unavailable.');
+        player.job = {id: job.id, mode: 'route', pickup: [rounded(pos.x), rounded(pos.y)],
+          drop: destination.id, stage: 'pickup', started: Date.now()};
+        message = 'Courier started. Collect the package here, then deliver it to the marked address.';
+      } else {
+        player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
+        message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
+      }
+      this.save();
+    } else if (action === 'job.pickup') {
+      if (player.job?.id !== 'courier' || player.job.mode !== 'route' ||
+          player.job.stage !== 'pickup') throw new Error('No package is ready to collect.');
+      if (!pos || Math.hypot(pos.x - player.job.pickup[0], pos.y - player.job.pickup[1]) > 12)
+        throw new Error('Return to the package pickup point.');
+      player.job.stage = 'delivery';
+      const home = HOME_CATALOG.find(item => item.id === player.job.drop);
+      message = `Package collected. Deliver it to ${home.name}.`;
       this.save();
     } else if (action === 'job.complete') {
       if (!player.job) throw new Error('No active job.');
       if (!pos) throw new Error('Enter the game to complete this job.');
       if (Date.now() - player.job.started < 3000) throw new Error('The task started too recently.');
-      if (player.job.progress < player.job.goal)
+      if (player.job.mode === 'route') {
+        if (player.job.stage !== 'delivery') throw new Error('Collect the package first.');
+        const home = HOME_CATALOG.find(item => item.id === player.job.drop);
+        if (!home?.out || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 12)
+          throw new Error(`Travel to the delivery address at ${home?.name || 'the marked location'}.`);
+      } else if (player.job.progress < player.job.goal)
         throw new Error(`Travel ${Math.ceil(player.job.goal - player.job.progress)} m more.`);
       const job = JOBS.find(item => item.id === player.job.id);
       if (job.id === 'trial' && Date.now() - player.job.started > 180000)
@@ -439,7 +483,7 @@ class LocalGame {
     if (message.t === 'ping') return peer.send({t: 'pong', c: message.c, s: Date.now()});
     if (message.t === 'me') {
       const previous = peer.state;
-      if (peer.player.job && previous && Date.now() - peer.lastSeen < 5000 &&
+      if (peer.player.job && peer.player.job.mode !== 'route' && previous && Date.now() - peer.lastSeen < 5000 &&
           (message.walking === true || message.driving === true) &&
           Number.isFinite(message.x) && Number.isFinite(message.y) &&
           Number.isFinite(previous.x) && Number.isFinite(previous.y)) {
@@ -508,7 +552,8 @@ class LocalGame {
         text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/buyhome ')) {
       try {
         const [command, value] = text.slice(1).split(/\s+/, 2);
-        const actions = {job: ['job.start', {job: value}], deliver: ['job.complete', {}],
+        const actions = {job: ['job.start', {job: value}], pickup: ['job.pickup', {}],
+          deliver: ['job.complete', {}],
           canceljob: ['job.cancel', {}], buycar: ['car.buy', {model: value}],
           spawncar: ['car.spawn', {slot: Number(value) - 1}],
           buyhome: ['home.buy', {home: value}]};
