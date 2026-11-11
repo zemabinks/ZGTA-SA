@@ -235,6 +235,11 @@ function serve(req, res) {
   let pathname;
   try { pathname = new URL(req.url, PUBLIC_ORIGIN).pathname; }
   catch { res.writeHead(400); return res.end('Invalid URL'); }
+  // Discord returns from another site, so the LAN join cookie may be withheld
+  // by SameSite=Strict. The callback separately validates a bound OAuth state
+  // and the existing local player cookie before touching an account.
+  if (SELFHOST && pathname === '/api/local/discord/callback' && req.method === 'GET')
+    return localGame.discordCallback(req, res);
   if (SELFHOST && localGame.requiresJoinCode) {
     if (pathname === '/join' && req.method === 'GET') return localGame.join(req, res);
     if (pathname === '/api/local/join') return localGame.join(req, res);
