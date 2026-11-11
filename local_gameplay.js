@@ -115,10 +115,11 @@
     section('Jobs and time trial');
     if (state.job) {
       if (state.job.mode === 'route') {
-        panel.append(element('p', `${state.job.stage === 'pickup' ? 'Collect the package' : 'Deliver the package'} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.`, 'zgta-muted'));
+        const taxi = state.job.id === 'taxi';
+        panel.append(element('p', `${state.job.stage === 'pickup' ? (taxi ? 'Collect the passenger' : 'Collect the package') : (taxi ? 'Drop off the passenger' : 'Deliver the package')} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.${taxi ? ' You must be driving.' : ''}`, 'zgta-muted'));
         if (state.job.stage === 'pickup')
-          row('Pick up package', 'job.pickup', {}, 'Collect', !state.connected || state.job.remaining > state.job.radius);
-        else row('Deliver package', 'job.complete', {}, 'Deliver', !state.connected || state.job.remaining > state.job.radius);
+          row(taxi ? 'Pick up passenger' : 'Pick up package', 'job.pickup', {}, 'Collect', !state.connected || state.job.remaining > state.job.radius);
+        else row(taxi ? 'Drop off passenger' : 'Deliver package', 'job.complete', {}, taxi ? 'Drop off' : 'Deliver', !state.connected || state.job.remaining > state.job.radius);
       } else {
         panel.append(element('p', `${state.job.name}: travel ${state.job.remaining} m more (${state.job.progress}/${state.job.goal} m).`, 'zgta-muted'));
         row('Route completed?', 'job.complete', {}, 'Complete', !state.connected || state.job.remaining > 0);
@@ -126,7 +127,8 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}`, 'job.start', {job: job.id}, 'Start', !state.connected);
+        row(`${job.name} · earn $${job.pay}${job.id === 'taxi' ? ' · needs a car' : ''}`,
+          'job.start', {job: job.id}, 'Start', !state.connected || (job.id === 'taxi' && !state.cars.length));
     }
     section('Garage');
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
@@ -169,7 +171,8 @@
       const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
       direction = ` ${compass[Math.round(Math.atan2(dx, dy) / (Math.PI / 4) + 8) % 8]}`;
     }
-    objective.textContent = `Courier: ${route.stage === 'pickup' ? 'collect package' : 'deliver package'}\n${route.target.name} · ${route.remaining ?? '?'} m${direction}\nPress F6 for details`;
+    const taxi = route.id === 'taxi';
+    objective.textContent = `${route.name}: ${route.stage === 'pickup' ? (taxi ? 'collect passenger' : 'collect package') : (taxi ? 'drop off passenger' : 'deliver package')}\n${route.target.name} · ${route.remaining ?? '?'} m${direction}\nPress F6 for details`;
     objective.style.whiteSpace = 'pre-line';
   }
   async function refresh() {
