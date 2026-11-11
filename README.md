@@ -111,7 +111,7 @@ ignored `local-only/selfhost/players.json`; type `/name Your Name` in chat to
 change a local name.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-five original local activities: courier, taxi, mechanic, medic, and a timed
+five independent local activities: courier, taxi, mechanic, medic, and a timed
 street trial. Each currently tracks distance traveled in the world, then pays
 cash and XP when completed. Jobs are simple local substitutes, not the
 publisher's job missions. The panel sells three inexpensive starter cars and
@@ -119,7 +119,10 @@ the ground vehicles listed in the archived client catalog. An owned vehicle
 can be spawned nearby and driven. It sells two starter homes and the 29
 properties listed in the archived client catalog. A purchased original
 property can be visited at its world entrance. Property interiors and garage
-storage are not implemented. Chat commands
+storage are not implemented. The client shows owned-house markers; its house
+entry prompt reports that interior actions are unavailable. A Chrome test of
+the extracted interior coordinates rendered an empty void, so interior entry
+is not enabled. Chat commands
 `/jobs`, `/job courier`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, and `/buyhome starter` expose the same local systems.
 
@@ -139,7 +142,8 @@ Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, job travel and payout,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
-reconnect. Both tests use isolated temporary servers and leave saved players
+reconnect. The gameplay test also checks that static asset requests do not
+create extra player accounts. Both tests use isolated temporary servers and leave saved players
 untouched. Chrome was also used to load the actual archived client, walk a
 courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
 and drive it in the 3D world. LAN access checks passed, but a second physical
