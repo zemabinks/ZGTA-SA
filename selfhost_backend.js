@@ -6,6 +6,23 @@ const path = require('path');
 
 const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
+const MAX_CASH = 100000000;
+const JOBS = Object.freeze([
+  {id: 'courier', name: 'Courier', pay: 250, distance: 38},
+  {id: 'taxi', name: 'Taxi', pay: 300, distance: 48},
+  {id: 'mechanic', name: 'Mechanic', pay: 350, distance: 55},
+  {id: 'medic', name: 'Medic', pay: 350, distance: 55},
+  {id: 'trial', name: 'Street time trial', pay: 450, distance: 75},
+]);
+const CAR_CATALOG = Object.freeze([
+  {model: 410, name: 'Manana', price: 500, car: '410.52.39.0.'},
+  {model: 400, name: 'Landstalker', price: 900, car: '400.52.39.0.'},
+  {model: 560, name: 'Sultan', price: 2500, car: '560.52.39.0.'},
+]);
+const HOME_CATALOG = Object.freeze([
+  {id: 'starter', name: 'Starter apartment', price: 1500},
+  {id: 'loft', name: 'City loft', price: 5000},
+]);
 const STATE_FILE = path.join(__dirname, 'local-only', 'selfhost', 'players.json');
 const COOKIE = 'zgta_local';
 const JOIN_CODE = process.env.ZGTA_JOIN_CODE || (process.env.ZGTA_JOIN_CODE_FILE
@@ -51,6 +68,14 @@ function limited(value, limit, fallback = 0) {
   return Number.isFinite(value) ? Math.max(-limit, Math.min(limit, value)) : fallback;
 }
 function rounded(value, fallback = 0) { return Math.round(finite(value, fallback) * 1000) / 1000; }
+function money(value) { return Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_CASH, value)) : 0; }
+function savedJob(value) {
+  return value && JOBS.some(job => job.id === value.id) &&
+    Number.isFinite(value.started) && Date.now() - value.started < 86400000
+    ? {id: value.id, goal: JOBS.find(job => job.id === value.id).distance,
+      progress: Math.max(0, Math.min(JOBS.find(job => job.id === value.id).distance,
+        finite(value.progress))), started: value.started} : null;
+}
 
 class LocalGame {
   get requiresJoinCode() { return !!JOIN_CODE; }
@@ -58,6 +83,8 @@ class LocalGame {
   constructor() {
     this.players = new Map();
     this.peers = new Set();
+    this.vehicles = new Map();
+    this.nextVehicle = 1;
     this.chat = [];
     this.chatSequence = 0;
     this.nextNumber = 1;
@@ -66,7 +93,11 @@ class LocalGame {
       for (const [id, value] of Object.entries(data.players || {})) {
         if (!/^[0-9a-f]{32}$/.test(id)) continue;
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
-          cash: finite(value.cash), settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
+          cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
+          cars: Array.isArray(value.cars) ? value.cars.filter(car => CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [],
+          homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 2) : [],
+          job: savedJob(value.job),
+          settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
       }
     } catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local players:', error.message); }
     this.saveTimer = null;
@@ -87,7 +118,8 @@ class LocalGame {
   flushSync() {
     if (this.saveTimer) {clearTimeout(this.saveTimer); this.saveTimer = null;}
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
-      [id, {name: p.name, cash: p.cash, settings: p.settings}]));
+      [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
+        cars: p.cars, homes: p.homes, job: p.job, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
     fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1, players}, null, 2) + '\n', {mode: 0o600});
     fs.renameSync(STATE_FILE + '.partial', STATE_FILE);
@@ -98,7 +130,7 @@ class LocalGame {
     if (!id || !this.players.has(id)) {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
-        cash: 0, settings: {}});
+        cash: 0, xp: 0, jobsDone: 0, cars: [], homes: [], job: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
       if (res) res.setHeader('Set-Cookie', `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax${secure}`);
       this.save();
@@ -117,6 +149,129 @@ class LocalGame {
         !req.headers['x-forwarded-proto']) return true;
     const match = /(?:^|;\s*)zgta_access=([0-9a-f]{64})(?:;|$)/.exec(req.headers.cookie || '');
     return !!match && crypto.timingSafeEqual(Buffer.from(match[1], 'hex'), Buffer.from(ACCESS_TOKEN, 'hex'));
+  }
+
+  position(player) {
+    const peer = [...this.peers].find(item => item.player === player && item.ready &&
+      Date.now() - item.lastSeen < 10000 && item.state &&
+      (item.state.walking === true || item.state.driving === true) &&
+      Number.isFinite(item.state.x) && Number.isFinite(item.state.y));
+    return peer ? {x: peer.state.x, y: peer.state.y,
+      z: finite(peer.state.z, 13), peer} : null;
+  }
+
+  gameplayState(player) {
+    const pos = this.position(player);
+    const active = player.job;
+    return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
+      connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
+      job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
+        goal: active.goal, progress: Math.floor(active.progress),
+        remaining: Math.max(0, Math.ceil(active.goal - active.progress)), started: active.started} : null,
+      cars: player.cars.map(model => CAR_CATALOG.find(car => car.model === model)).filter(Boolean),
+      homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
+      catalog: {jobs: JOBS, cars: CAR_CATALOG.map(({model, name, price}) => ({model, name, price})),
+        homes: HOME_CATALOG}};
+  }
+
+  note(player, text) {
+    for (const peer of this.peers) if (peer.player === player && peer.ready)
+      peer.send({t: 'note', text});
+  }
+
+  owned(player) {
+    const cars = player.cars.map(model => CAR_CATALOG.find(car => car.model === model));
+    return {t: 'owned', cars: cars.map(car => car.car), out: [], login: true,
+      worth: cars.map(car => car.price), stored: [], locked: [],
+      rep: {level: 1 + Math.floor(player.xp / 1000)}, licence: true};
+  }
+
+  updatePlayer(player) {
+    this.save();
+    for (const peer of this.peers) if (peer.player === player && peer.ready) {
+      peer.send({t: 'cash', cash: player.cash});
+      peer.send(this.owned(player));
+    }
+  }
+
+  spawnOwnedCar(player, slot) {
+    const pos = this.position(player);
+    if (!pos) throw new Error('Enter the game before spawning a car.');
+    const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
+    if (!car) throw new Error('That car is not in your garage.');
+    const mine = [...this.vehicles.values()].filter(vehicle => vehicle.owner === player);
+    if (mine.length >= 3) {
+      const oldest = mine[0];
+      this.vehicles.delete(oldest.id);
+      for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: oldest.id});
+    }
+    const id = `local-${this.nextVehicle++}`;
+    // Vehicle origins sit above their tyres. Ground-height origins can embed
+    // the body in the map and make the physics engine launch it on entry.
+    const row = [id, player.name, car.car, rounded(pos.x + 4), rounded(pos.y + 3),
+      rounded(pos.z + 1.1), 0, 0, 0, 1000, '', null];
+    this.vehicles.set(id, {id, owner: player, row});
+    for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
+    return `${car.name} spawned nearby.`;
+  }
+
+  action(player, action, input) {
+    const pos = this.position(player);
+    let message;
+    if (action === 'job.start') {
+      const job = JOBS.find(item => item.id === input.job);
+      if (!job) throw new Error('Unknown job.');
+      if (!pos) throw new Error('Enter the game before starting a job.');
+      if (player.job) throw new Error('Finish or cancel your current job first.');
+      player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
+      message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
+      this.save();
+    } else if (action === 'job.complete') {
+      if (!player.job) throw new Error('No active job.');
+      if (!pos) throw new Error('Enter the game to complete this job.');
+      if (Date.now() - player.job.started < 3000) throw new Error('The task started too recently.');
+      if (player.job.progress < player.job.goal)
+        throw new Error(`Travel ${Math.ceil(player.job.goal - player.job.progress)} m more.`);
+      const job = JOBS.find(item => item.id === player.job.id);
+      if (job.id === 'trial' && Date.now() - player.job.started > 180000)
+        throw new Error('The time trial expired. Cancel it and start again.');
+      player.cash = money(player.cash + job.pay);
+      player.xp = money(player.xp + Math.round(job.pay / 5));
+      player.jobsDone++;
+      player.job = null;
+      message = `${job.name} complete: +$${job.pay}. Balance: $${player.cash}.`;
+      this.updatePlayer(player);
+    } else if (action === 'job.cancel') {
+      if (!player.job) throw new Error('No active job.');
+      player.job = null;
+      message = 'Job cancelled.';
+      this.save();
+    } else if (action === 'car.buy') {
+      const car = CAR_CATALOG.find(item => item.model === Number(input.model));
+      if (!car) throw new Error('Unknown car.');
+      if (player.cars.length >= 12) throw new Error('Your garage is full.');
+      if (player.cash < car.price) throw new Error(`You need $${car.price}.`);
+      player.cash -= car.price;
+      player.cars.push(car.model);
+      message = `${car.name} bought for $${car.price}. Open My Vehicles or spawn it here.`;
+      this.updatePlayer(player);
+    } else if (action === 'car.spawn') {
+      const slot = Number(input.slot);
+      if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
+        throw new Error('Choose a car in your garage.');
+      message = this.spawnOwnedCar(player, slot);
+    } else if (action === 'home.buy') {
+      const home = HOME_CATALOG.find(item => item.id === input.home);
+      if (!home) throw new Error('Unknown home.');
+      if (player.homes.includes(home.id)) throw new Error('You already own this home.');
+      if (player.cash < home.price) throw new Error(`You need $${home.price}.`);
+      player.cash -= home.price;
+      player.homes.push(home.id);
+      message = `${home.name} bought for $${home.price}.`;
+      this.updatePlayer(player);
+    } else throw new Error('Unknown action.');
+    this.note(player, message);
+    return {ok: true, message, state: this.gameplayState(player)};
   }
 
   async join(req, res) {
@@ -144,7 +299,8 @@ class LocalGame {
       return json(res, 200, {selfhost: true, players: [...this.peers].filter(p => p.ready).length,
         joinCodeRequired: !!JOIN_CODE, lanAccessible: process.env.BIND_HOST === '0.0.0.0',
         allowedHosts: (process.env.ZGTA_ALLOWED_HOSTS || '').split(',').filter(Boolean),
-        features: ['local accounts', 'player positions', 'chat', 'local settings']});
+        features: ['local accounts', 'player positions', 'chat', 'local settings',
+          'jobs and cash', 'garage ownership', 'home ownership']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
         'pitch', 'roll', 'speed', 'steer', 'health', 'life', 'weapon', 'act', 'clock'];
@@ -153,6 +309,14 @@ class LocalGame {
         sample: Object.fromEntries(keys.filter(k => p.state && k in p.state).map(k => [k, p.state[k]]))}))});
     }
     const {id, player} = this.ensurePlayer(req, res);
+    if (url.pathname === '/api/local/state' && req.method === 'GET')
+      return json(res, 200, this.gameplayState(player));
+    if (url.pathname === '/api/local/action' && req.method === 'POST') {
+      try {
+        const body = await readBody(req, 2048);
+        return json(res, 200, this.action(player, body.action, body));
+      } catch (error) { return json(res, 400, {error: error.message}); }
+    }
     if (url.pathname === '/api/auth/me' && req.method === 'GET')
       return json(res, 200, {id, name: player.name, username: player.name,
         loggedIn: true, available: true, rank: 'player', admin: false, local: true});
@@ -172,8 +336,10 @@ class LocalGame {
       }
       if (req.method === 'DELETE') { delete player.settings[key]; this.save(); return json(res, 200, {ok: true}); }
     }
-    if (url.pathname === '/api/garage' && req.method === 'GET') return json(res, 200, {cars: []});
-    if (url.pathname === '/api/world/cars' && req.method === 'GET') return json(res, 200, {cars: []});
+    if (url.pathname === '/api/garage' && req.method === 'GET')
+      return json(res, 200, {cars: this.gameplayState(player).cars});
+    if (url.pathname === '/api/world/cars' && req.method === 'GET')
+      return json(res, 200, {cars: [...this.vehicles.values()].map(vehicle => vehicle.row)});
     if (url.pathname === '/api/local/profile') {
       if (req.method === 'GET') return json(res, 200, {name: player.name, number: player.number});
       if (req.method === 'PUT') {
@@ -227,16 +393,45 @@ class LocalGame {
         spot: [1480, -1738, 13, 0], life: [100, 0], out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0});
       peer.send(this.fullState(peer));
+      peer.send(this.owned(peer.player));
       return;
     }
     if (!peer.ready) return;
     if (message.t === 'ping') return peer.send({t: 'pong', c: message.c, s: Date.now()});
     if (message.t === 'me') {
+      const previous = peer.state;
+      if (peer.player.job && previous && Date.now() - peer.lastSeen < 5000 &&
+          (message.walking === true || message.driving === true) &&
+          Number.isFinite(message.x) && Number.isFinite(message.y) &&
+          Number.isFinite(previous.x) && Number.isFinite(previous.y)) {
+        const step = Math.hypot(message.x - previous.x, message.y - previous.y);
+        if (step >= 0.2 && step <= 10) {
+          peer.player.job.progress = Math.min(peer.player.job.goal,
+            peer.player.job.progress + step);
+          this.save();
+        }
+      }
       peer.state = message;
       peer.lastSeen = Date.now();
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
     }
+    if (message.t === 'centre') {
+      return peer.send({t: 'centre', open: !!message.open, jobs: JOBS.map(job => ({
+        job: job.id, name: job.name, start: `/job ${job.id}`,
+        marked: false, starts: [], spots: []}))});
+    }
+    if (message.t === 'spawn') {
+      try {
+        if (!Number.isInteger(message.own) ||
+            CAR_CATALOG.find(car => car.model === peer.player.cars[message.own])?.car !== message.car)
+          throw new Error('Buy this car before spawning it.');
+        this.spawnOwnedCar(peer.player, message.own);
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
+      return;
+    }
+    if (message.t === 'enter' || message.t === 'jack')
+      return peer.send({t: message.t, v: message.v, ok: this.vehicles.has(message.v)});
     if (message.t === 'who' && Array.isArray(message.ids))
       return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer && message.ids.includes(String(p.player.number)))
         .map(p => this.row(p)).filter(Boolean)});
@@ -255,6 +450,25 @@ class LocalGame {
     if (text === '/players') {
       peer.send(this.board(peer));
       peer.send({t: 'note', text: `${[...this.peers].filter(p => p.ready).length} local player(s) online.`});
+      return;
+    }
+    if (text === '/owned' || text === '/mycars' || text === '/garage')
+      return peer.send(this.owned(peer.player));
+    if (text === '/balance' || text === '/money')
+      return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
+    if (text === '/jobs')
+      return peer.send({t: 'note', text: `Local jobs: ${JOBS.map(job => `${job.id} ($${job.pay})`).join(', ')}. Type /job <name>.`});
+    if (text.startsWith('/job ') || text === '/deliver' || text === '/canceljob' ||
+        text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/buyhome ')) {
+      try {
+        const [command, value] = text.slice(1).split(/\s+/, 2);
+        const actions = {job: ['job.start', {job: value}], deliver: ['job.complete', {}],
+          canceljob: ['job.cancel', {}], buycar: ['car.buy', {model: value}],
+          spawncar: ['car.spawn', {slot: Number(value) - 1}],
+          buyhome: ['home.buy', {home: value}]};
+        const [action, input] = actions[command];
+        this.action(peer.player, action, input);
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
       return;
     }
     const line = [++this.chatSequence, peer.player.name, text, peer.player.number, 0, '', 0, ''];
@@ -330,7 +544,8 @@ class LocalGame {
     return {t: 'all', protocol: 38, number: peer.player.number, world: 1,
       id: String(peer.player.number), you: peer.player.name, out: [1480, -1738],
       time: Date.now(), cash: peer.player.cash, cars: [...this.peers].filter(p => p !== peer).map(p => this.row(p)).filter(Boolean),
-      chat: this.chat.slice(-50), vehicles: [], objects: [], boomboxes: [], dots: [], vdots: [], orders: []};
+      chat: this.chat.slice(-50), vehicles: [...this.vehicles.values()].map(vehicle => vehicle.row),
+      objects: [], boomboxes: [], dots: [], vdots: [], orders: []};
   }
 
   board(peer) {
