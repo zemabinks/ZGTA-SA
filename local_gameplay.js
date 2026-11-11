@@ -1,0 +1,141 @@
+// Small local gameplay panel for the independent server. No copied game assets.
+(() => {
+  if (document.getElementById('zgta-local-open')) return;
+  const css = document.createElement('style');
+  css.textContent = `
+    #zgta-local-open{position:fixed;right:16px;bottom:18px;z-index:1000;border:1px solid #86a9ff;border-radius:10px;background:#14264f;color:white;padding:10px 14px;font:700 14px system-ui;cursor:pointer;box-shadow:0 4px 18px #0009}
+    #zgta-local-shade{position:fixed;inset:0;z-index:1001;display:none;align-items:center;justify-content:center;background:#000b;font:14px system-ui;color:#f5f7ff}
+    #zgta-local-shade[data-open="true"]{display:flex}
+    #zgta-local-panel{width:min(440px,calc(100vw - 26px));max-height:min(80vh,720px);overflow:auto;border:1px solid #5b719c;border-radius:14px;background:#111b2e;box-shadow:0 15px 60px #000c;padding:18px}
+    #zgta-local-panel h2{font-size:22px;margin:0 0 6px}#zgta-local-panel h3{font-size:16px;margin:18px 0 8px;border-top:1px solid #3b4b69;padding-top:13px}
+    #zgta-local-panel p{line-height:1.45;margin:6px 0}#zgta-local-panel .zgta-muted{color:#afbdd6;font-size:12px}
+    #zgta-local-panel .zgta-row{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid #29364d}
+    #zgta-local-panel .zgta-row span{min-width:0}#zgta-local-panel button{border:1px solid #7797dd;border-radius:8px;background:#254785;color:white;padding:7px 10px;font:600 13px system-ui;cursor:pointer;white-space:nowrap}
+    #zgta-local-panel button:disabled{opacity:.45;cursor:default}#zgta-local-panel .zgta-close{float:right;background:#263247}
+    #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
+  `;
+  document.head.append(css);
+  const openButton = document.createElement('button');
+  openButton.id = 'zgta-local-open';
+  openButton.type = 'button';
+  openButton.textContent = 'ZGTA:SA · Local gameplay (F6)';
+  const shade = document.createElement('div');
+  shade.id = 'zgta-local-shade';
+  shade.dataset.open = 'false';
+  const panel = document.createElement('section');
+  panel.id = 'zgta-local-panel';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'ZGTA:SA local gameplay');
+  shade.append(panel);
+  document.body.append(openButton, shade);
+  new MutationObserver(() => {
+    if (!openButton.isConnected || !shade.isConnected) document.body.append(openButton, shade);
+  }).observe(document.documentElement, {childList: true, subtree: true});
+  let visible = false;
+  let state = null;
+  let result = '';
+  let error = false;
+  let busy = false;
+
+  function element(tag, text, className) {
+    const item = document.createElement(tag);
+    if (text !== undefined) item.textContent = text;
+    if (className) item.className = className;
+    return item;
+  }
+  function section(title) {
+    panel.append(element('h3', title));
+  }
+  function row(label, action, payload, buttonText, disabled = false) {
+    const line = element('div', undefined, 'zgta-row');
+    line.append(element('span', label));
+    const button = element('button', buttonText);
+    button.type = 'button';
+    button.disabled = disabled || busy;
+    button.addEventListener('click', () => perform(action, payload));
+    line.append(button);
+    panel.append(line);
+  }
+  function render() {
+    if (!visible) return;
+    panel.replaceChildren();
+    const close = element('button', 'Close', 'zgta-close');
+    close.type = 'button';
+    close.addEventListener('click', () => toggle(false));
+    panel.append(close, element('h2', 'ZGTA:SA local gameplay'));
+    if (!state) {
+      panel.append(element('p', 'Loading your local account…'));
+      return;
+    }
+    panel.append(element('p', `${state.name} · $${state.cash.toLocaleString()} · ${state.xp} XP`));
+    panel.append(element('p', state.connected ? 'Connected to the local world' : 'Enter the game world to start jobs or spawn a car.', 'zgta-muted'));
+    const status = element('p', result);
+    status.id = 'zgta-local-result';
+    status.dataset.error = String(error);
+    panel.append(status);
+
+    section('Jobs and time trial');
+    if (state.job) {
+      panel.append(element('p', `${state.job.name}: travel ${state.job.remaining} m more (${state.job.progress}/${state.job.goal} m).`, 'zgta-muted'));
+      row('Route completed?', 'job.complete', {}, 'Complete', !state.connected || state.job.remaining > 0);
+      row('End this task', 'job.cancel', {}, 'Cancel');
+    } else {
+      for (const job of state.catalog.jobs)
+        row(`${job.name} · earn $${job.pay}`, 'job.start', {job: job.id}, 'Start', !state.connected);
+    }
+    section('Garage');
+    if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
+    state.cars.forEach((car, slot) => row(`${car.name} · owned`, 'car.spawn', {slot}, 'Spawn', !state.connected));
+    for (const car of state.catalog.cars)
+      row(`${car.name} · $${car.price}`, 'car.buy', {model: car.model}, 'Buy', state.cash < car.price);
+    section('Homes');
+    for (const home of state.catalog.homes) {
+      const owned = state.homes.some(item => item.id === home.id);
+      row(`${home.name} · ${owned ? 'owned' : '$' + home.price}`,
+        'home.buy', {home: home.id}, owned ? 'Owned' : 'Buy', owned || state.cash < home.price);
+    }
+    panel.append(element('p', 'Your cash, cars, homes, and active job are saved on this Mac. Press F6 to open this panel again.', 'zgta-muted'));
+  }
+  async function refresh() {
+    if (!visible || busy) return;
+    try {
+      const response = await fetch('/api/local/state', {credentials: 'same-origin'});
+      if (!response.ok) throw new Error(`Could not load local state (${response.status}).`);
+      state = await response.json();
+      render();
+    } catch (failure) { result = failure.message; error = true; render(); }
+  }
+  async function perform(action, payload) {
+    if (busy) return;
+    busy = true;
+    try {
+      const response = await fetch('/api/local/action', {method: 'POST', credentials: 'same-origin',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, ...payload})});
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || `Action failed (${response.status}).`);
+      state = body.state;
+      result = body.message;
+      error = false;
+    } catch (failure) { result = failure.message; error = true; }
+    busy = false;
+    render();
+  }
+  function toggle(next) {
+    visible = next;
+    shade.dataset.open = String(next);
+    if (next) {
+      document.exitPointerLock?.();
+      result = '';
+      render();
+      refresh();
+    } else openButton.focus();
+  }
+  openButton.addEventListener('click', () => toggle(true));
+  shade.addEventListener('click', event => {if (event.target === shade) toggle(false);});
+  panel.addEventListener('keydown', event => event.stopPropagation());
+  window.addEventListener('keydown', event => {
+    if (event.key === 'F6') {event.preventDefault(); event.stopImmediatePropagation(); toggle(!visible);}
+    else if (visible && event.key === 'Escape') {event.preventDefault(); event.stopImmediatePropagation(); toggle(false);}
+  }, true);
+  setInterval(() => {if (visible) refresh();}, 3000);
+})();
