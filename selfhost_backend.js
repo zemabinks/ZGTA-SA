@@ -14,14 +14,33 @@ const JOBS = Object.freeze([
   {id: 'medic', name: 'Medic', pay: 350, distance: 55},
   {id: 'trial', name: 'Street time trial', pay: 450, distance: 75},
 ]);
-const CAR_CATALOG = Object.freeze([
-  {model: 410, name: 'Manana', price: 500, car: '410.52.39.0.'},
-  {model: 400, name: 'Landstalker', price: 900, car: '400.52.39.0.'},
-  {model: 560, name: 'Sultan', price: 2500, car: '560.52.39.0.'},
-]);
+const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json');
+let clientCatalog = {vehicles: [], homes: []};
+try { clientCatalog = JSON.parse(fs.readFileSync(CATALOG_FILE, 'utf8')); }
+catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local client catalog:', error.message); }
+const STARTER_CARS = [
+  {model: 410, name: 'Manana', price: 500, car: '410.52.39.0.', source: 'starter'},
+  {model: 400, name: 'Landstalker', price: 900, car: '400.52.39.0.', source: 'starter'},
+  {model: 560, name: 'Sultan', price: 2500, car: '560.52.39.0.', source: 'starter'},
+];
+const starterModels = new Set(STARTER_CARS.map(car => car.model));
+const CAR_CATALOG = Object.freeze([...STARTER_CARS, ...(clientCatalog.vehicles || [])
+  .filter(item => Number.isInteger(item.model) && Number.isSafeInteger(item.price) && item.price > 0 &&
+    Array.isArray(item.dealers) && item.dealers.length > 0 &&
+    ['car', 'bike', 'bicycle', 'quad'].includes(item.type) && !starterModels.has(item.model))
+  .map(item => ({model: item.model, name: String(item.name).slice(0, 80), price: item.price,
+    car: `${item.model}.${Number.isInteger(item.colors?.[0]) ? item.colors[0] : 1}.` +
+      `${Number.isInteger(item.colors?.[1]) ? item.colors[1] : 1}.0.`,
+    type: item.type, source: 'archived'}))]);
 const HOME_CATALOG = Object.freeze([
-  {id: 'starter', name: 'Starter apartment', price: 1500},
-  {id: 'loft', name: 'City loft', price: 5000},
+  {id: 'starter', name: 'Starter apartment', price: 1500, source: 'starter'},
+  {id: 'loft', name: 'City loft', price: 5000, source: 'starter'},
+  ...(clientCatalog.homes || [])
+    .filter(item => typeof item.key === 'string' && Number.isSafeInteger(item.price) && item.price > 0 &&
+      Array.isArray(item.out) && item.out.length === 4 && item.out.every(Number.isFinite))
+    .map(item => ({id: item.key, name: String(item.name).slice(0, 80), price: item.price,
+      city: String(item.city || '').slice(0, 8), tier: String(item.tier || '').slice(0, 20),
+      out: item.out, source: 'archived'})),
 ]);
 const STATE_FILE = path.join(__dirname, 'local-only', 'selfhost', 'players.json');
 const COOKIE = 'zgta_local';
@@ -95,7 +114,7 @@ class LocalGame {
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
           cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
           cars: Array.isArray(value.cars) ? value.cars.filter(car => CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [],
-          homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 2) : [],
+          homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
           settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
       }
@@ -170,8 +189,10 @@ class LocalGame {
         remaining: Math.max(0, Math.ceil(active.goal - active.progress)), started: active.started} : null,
       cars: player.cars.map(model => CAR_CATALOG.find(car => car.model === model)).filter(Boolean),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
-      catalog: {jobs: JOBS, cars: CAR_CATALOG.map(({model, name, price}) => ({model, name, price})),
-        homes: HOME_CATALOG}};
+      catalog: {jobs: JOBS,
+        cars: CAR_CATALOG.map(({model, name, price, type, source}) => ({model, name, price, type, source})),
+        homes: HOME_CATALOG.map(({id, name, price, city, tier, source}) =>
+          ({id, name, price, city, tier, source}))}};
   }
 
   note(player, text) {
@@ -269,6 +290,14 @@ class LocalGame {
       player.homes.push(home.id);
       message = `${home.name} bought for $${home.price}.`;
       this.updatePlayer(player);
+    } else if (action === 'home.visit') {
+      const home = HOME_CATALOG.find(item => item.id === input.home);
+      if (!home || !player.homes.includes(home.id)) throw new Error('You do not own this home.');
+      if (!home.out) throw new Error('This starter home has no world entrance.');
+      if (!pos) throw new Error('Enter the game before visiting your home.');
+      pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2],
+        h: home.out[3], g: 1});
+      message = `Travelling to ${home.name}.`;
     } else throw new Error('Unknown action.');
     this.note(player, message);
     return {ok: true, message, state: this.gameplayState(player)};
@@ -300,7 +329,7 @@ class LocalGame {
         joinCodeRequired: !!JOIN_CODE, lanAccessible: process.env.BIND_HOST === '0.0.0.0',
         allowedHosts: (process.env.ZGTA_ALLOWED_HOSTS || '').split(',').filter(Boolean),
         features: ['local accounts', 'player positions', 'chat', 'local settings',
-          'jobs and cash', 'garage ownership', 'home ownership']});
+          'jobs and cash', 'garage ownership', 'home ownership', 'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
         'pitch', 'roll', 'speed', 'steer', 'health', 'life', 'weapon', 'act', 'clock'];
