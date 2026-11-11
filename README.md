@@ -140,11 +140,14 @@ street trial. Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
 entrance for pickup, then drive to a different entrance for drop-off. Pickup
-and drop-off both require the player to be driving within 12 meters. An
-objective box shows the destination, distance, and compass direction while
-the panel is closed. The remaining three activities still track distance
-traveled, then pay cash and XP. These are independent
-local substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
+and drop-off both require the player to be driving within 12 meters. Mechanic
+spawns a damaged roadside car at a property entrance; reach it and repair it
+on foot. Medic spawns an ambulance; drive to a patient pickup point and return
+to the starting aid station. The time trial requires an owned car and three
+property checkpoints within three minutes. The patient and taxi passenger do
+not yet appear as characters. An objective box shows the destination,
+distance, and compass direction while the panel is closed. These are
+independent local substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
 the ground vehicles listed in the archived client catalog. An owned vehicle
 can be spawned nearby and driven. It sells two starter homes and the 29
 properties listed in the archived client catalog. A purchased original
@@ -153,7 +156,8 @@ storage are not implemented. The client shows owned-house markers; its house
 entry prompt reports that interior actions are unavailable. A Chrome test of
 the extracted interior coordinates rendered an empty void, so interior entry
 is not enabled. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/pickup`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`,
+`/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, and `/buyhome starter` expose the same local systems.
 
 This is a **work-in-progress independent server**. It supports local accounts,
@@ -172,16 +176,20 @@ verification status of each major system.
 
 Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
-taxi pickup and drop-off with driving requirements,
-other job travel and payout,
+taxi and medic pickup and drop-off with driving requirements, mechanic roadside
+repair, timed checkpoints, mission vehicle cleanup and restart persistence,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
 create extra player accounts. Both tests use isolated temporary servers and leave saved players
 untouched. Chrome was also used to load the actual archived client, walk a
 courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
-and drive it in the 3D world. LAN access checks passed, but a second physical
-device and all original game systems have not been verified.
+and drive it in the 3D world. A later Chrome check started and cancelled the
+mechanic and medic missions, displayed their objectives, and showed the medic
+ambulance beside the player. The full new routes were exercised by the
+isolated gameplay test, not by driving them in Chrome. LAN access checks
+passed, but a second physical device and all original game systems have not
+been verified.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
