@@ -112,9 +112,15 @@ async function main() {
   try {
     child = start();
     await ready();
-    const first = await fetch(root + '/api/auth/me');
-    const cookie = first.headers.get('set-cookie')?.split(';')[0];
+    const asset = await fetch(root + '/local-gameplay.js');
+    assert.equal(asset.status, 200);
+    assert.equal(asset.headers.get('set-cookie'), null, 'assets must not create player accounts');
+    const document = await fetch(root + '/');
+    assert.equal(document.status, 200);
+    const cookie = document.headers.get('set-cookie')?.split(';')[0];
     assert(cookie);
+    const first = await fetch(root + '/api/auth/me', {headers: {Cookie: cookie}});
+    assert.equal(first.headers.get('set-cookie'), null, 'document account must carry into the API');
     const api = async (url, method = 'GET', body) => {
       const response = await fetch(root + url, {method, headers: {Cookie: cookie,
         ...(body ? {'Content-Type': 'application/json'} : {})},
@@ -206,6 +212,7 @@ async function main() {
     ws = await connect(port, cookie);
     ws.send({t: 'hi'});
     await ws.wait(message => message.t === 'all');
+    await ws.wait(message => message.t === 'home' && Array.isArray(message.own));
     ws.send({t: 'me', walking: true, skin: 7, x: 1480, y: -1738, z: 13});
     assert.equal((await api('/api/local/state')).body.connected, true);
     const originalCar = await api('/api/local/action', 'POST', {action: 'car.buy', model: 401});
@@ -214,12 +221,16 @@ async function main() {
     const originalHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'willowfield'});
     assert.equal(originalHome.status, 200, JSON.stringify(originalHome.body));
     assert.equal(originalHome.body.state.cash, 44000);
+    assert((await ws.wait(message => message.t === 'home' && message.own?.includes('willowfield'))).own.includes('willowfield'));
     const visit = await api('/api/local/action', 'POST', {action: 'home.visit', home: 'willowfield'});
     assert.equal(visit.status, 200, JSON.stringify(visit.body));
     const teleport = await ws.wait(message => message.t === 'tp');
     assert.deepEqual([teleport.x, teleport.y, teleport.z, teleport.h],
       [2483.4, -1999.18, 12.851, -180]);
-    console.log('PASS: accounts, jobs, cash, vehicle spawn, starter and archived purchases, home visit, persistence and reconnect');
+    ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851,
+      say: '/home enter willowfield'});
+    await ws.wait(message => message.t === 'note' && message.text.includes('interiors'));
+    console.log('PASS: account creation without asset duplication, jobs, cash, vehicle spawn, catalog purchases, native home status and exterior visit');
   } finally {
     ws?.close();
     if (child && child.exitCode === null) {
