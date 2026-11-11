@@ -32,21 +32,29 @@ const COMMUNITY_SCRIPT = `<script>
   const invite = ${JSON.stringify(COMMUNITY_DISCORD)};
   const connected = ${CONNECTED};
   const selfhost = ${SELFHOST};
-  let copied = false;
   function localCopy() {
-    if (!selfhost || copied) return;
-    copied = true;
+    if (!selfhost) return;
+    const welcome = document.querySelector('[data-welcome="true"]');
+    if (!welcome) return;
+    welcome.setAttribute('aria-label', 'Welcome to ZGTA:SA');
+    welcome.querySelector('h2')?.setAttribute('aria-label', 'Welcome to ZGTA:SA');
+    if (!document.getElementById('zgta-welcome-style')) {
+      const style = document.createElement('style');
+      style.id = 'zgta-welcome-style';
+      style.textContent = '[data-welcome="true"] h2 canvas{display:none!important}[data-welcome="true"] h2::before{content:"Welcome to ZGTA:SA";display:block;font:700 clamp(25px,4vw,37px) system-ui;color:#e6eeff;letter-spacing:-.03em;padding:2px 0 8px}';
+      document.head.append(style);
+    }
     const replacements = [
       ['Welcome to samp.directory', 'Welcome to ZGTA:SA'],
       ['San Andreas, in your browser, with everybody else.', 'San Andreas, in your browser, with players on this local server.'],
-      ['Log in with Discord to play: it keeps your money, levels and achievements.', 'No Discord login is needed. Local names and settings are saved on this Mac.'],
-      ['Get a job', 'Explore the world'],
-      ['The job centre is just below the Conference Center, right where you start: walk into the yellow arrow, or type /jobs. Every job has a tutorial whenever you want one: /tutorial.', 'Walk, drive, and meet other players on this local server.'],
-      ['Save for a car, then a home', 'Local progress'],
-      ['Once you’ve looked at the jobs, the First steps card under your money shows the next goal, its price and where it is.', 'This server saves player names and settings. More game systems are still being built.'],
+      ['Log in with Discord to play: it keeps your money, levels and achievements.', 'No Discord login is needed. Your name, cash, cars, homes, and jobs are saved on this Mac.'],
+      ['Get a job', 'Local jobs'],
+      ['The job centre is just below the Conference Center, right where you start: walk into the yellow arrow, or type /jobs. Every job has a tutorial whenever you want one: /tutorial.', 'Press F6 in the world to start a local job, see your progress, and claim its payout.'],
+      ['Save for a car, then a home', 'Cars and homes'],
+      ['Once you’ve looked at the jobs, the First steps card under your money shows the next goal, its price and where it is.', 'Earn cash from local jobs, buy a car or home in the F6 panel, and spawn an owned car nearby.'],
       ['Everybody you see is another player. Press T to chat, and work a job side by side.', 'Press T to chat with other players connected to this Mac.'],
     ];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(welcome, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       const node = walker.currentNode;
       if (node.parentElement?.closest('script,style')) continue;
@@ -54,9 +62,9 @@ const COMMUNITY_SCRIPT = `<script>
     }
   }
   function addCommunityLink() {
+    localCopy();
     const login = document.querySelector('a[href*="/api/auth/discord/login"]');
     if (!login) return;
-    localCopy();
     if (selfhost) {
       login.href = '#';
       login.onclick = event => event.preventDefault();
@@ -99,6 +107,7 @@ const COMMUNITY_SCRIPT = `<script>
   addCommunityLink();
 })();
 </script>`;
+const GAMEPLAY_SCRIPT = SELFHOST ? '<script defer src="/local-gameplay.js"></script>' : '';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -240,6 +249,12 @@ function serve(req, res) {
   // account cookie before their JavaScript opens the multiplayer socket.
   if (SELFHOST && !pathname.startsWith('/api/'))
     localGame.ensurePlayer(req, res);
+  if (SELFHOST && pathname === '/local-gameplay.js' && req.method === 'GET') {
+    const content = fs.readFileSync(path.join(__dirname, 'local_gameplay.js'));
+    res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8',
+      'Content-Length': content.length, 'Cache-Control': 'no-store'});
+    return res.end(content);
+  }
   if (pathname.startsWith('/api/')) {
     if (!SELFHOST) return proxyHttp(req, res);
     return localGame.http(req, res).catch(error => {
@@ -282,7 +297,7 @@ function serve(req, res) {
     if (type.startsWith('text/html')) {
       const html = fs.readFileSync(filename, 'utf8');
       const gamePage = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded);
-      const content = Buffer.from(gamePage ? html.replace('</body>', COMMUNITY_SCRIPT + '</body>') : html);
+      const content = Buffer.from(gamePage ? html.replace('</body>', COMMUNITY_SCRIPT + GAMEPLAY_SCRIPT + '</body>') : html);
       res.setHeader('Content-Type', type);
       res.setHeader('Content-Length', content.length);
       res.setHeader('Accept-Ranges', 'none');
