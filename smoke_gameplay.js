@@ -95,7 +95,7 @@ async function main() {
   for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
-  let child, ws;
+  let child, ws, otherWs;
   const start = () => spawn(process.execPath, ['serve_local.js'], {
     cwd: temporary, env: {...process.env, ZGTA_SELFHOST: '1', PORT: String(port),
       BIND_HOST: '127.0.0.1', ZGTA_JOIN_CODE: '', ZGTA_JOIN_CODE_FILE: '', ZGTA_ALLOWED_HOSTS: ''},
@@ -180,12 +180,24 @@ async function main() {
       assert.equal(delivered.body.state.job, null);
     }
     async function mechanic() {
+      const otherDocument = await fetch(root + '/');
+      const otherCookie = otherDocument.headers.get('set-cookie')?.split(';')[0];
+      assert(otherCookie && otherCookie !== cookie);
+      otherWs = await connect(port, otherCookie);
+      otherWs.send({t: 'hi'});
+      await otherWs.wait(message => message.t === 'all');
       const started = await api('/api/local/action', 'POST', {action: 'job.start', job: 'mechanic'});
       assert.equal(started.status, 200, JSON.stringify(started.body));
       assert.equal(started.body.state.job.mode, 'service');
       const broken = await ws.wait(message => message.t === 'spawned' &&
         message.v[0].startsWith('mission-'));
       assert.equal(broken.v[9], 350, 'roadside car starts damaged');
+      const shared = await otherWs.wait(message => message.t === 'spawned' &&
+        message.v[0] === broken.v[0]);
+      assert.equal(shared.v[9], 350, 'second player sees the same damaged car');
+      otherWs.send({t: 'enter', v: broken.v[0]});
+      assert.equal((await otherWs.wait(message => message.t === 'enter' &&
+        message.v === broken.v[0])).ok, false, 'other player cannot take the mission car');
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400);
       await moveTo(started.body.state.job.target, true);
       await new Promise(resolve => setTimeout(resolve, 3100));
@@ -197,6 +209,8 @@ async function main() {
       assert.equal(repaired.status, 200, JSON.stringify(repaired.body));
       assert.equal(repaired.body.state.job, null);
       await ws.wait(message => message.t === 'vgone' && message.id === broken.v[0]);
+      await otherWs.wait(message => message.t === 'vgone' && message.id === broken.v[0]);
+      otherWs.close(); otherWs = null;
     }
     async function medic() {
       const started = await api('/api/local/action', 'POST', {action: 'job.start', job: 'medic'});
@@ -369,6 +383,7 @@ async function main() {
     await ws.wait(message => message.t === 'note' && message.text.includes('interiors'));
     console.log('PASS: guest account, five world-objective jobs, timed checkpoints, mission vehicles and persistence, catalog purchases, home status and exterior visit');
   } finally {
+    otherWs?.close();
     ws?.close();
     if (child && child.exitCode === null) {
       child.kill('SIGINT');
