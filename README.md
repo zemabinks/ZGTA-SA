@@ -5,7 +5,8 @@ A local-only preservation workspace for the public browser game at
 of code and local game content used by ZGTAIV.
 
 The website mirror and all downloaded game assets live in `local-only/`, which
-Git ignores. This repository contains archival tools and notes only. The
+Git ignores. This repository contains archival tools, an independent server,
+and original local gameplay UI code. The
 original site is a live multiplayer service; its account, world, and other
 server APIs are not captured by static file downloads. A complete, working
 offline game therefore cannot be claimed from a static snapshot.
@@ -80,9 +81,9 @@ server also passed page, service worker, texture, and byte-range checks.
 The original welcome screen has a **Play** button that dismisses its Discord
 prompt, but the live WebSocket then sends a login request to an unsigned
 visitor. Replacing the Discord OAuth link with a Discord server invite would
-not authenticate the player. Independent play of the full game would require
-a compatible local game server, which is not present in the public website
-files.
+not authenticate the player. The independent server below provides local
+accounts and a growing set of gameplay systems. The publisher's complete
+server implementation is not present in the public website files.
 
 Signing in on the original site makes its multiplayer world playable there,
 but the login does not carry over to `127.0.0.1`. Chrome scopes the site's
@@ -101,25 +102,38 @@ Double-click `ZGTA-SA Self-Hosted.command` in Finder, or run
 Keep the Terminal window open while playing; Ctrl-C stops the local server.
 The server uses the archived game client and assets on this Mac. It does not
 forward API, WebSocket, or missing-asset requests to the original site. It
-creates local player accounts automatically, with no Discord login. Names and
-settings are saved in ignored `local-only/selfhost/players.json`; type
-`/name Your Name` in chat to change a local name.
+creates local player accounts automatically, with no Discord login. Names,
+settings, cash, XP, owned cars, owned homes, and an active job are saved in
+ignored `local-only/selfhost/players.json`; type `/name Your Name` in chat to
+change a local name.
 
-This is a **work-in-progress independent server**. Two loopback clients were
-tested exchanging player state and chat. In Chrome, the archived browser client
-loaded the city, entered on-foot mode without Discord, displayed a character
-and HUD, moved the player, sent a chat line, and opened the player list.
-The server currently implements account creation, settings, player-position
-messages, chat, and the player list. Position messages now follow the archived
-client's walking, passenger, and driving row format. Run
-`node smoke_multiplayer.js` with Node.js 24 to check the local account and
-two-player wire protocol in an isolated temporary server; it does not touch
-saved player accounts. The original service's jobs, economy,
-garage, property, races, vehicles, combat, administration, and other server
-systems still need their own implementations. Their public browser code does
-not contain the original server logic or database. The 3D map and solo mode
-remain available from the local archive. Do not describe this mode as a full
-replacement for the original game yet.
+Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
+five original local activities: courier, taxi, mechanic, medic, and a timed
+street trial. Each currently tracks distance traveled in the world, then pays
+cash and XP when completed. Jobs are simple local substitutes, not the
+publisher's job missions. The panel also sells three car models; an owned car
+can be spawned nearby and driven. Two home purchases save ownership, but
+interiors and other property actions are not implemented. Chat commands
+`/jobs`, `/job courier`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
+`/spawncar 1`, and `/buyhome starter` expose the same local systems.
+
+This is a **work-in-progress independent server**. It supports local accounts,
+settings, walking and driving player positions, passenger state, live chat,
+player list, job payouts, cash, garage ownership and vehicle spawning, and
+home ownership. The original service's detailed job missions, economy rules,
+property interiors, races, combat, police, gangs, administration, and other
+server systems still need independent implementations. The browser download
+does not include the original server logic or database. The 3D map and solo
+mode remain available from the local archive.
+
+Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
+test the local wire protocol, two-player exchange, job travel and payout,
+vehicle spawning and entry, purchases, persistence, and car ownership after
+reconnect. Both tests use isolated temporary servers and leave saved players
+untouched. Chrome was also used to load the actual archived client, walk a
+courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
+and drive it in the 3D world. LAN access checks passed, but a second physical
+device and all original game systems have not been verified.
 
 ### Host from this Mac over LAN
 
@@ -147,9 +161,9 @@ router to the public internet. The game files continue to be served from
 The LAN route passed a join redirect, wrong-code rejection, successful
 join-cookie, game-page, local asset byte-range, and WebSocket upgrade test.
 Chrome connected as one player, entered on-foot mode, moved, chatted, and
-showed the player list while the LAN server ran. A second physical device and
-full game systems have not been verified yet. The independent server still has
-the feature limits above.
+showed the player list while the LAN server ran. A second physical device has
+not been verified yet. The independent server still has the feature limits
+above.
 
 For private access from outside the home network, `zsh launch_share.sh both`
 can also add Tailscale Serve on HTTPS port 8443 **if Tailscale is connected**.
