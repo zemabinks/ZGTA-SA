@@ -14,6 +14,7 @@ if ! [[ "$port" =~ '^[0-9]{1,5}$' ]] || (( port < 1024 || port > 65535 )); then
   print -u2 'ZGTA_LOCAL_PORT must be between 1024 and 65535.'
   exit 1
 fi
+python3 "$project_dir/extract_client_catalog.py"
 
 ready() {
   local response
