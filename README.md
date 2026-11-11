@@ -10,7 +10,7 @@ original site is a live multiplayer service; its account, world, and other
 server APIs are not captured by static file downloads. A complete, working
 offline game therefore cannot be claimed from a static snapshot.
 
-The 10 November 2026 snapshot has **2,126 verified files (941,058,647 bytes)**,
+The 11 November 2026 snapshot has **2,728 verified files (999,510,957 bytes)**,
 including the site's four linked language variants, its companion 3D map, and
 the service worker's offline resources. The archive includes 271 world
 textures, 250 high-detail textures, all 212 vehicle thumbnails, and the HUD
@@ -106,8 +106,9 @@ settings are saved in ignored `local-only/selfhost/players.json`; type
 `/name Your Name` in chat to change a local name.
 
 This is a **work-in-progress independent server**. Two loopback clients were
-tested exchanging player state and chat. The archived browser client also
-reached its local welcome screen and showed a local player name and chat.
+tested exchanging player state and chat. In Chrome, the archived browser client
+loaded the city, entered on-foot mode without Discord, displayed a character
+and HUD, moved the player, sent a chat line, and opened the player list.
 The server currently implements account creation, settings, player-position
 messages, chat, and the player list. Position messages now follow the archived
 client's walking, passenger, and driving row format. Run
@@ -144,10 +145,11 @@ router to the public internet. The game files continue to be served from
 `local-only/` on this Mac; nothing in that directory goes to GitHub.
 
 The LAN route passed a join redirect, wrong-code rejection, successful
-join-cookie, game-page, and WebSocket upgrade test. A local Chrome browser also
-connected as one player after the LAN server started. These checks establish
-the connection path; a second physical device and full game systems have not
-been verified yet. The independent server still has the feature limits above.
+join-cookie, game-page, local asset byte-range, and WebSocket upgrade test.
+Chrome connected as one player, entered on-foot mode, moved, chatted, and
+showed the player list while the LAN server ran. A second physical device and
+full game systems have not been verified yet. The independent server still has
+the feature limits above.
 
 For private access from outside the home network, `zsh launch_share.sh both`
 can also add Tailscale Serve on HTTPS port 8443 **if Tailscale is connected**.
