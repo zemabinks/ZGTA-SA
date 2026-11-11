@@ -55,7 +55,7 @@ async function main() {
   const local = path.join(temporary, 'local-only');
   fs.mkdirSync(local);
   fs.symlinkSync(path.join(__dirname, 'local-only', 'site'), path.join(local, 'site'));
-  for (const file of ['serve_local.js', 'selfhost_backend.js'])
+  for (const file of ['serve_local.js', 'selfhost_backend.js', 'optional_discord.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   const child = spawn(process.execPath, ['serve_local.js'], {
