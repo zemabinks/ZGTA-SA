@@ -151,13 +151,13 @@ async function main() {
       assert.equal(state.body.job.remaining, 0, JSON.stringify(state.body.job));
     }
 
-    async function moveTo(target) {
+    async function moveTo(target, driving = false) {
       const startX = x, startY = y;
       const steps = Math.ceil(Math.hypot(target.x - x, target.y - y) / 5);
       for (let i = 1; i <= steps; i++) {
         x = startX + (target.x - startX) * i / steps;
         y = startY + (target.y - startY) * i / steps;
-        ws.send({t: 'me', walking: true, skin: 7, x, y, z: 13});
+        ws.send({t: 'me', walking: !driving, driving, skin: 7, x, y, z: 13});
         // Match an actual client's update cadence; the server limits bursts.
         await new Promise(resolve => setTimeout(resolve, 20));
       }
@@ -188,8 +188,33 @@ async function main() {
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
       assert.equal(delivered.body.state.job, null);
     }
+    async function taxi() {
+      const started = await api('/api/local/action', 'POST', {action: 'job.start', job: 'taxi'});
+      assert.equal(started.status, 200, JSON.stringify(started.body));
+      assert.equal(started.body.state.job.stage, 'pickup');
+      await moveTo(started.body.state.job.target);
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
+        'passenger pickup requires driving');
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const pickup = await api('/api/local/action', 'POST', {action: 'job.pickup'});
+      assert.equal(pickup.status, 200, JSON.stringify(pickup.body));
+      assert.equal(pickup.body.state.job.stage, 'delivery');
+      await moveTo(pickup.body.state.job.target, true);
+      ws.send({t: 'me', walking: true, driving: false, skin: 7, x, y, z: 13});
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
+        'passenger drop-off requires driving');
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      await new Promise(resolve => setTimeout(resolve, 3100));
+      const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
+      assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
+      assert.equal(delivered.body.state.job, null);
+    }
 
-    for (const job of ['taxi', 'mechanic', 'medic', 'trial']) {
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.start', job: 'taxi'})).status, 400,
+      'taxi requires an owned car');
+    for (const job of ['mechanic', 'medic', 'trial']) {
       const startJob = await api('/api/local/action', 'POST', {action: 'job.start', job});
       assert.equal(startJob.status, 200, JSON.stringify(startJob.body));
       const tooEarly = await api('/api/local/action', 'POST', {action: 'job.complete'});
@@ -203,11 +228,11 @@ async function main() {
     await courier();
     await courier();
     const money = await api('/api/local/state');
-    assert.equal(money.body.cash, 1950);
-    assert.equal(money.body.jobsDone, 6);
+    assert.equal(money.body.cash, 1650);
+    assert.equal(money.body.jobsDone, 5);
     const buyCar = await api('/api/local/action', 'POST', {action: 'car.buy', model: 410});
     assert.equal(buyCar.status, 200);
-    assert.equal(buyCar.body.state.cash, 1450);
+    assert.equal(buyCar.body.state.cash, 1150);
     const spawnCar = await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0});
     assert.equal(spawnCar.status, 200, JSON.stringify(spawnCar.body));
     const vehicle = await ws.wait(message => message.t === 'spawned');
@@ -217,6 +242,8 @@ async function main() {
     assert.equal((await ws.wait(message => message.t === 'enter')).ok, true);
     const noHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'starter'});
     assert.equal(noHome.status, 400);
+    await taxi();
+    assert.equal((await api('/api/local/state')).body.cash, 1450);
     await courier();
     const buyHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'starter'});
     assert.equal(buyHome.status, 200, JSON.stringify(buyHome.body));
