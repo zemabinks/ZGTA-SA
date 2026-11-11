@@ -139,19 +139,57 @@ async function main() {
     assert.equal(connected.body.catalog.homes.length, 31, 'archived property catalog must load');
     const earlyBuy = await api('/api/local/action', 'POST', {action: 'car.buy', model: 410});
     assert.equal(earlyBuy.status, 400);
-    let x = 1480;
+    let x = 1480, y = -1738;
     async function travel(goal) {
       for (let travelled = 0; travelled < goal; travelled += 5) {
         const step = Math.min(5, goal - travelled);
         x += step;
-        ws.send({t: 'me', walking: true, skin: 7, x, y: -1738, z: 13});
+        ws.send({t: 'me', walking: true, skin: 7, x, y, z: 13});
       }
       await new Promise(resolve => setTimeout(resolve, 100));
       const state = await api('/api/local/state');
       assert.equal(state.body.job.remaining, 0, JSON.stringify(state.body.job));
     }
 
-    for (const job of ['courier', 'taxi', 'mechanic', 'medic', 'trial', 'courier']) {
+    async function moveTo(target) {
+      const startX = x, startY = y;
+      const steps = Math.ceil(Math.hypot(target.x - x, target.y - y) / 5);
+      for (let i = 1; i <= steps; i++) {
+        x = startX + (target.x - startX) * i / steps;
+        y = startY + (target.y - startY) * i / steps;
+        ws.send({t: 'me', walking: true, skin: 7, x, y, z: 13});
+        // Match an actual client's update cadence; the server limits bursts.
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    async function courier() {
+      const started = await api('/api/local/action', 'POST', {action: 'job.start', job: 'courier'});
+      assert.equal(started.status, 200, JSON.stringify(started.body));
+      assert.equal(started.body.state.job.stage, 'pickup');
+      assert.equal(started.body.state.job.remaining, 0);
+      const beforePickup = await api('/api/local/action', 'POST', {action: 'job.complete'});
+      assert.equal(beforePickup.status, 400);
+      const pickupPoint = started.body.state.job.target;
+      await moveTo({x: x + 20, y});
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400);
+      await moveTo(pickupPoint);
+      const pickup = await api('/api/local/action', 'POST', {action: 'job.pickup'});
+      assert.equal(pickup.status, 200, JSON.stringify(pickup.body));
+      assert.equal(pickup.body.state.job.stage, 'delivery');
+      assert(pickup.body.state.job.remaining > pickup.body.state.job.radius);
+      const premature = await api('/api/local/action', 'POST', {action: 'job.complete'});
+      assert.equal(premature.status, 400);
+      await moveTo(pickup.body.state.job.target);
+      const arrived = await api('/api/local/state');
+      assert(arrived.body.job.remaining <= arrived.body.job.radius, JSON.stringify(arrived.body.job));
+      await new Promise(resolve => setTimeout(resolve, 3100));
+      const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
+      assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
+      assert.equal(delivered.body.state.job, null);
+    }
+
+    for (const job of ['taxi', 'mechanic', 'medic', 'trial']) {
       const startJob = await api('/api/local/action', 'POST', {action: 'job.start', job});
       assert.equal(startJob.status, 200, JSON.stringify(startJob.body));
       const tooEarly = await api('/api/local/action', 'POST', {action: 'job.complete'});
@@ -162,6 +200,8 @@ async function main() {
       assert.equal(paid.status, 200, JSON.stringify(paid.body));
       assert.equal(paid.body.state.job, null);
     }
+    await courier();
+    await courier();
     const money = await api('/api/local/state');
     assert.equal(money.body.cash, 1950);
     assert.equal(money.body.jobsDone, 6);
@@ -177,14 +217,14 @@ async function main() {
     assert.equal((await ws.wait(message => message.t === 'enter')).ok, true);
     const noHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'starter'});
     assert.equal(noHome.status, 400);
-    const extra = await api('/api/local/action', 'POST', {action: 'job.start', job: 'courier'});
-    assert.equal(extra.status, 200);
-    await travel(extra.body.state.job.goal);
-    await new Promise(resolve => setTimeout(resolve, 3100));
-    assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 200);
+    await courier();
     const buyHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'starter'});
     assert.equal(buyHome.status, 200, JSON.stringify(buyHome.body));
     assert.equal(buyHome.body.state.cash, 200);
+    const persistedRoute = await api('/api/local/action', 'POST', {action: 'job.start', job: 'courier'});
+    assert.equal(persistedRoute.status, 200);
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 200);
+    const deliveryTarget = (await api('/api/local/state')).body.job.target;
     ws.close(); ws = null;
     child.kill('SIGINT');
     await new Promise(resolve => child.once('exit', resolve));
@@ -195,6 +235,9 @@ async function main() {
     assert.equal(saved.body.jobsDone, 7);
     assert.equal(saved.body.cars[0].model, 410);
     assert.equal(saved.body.homes[0].id, 'starter');
+    assert.equal(saved.body.job.stage, 'delivery');
+    assert.deepEqual(saved.body.job.target, deliveryTarget);
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.cancel'})).status, 200);
     ws = await connect(port, cookie);
     ws.send({t: 'hi'});
     const owned = await ws.wait(message => message.t === 'owned');
