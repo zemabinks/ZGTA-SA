@@ -245,9 +245,11 @@ function serve(req, res) {
       res.writeHead(401); return res.end('Access code required');
     }
   }
-  // API handlers create or reuse their own account once. Static pages need an
-  // account cookie before their JavaScript opens the multiplayer socket.
-  if (SELFHOST && !pathname.startsWith('/api/'))
+  // The game document needs its cookie before JavaScript opens the socket.
+  // Assets are fetched concurrently and must not each create an account.
+  if (SELFHOST && req.method === 'GET' &&
+      (pathname === '/' || pathname === '/index.html' ||
+        req.headers['sec-fetch-dest'] === 'document'))
     localGame.ensurePlayer(req, res);
   if (SELFHOST && pathname === '/local-gameplay.js' && req.method === 'GET') {
     const content = fs.readFileSync(path.join(__dirname, 'local_gameplay.js'));
