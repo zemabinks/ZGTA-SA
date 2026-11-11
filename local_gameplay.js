@@ -112,6 +112,17 @@
     status.dataset.error = String(error);
     panel.append(status);
 
+    section('Account');
+    panel.append(element('p', state.discord?.linked ?
+      `Discord linked: ${state.discord.name}. Your guest progress remains available.` :
+      'Guest play is ready. Discord is optional.', 'zgta-muted'));
+    if (state.discord?.available && !state.discord.linked) {
+      const link = element('button', `Link Discord · one-time $${state.discord.bonus} bonus`);
+      link.type = 'button';
+      link.addEventListener('click', () => { window.location.href = '/api/local/discord/start'; });
+      panel.append(link);
+    }
+
     section('Jobs and time trial');
     if (state.job) {
       if (state.job.mode === 'route') {
