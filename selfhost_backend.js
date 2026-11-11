@@ -154,7 +154,8 @@ class LocalGame {
     }
     const {id, player} = this.ensurePlayer(req, res);
     if (url.pathname === '/api/auth/me' && req.method === 'GET')
-      return json(res, 200, {id, name: player.name, username: player.name, rank: 'player', admin: false, local: true});
+      return json(res, 200, {id, name: player.name, username: player.name,
+        loggedIn: true, available: true, rank: 'player', admin: false, local: true});
     if (url.pathname === '/api/auth/discord/login')
       return json(res, 409, {error: 'Local accounts are active; Discord is not required.'});
     if (url.pathname === '/api/settings') {
