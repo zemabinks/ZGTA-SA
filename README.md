@@ -177,7 +177,8 @@ verification status of each major system.
 Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, mission vehicle cleanup and restart persistence,
+repair, timed checkpoints, mission vehicle cleanup, two-client visibility and
+entry restrictions, and restart persistence,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
