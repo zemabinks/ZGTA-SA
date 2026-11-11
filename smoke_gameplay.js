@@ -89,6 +89,9 @@ async function main() {
   const local = path.join(temporary, 'local-only');
   fs.mkdirSync(local);
   fs.symlinkSync(path.join(__dirname, 'local-only', 'site'), path.join(local, 'site'));
+  fs.mkdirSync(path.join(local, 'selfhost'));
+  fs.copyFileSync(path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json'),
+    path.join(local, 'selfhost', 'client-catalog.json'));
   for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
@@ -126,6 +129,8 @@ async function main() {
     ws.send({t: 'me', walking: true, skin: 7, x: 1480, y: -1738, z: 13});
     const connected = await api('/api/local/state');
     assert.equal(connected.body.connected, true);
+    assert(connected.body.catalog.cars.length > 80, 'archived vehicle catalog must load');
+    assert.equal(connected.body.catalog.homes.length, 31, 'archived property catalog must load');
     const earlyBuy = await api('/api/local/action', 'POST', {action: 'car.buy', model: 410});
     assert.equal(earlyBuy.status, 400);
     let x = 1480;
@@ -188,7 +193,33 @@ async function main() {
     ws.send({t: 'hi'});
     const owned = await ws.wait(message => message.t === 'owned');
     assert.deepEqual(owned.cars, ['410.52.39.0.']);
-    console.log('PASS: shared account, job travel and payout, cash, car ownership and spawn, home purchase, persistence and reconnect');
+    ws.close(); ws = null;
+    child.kill('SIGINT');
+    await new Promise(resolve => child.once('exit', resolve));
+    const playerFile = path.join(local, 'selfhost', 'players.json');
+    const localPlayers = JSON.parse(fs.readFileSync(playerFile, 'utf8'));
+    const accountId = cookie.split('=')[1];
+    localPlayers.players[accountId].cash = 100000;
+    fs.writeFileSync(playerFile, JSON.stringify(localPlayers));
+    child = start();
+    await ready();
+    ws = await connect(port, cookie);
+    ws.send({t: 'hi'});
+    await ws.wait(message => message.t === 'all');
+    ws.send({t: 'me', walking: true, skin: 7, x: 1480, y: -1738, z: 13});
+    assert.equal((await api('/api/local/state')).body.connected, true);
+    const originalCar = await api('/api/local/action', 'POST', {action: 'car.buy', model: 401});
+    assert.equal(originalCar.status, 200, JSON.stringify(originalCar.body));
+    assert.equal(originalCar.body.state.cash, 80000);
+    const originalHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'willowfield'});
+    assert.equal(originalHome.status, 200, JSON.stringify(originalHome.body));
+    assert.equal(originalHome.body.state.cash, 44000);
+    const visit = await api('/api/local/action', 'POST', {action: 'home.visit', home: 'willowfield'});
+    assert.equal(visit.status, 200, JSON.stringify(visit.body));
+    const teleport = await ws.wait(message => message.t === 'tp');
+    assert.deepEqual([teleport.x, teleport.y, teleport.z, teleport.h],
+      [2483.4, -1999.18, 12.851, -180]);
+    console.log('PASS: accounts, jobs, cash, vehicle spawn, starter and archived purchases, home visit, persistence and reconnect');
   } finally {
     ws?.close();
     if (child && child.exitCode === null) {
