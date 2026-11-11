@@ -110,6 +110,30 @@ settings, cash, XP, owned cars, owned homes, and an active job are saved in
 ignored `local-only/selfhost/players.json`; type `/name Your Name` in chat to
 change a local name.
 
+Optional Discord account linking is available when the host supplies a
+[Discord developer application](https://docs.discord.com/developers/topics/oauth2)
+and a callback URL. Create `local-only/selfhost/discord-oauth.json` on the Mac:
+
+```json
+{
+  "clientId": "YOUR_APPLICATION_ID",
+  "clientSecret": "YOUR_APPLICATION_SECRET",
+  "redirectUri": "https://YOUR_HOST/api/local/discord/callback"
+}
+```
+
+Keep this file private (`chmod 600 local-only/selfhost/discord-oauth.json`)
+and restart the server. The callback URL must be registered in the app's
+OAuth2 settings and must use the same host where players begin linking.
+Loopback `http://127.0.0.1` is also supported for local testing. The current
+plain HTTP LAN URL does not enable Discord linking. When configured, the F6
+panel offers a voluntary `identify`-only link. A verified Discord identity
+receives a one-time $500 local bonus; returning with the same identity opens
+its linked account. Guest progress is not merged into a different linked
+account. Tokens and the client secret are not stored in player data. The
+mocked OAuth test passes, but a live Discord sign-in has not been tested
+because no application credentials or public callback URL have been provided.
+
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
 five independent local activities: courier, taxi, mechanic, medic, and a timed
 street trial. Courier is a staged mission: collect a package where you start,
@@ -158,6 +182,8 @@ untouched. Chrome was also used to load the actual archived client, walk a
 courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
 and drive it in the 3D world. LAN access checks passed, but a second physical
 device and all original game systems have not been verified.
+Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
+bonus, and returning-account test. It makes no Discord network request.
 
 ### Host from this Mac over LAN
 
