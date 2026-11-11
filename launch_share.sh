@@ -20,6 +20,7 @@ if [[ ! -f "$local_dir/site/index.html" || ! -f "$local_dir/manifest.json" ]]; t
   print -u2 'Local archive missing. Run python3 archive_site.py first.'
   exit 1
 fi
+python3 "$project_dir/extract_client_catalog.py"
 
 mkdir -p "$local_dir/selfhost"
 if [[ ! -f "$join_file" ]]; then
