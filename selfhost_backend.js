@@ -9,6 +9,8 @@ const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
 const MAX_CASH = 100000000;
 const DISCORD_BONUS = 500;
+const MISSION_RADIUS = 12;
+const TIME_TRIAL_MS = 180000;
 const JOBS = Object.freeze([
   {id: 'courier', name: 'Courier', pay: 250, distance: 38},
   {id: 'taxi', name: 'Taxi', pay: 300, distance: 48},
@@ -94,18 +96,42 @@ function limited(value, limit, fallback = 0) {
 }
 function rounded(value, fallback = 0) { return Math.round(finite(value, fallback) * 1000) / 1000; }
 function money(value) { return Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_CASH, value)) : 0; }
+function homeAt(id) { return HOME_CATALOG.find(home => home.id === id && home.out); }
+function nearestHome(pos, minimum = 120, excluded = []) {
+  return HOME_CATALOG.filter(home => home.out && !excluded.includes(home.id) &&
+    Math.hypot(home.out[0] - pos.x, home.out[1] - pos.y) >= minimum)
+    .sort((a, b) => Math.hypot(a.out[0] - pos.x, a.out[1] - pos.y) -
+      Math.hypot(b.out[0] - pos.x, b.out[1] - pos.y))[0];
+}
+function missionId() { return `mission-${crypto.randomBytes(8).toString('hex')}`; }
+function validMissionId(value) { return /^mission-[0-9a-f]{16}$/.test(value || ''); }
 function savedJob(value) {
   if (!value || !JOBS.some(job => job.id === value.id) ||
       !Number.isFinite(value.started) || Date.now() - value.started >= 86400000) return null;
-  if (['courier', 'taxi'].includes(value.id) && value.mode === 'route') {
+  if (['courier', 'taxi', 'medic'].includes(value.id) && value.mode === 'route') {
     if ((value.id === 'courier' && (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
         !value.pickup.every(Number.isFinite))) ||
-        (value.id === 'taxi' && !HOME_CATALOG.some(home => home.id === value.pickupHome && home.out)) ||
-        !HOME_CATALOG.some(home => home.id === value.drop && home.out) ||
+        (value.id !== 'courier' && !homeAt(value.pickupHome)) ||
+        (value.id !== 'medic' && !homeAt(value.drop)) ||
+        (value.id === 'medic' && (!Array.isArray(value.station) || value.station.length !== 3 ||
+          !value.station.every(Number.isFinite) || !validMissionId(value.vehicleId))) ||
         !['pickup', 'delivery'].includes(value.stage)) return null;
     return {id: value.id, mode: 'route',
       ...(value.id === 'courier' ? {pickup: value.pickup} : {pickupHome: value.pickupHome}),
-      drop: value.drop, stage: value.stage, started: value.started};
+      ...(value.id === 'medic' ? {station: value.station, vehicleId: value.vehicleId} : {drop: value.drop}),
+      stage: value.stage, started: value.started};
+  }
+  if (value.id === 'mechanic' && value.mode === 'service') {
+    if (!homeAt(value.targetHome) || !validMissionId(value.vehicleId)) return null;
+    return {id: value.id, mode: 'service', targetHome: value.targetHome,
+      vehicleId: value.vehicleId, started: value.started};
+  }
+  if (value.id === 'trial' && value.mode === 'checkpoints') {
+    if (!Array.isArray(value.points) || value.points.length !== 3 ||
+        !value.points.every(homeAt) || new Set(value.points).size !== 3 ||
+        !Number.isInteger(value.index) || value.index < 0 || value.index > 2) return null;
+    return {id: value.id, mode: 'checkpoints', points: value.points,
+      index: value.index, started: value.started};
   }
   const goal = JOBS.find(job => job.id === value.id).distance;
   return {id: value.id, goal, progress: Math.max(0, Math.min(goal,
@@ -139,6 +165,8 @@ class LocalGame {
           settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
       }
     } catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local players:', error.message); }
+    for (const player of this.players.values()) if (player.job?.vehicleId)
+      this.addMissionVehicle(player);
     this.saveTimer = null;
     this.tick = setInterval(() => this.broadcastPositions(), 200);
     this.tick.unref();
@@ -202,23 +230,44 @@ class LocalGame {
   gameplayState(player) {
     const pos = this.position(player);
     const active = player.job;
-    const pickupHome = active?.mode === 'route' && active.id === 'taxi' ?
-      HOME_CATALOG.find(home => home.id === active.pickupHome && home.out) : null;
-    const routeHome = active?.mode === 'route' ?
-      HOME_CATALOG.find(home => home.id === active.drop && home.out) : null;
-    const target = active?.mode === 'route' ?
-      (active.stage === 'pickup' ? (active.id === 'courier' ? active.pickup : pickupHome?.out) : routeHome?.out) : null;
-    const route = target ? {mode: 'route', stage: active.stage,
-      target: {x: rounded(target[0]), y: rounded(target[1]),
-        name: active.stage === 'pickup' ? (pickupHome?.name || 'Package pickup') : routeHome.name},
-      remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
-      radius: 12} : null;
+    let objective = null;
+    if (active?.mode === 'route') {
+      const pickupHome = active.id === 'courier' ? null : homeAt(active.pickupHome);
+      const dropHome = active.id === 'medic' ? null : homeAt(active.drop);
+      const target = active.stage === 'pickup' ?
+        (active.id === 'courier' ? active.pickup : pickupHome?.out) :
+        (active.id === 'medic' ? active.station : dropHome?.out);
+      if (target) objective = {mode: 'route', stage: active.stage,
+        target: {x: rounded(target[0]), y: rounded(target[1]),
+          name: active.stage === 'pickup' ? (pickupHome?.name || 'Package pickup') :
+            (dropHome?.name || 'Aid station')},
+        remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
+        radius: MISSION_RADIUS};
+    } else if (active?.mode === 'service') {
+      const home = homeAt(active.targetHome);
+      const vehicle = this.vehicles.get(active.vehicleId);
+      const target = vehicle?.row || home?.out;
+      if (target) {
+        const x = vehicle ? target[3] : target[0], y = vehicle ? target[4] : target[1];
+        objective = {mode: 'service', stage: 'repair',
+          target: {x: rounded(x), y: rounded(y), name: `Roadside call near ${home.name}`},
+          remaining: pos ? Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null,
+          radius: MISSION_RADIUS};
+      }
+    } else if (active?.mode === 'checkpoints') {
+      const home = homeAt(active.points[active.index]);
+      if (home) objective = {mode: 'checkpoints', stage: 'checkpoint',
+        target: {x: rounded(home.out[0]), y: rounded(home.out[1]), name: home.name},
+        remaining: pos ? Math.ceil(Math.hypot(pos.x - home.out[0], pos.y - home.out[1])) : null,
+        radius: MISSION_RADIUS, index: active.index + 1, total: active.points.length,
+        secondsLeft: Math.max(0, Math.ceil((TIME_TRIAL_MS - (Date.now() - active.started)) / 1000))};
+    }
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
-        ...(route || {goal: active.goal, progress: Math.floor(active.progress),
+        ...(objective || {goal: active.goal, progress: Math.floor(active.progress),
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
         started: active.started} : null,
       cars: player.cars.map(model => CAR_CATALOG.find(car => car.model === model)).filter(Boolean),
@@ -256,6 +305,27 @@ class LocalGame {
       peer.send(this.owned(player));
       peer.send(this.homeStatus(player));
     }
+  }
+
+  addMissionVehicle(player) {
+    const job = player.job;
+    if (!job?.vehicleId) return;
+    const mechanic = job.id === 'mechanic';
+    const point = mechanic ? homeAt(job.targetHome)?.out : job.station;
+    if (!point) return;
+    const id = job.vehicleId;
+    const row = [id, mechanic ? 'Roadside call' : player.name,
+      mechanic ? '410.52.39.0.' : '416.1.1.0.',
+      rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
+      0, 0, 0, mechanic ? 350 : 1000, '', null];
+    this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
+    for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
+  }
+
+  removeMissionVehicle(player) {
+    const id = player.job?.vehicleId;
+    if (!id || !this.vehicles.delete(id)) return;
+    for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id});
   }
 
   discordStart(req, res) {
@@ -339,69 +409,119 @@ class LocalGame {
       if (job.id === 'courier' || job.id === 'taxi') {
         if (job.id === 'taxi' && player.cars.length === 0)
           throw new Error('Own a car before starting taxi fares.');
-        const destinations = HOME_CATALOG.filter(home => home.out &&
-          Math.hypot(home.out[0] - pos.x, home.out[1] - pos.y) >= 120);
-        const nearest = destinations.sort((a, b) =>
-          Math.hypot(a.out[0] - pos.x, a.out[1] - pos.y) -
-          Math.hypot(b.out[0] - pos.x, b.out[1] - pos.y))[0];
+        const nearest = nearestHome(pos);
         if (!nearest) throw new Error('Job destinations are unavailable.');
         if (job.id === 'courier') {
           player.job = {id: job.id, mode: 'route', pickup: [rounded(pos.x), rounded(pos.y)],
             drop: nearest.id, stage: 'pickup', started: Date.now()};
           message = 'Courier started. Collect the package here, then follow the objective box to the delivery address.';
         } else {
-          const drop = HOME_CATALOG.filter(home => home.out && home.id !== nearest.id &&
-            Math.hypot(home.out[0] - nearest.out[0], home.out[1] - nearest.out[1]) >= 150)
-            .sort((a, b) => Math.hypot(a.out[0] - nearest.out[0], a.out[1] - nearest.out[1]) -
-              Math.hypot(b.out[0] - nearest.out[0], b.out[1] - nearest.out[1]))[0];
+          const drop = nearestHome({x: nearest.out[0], y: nearest.out[1]}, 150, [nearest.id]);
           if (!drop) throw new Error('Taxi drop-off locations are unavailable.');
           player.job = {id: job.id, mode: 'route', pickupHome: nearest.id,
             drop: drop.id, stage: 'pickup', started: Date.now()};
           message = `Taxi fare started. Drive to ${nearest.name} for pickup.`;
         }
+      } else if (job.id === 'mechanic') {
+        const home = nearestHome(pos);
+        if (!home) throw new Error('Roadside service locations are unavailable.');
+        player.job = {id: job.id, mode: 'service', targetHome: home.id,
+          vehicleId: missionId(), started: Date.now()};
+        this.addMissionVehicle(player);
+        message = `Roadside call started. Go to the broken-down car near ${home.name}, then repair it on foot.`;
+      } else if (job.id === 'medic') {
+        const home = nearestHome(pos);
+        if (!home) throw new Error('Patient locations are unavailable.');
+        player.job = {id: job.id, mode: 'route', pickupHome: home.id,
+          station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)],
+          vehicleId: missionId(), stage: 'pickup', started: Date.now()};
+        this.addMissionVehicle(player);
+        message = `Medical call started. An ambulance is nearby. Drive to the patient near ${home.name}.`;
+      } else if (job.id === 'trial') {
+        if (player.cars.length === 0) throw new Error('Own a car before entering the time trial.');
+        const points = [];
+        let from = pos;
+        for (let i = 0; i < 3; i++) {
+          const home = nearestHome(from, 120, points);
+          if (!home) throw new Error('Time trial checkpoints are unavailable.');
+          points.push(home.id);
+          from = {x: home.out[0], y: home.out[1]};
+        }
+        player.job = {id: job.id, mode: 'checkpoints', points,
+          index: 0, started: Date.now()};
+        message = `Street time trial started. Drive through three checkpoints within ${TIME_TRIAL_MS / 60000} minutes.`;
       } else {
         player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
         message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
       }
       this.save();
     } else if (action === 'job.pickup') {
-      if (!['courier', 'taxi'].includes(player.job?.id) || player.job.mode !== 'route' ||
+      if (!['courier', 'taxi', 'medic'].includes(player.job?.id) || player.job.mode !== 'route' ||
           player.job.stage !== 'pickup') throw new Error('No pickup is ready.');
       const pickup = player.job.id === 'courier' ? player.job.pickup :
-        HOME_CATALOG.find(home => home.id === player.job.pickupHome)?.out;
-      if (!pos || !pickup || Math.hypot(pos.x - pickup[0], pos.y - pickup[1]) > 12)
+        homeAt(player.job.pickupHome)?.out;
+      if (!pos || !pickup || Math.hypot(pos.x - pickup[0], pos.y - pickup[1]) > MISSION_RADIUS)
         throw new Error('Travel to the pickup point.');
-      if (player.job.id === 'taxi' && pos.peer.state.driving !== true)
-        throw new Error('Drive your car to collect the passenger.');
+      if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
+        throw new Error('Drive to collect the passenger or patient.');
       player.job.stage = 'delivery';
-      const home = HOME_CATALOG.find(item => item.id === player.job.drop);
+      const home = homeAt(player.job.drop);
       message = player.job.id === 'courier' ? `Package collected. Deliver it to ${home.name}.` :
-        `Passenger aboard. Drive to ${home.name}.`;
+        player.job.id === 'taxi' ? `Passenger aboard. Drive to ${home.name}.` :
+          'Patient aboard. Return to the aid station.';
+      this.save();
+    } else if (action === 'job.checkpoint') {
+      if (player.job?.id !== 'trial' || player.job.mode !== 'checkpoints' ||
+          player.job.index >= player.job.points.length - 1)
+        throw new Error('No intermediate checkpoint is active.');
+      if (Date.now() - player.job.started > TIME_TRIAL_MS)
+        throw new Error('The time trial expired. Cancel it and start again.');
+      const home = homeAt(player.job.points[player.job.index]);
+      if (!pos || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS ||
+          pos.peer.state.driving !== true)
+        throw new Error('Drive into the active checkpoint.');
+      player.job.index++;
+      message = `Checkpoint ${player.job.index} passed. Drive to ${homeAt(player.job.points[player.job.index]).name}.`;
       this.save();
     } else if (action === 'job.complete') {
       if (!player.job) throw new Error('No active job.');
       if (!pos) throw new Error('Enter the game to complete this job.');
       if (Date.now() - player.job.started < 3000) throw new Error('The task started too recently.');
       if (player.job.mode === 'route') {
-        if (player.job.stage !== 'delivery') throw new Error('Collect the package first.');
-        const home = HOME_CATALOG.find(item => item.id === player.job.drop);
-        if (!home?.out || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 12)
-          throw new Error(`Travel to the delivery address at ${home?.name || 'the marked location'}.`);
-        if (player.job.id === 'taxi' && pos.peer.state.driving !== true)
-          throw new Error('Finish the taxi fare in your car.');
+        if (player.job.stage !== 'delivery') throw new Error('Complete the pickup first.');
+        const home = homeAt(player.job.drop);
+        const target = player.job.id === 'medic' ? player.job.station : home?.out;
+        if (!target || Math.hypot(pos.x - target[0], pos.y - target[1]) > MISSION_RADIUS)
+          throw new Error('Travel to the delivery destination.');
+        if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
+          throw new Error('Finish the fare or medical call while driving.');
+      } else if (player.job.mode === 'service') {
+        const vehicle = this.vehicles.get(player.job.vehicleId);
+        if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > MISSION_RADIUS)
+          throw new Error('Go to the stranded vehicle to repair it.');
+        if (pos.peer.state.walking !== true)
+          throw new Error('Get out and repair the vehicle on foot.');
+      } else if (player.job.mode === 'checkpoints') {
+        const home = homeAt(player.job.points[player.job.index]);
+        if (player.job.index !== player.job.points.length - 1 || !home ||
+            Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS ||
+            pos.peer.state.driving !== true)
+          throw new Error('Drive through the final checkpoint.');
       } else if (player.job.progress < player.job.goal)
         throw new Error(`Travel ${Math.ceil(player.job.goal - player.job.progress)} m more.`);
       const job = JOBS.find(item => item.id === player.job.id);
-      if (job.id === 'trial' && Date.now() - player.job.started > 180000)
+      if (job.id === 'trial' && Date.now() - player.job.started > TIME_TRIAL_MS)
         throw new Error('The time trial expired. Cancel it and start again.');
       player.cash = money(player.cash + job.pay);
       player.xp = money(player.xp + Math.round(job.pay / 5));
       player.jobsDone++;
+      this.removeMissionVehicle(player);
       player.job = null;
       message = `${job.name} complete: +$${job.pay}. Balance: $${player.cash}.`;
       this.updatePlayer(player);
     } else if (action === 'job.cancel') {
       if (!player.job) throw new Error('No active job.');
+      this.removeMissionVehicle(player);
       player.job = null;
       message = 'Job cancelled.';
       this.save();
@@ -571,7 +691,7 @@ class LocalGame {
     if (message.t === 'ping') return peer.send({t: 'pong', c: message.c, s: Date.now()});
     if (message.t === 'me') {
       const previous = peer.state;
-      if (peer.player.job && peer.player.job.mode !== 'route' && previous && Date.now() - peer.lastSeen < 5000 &&
+      if (peer.player.job && !peer.player.job.mode && previous && Date.now() - peer.lastSeen < 5000 &&
           (message.walking === true || message.driving === true) &&
           Number.isFinite(message.x) && Number.isFinite(message.y) &&
           Number.isFinite(previous.x) && Number.isFinite(previous.y)) {
@@ -601,8 +721,11 @@ class LocalGame {
       } catch (error) { peer.send({t: 'note', text: error.message}); }
       return;
     }
-    if (message.t === 'enter' || message.t === 'jack')
-      return peer.send({t: message.t, v: message.v, ok: this.vehicles.has(message.v)});
+    if (message.t === 'enter' || message.t === 'jack') {
+      const vehicle = this.vehicles.get(message.v);
+      return peer.send({t: message.t, v: message.v,
+        ok: !!vehicle && (!vehicle.missionOwner || vehicle.missionOwner === peer.player)});
+    }
     if (message.t === 'who' && Array.isArray(message.ids))
       return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer && message.ids.includes(String(p.player.number)))
         .map(p => this.row(p)).filter(Boolean)});
@@ -636,12 +759,13 @@ class LocalGame {
       return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
     if (text === '/jobs')
       return peer.send({t: 'note', text: `Local jobs: ${JOBS.map(job => `${job.id} ($${job.pay})`).join(', ')}. Type /job <name>.`});
-    if (text.startsWith('/job ') || text === '/deliver' || text === '/canceljob' ||
+    if (text.startsWith('/job ') || ['/pickup', '/checkpoint', '/repair', '/deliver', '/finish', '/canceljob'].includes(text) ||
         text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/buyhome ')) {
       try {
         const [command, value] = text.slice(1).split(/\s+/, 2);
         const actions = {job: ['job.start', {job: value}], pickup: ['job.pickup', {}],
-          deliver: ['job.complete', {}],
+          checkpoint: ['job.checkpoint', {}], repair: ['job.complete', {}],
+          deliver: ['job.complete', {}], finish: ['job.complete', {}],
           canceljob: ['job.cancel', {}], buycar: ['car.buy', {model: value}],
           spawncar: ['car.spawn', {slot: Number(value) - 1}],
           buyhome: ['home.buy', {home: value}]};
