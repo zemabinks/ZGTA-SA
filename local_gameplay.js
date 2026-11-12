@@ -161,7 +161,21 @@
     }
     section('Garage');
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
-    state.cars.forEach((car, slot) => row(`${car.name} · owned`, 'car.spawn', {slot}, 'Spawn', !state.connected));
+    state.cars.forEach((car, slot) => {
+      const garage = state.garage?.[slot];
+      const condition = garage ? ` · ${Math.round(garage.health / 10)}% condition` : '';
+      row(`${car.name} · ${garage?.active ? 'out' : 'stored'}${condition}`,
+        'car.spawn', {slot}, garage?.active ? 'Recall' : 'Spawn', !state.connected);
+      if (garage?.active) {
+        const nearOnFoot = state.connected && state.onFoot &&
+          garage.distance !== null && garage.distance <= 18;
+        row(`${car.name} · ${garage.distance ?? '?'} m away`,
+          'car.store', {slot}, 'Store', !nearOnFoot);
+        if (garage.repairCost)
+          row(`${car.name} · repair for $${garage.repairCost}`,
+            'car.repair', {slot}, 'Repair', !nearOnFoot || state.cash < garage.repairCost);
+      }
+    });
     for (const car of state.catalog.cars.filter(item => item.source === 'starter'))
       row(`${car.name} · $${car.price}`, 'car.buy', {model: car.model}, 'Buy', state.cash < car.price);
     const originalCars = state.catalog.cars.filter(item => item.source === 'archived');
