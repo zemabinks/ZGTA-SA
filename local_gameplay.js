@@ -15,6 +15,7 @@
     #zgta-local-panel select{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-panel input[type=number]{width:95px;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-panel input[type=text]{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
+    #zgta-local-panel a{color:#b7d4ff;text-decoration:underline;text-underline-offset:3px}
     #zgta-route-map{position:relative;width:min(100%,320px);aspect-ratio:1;margin:9px auto 4px;border:2px solid #7895cc;border-radius:9px;overflow:hidden;background:#25344a url('/tools/map/radar.webp') center/100% 100% no-repeat}
     #zgta-route-map svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
     #zgta-route-map .zgta-map-pin{position:absolute;z-index:1;width:13px;height:13px;border:2px solid white;border-radius:50%;box-shadow:0 0 0 3px #0009,0 0 9px #000;transform:translate(-50%,-50%)}
@@ -160,6 +161,11 @@
     panel.append(element('p', state.discord?.linked ?
       `Discord linked: ${state.discord.name}. Your guest progress remains available.` :
       'Guest play is ready. Discord is optional.', 'zgta-muted'));
+    const community = element('a', 'ZGTA:SA community Discord (optional)');
+    community.href = 'https://discord.gg/Cg39cguVUa';
+    community.target = '_blank';
+    community.rel = 'noopener noreferrer';
+    panel.append(community);
     panel.append(element('p', `Health ${state.health}/100 · Armour ${state.armour}/100 · Wanted ${state.wanted}/6 · ${state.kills} kills · ${state.deaths} deaths`, 'zgta-muted'));
     if (state.discord?.available && !state.discord.linked) {
       const link = element('button', `Link Discord · one-time $${state.discord.bonus} bonus`);
@@ -192,11 +198,13 @@
         row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
           !state.connected || state.job.remaining > state.job.radius);
       } else if (state.job.mode === 'checkpoints') {
-        panel.append(element('p', `Checkpoint ${state.job.index}/${state.job.total}: ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. ${state.job.secondsLeft} s left. Drive ${state.job.id === 'patrol' ? 'the marked police car ' : ''}within ${state.job.radius} m.`, 'zgta-muted'));
-        row(state.job.index === state.job.total ?
-          (state.job.id === 'patrol' ? 'Finish patrol' : 'Finish time trial') : 'Pass checkpoint',
+        const pizza = state.job.id === 'pizza';
+        panel.append(element('p', `${pizza ? 'Pizza delivery' : 'Checkpoint'} ${state.job.index}/${state.job.total}: ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. ${state.job.secondsLeft} s left. Drive ${state.job.id === 'patrol' ? 'the marked police car ' : pizza ? 'the marked Pizzaboy scooter ' : ''}within ${state.job.radius} m.`, 'zgta-muted'));
+        row(pizza ? (state.job.index === state.job.total ? 'Deliver final pizza' : 'Deliver pizza') :
+          state.job.index === state.job.total ?
+            (state.job.id === 'patrol' ? 'Finish patrol' : 'Finish time trial') : 'Pass checkpoint',
           state.job.index === state.job.total ? 'job.complete' : 'job.checkpoint', {},
-          state.job.index === state.job.total ? 'Finish' : 'Pass',
+          pizza ? 'Deliver' : state.job.index === state.job.total ? 'Finish' : 'Pass',
           !state.connected || state.job.remaining > state.job.radius || state.job.secondsLeft <= 0);
       } else {
         panel.append(element('p', `${state.job.name}: travel ${state.job.remaining} m more (${state.job.progress}/${state.job.goal} m).`, 'zgta-muted'));
@@ -205,7 +213,7 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}`,
+        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
             (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
             (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
@@ -433,7 +441,8 @@
       return;
     }
     const task = job.mode === 'service' ? 'repair vehicle' :
-      job.mode === 'checkpoints' ? `checkpoint ${job.index}/${job.total} · ${job.secondsLeft} s left` :
+      job.mode === 'checkpoints' ?
+        `${job.id === 'pizza' ? 'pizza delivery' : 'checkpoint'} ${job.index}/${job.total} · ${job.secondsLeft} s left` :
       job.stage === 'pickup' ? (job.id === 'carthief' ? `take getaway car · ${job.secondsLeft} s left` : job.id === 'taxi' ? 'collect passenger' :
         job.id === 'medic' ? 'collect patient' : 'collect package') :
         (job.id === 'carthief' ? `deliver getaway car · ${job.secondsLeft} s left` : job.id === 'taxi' ? 'drop off passenger' : job.id === 'medic' ?
