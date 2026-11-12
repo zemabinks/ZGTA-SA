@@ -47,12 +47,23 @@ try {
   assert.equal(green.player.turfCaptures, 1);
   assert.equal(violet.player.cash, 0);
   assert.throws(() => game.action(green.player, 'turf.start', {turf: 'elcorona'}), /already controls/);
+  assert.throws(() => game.action(green.player, 'money.transfer',
+    {number: violet.player.number, amount: 50}), /within 8 m/);
+  violet.peer.state.x = 1687;
+  assert.throws(() => game.action(green.player, 'money.transfer',
+    {number: violet.player.number, amount: 201}), /enough cash/);
+  assert.throws(() => game.action(green.player, 'money.transfer',
+    {number: violet.player.number, amount: 1.5}), /whole-dollar/);
+  game.action(green.player, 'money.transfer', {number: violet.player.number, amount: 50});
+  assert.equal(green.player.cash, 150);
+  assert.equal(violet.player.cash, 50);
+  assert.equal(game.gameplayState(green.player).leaderboard[0].name, green.player.name);
   game.flushSync();
   const saved = JSON.parse(fs.readFileSync(path.join(temporary, 'local-only', 'selfhost', 'players.json')));
   assert.equal(saved.territories.elcorona, 'green');
   assert(Object.values(saved.players).some(player => player.gang === 'green' && player.turfCaptures === 1));
   clearInterval(game.tick);
-  console.log('PASS: crew membership, switch cooldown, territory distance, contest, capture, payout, persistence');
+  console.log('PASS: crews, territory contest and capture, cash transfers, leaderboard, persistence');
 } finally {
   fs.rmSync(temporary, {recursive: true, force: true});
 }
