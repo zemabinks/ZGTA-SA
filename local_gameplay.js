@@ -13,6 +13,7 @@
     #zgta-local-panel .zgta-row span{min-width:0}#zgta-local-panel button{border:1px solid #7797dd;border-radius:8px;background:#254785;color:white;padding:7px 10px;font:600 13px system-ui;cursor:pointer;white-space:nowrap}
     #zgta-local-panel button:disabled{opacity:.45;cursor:default}#zgta-local-panel .zgta-close{float:right;background:#263247}
     #zgta-local-panel select{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
+    #zgta-local-panel input[type=number]{width:95px;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
     #zgta-local-objective{position:fixed;right:16px;top:72px;z-index:1000;max-width:min(330px,calc(100vw - 32px));border:1px solid #86a9ff;border-radius:10px;background:#14264ff0;color:white;padding:10px 14px;font:600 13px/1.45 system-ui;text-align:left;cursor:pointer;box-shadow:0 4px 18px #0009}
     #zgta-local-objective[hidden]{display:none}
@@ -46,6 +47,7 @@
   let busy = false;
   let selectedCarModel = '';
   let selectedHomeId = '';
+  const transferAmounts = new Map();
 
   function element(tag, text, className) {
     const item = document.createElement(tag);
@@ -231,6 +233,28 @@
         turf.owner === state.gang || !!turf.capturing || !!myCapture ||
         turf.distance === null || turf.distance > 20);
     }
+    section('Players and cash');
+    if (!state.nearbyPlayers.length)
+      panel.append(element('p', 'No other players within 15 m. Cash transfers require 8 m.', 'zgta-muted'));
+    for (const other of state.nearbyPlayers) {
+      const line = element('div', undefined, 'zgta-row');
+      line.append(element('span', `${other.name} · ${other.distance} m`));
+      const input = element('input');
+      input.type = 'number'; input.min = '1'; input.max = '1000000';
+      input.step = '1'; input.value = transferAmounts.get(other.number) || '50';
+      input.setAttribute('aria-label', `Cash for ${other.name}`);
+      input.addEventListener('input', () => transferAmounts.set(other.number, input.value));
+      const send = element('button', 'Give cash');
+      send.type = 'button';
+      send.disabled = busy || other.distance > 8 || state.cash < 1;
+      send.addEventListener('click', () => perform('money.transfer',
+        {number: other.number, amount: Number(input.value)}));
+      line.append(input, send);
+      panel.append(line);
+    }
+    panel.append(element('p', `Local leaderboard · top ${state.leaderboard.length} by XP`, 'zgta-muted'));
+    for (const entry of state.leaderboard)
+      panel.append(element('p', `#${entry.place} ${entry.name} · ${entry.xp} XP · ${entry.jobsDone} jobs · ${entry.racesWon} race wins · ${entry.turfCaptures} captures`, 'zgta-muted'));
     section('Garage');
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
     state.cars.forEach((car, slot) => {
