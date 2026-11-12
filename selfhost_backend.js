@@ -11,6 +11,7 @@ const MAX_CASH = 100000000;
 const DISCORD_BONUS = 500;
 const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
+const MULTIPLAYER_RACE_MS = 300000;
 const JOBS = Object.freeze([
   {id: 'courier', name: 'Courier', pay: 250, distance: 38},
   {id: 'taxi', name: 'Taxi', pay: 300, distance: 48},
@@ -163,6 +164,7 @@ class LocalGame {
     this.peers = new Set();
     this.vehicles = new Map();
     this.nextVehicle = 1;
+    this.race = null;
     this.chat = [];
     this.chatSequence = 0;
     this.nextNumber = 1;
@@ -174,6 +176,7 @@ class LocalGame {
           CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [];
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
           cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
+          racesFinished: money(value.racesFinished), racesWon: money(value.racesWon),
           cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
@@ -207,6 +210,7 @@ class LocalGame {
     if (this.saveTimer) {clearTimeout(this.saveTimer); this.saveTimer = null;}
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
       [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
+        racesFinished: p.racesFinished, racesWon: p.racesWon,
         cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
         discord: p.discord, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
@@ -219,7 +223,8 @@ class LocalGame {
     if (!id || !this.players.has(id)) {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
-        cash: 0, xp: 0, jobsDone: 0, cars: [], garage: [], homes: [], job: null,
+        cash: 0, xp: 0, jobsDone: 0, racesFinished: 0, racesWon: 0,
+        cars: [], garage: [], homes: [], job: null,
         discord: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
       if (res) res.setHeader('Set-Cookie', `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax${secure}`);
@@ -248,6 +253,59 @@ class LocalGame {
       Number.isFinite(item.state.x) && Number.isFinite(item.state.y));
     return peer ? {x: peer.state.x, y: peer.state.y,
       z: finite(peer.state.z, 13), peer} : null;
+  }
+
+  removeRaceCar(member) {
+    if (!member?.carId || !this.vehicles.delete(member.carId)) return;
+    for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: member.carId});
+    member.carId = null;
+  }
+
+  finishRaceIfDone() {
+    const race = this.race;
+    if (!race || race.stage !== 'running' ||
+        [...race.members.values()].some(member => !member.finishedAt && !member.left)) return;
+    race.stage = 'finished';
+    race.finishedAt = Date.now();
+    for (const member of race.members.values()) this.removeRaceCar(member);
+    for (const player of race.members.keys()) this.note(player, 'The multiplayer race has ended. Results are in F6.');
+  }
+
+  expireRace() {
+    const race = this.race;
+    if (!race) return;
+    if (race.stage === 'lobby' && Date.now() - race.created > 600000) {
+      this.race = null;
+    } else if (race.stage === 'running' && Date.now() - race.started > MULTIPLAYER_RACE_MS) {
+      for (const member of race.members.values()) if (!member.finishedAt) {
+        member.left = true;
+        this.removeRaceCar(member);
+      }
+      this.finishRaceIfDone();
+    }
+  }
+
+  raceView(player, pos) {
+    this.expireRace();
+    const race = this.race;
+    if (!race) return null;
+    const member = race.members.get(player);
+    const home = member && race.stage === 'running' && !member.finishedAt && !member.left ?
+      homeAt(race.points[member.index]) : null;
+    const target = home ? {x: rounded(home.out[0]), y: rounded(home.out[1]), name: home.name} : null;
+    return {stage: race.stage, host: race.host.name, isHost: race.host === player,
+      joined: !!member, start: {x: race.start[0], y: race.start[1]},
+      startDistance: pos ? Math.ceil(Math.hypot(pos.x - race.start[0], pos.y - race.start[1])) : null,
+      players: [...race.members].map(([racer, entry]) => ({name: racer.name,
+        status: entry.finishedAt ? `#${entry.place}` : entry.left ? 'DNF' :
+          race.stage === 'lobby' ? 'ready' : 'racing'})),
+      index: home ? member.index + 1 : null, total: race.points.length,
+      target, remaining: target && pos ? Math.ceil(Math.hypot(pos.x - target.x, pos.y - target.y)) : null,
+      radius: MISSION_RADIUS,
+      secondsLeft: race.stage === 'running' ?
+        Math.max(0, Math.ceil((MULTIPLAYER_RACE_MS - (Date.now() - race.started)) / 1000)) : null,
+      results: race.results.map(result => ({name: result.name, place: result.place,
+        seconds: result.seconds, pay: result.pay}))};
   }
 
   gameplayState(player) {
@@ -286,6 +344,7 @@ class LocalGame {
         secondsLeft: Math.max(0, Math.ceil((TIME_TRIAL_MS - (Date.now() - active.started)) / 1000))};
     }
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
+      racesFinished: player.racesFinished || 0, racesWon: player.racesWon || 0,
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
@@ -304,6 +363,7 @@ class LocalGame {
             Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null};
       }),
       onFoot: pos?.peer.state.walking === true,
+      race: this.raceView(player, pos),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
       catalog: {jobs: JOBS,
         cars: CAR_CATALOG.map(({model, name, price, type, source}) => ({model, name, price, type, source})),
@@ -489,11 +549,112 @@ class LocalGame {
   action(player, action, input) {
     const pos = this.position(player);
     let message;
-    if (action === 'job.start') {
+    this.expireRace();
+    if (action === 'race.create') {
+      if (this.race && this.race.stage !== 'finished') throw new Error('A race lobby already exists.');
+      if (!pos || player.job) throw new Error('Enter the game and finish your job before creating a race.');
+      const points = [];
+      let from = pos;
+      for (let i = 0; i < 3; i++) {
+        const home = nearestHome(from, 120, points);
+        if (!home) throw new Error('Race checkpoints are unavailable.');
+        points.push(home.id);
+        from = {x: home.out[0], y: home.out[1]};
+      }
+      this.race = {host: player, members: new Map([[player,
+        {index: 0, carId: null, finishedAt: null, left: false, place: null}]]),
+      points, start: [rounded(pos.x), rounded(pos.y)], created: Date.now(),
+      started: null, stage: 'lobby', results: []};
+      message = 'Race lobby opened. Other players can join near the starting line in F6.';
+      for (const peer of this.peers) if (peer.ready && peer.player !== player)
+        peer.send({t: 'note', text: `${player.name} opened a multiplayer race. Press F6 to join.`});
+    } else if (action === 'race.join') {
+      const race = this.race;
+      if (!race || race.stage !== 'lobby') throw new Error('No race lobby is open.');
+      if (player.job) throw new Error('Finish your current job before joining a race.');
+      if (race.members.has(player)) throw new Error('You already joined this race.');
+      if (race.members.size >= 8) throw new Error('This race is full.');
+      if (!pos || Math.hypot(pos.x - race.start[0], pos.y - race.start[1]) > 25)
+        throw new Error('Go within 25 m of the race starting line to join.');
+      race.members.set(player, {index: 0, carId: null, finishedAt: null, left: false, place: null});
+      message = `Joined ${race.host.name}'s race. Wait for the host to start.`;
+      this.note(race.host, `${player.name} joined your race (${race.members.size} players).`);
+    } else if (action === 'race.start') {
+      const race = this.race;
+      if (!race || race.stage !== 'lobby' || race.host !== player)
+        throw new Error('Only the host can start an open race lobby.');
+      if (race.members.size < 2) throw new Error('At least two players must join the race.');
+      for (const racer of race.members.keys()) {
+        const at = this.position(racer);
+        if (!at || Math.hypot(at.x - race.start[0], at.y - race.start[1]) > 25)
+          throw new Error(`${racer.name} must be near the starting line.`);
+      }
+      race.stage = 'running'; race.started = Date.now();
+      let lane = 0;
+      for (const [racer, member] of race.members) {
+        const at = this.position(racer);
+        const id = missionId();
+        const row = [id, racer.name, '410.52.39.0.', rounded(at.x + 4 + 4 * lane++),
+          rounded(at.y + 3), rounded(at.z + 1.1), 0, 0, 0, 1000, '', null];
+        member.carId = id;
+        this.vehicles.set(id, {id, owner: null, missionOwner: racer, row});
+        for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
+        this.note(racer, 'Your loaner Manana spawned nearby. Drive through the three race checkpoints.');
+      }
+      message = 'Race started. Drive through three checkpoints within five minutes.';
+    } else if (action === 'race.checkpoint' || action === 'race.finish') {
+      const race = this.race;
+      const member = race?.members.get(player);
+      if (!race || race.stage !== 'running' || !member || member.finishedAt || member.left)
+        throw new Error('You are not in an active race.');
+      if (Date.now() - race.started > MULTIPLAYER_RACE_MS)
+        throw new Error('The race has expired.');
+      const final = member.index === race.points.length - 1;
+      if ((action === 'race.finish') !== final)
+        throw new Error(final ? 'Finish at the final checkpoint.' : 'Pass the next checkpoint first.');
+      const home = homeAt(race.points[member.index]);
+      if (!pos || pos.peer.state.driving !== true ||
+          Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS)
+        throw new Error('Drive within 12 m of your active race checkpoint.');
+      if (!final) {
+        member.index++;
+        message = `Checkpoint ${member.index} passed. Next: ${homeAt(race.points[member.index]).name}.`;
+      } else {
+        if (Date.now() - race.started < 3000) throw new Error('The race started too recently.');
+        const place = race.results.length + 1;
+        const pay = place === 1 ? 600 : place === 2 ? 400 : 250;
+        member.finishedAt = Date.now(); member.place = place;
+        race.results.push({name: player.name, place,
+          seconds: Math.round((member.finishedAt - race.started) / 1000), pay});
+        player.cash = money(player.cash + pay);
+        player.xp = money(player.xp + Math.round(pay / 5));
+        player.racesFinished = money((player.racesFinished || 0) + 1);
+        if (place === 1) player.racesWon = money((player.racesWon || 0) + 1);
+        this.removeRaceCar(member);
+        this.updatePlayer(player);
+        this.finishRaceIfDone();
+        message = `Race finish #${place}: +$${pay}.`;
+      }
+    } else if (action === 'race.leave') {
+      const race = this.race;
+      const member = race?.members.get(player);
+      if (!race || !member || race.stage === 'finished') throw new Error('You are not in an active race.');
+      if (race.stage === 'lobby') {
+        if (race.host === player) this.race = null;
+        else race.members.delete(player);
+      } else {
+        member.left = true;
+        this.removeRaceCar(member);
+        this.finishRaceIfDone();
+      }
+      message = race.host === player && race.stage === 'lobby' ? 'Race lobby cancelled.' : 'Left the race.';
+    } else if (action === 'job.start') {
       const job = JOBS.find(item => item.id === input.job);
       if (!job) throw new Error('Unknown job.');
       if (!pos) throw new Error('Enter the game before starting a job.');
       if (player.job) throw new Error('Finish or cancel your current job first.');
+      if (this.race && ['lobby', 'running'].includes(this.race.stage) &&
+          this.race.members.has(player)) throw new Error('Leave or finish your race first.');
       if (job.id === 'courier' || job.id === 'taxi') {
         if (job.id === 'taxi' && player.cars.length === 0)
           throw new Error('Own a car before starting taxi fares.');
@@ -705,7 +866,8 @@ class LocalGame {
         joinCodeRequired: !!JOIN_CODE, lanAccessible: process.env.BIND_HOST === '0.0.0.0',
         allowedHosts: (process.env.ZGTA_ALLOWED_HOSTS || '').split(',').filter(Boolean),
         features: ['local accounts', 'player positions', 'chat', 'local settings',
-          'jobs and cash', 'garage ownership', 'home ownership', 'client catalogs']});
+          'jobs and cash', 'garage ownership', 'home ownership', 'multiplayer races',
+          'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
         'pitch', 'roll', 'speed', 'steer', 'health', 'life', 'weapon', 'act', 'clock'];
@@ -877,6 +1039,17 @@ class LocalGame {
       return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
     if (text === '/jobs')
       return peer.send({t: 'note', text: `Local jobs: ${JOBS.map(job => `${job.id} ($${job.pay})`).join(', ')}. Type /job <name>.`});
+    if (text === '/race')
+      return peer.send({t: 'note', text: 'Race commands: /race create, join, start, checkpoint, finish, leave. F6 shows the current lobby and objectives.'});
+    if (text.startsWith('/race ')) {
+      try {
+        const command = text.slice(6).trim();
+        if (!['create', 'join', 'start', 'checkpoint', 'finish', 'leave'].includes(command))
+          throw new Error('Unknown race command. Type /race for help.');
+        this.action(peer.player, `race.${command}`, {});
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
+      return;
+    }
     if (text.startsWith('/job ') || ['/pickup', '/checkpoint', '/repair', '/deliver', '/finish', '/canceljob'].includes(text) ||
         text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/storecar ') ||
         text.startsWith('/repaircar ') || text.startsWith('/buyhome ')) {
@@ -979,6 +1152,7 @@ class LocalGame {
   }
 
   broadcastPositions() {
+    this.expireRace();
     for (const p of this.peers) {
       if (!p.ready) continue;
       const rows = [...this.peers].filter(other => other !== p).map(other => this.row(other)).filter(Boolean);
