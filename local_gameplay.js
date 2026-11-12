@@ -131,16 +131,19 @@
       if (state.job.mode === 'route') {
         const taxi = state.job.id === 'taxi';
         const medic = state.job.id === 'medic';
+        const thief = state.job.id === 'carthief';
         const task = state.job.stage === 'pickup' ?
-          (taxi ? 'Collect the passenger' : medic ? 'Collect the patient' : 'Collect the package') :
-          (taxi ? 'Drop off the passenger' : medic ? 'Return the patient' : 'Deliver the package');
-        panel.append(element('p', `${task} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.${taxi || medic ? ' You must be driving.' : ''}`, 'zgta-muted'));
+          (thief ? 'Take the marked car' : taxi ? 'Collect the passenger' : medic ? 'Collect the patient' : 'Collect the package') :
+          (thief ? 'Deliver the marked car' : taxi ? 'Drop off the passenger' : medic ? 'Return the patient' : 'Deliver the package');
+        panel.append(element('p', `${task} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.${taxi || medic || thief ? ' You must be driving.' : ''}${thief ? ` ${state.job.secondsLeft} s left.` : ''}`, 'zgta-muted'));
         if (state.job.stage === 'pickup')
-          row(taxi ? 'Pick up passenger' : medic ? 'Pick up patient' : 'Pick up package',
-            'job.pickup', {}, 'Collect', !state.connected || state.job.remaining > state.job.radius);
-        else row(taxi ? 'Drop off passenger' : medic ? 'Return patient' : 'Deliver package',
+          row(thief ? 'Take getaway car' : taxi ? 'Pick up passenger' : medic ? 'Pick up patient' : 'Pick up package',
+            'job.pickup', {}, thief ? 'Take' : 'Collect', !state.connected || state.job.remaining > state.job.radius ||
+              (thief && state.job.secondsLeft <= 0));
+        else row(thief ? 'Deliver getaway car' : taxi ? 'Drop off passenger' : medic ? 'Return patient' : 'Deliver package',
           'job.complete', {}, taxi ? 'Drop off' : medic ? 'Return' : 'Deliver',
-          !state.connected || state.job.remaining > state.job.radius);
+          !state.connected || state.job.remaining > state.job.radius ||
+            (thief && state.job.secondsLeft <= 0));
       } else if (state.job.mode === 'service') {
         panel.append(element('p', `Repair the stranded vehicle at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m and stand on foot.`, 'zgta-muted'));
         row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
@@ -158,9 +161,10 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}`,
+        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
             (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
+            (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
             (state.race?.joined && ['lobby', 'running'].includes(state.race.stage)));
     }
     section('Multiplayer race');
@@ -326,9 +330,9 @@
     }
     const task = job.mode === 'service' ? 'repair vehicle' :
       job.mode === 'checkpoints' ? `checkpoint ${job.index}/${job.total} · ${job.secondsLeft} s left` :
-      job.stage === 'pickup' ? (job.id === 'taxi' ? 'collect passenger' :
+      job.stage === 'pickup' ? (job.id === 'carthief' ? `take getaway car · ${job.secondsLeft} s left` : job.id === 'taxi' ? 'collect passenger' :
         job.id === 'medic' ? 'collect patient' : 'collect package') :
-        (job.id === 'taxi' ? 'drop off passenger' : job.id === 'medic' ?
+        (job.id === 'carthief' ? `deliver getaway car · ${job.secondsLeft} s left` : job.id === 'taxi' ? 'drop off passenger' : job.id === 'medic' ?
           'return patient' : 'deliver package');
     objective.textContent = `${job.name}: ${task}\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nPress F6 for details`;
     objective.style.whiteSpace = 'pre-line';
