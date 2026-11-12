@@ -20,7 +20,9 @@ complete rules or data held by that private server.
 | Multiplayer race | Shared lobby, two or more racers, temporary cars, three ordered checkpoints, finish ranking, and payouts | Chrome created and cancelled a lobby. Two protocol clients pass route, rank, payout, car cleanup, and account-stat persistence tests. A full browser race has not been driven; there are no 3D checkpoint rings or persistent leaderboard. Active race is lost on server restart. |
 | Economy | Cash, XP, job payouts, car and home prices | Transactions and saved balances pass isolated tests. Publisher rules, businesses, shops, taxes, and trading are not reproduced. |
 | Homes | Purchase, owned markers, exterior visit | Purchase and native home-status tests pass. Interiors rendered as empty space in a Chrome probe, so entry, storage, and garage actions remain disabled. |
-| Police, combat, gangs | No independent implementations | These advertised or client-facing systems need behavioral specifications, original code/data, or independent designs and tests. |
+| Combat and safety | Saved health, armour, kills and deaths; nearby hit damage, kill feed, passive mode and cooldown | Two protocol clients pass shot, hit, kill and respawn tests. The archived client exposes the packet shapes, but exact publisher damage and physics rules are unavailable. Hit range uses client reported positions; weapons, line of sight and anti-cheat are incomplete. A real browser fight has not been tested. |
+| Wanted level and police | Wanted levels rise on attacks and decay over time; volunteers can go on police duty and arrest a nearby wanted player for a fine and reward | Two protocol clients pass wanted, arrest and passive restrictions. There are no police NPCs, pursuit vehicles, jail, or original publisher rules. |
+| Crews and territory | Three local crews and three property based territories; capture progress, rival contest, reward, saved ownership | Isolated tests cover crew switching, location, contest, capture, payout and restart data. No 3D territory marker, gang missions, or publisher gang system. Capture is session state. |
 | Internet hosting | LAN launcher and private join code | Join and local LAN-address checks pass. No public deployment, domain, HTTPS endpoint, or internet device test exists. |
 
 The local game should be described as a growing independent implementation.
@@ -35,10 +37,10 @@ those files out of GitHub.
    and on a second physical device; add visible patient and checkpoint markers.
 2. Add server-validated vehicle collisions and damage, then property garages,
    fuel, and tuning rules.
-3. Add health, combat, wanted levels, and police behavior with rules enforced
-   by the server.
-4. Add gangs and territory control; expand races with visible checkpoint
-   markers and a persistent leaderboard.
+3. Validate combat and turf capture in the real browser with two devices;
+   add authoritative hit geometry, police NPC behavior, and 3D markers.
+4. Expand gangs, territory control, and races with missions, visible
+   checkpoints, and a persistent leaderboard.
 5. Build an original public web experience with guest accounts, configure
    optional Discord linking, HTTPS, abuse controls, and a licensed asset path.
 
