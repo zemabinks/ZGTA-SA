@@ -19,7 +19,8 @@ complete rules or data held by that private server.
 | Medic | Mission ambulance, patient pickup point, and return to starting aid station | Browser showed the ambulance and patient objective; isolated driving, pickup, payout, and cleanup tests pass. No visible patient, hospital system, or healing yet. |
 | Street time trial | Three world checkpoints in an owned car within three minutes | Order, driving requirement, timer, and payout pass isolated tests. No visible checkpoint markers or leaderboard yet. |
 | Getaway car | Timed car theft route using a reserved mission vehicle; taking the car raises wanted level | Chrome started and cancelled the mission and displayed its location and timer. Isolated tests cover another player's entry denial, wrong-car rejection, pickup, delivery, payout, cleanup, and restart restoration. This is an independent mission, not the publisher's car thief rules. |
-| Multiplayer race | Shared lobby, two or more racers, temporary cars, three ordered checkpoints, finish ranking, and payouts | Chrome created and cancelled a lobby. Two protocol clients pass route, rank, payout, car cleanup, and account-stat persistence tests. A full browser race has not been driven; there are no 3D checkpoint rings or persistent leaderboard. Active race is lost on server restart. |
+| Exploration trail | Twelve one-time property-entrance discoveries across the map, with cash and XP rewards and a completion bonus | Isolated tests cover on-foot proximity, duplicate rejection, rewards, and restart persistence. Chrome verified F6 track and untrack controls. F6 offers a direction objective; there are no 3D collectible models or publisher collectible locations. |
+| Multiplayer race | Shared lobby, two or more racers, temporary cars, three ordered checkpoints, finish ranking, payouts, and saved standings by wins and finishes | Chrome created and cancelled a lobby. Two protocol clients pass route, rank, payout, car cleanup, and account-stat persistence tests. Saved standings survive a restart. A full browser race has not been driven; there are no 3D checkpoint rings. Active race is lost on server restart. |
 | Economy | Cash, XP, job payouts, car and home prices | Transactions and saved balances pass isolated tests. Publisher rules, businesses, shops, taxes, and item trading are not reproduced. |
 | Player economy | Nearby cash transfers and a local top-ten XP leaderboard | Isolated tests cover amount, balance and distance checks, transfer, and ranking. Item trading, businesses, shops, and publisher rankings remain unavailable. |
 | Homes | Purchase, owned markers, exterior visit | Purchase and native home-status tests pass. Interiors rendered as empty space in a Chrome probe, so entry, storage, and garage actions remain disabled. |
@@ -36,14 +37,14 @@ those files out of GitHub.
 
 ## Next acceptance targets
 
-1. Check the new mechanic, medic, and time trial objectives in a real browser
-   and on a second physical device; add visible patient and checkpoint markers.
+1. Check the new mechanic, medic, time trial, and exploration objectives in a
+   real browser and on a second physical device; add visible world markers.
 2. Add server-validated vehicle collisions and damage, then property garages,
    fuel, and tuning rules.
 3. Validate combat and turf capture in the real browser with two devices;
    add authoritative hit geometry, police NPC behavior, and 3D markers.
-4. Expand gangs, territory control, and races with missions, visible
-   checkpoints, and a persistent leaderboard.
+4. Expand gangs, territory control, and races with missions and visible
+   checkpoints; test the saved race standings with real browser races.
 5. Build an original public web experience with guest accounts, configure
    optional Discord linking, HTTPS, abuse controls, and a licensed asset path.
 
