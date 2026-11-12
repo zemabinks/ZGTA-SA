@@ -185,8 +185,9 @@ Passive mode blocks player damage; turning it off starts a two-minute cooldown.
 Wanted levels decay over time. A player on volunteer police duty can arrest a
 wanted player when both are on foot within four metres, clearing the wanted
 level and charging a small fine. F6 shows these controls and nearby suspects.
-The rules use client reported positions and do not provide authoritative shot
-geometry, weapon inventory, police NPCs, or the publisher's original combat
+The server rejects shot origins far from the shooter and hits far from the
+reported impact point. The rules still use client reported positions and do
+not provide authoritative line of sight, weapon inventory, police NPCs, or the publisher's original combat
 system. Type `/wanted`, `/passive`, `/police`, or `/arrest NUMBER` in chat.
 
 F6 also offers three local crews and three property based territories. Join a
