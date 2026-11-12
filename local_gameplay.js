@@ -14,6 +14,7 @@
     #zgta-local-panel button:disabled{opacity:.45;cursor:default}#zgta-local-panel .zgta-close{float:right;background:#263247}
     #zgta-local-panel select{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-panel input[type=number]{width:95px;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
+    #zgta-local-panel input[type=text]{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
     #zgta-local-objective{position:fixed;right:16px;top:72px;z-index:1000;max-width:min(330px,calc(100vw - 32px));border:1px solid #86a9ff;border-radius:10px;background:#14264ff0;color:white;padding:10px 14px;font:600 13px/1.45 system-ui;text-align:left;cursor:pointer;box-shadow:0 4px 18px #0009}
     #zgta-local-objective[hidden]{display:none}
@@ -48,6 +49,7 @@
   let selectedCarModel = '';
   let selectedHomeId = '';
   const transferAmounts = new Map();
+  let partyDraft = '';
 
   function element(tag, text, className) {
     const item = document.createElement(tag);
@@ -237,6 +239,38 @@
         turf.owner === state.gang || !!turf.capturing || !!myCapture ||
         turf.distance === null || turf.distance > 20);
     }
+    section('Private group');
+    if (state.party.invite) {
+      panel.append(element('p', `${state.party.invite.from} invited you to a group · ${state.party.invite.secondsLeft} s left.`, 'zgta-muted'));
+      row('Join this group', 'party.accept', {}, 'Accept');
+      row('Ignore this invitation', 'party.decline', {}, 'Decline');
+    }
+    const group = state.party.group;
+    if (!group) row('Create a group for up to four players', 'party.create', {}, 'Create');
+    else {
+      panel.append(element('p', `${group.leader}'s group · ${group.members.length}/4 players · session only`, 'zgta-muted'));
+      for (const member of group.members)
+        if (group.isLeader && member.number !== state.party.you)
+          row(member.name, 'party.kick', {number: member.number}, 'Remove');
+        else panel.append(element('p', `${member.name}${member.number === group.leaderNumber ? ' · leader' : ''}`, 'zgta-muted'));
+      const line = element('div', undefined, 'zgta-row');
+      const draft = element('input');
+      draft.type = 'text'; draft.maxLength = 160; draft.value = partyDraft;
+      draft.placeholder = 'Message your group';
+      draft.setAttribute('aria-label', 'Private group message');
+      draft.addEventListener('input', () => {partyDraft = draft.value;});
+      draft.addEventListener('keydown', event => {
+        if (event.key === 'Enter') perform('party.chat', {text: draft.value});
+      });
+      const send = element('button', 'Send');
+      send.type = 'button'; send.disabled = busy;
+      send.addEventListener('click', () => perform('party.chat', {text: draft.value}));
+      line.append(draft, send); panel.append(line);
+      row('Leave this group', 'party.leave', {}, 'Leave');
+    }
+    if (!group || group.isLeader) for (const candidate of state.party.candidates)
+      row(`Invite ${candidate.name}`, 'party.invite', {number: candidate.number}, 'Invite',
+        !!group && group.members.length >= 4);
     section('Players and cash');
     if (!state.nearbyPlayers.length)
       panel.append(element('p', 'No other players within 15 m. Cash transfers require 8 m.', 'zgta-muted'));
@@ -361,6 +395,7 @@
       state = body.state;
       result = body.message;
       error = false;
+      if (action === 'party.chat') partyDraft = '';
     } catch (failure) { result = failure.message; error = true; }
     busy = false;
     render();
