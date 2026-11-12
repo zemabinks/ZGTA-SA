@@ -47,10 +47,14 @@ try {
   assert.equal(party.leader, c.player);
   c.player.lastPartyInvite = 0;
   game.action(c.player, 'party.invite', {number: e.player.number});
-  game.partyInvites.get(e.player).expires = Date.now() - 1;
-  assert.throws(() => game.action(e.player, 'party.accept', {}), /No active/);
   game.remove(c.peer);
   assert.equal(party.leader, d.player);
+  assert.throws(() => game.action(e.player, 'party.accept', {}), /No active/,
+    'an invitation must expire when its sender leaves the group');
+  d.player.lastPartyInvite = 0;
+  game.action(d.player, 'party.invite', {number: e.player.number});
+  game.partyInvites.get(e.player).expires = Date.now() - 1;
+  assert.throws(() => game.action(e.player, 'party.accept', {}), /No active/);
   game.remove(d.peer);
   assert.equal(game.parties.has(party.id), false);
   clearInterval(game.tick);
