@@ -213,9 +213,36 @@ async function main() {
     const recovered = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
     assert.equal(Object.values(recovered.players).find(player =>
       player.name === allA.you).health, 100, 'client respawn restores local health');
+    const c = await openSocket(`ws://127.0.0.1:${port}/api/world/live`);
+    clients.push(c);
+    const fromC = inbox(c);
+    c.send(JSON.stringify({t: 'hi'}));
+    const allC = await fromC(message => message.t === 'all');
+    assert.notEqual(allC.id, allA.id);
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 100,
+      say: `/party invite ${allB.id}`}));
+    await fromB(message => message.t === 'note' && message.text.includes('invited you'));
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13, health: 100, say: '/party accept'}));
+    await fromA(message => message.t === 'note' && message.text.includes('joined the group'));
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 100, say: '/p private hello'}));
+    await fromB(message => message.t === 'note' && message.text.includes('[Group]') &&
+      message.text.includes('private hello'));
+    await assert.rejects(fromC(message => message.t === 'note' &&
+      message.text.includes('private hello'), 400), /Timed out/,
+    'a third player must not receive private group chat');
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 100, say: '/party leave'}));
+    await fromB(message => message.t === 'note' && message.text.includes('left the group'));
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13, health: 100, say: '/p new leader'}));
+    await fromB(message => message.t === 'note' && message.text.includes('[Group]') &&
+      message.text.includes('new leader'));
     b.close();
     await fromA(message => message.t === 'gone' && message.id === allB.id);
-    console.log('PASS: account creation, two players, movement, chat, combat, kill feed, wanted level, arrest, passive mode, respawn');
+    console.log('PASS: accounts, movement, chat, combat, wanted level, arrest, respawn, group invites and private chat');
   } finally {
     for (const ws of clients) if (ws.readyState === WebSocket.OPEN) ws.close();
     child.kill('SIGINT');
