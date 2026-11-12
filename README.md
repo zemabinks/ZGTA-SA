@@ -191,12 +191,17 @@ rival crew member nearby pauses the capture. The owning crew and player rewards
 are saved on this Mac; an active capture ends when the server stops. Changing
 crews has a ten-minute cooldown. These are original local rules. They do not
 reproduce the publisher's gang missions or territory system.
+The F6 panel also lists the top ten local players by XP and lets nearby
+players give each other cash. The server checks the amount, sender balance,
+and an eight-metre distance before moving funds. Item trading and publisher
+businesses are not included.
 
 This is a **work-in-progress independent server**. It supports local accounts,
 settings, walking and driving player positions, passenger state, live chat,
 player list, job payouts, cash, vehicle ownership, spawning, condition,
 storage, repair, a multiplayer race, simplified combat and wanted levels,
-volunteer arrests, and local territory capture, plus
+volunteer arrests, local territory capture, nearby cash transfers, and a
+local leaderboard, plus
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
 independent server's cash balance; they do not reproduce the publisher's
@@ -217,6 +222,7 @@ repair, timed checkpoints, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
 wanted levels, passive mode, volunteer arrests, territory capture and contests,
+cash transfers and leaderboard ranking,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
