@@ -175,15 +175,33 @@ leaderboard yet. Chat commands
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
 
+The independent combat layer tracks health, armour, kills, deaths, and a wanted
+level. Nearby player hits apply simplified server damage and send a kill feed.
+Passive mode blocks player damage; turning it off starts a two-minute cooldown.
+Wanted levels decay over time. A player on volunteer police duty can arrest a
+wanted player when both are on foot within four metres, clearing the wanted
+level and charging a small fine. F6 shows these controls and nearby suspects.
+The rules use client reported positions and do not provide authoritative shot
+geometry, weapon inventory, police NPCs, or the publisher's original combat
+system. Type `/wanted`, `/passive`, `/police`, or `/arrest NUMBER` in chat.
+
+F6 also offers three local crews and three property based territories. Join a
+crew, stand on foot near a territory, and hold a capture for 30 seconds. A
+rival crew member nearby pauses the capture. The owning crew and player rewards
+are saved on this Mac; an active capture ends when the server stops. Changing
+crews has a ten-minute cooldown. These are original local rules. They do not
+reproduce the publisher's gang missions or territory system.
+
 This is a **work-in-progress independent server**. It supports local accounts,
 settings, walking and driving player positions, passenger state, live chat,
 player list, job payouts, cash, vehicle ownership, spawning, condition,
-storage, repair, and a multiplayer race, plus
+storage, repair, a multiplayer race, simplified combat and wanted levels,
+volunteer arrests, and local territory capture, plus
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
 independent server's cash balance; they do not reproduce the publisher's
 dealer locations, sale rules, or economy. The original service's job missions, economy rules,
-property interiors, the publisher's race formats, combat, police, gangs,
+property interiors, the publisher's race formats and combat and gang rules,
 administration, and other
 server systems still need independent implementations. The browser download
 does not include the original server logic or database. The 3D map and solo
@@ -191,12 +209,14 @@ mode remain available from the local archive.
 See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the current implementation and
 verification status of each major system.
 
-Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
+Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`, and
+`node smoke_gangs.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
 repair, timed checkpoints, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, restart persistence, and a
-two-player race with ordered checkpoints and payouts,
+two-player race with ordered checkpoints and payouts, player combat, kill feed,
+wanted levels, passive mode, volunteer arrests, territory capture and contests,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
