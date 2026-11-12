@@ -160,21 +160,31 @@ property can be visited at its world entrance. Property interiors and garage
 buildings are not implemented. The client shows owned-house markers; its house
 entry prompt reports that interior actions are unavailable. A Chrome test of
 the extracted interior coordinates rendered an empty void, so interior entry
-is not enabled. Chat commands
+is not enabled.
+
+The F6 panel also offers a separate multiplayer race. A host opens a lobby
+near other players, starts once at least two have joined, and each racer gets
+a temporary Manana. Racers drive through three shared property checkpoints
+within five minutes. First place earns $600, second $400, and later finishers
+$250; completed races and wins are saved to each account. The lobby, active
+race, and temporary cars are session state and do not survive a server
+restart. This independent race has no 3D checkpoint rings or global
+leaderboard yet. Chat commands
 `/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, and `/buyhome starter`
-expose the same local systems.
+expose the same local systems. Type `/race` for the multiplayer race commands.
 
 This is a **work-in-progress independent server**. It supports local accounts,
 settings, walking and driving player positions, passenger state, live chat,
 player list, job payouts, cash, vehicle ownership, spawning, condition,
-storage, and repair, and
+storage, repair, and a multiplayer race, plus
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
 independent server's cash balance; they do not reproduce the publisher's
 dealer locations, sale rules, or economy. The original service's job missions, economy rules,
-property interiors, races, combat, police, gangs, administration, and other
+property interiors, the publisher's race formats, combat, police, gangs,
+administration, and other
 server systems still need independent implementations. The browser download
 does not include the original server logic or database. The 3D map and solo
 mode remain available from the local archive.
@@ -185,7 +195,8 @@ Run `node smoke_multiplayer.js` and `node smoke_gameplay.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
 repair, timed checkpoints, mission vehicle cleanup, two-client visibility and
-entry restrictions, owned car storage, repair, and restart persistence,
+entry restrictions, owned car storage, repair, restart persistence, and a
+two-player race with ordered checkpoints and payouts,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
