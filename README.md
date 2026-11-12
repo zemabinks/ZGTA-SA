@@ -170,10 +170,10 @@ The F6 panel also offers a separate multiplayer race. A host opens a lobby
 near other players, starts once at least two have joined, and each racer gets
 a temporary Manana. Racers drive through three shared property checkpoints
 within five minutes. First place earns $600, second $400, and later finishers
-$250; completed races and wins are saved to each account. The lobby, active
-race, and temporary cars are session state and do not survive a server
-restart. This independent race has no 3D checkpoint rings or global
-leaderboard yet. Chat commands
+$250; completed races and wins are saved to each account. F6 shows saved race
+standings ranked by wins, then finishes. The lobby, active race, and temporary
+cars are session state and do not survive a server restart. This independent
+race has no 3D checkpoint rings. Chat commands
 `/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, and `/buyhome starter`
@@ -208,12 +208,21 @@ in chat for invitation and membership commands, or `/p MESSAGE` for a private
 group message. Groups are session state and end after the server restarts.
 This is an independent social feature, not the publisher's party system.
 
+F6 also has a twelve-location exploration trail through Los Santos, San
+Fierro, Las Venturas, and the countryside. Track a location to see its
+distance and compass direction, then stand on foot within 12 metres to
+discover it. Each location pays $75 and 20 XP once; finding all twelve gives
+another $500 and 100 XP. Progress and the tracked location are saved on this
+Mac. Type `/explore` for chat commands. These property-entrance stops are
+original local objectives, not the publisher's collectible locations; they
+have no 3D pickup model yet.
+
 This is a **work-in-progress independent server**. It supports local accounts,
 settings, walking and driving player positions, passenger state, live chat,
 player list, job payouts, cash, vehicle ownership, spawning, condition,
 storage, repair, a multiplayer race, simplified combat and wanted levels,
 volunteer arrests, local territory capture, nearby cash transfers, private
-groups and a local leaderboard, plus
+groups, an exploration trail, and a local leaderboard, plus
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
 independent server's cash balance; they do not reproduce the publisher's
@@ -227,7 +236,8 @@ See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the current implementation and
 verification status of each major system.
 
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
-`node smoke_gangs.js`, and `node smoke_parties.js` with Node.js 24 to
+`node smoke_gangs.js`, `node smoke_parties.js`, and `node smoke_explore.js`
+with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
 repair, timed checkpoints, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
@@ -238,7 +248,7 @@ cash transfers, leaderboard ranking, group invitations, private chat privacy,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
-create extra player accounts. Both tests use isolated temporary servers and leave saved players
+create extra player accounts. The tests use isolated temporary servers and leave saved players
 untouched. Chrome was also used to load the actual archived client, walk a
 courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
 and drive it in the 3D world. A later Chrome check started and cancelled the
@@ -246,7 +256,8 @@ mechanic and medic missions, displayed their objectives, and showed the medic
 ambulance beside the player. The full new routes were exercised by the
 isolated gameplay test, not by driving them in Chrome. Chrome also created and
 cancelled a race lobby in the F6 panel; the complete race was exercised by
-two protocol test clients. LAN access checks
+two protocol test clients. Chrome verified exploration tracking and clearing
+in F6; the twelve discovery payouts were checked in an isolated test. LAN access checks
 passed, but a second physical device and all original game systems have not
 been verified.
 Chrome also started and cancelled the getaway mission, showing its destination
