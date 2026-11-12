@@ -464,6 +464,50 @@ async function main() {
     assert.equal((await otherApi('/api/local/state')).body.cash, 400);
     assert.equal((await api('/api/world/cars')).body.cars.filter(car =>
       car[0].startsWith('mission-')).length, 0, 'loaner cars disappear after the race');
+    const theft = await api('/api/local/action', 'POST', {action: 'job.start', job: 'carthief'});
+    assert.equal(theft.status, 200, JSON.stringify(theft.body));
+    assert.equal(theft.body.state.job.stage, 'pickup');
+    const getaway = await ws.wait(message => message.t === 'spawned' &&
+      message.v[2] === '560.52.39.0.');
+    assert.equal((await otherWs.wait(message => message.t === 'spawned' &&
+      message.v[0] === getaway.v[0])).v[0], getaway.v[0]);
+    otherWs.send({t: 'enter', v: getaway.v[0]});
+    assert.equal((await otherWs.wait(message => message.t === 'enter' &&
+      message.v === getaway.v[0])).ok, false);
+    await moveTo(theft.body.state.job.target);
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
+      'getaway pickup requires the mission car');
+    ws.send({t: 'enter', v: getaway.v[0]});
+    assert.equal((await ws.wait(message => message.t === 'enter' &&
+      message.v === getaway.v[0])).ok, true);
+    ws.send({t: 'me', walking: false, driving: true, skin: 7,
+      car: getaway.v[2], vehicle: 'wrong-car', x, y, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400);
+    ws.send({t: 'me', walking: false, driving: true, skin: 7,
+      car: getaway.v[2], vehicle: getaway.v[0], x, y, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const stolen = await api('/api/local/action', 'POST', {action: 'job.pickup'});
+    assert.equal(stolen.status, 200, JSON.stringify(stolen.body));
+    assert.equal(stolen.body.state.wanted, 2);
+    assert.equal(stolen.body.state.job.stage, 'delivery');
+    await moveTo(stolen.body.state.job.target, true);
+    ws.send({t: 'me', walking: false, driving: true, skin: 7,
+      car: getaway.v[2], vehicle: 'wrong-car', x, y, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400);
+    ws.send({t: 'me', walking: false, driving: true, skin: 7,
+      car: getaway.v[2], vehicle: getaway.v[0], x, y, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 3100));
+    const escaped = await api('/api/local/action', 'POST', {action: 'job.complete'});
+    assert.equal(escaped.status, 200, JSON.stringify(escaped.body));
+    assert.equal(escaped.body.state.job, null);
+    assert.equal(escaped.body.state.cash, 45150);
+    await ws.wait(message => message.t === 'vgone' && message.id === getaway.v[0]);
+    const secondTheft = await api('/api/local/action', 'POST', {action: 'job.start', job: 'carthief'});
+    assert.equal(secondTheft.status, 200, JSON.stringify(secondTheft.body));
+    const savedGetaway = await ws.wait(message => message.t === 'spawned' &&
+      message.v[2] === '560.52.39.0.' && message.v[0] !== getaway.v[0]);
     otherWs.close(); otherWs = null;
     ws.close(); ws = null;
     child.kill('SIGINT');
@@ -474,7 +518,11 @@ async function main() {
     assert.equal((await otherApi('/api/local/state')).body.racesFinished, 1);
     assert.equal((await api('/api/local/state')).body.race, null,
       'active race state should not survive a server restart');
-    console.log('PASS: guest accounts, five world-objective jobs, garage persistence and repair, two-player race and payouts, home exterior visit');
+    assert.equal((await api('/api/local/state')).body.job.id, 'carthief',
+      'unfinished getaway must survive a server restart');
+    assert((await api('/api/world/cars')).body.cars.some(car => car[0] === savedGetaway.v[0]),
+      'unfinished getaway car must return after a server restart');
+    console.log('PASS: guest accounts, six world-objective jobs including getaway, garage persistence and repair, two-player race and payouts, home exterior visit');
   } finally {
     otherWs?.close();
     ws?.close();
