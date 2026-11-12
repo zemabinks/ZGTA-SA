@@ -206,7 +206,9 @@ courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
 and drive it in the 3D world. A later Chrome check started and cancelled the
 mechanic and medic missions, displayed their objectives, and showed the medic
 ambulance beside the player. The full new routes were exercised by the
-isolated gameplay test, not by driving them in Chrome. LAN access checks
+isolated gameplay test, not by driving them in Chrome. Chrome also created and
+cancelled a race lobby in the F6 panel; the complete race was exercised by
+two protocol test clients. LAN access checks
 passed, but a second physical device and all original game systems have not
 been verified.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
