@@ -11,7 +11,7 @@ complete rules or data held by that private server.
 | 3D world and browser client | Archived client and assets served locally | Loaded in Chrome with WebGL. The archive is a discoverable snapshot, not a complete publisher asset inventory. |
 | Guest accounts | Local account cookie and saved player data; Discord is unnecessary | HTTP and WebSocket share an account in isolated tests. Optional Discord linking and a one-time $500 bonus pass a mocked test, but need host credentials, HTTPS, and a live sign-in check. |
 | Multiplayer | Shared walking and driving positions, passenger state, player list, and chat | Two simultaneous clients pass wire tests. A second physical device has not been tested. |
-| Vehicles | Local cash purchase, ownership, spawn, entry, and driving using the extracted vehicle catalog | Catalog and gameplay tests pass. Original dealership rules, persistent garage storage, damage, fuel, and tuning are not reproduced. |
+| Vehicles | Local purchase, ownership, spawn, driving, saved condition and position, storage, recall, and paid repair | Catalog and gameplay tests cover storage, damaged respawn, restart restoration, and repair. Condition comes from the owner's client report; publisher dealerships, storage buildings, fuel, and tuning remain unavailable. |
 | Courier | Package pickup and delivery to an archived property entrance | Wrong-location actions fail; payout and unfinished-route persistence pass isolated tests. |
 | Taxi | Own a car, drive to a pickup, then drive to a different drop-off | Walking pickup/drop-off fails; driving completion and payout pass isolated tests. There is no visible passenger character or fare meter yet. |
 | Mechanic | Damaged roadside mission car at a property entrance; approach and repair on foot | Browser objective and isolated location, on-foot, payout, cleanup, and restart tests pass. A second test client sees the car but cannot take it. No towing, repair animation, or general vehicle damage system yet. |
@@ -32,7 +32,8 @@ those files out of GitHub.
 
 1. Check the new mechanic, medic, and time trial objectives in a real browser
    and on a second physical device; add visible patient and checkpoint markers.
-2. Add server-owned vehicle state, damage, repair, and a persistent garage.
+2. Add server-validated vehicle collisions and damage, then property garages,
+   fuel, and tuning rules.
 3. Add health, combat, wanted levels, and police behavior with rules enforced
    by the server.
 4. Add gangs, territory control, and races as multiplayer systems.
