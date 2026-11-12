@@ -511,6 +511,17 @@ class LocalGame {
       .map(item => ({number: item.player.number, name: item.player.name,
         wanted: item.player.wanted,
         distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y))})) : [];
+    const nearbyPlayers = pos ? [...this.peers]
+      .filter(peer => peer.ready && peer.player !== player)
+      .map(peer => ({player: peer.player, at: this.position(peer.player)}))
+      .filter(item => item.at && Math.hypot(pos.x - item.at.x, pos.y - item.at.y) <= 15)
+      .map(item => ({number: item.player.number, name: item.player.name,
+        distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y))})) : [];
+    const leaderboard = [...this.players.values()].sort((a, b) => b.xp - a.xp ||
+      b.jobsDone - a.jobsDone || a.number - b.number).slice(0, 10)
+      .map((entry, index) => ({place: index + 1, name: entry.name, xp: entry.xp,
+        jobsDone: entry.jobsDone, racesWon: entry.racesWon || 0,
+        turfCaptures: entry.turfCaptures || 0}));
     const turfs = TURFS.map(id => {
       const home = homeAt(id);
       if (!home) return null;
@@ -529,6 +540,7 @@ class LocalGame {
         Math.ceil((player.passiveWaitUntil - Date.now()) / 1000)),
       kills: player.kills, deaths: player.deaths, arrests: player.arrests,
       policeDuty: player.policeDuty, nearbyWanted: suspects,
+      nearbyPlayers, leaderboard,
       gang: player.gang, gangSwitchWait: Math.max(0,
         Math.ceil((player.gangSwitchUntil - Date.now()) / 1000)),
       turfCaptures: player.turfCaptures, gangs: GANGS, turfs,
@@ -737,7 +749,25 @@ class LocalGame {
     const pos = this.position(player);
     let message;
     this.expireRace();
-    if (action === 'gang.join') {
+    if (action === 'money.transfer') {
+      const amount = Number(input.amount);
+      if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1000000)
+        throw new Error('Choose a whole-dollar amount from $1 to $1,000,000.');
+      if (player.cash < amount) throw new Error('You do not have enough cash.');
+      const target = [...this.peers].find(peer => peer.ready && peer.player !== player &&
+        peer.player.number === Number(input.number));
+      const at = target && this.position(target.player);
+      if (!pos || !at || Math.hypot(pos.x - at.x, pos.y - at.y) > 8)
+        throw new Error('The other player must be within 8 m.');
+      if (target.player.cash > MAX_CASH - amount)
+        throw new Error('The other player cannot receive that much cash.');
+      player.cash -= amount;
+      target.player.cash += amount;
+      this.updatePlayer(player);
+      this.updatePlayer(target.player);
+      this.note(target.player, `${player.name} gave you $${amount}.`);
+      message = `Gave $${amount} to ${target.player.name}.`;
+    } else if (action === 'gang.join') {
       const gang = GANGS.find(item => item.id === input.gang);
       if (!gang) throw new Error('Choose a listed crew.');
       if (player.gang === gang.id) throw new Error('You are already in that crew.');
@@ -1136,6 +1166,7 @@ class LocalGame {
         features: ['local accounts', 'player positions', 'chat', 'local settings',
           'jobs and cash', 'garage ownership', 'home ownership', 'multiplayer races',
           'combat and passive mode', 'wanted levels and arrests', 'crews and territory',
+          'cash transfers and leaderboard',
           'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
