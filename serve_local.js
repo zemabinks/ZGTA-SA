@@ -314,7 +314,7 @@ function serve(req, res) {
       const html = fs.readFileSync(filename, 'utf8');
       const gamePage = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded);
       const content = Buffer.from(gamePage ? html
-        .replace('</head>', SELFHOST_TIPS_SCRIPT + '</head>')
+        .replace('<head>', '<head>' + SELFHOST_TIPS_SCRIPT)
         .replace('</body>', COMMUNITY_SCRIPT + GAMEPLAY_SCRIPT + '</body>') : html);
       res.setHeader('Content-Type', type);
       res.setHeader('Content-Length', content.length);
