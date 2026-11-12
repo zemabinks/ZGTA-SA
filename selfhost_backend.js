@@ -517,7 +517,9 @@ class LocalGame {
       .filter(item => item.at && Math.hypot(pos.x - item.at.x, pos.y - item.at.y) <= 15)
       .map(item => ({number: item.player.number, name: item.player.name,
         distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y))})) : [];
-    const leaderboard = [...this.players.values()].sort((a, b) => b.xp - a.xp ||
+    const leaderboard = [...this.players.values()].filter(entry => entry.xp > 0 ||
+      [...this.peers].some(peer => peer.ready && peer.player === entry))
+      .sort((a, b) => b.xp - a.xp ||
       b.jobsDone - a.jobsDone || a.number - b.number).slice(0, 10)
       .map((entry, index) => ({place: index + 1, name: entry.name, xp: entry.xp,
         jobsDone: entry.jobsDone, racesWon: entry.racesWon || 0,
