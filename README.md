@@ -150,8 +150,11 @@ property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
 after a server restart. An objective box shows the destination,
-distance, and compass direction while the panel is closed. These are
-independent local substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
+distance, and compass direction while the panel is closed. F6 shows a route
+map with the player's current position and the active mission, race,
+territory, or tracked exploration target. Its radar image is served only
+from the Mac's ignored local asset archive. These are independent local
+substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
 the ground vehicles listed in the archived client catalog. An owned vehicle
 can be spawned nearby and driven. Its last reported position, health, and
 damage are saved per garage slot. Active cars return after a server restart;
@@ -264,7 +267,9 @@ ambulance beside the player. The full new routes were exercised by the
 isolated gameplay test, not by driving them in Chrome. Chrome also created and
 cancelled a race lobby in the F6 panel; the complete race was exercised by
 two protocol test clients. Chrome verified exploration tracking and clearing
-in F6; the twelve discovery payouts were checked in an isolated test. LAN access checks
+in F6. It also loaded the route map with the archived radar image, showed
+both live player and target markers, and removed the map after untracking;
+the twelve discovery payouts were checked in an isolated test. LAN access checks
 passed, but a second physical device and all original game systems have not
 been verified.
 Chrome also started and cancelled the getaway mission, showing its destination
