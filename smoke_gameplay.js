@@ -467,6 +467,10 @@ async function main() {
     const theft = await api('/api/local/action', 'POST', {action: 'job.start', job: 'carthief'});
     assert.equal(theft.status, 200, JSON.stringify(theft.body));
     assert.equal(theft.body.state.job.stage, 'pickup');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'safety.passive'})).status, 400,
+      'passive mode cannot protect a getaway driver');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'police.duty'})).status, 400,
+      'getaway driver cannot go on police duty');
     const getaway = await ws.wait(message => message.t === 'spawned' &&
       message.v[2] === '560.52.39.0.');
     assert.equal((await otherWs.wait(message => message.t === 'spawned' &&
