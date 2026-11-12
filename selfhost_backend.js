@@ -308,7 +308,8 @@ class LocalGame {
   partyView(player) {
     const party = this.partyOf(player);
     const invite = this.partyInvites.get(player);
-    if (invite && (Date.now() >= invite.expires || !this.parties.has(invite.partyId)))
+    if (invite && (Date.now() >= invite.expires ||
+        !this.parties.get(invite.partyId)?.members.has(invite.from)))
       this.partyInvites.delete(player);
     const activeInvite = this.partyInvites.get(player);
     return {you: player.number, group: party ? {id: party.id, leader: party.leader.name,
@@ -328,6 +329,8 @@ class LocalGame {
     if (!party) return false;
     party.members.delete(player);
     this.partyInvites.delete(player);
+    for (const [target, invite] of this.partyInvites)
+      if (invite.from === player) this.partyInvites.delete(target);
     if (party.members.size === 0) {
       this.parties.delete(party.id);
       for (const [target, invite] of this.partyInvites)
@@ -843,7 +846,8 @@ class LocalGame {
     } else if (action === 'party.accept') {
       const invite = this.partyInvites.get(player);
       const party = invite && this.parties.get(invite.partyId);
-      if (!invite || !party || Date.now() >= invite.expires)
+      if (!invite || !party || !party.members.has(invite.from) ||
+          Date.now() >= invite.expires)
         throw new Error('No active group invitation.');
       if (this.partyOf(player)) throw new Error('Leave your current group first.');
       if (party.members.size >= PARTY_LIMIT) throw new Error('The group is full.');
@@ -1668,8 +1672,10 @@ class LocalGame {
 
   remove(peer) {
     if (!this.peers.delete(peer)) return;
-    if (![...this.peers].some(other => other.player === peer.player))
+    if (![...this.peers].some(other => other.player === peer.player)) {
+      this.partyInvites.delete(peer.player);
       this.leaveParty(peer.player);
+    }
     for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
   }
 }
