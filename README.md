@@ -201,12 +201,19 @@ players give each other cash. The server checks the amount, sender balance,
 and an eight-metre distance before moving funds. Item trading and publisher
 businesses are not included.
 
+F6 now supports private groups of up to four online players. A leader can
+invite or remove members; an invite lasts one minute. Group messages reach
+only group members through the local game's notification feed. Type `/party`
+in chat for invitation and membership commands, or `/p MESSAGE` for a private
+group message. Groups are session state and end after the server restarts.
+This is an independent social feature, not the publisher's party system.
+
 This is a **work-in-progress independent server**. It supports local accounts,
 settings, walking and driving player positions, passenger state, live chat,
 player list, job payouts, cash, vehicle ownership, spawning, condition,
 storage, repair, a multiplayer race, simplified combat and wanted levels,
-volunteer arrests, local territory capture, nearby cash transfers, and a
-local leaderboard, plus
+volunteer arrests, local territory capture, nearby cash transfers, private
+groups and a local leaderboard, plus
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
 independent server's cash balance; they do not reproduce the publisher's
@@ -219,15 +226,15 @@ mode remain available from the local archive.
 See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the current implementation and
 verification status of each major system.
 
-Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`, and
-`node smoke_gangs.js` with Node.js 24 to
+Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
+`node smoke_gangs.js`, and `node smoke_parties.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
 repair, timed checkpoints, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
 wanted levels, passive mode, volunteer arrests, territory capture and contests,
-cash transfers and leaderboard ranking,
+cash transfers, leaderboard ranking, group invitations, private chat privacy,
 vehicle spawning and entry, starter and archived catalog purchases, property
 exterior teleportation, persistence, and car ownership after
 reconnect. The gameplay test also checks that static asset requests do not
