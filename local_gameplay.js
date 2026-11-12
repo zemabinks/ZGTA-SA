@@ -157,7 +157,39 @@
       for (const job of state.catalog.jobs)
         row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
-            (['taxi', 'trial'].includes(job.id) && !state.cars.length));
+            (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
+            (state.race?.joined && ['lobby', 'running'].includes(state.race.stage)));
+    }
+    section('Multiplayer race');
+    const race = state.race;
+    if (!race || race.stage === 'finished') {
+      if (race?.results.length)
+        panel.append(element('p', `Last race: ${race.results.map(item =>
+          `#${item.place} ${item.name} · ${item.seconds}s · $${item.pay}`).join(' | ')}`, 'zgta-muted'));
+      row('Open a three-checkpoint race with loaner cars · first $600, second $400',
+        'race.create', {}, 'Create', !state.connected || !!state.job);
+    } else {
+      panel.append(element('p', `${race.host}'s ${race.stage} race · ${race.players.map(item =>
+        `${item.name} (${item.status})`).join(', ')}`, 'zgta-muted'));
+      if (race.stage === 'lobby') {
+        panel.append(element('p', `Starting line: ${race.start.x}, ${race.start.y} · ${race.startDistance ?? '?'} m away. Join within 25 m.`, 'zgta-muted'));
+        if (!race.joined) row('Join the race', 'race.join', {}, 'Join',
+          !state.connected || !!state.job || race.startDistance > 25);
+        else {
+          if (race.isHost) row('Start with two or more players near the line',
+            'race.start', {}, 'Start', race.players.length < 2 || race.startDistance > 25);
+          row(race.isHost ? 'Cancel this lobby' : 'Leave this lobby',
+            'race.leave', {}, race.isHost ? 'Cancel' : 'Leave');
+        }
+      } else if (race.joined && race.target) {
+        panel.append(element('p', `Checkpoint ${race.index}/${race.total}: ${race.target.name} (${race.target.x}, ${race.target.y}). ${race.remaining ?? '?'} m away. ${race.secondsLeft} s left. Drive within ${race.radius} m.`, 'zgta-muted'));
+        const final = race.index === race.total;
+        row(final ? 'Finish race' : 'Pass checkpoint',
+          final ? 'race.finish' : 'race.checkpoint', {}, final ? 'Finish' : 'Pass',
+          !state.connected || race.remaining > race.radius || race.secondsLeft <= 0);
+        row('Withdraw from race', 'race.leave', {}, 'Leave');
+      } else if (race.joined)
+        panel.append(element('p', 'Your race is complete. Waiting for the remaining drivers.', 'zgta-muted'));
     }
     section('Garage');
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
@@ -204,15 +236,23 @@
     panel.scrollTop = scrollTop;
   }
   function renderObjective() {
+    const race = state?.race?.stage === 'running' && state.race.joined &&
+      state.race.target ? state.race : null;
     const job = state?.job?.mode ? state.job : null;
-    objective.hidden = !job || visible;
-    if (!job) return;
+    const active = race || job;
+    objective.hidden = !active || visible;
+    if (!active) return;
     let direction = '';
     if (state.position) {
-      const dx = job.target.x - state.position.x;
-      const dy = job.target.y - state.position.y;
+      const dx = active.target.x - state.position.x;
+      const dy = active.target.y - state.position.y;
       const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
       direction = ` ${compass[Math.round(Math.atan2(dx, dy) / (Math.PI / 4) + 8) % 8]}`;
+    }
+    if (race) {
+      objective.textContent = `Multiplayer race: checkpoint ${race.index}/${race.total} · ${race.secondsLeft} s left\n${race.target.name} · ${race.remaining ?? '?'} m${direction}\nPress F6 for details`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
     }
     const task = job.mode === 'service' ? 'repair vehicle' :
       job.mode === 'checkpoints' ? `checkpoint ${job.index}/${job.total} · ${job.secondsLeft} s left` :
@@ -272,5 +312,5 @@
     else if (visible && event.key === 'Escape') {event.preventDefault(); event.stopImmediatePropagation(); toggle(false);}
   }, true);
   refresh();
-  setInterval(() => {if (visible || state?.job?.mode) refresh();}, 3000);
+  setInterval(() => {if (visible || state?.job?.mode || state?.race?.joined) refresh();}, 3000);
 })();
