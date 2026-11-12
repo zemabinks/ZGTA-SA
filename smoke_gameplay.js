@@ -307,6 +307,11 @@ async function main() {
       vehicle: vehicle.v[0], x, y, z: 13, health: 450, damage: 'test-damage'});
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal((await api('/api/local/state')).body.garage[0].health, 450);
+    ws.send({t: 'me', walking: false, driving: true, car: vehicle.v[2],
+      vehicle: vehicle.v[0], x, y, z: 13, health: 1000, damage: ''});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/state')).body.garage[0].health, 450,
+      'client updates cannot repair a damaged vehicle for free');
     ws.send({t: 'me', walking: true, driving: false, skin: 7, car: vehicle.v[2],
       vehicle: vehicle.v[0], x, y, z: 13,
       parked: {x: vehicle.v[3], y: vehicle.v[4], z: vehicle.v[5], heading: 0,
@@ -366,6 +371,8 @@ async function main() {
     await ws.wait(message => message.t === 'vgone' && message.id === restoredCar[0]);
     assert((await api('/api/world/cars')).body.cars.some(car =>
       car[2] === vehicle.v[2] && car[9] === 1000), 'repair must refresh the shared vehicle');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'car.respray', slot: 0})).status, 400,
+      'respray requires enough cash');
     const ongoing = await api('/api/local/action', 'POST', {action: 'job.start', job: 'mechanic'});
     assert.equal(ongoing.status, 200, JSON.stringify(ongoing.body));
     const missionCar = await ws.wait(message => message.t === 'spawned' &&
@@ -510,6 +517,23 @@ async function main() {
     assert.equal(escaped.body.state.job, null);
     assert.equal(escaped.body.state.cash, 45150);
     await ws.wait(message => message.t === 'vgone' && message.id === getaway.v[0]);
+    ws.send({t: 'me', walking: true, driving: false, skin: 7, x, y, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0})).status, 200);
+    const beforePaint = (await api('/api/world/cars')).body.cars.find(car =>
+      car[0].startsWith('local-') && car[2] === vehicle.v[2]);
+    assert(beforePaint, 'owned car can be recalled beside the player');
+    const resprayed = await api('/api/local/action', 'POST', {action: 'car.respray', slot: 0});
+    assert.equal(resprayed.status, 200, JSON.stringify(resprayed.body));
+    assert.equal(resprayed.body.state.cash, 45030);
+    assert.equal(resprayed.body.state.garage[0].paint.length, 2);
+    const paintedCode = `410.${resprayed.body.state.garage[0].paint.join('.')}.0.`;
+    assert.notEqual(paintedCode, vehicle.v[2]);
+    const paintedCar = (await api('/api/world/cars')).body.cars.find(car =>
+      car[0].startsWith('local-') && car[2] === paintedCode);
+    assert(paintedCar, 'respray changes the shared vehicle appearance code');
+    await ws.wait(message => message.t === 'vgone' && message.id === beforePaint[0]);
+    await ws.wait(message => message.t === 'spawned' && message.v[0] === paintedCar[0]);
     const secondTheft = await api('/api/local/action', 'POST', {action: 'job.start', job: 'carthief'});
     assert.equal(secondTheft.status, 200, JSON.stringify(secondTheft.body));
     const savedGetaway = await ws.wait(message => message.t === 'spawned' &&
@@ -521,6 +545,10 @@ async function main() {
     child = start();
     await ready();
     assert.equal((await api('/api/local/state')).body.racesWon, 1);
+    assert.deepEqual((await api('/api/local/state')).body.garage[0].paint,
+      resprayed.body.state.garage[0].paint, 'custom paint survives restart');
+    assert((await api('/api/world/cars')).body.cars.some(car => car[2] === paintedCode),
+      'resprayed vehicle returns after restart');
     assert.equal((await otherApi('/api/local/state')).body.racesFinished, 1);
     assert.deepEqual((await api('/api/local/state')).body.raceLeaders.map(entry =>
       [entry.wins, entry.finishes]), [[1, 1], [0, 1]],
