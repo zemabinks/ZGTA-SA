@@ -110,6 +110,12 @@ settings, cash, XP, owned cars, owned homes, and an active job are saved in
 ignored `local-only/selfhost/players.json`; type `/name Your Name` in chat to
 change a local name.
 
+Self-hosted pages turn off the archived client's built-in tips, which describe
+publisher-only features and an unrelated Discord reward. F6 provides the
+ZGTA:SA community invite, and `/discord` in chat shows it too. Joining that
+community is optional. The only local Discord bonus is the one described
+below, when the host configures account linking.
+
 Optional Discord account linking is available when the host supplies a
 [Discord developer application](https://docs.discord.com/developers/topics/oauth2)
 and a callback URL. Create `local-only/selfhost/discord-oauth.json` on the Mac:
@@ -135,8 +141,9 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-seven independent local activities: courier, taxi, mechanic, medic, a timed
-street trial, a police patrol, and a getaway car mission. Courier is a staged mission: collect a package where you start,
+eight independent local activities: courier, taxi, mechanic, medic, a timed
+street trial, a police patrol, pizza delivery, and a getaway car mission.
+Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
 entrance for pickup, then drive to a different entrance for drop-off. Pickup
@@ -145,7 +152,12 @@ spawns a damaged roadside car at a property entrance; reach it and repair it
 on foot. Medic spawns an ambulance; drive to a patient pickup point and return
 to the starting aid station. The time trial requires an owned car and three
 property checkpoints within three minutes. The patient and taxi passenger do
-not yet appear as characters. In the getaway mission, take a spawned car at a
+not yet appear as characters. Pizza delivery spawns a reserved Pizzaboy
+scooter and sends its driver to three ordered property entrances within six
+minutes for $400 and 80 XP. The route, scooter, and completed stops recover
+after a server restart; an expired route is discarded. The archived client
+lists a pizza job and Pizzaboy vehicle, but these delivery rules are original
+to this local server. In the getaway mission, take a spawned car at a
 property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
@@ -182,7 +194,7 @@ $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job carthief`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
@@ -250,12 +262,13 @@ See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the current implementation and
 verification status of each major system.
 
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
-`node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`, and
-`node smoke_patrol.js`
+`node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
+`node smoke_patrol.js`, and `node smoke_pizza.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, police patrol in a marked loaner, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
+repair, timed checkpoints, police patrol and pizza delivery in marked loaners,
+getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, paid respray, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
 wanted levels, passive mode, volunteer arrests, territory capture and contests,
@@ -284,6 +297,10 @@ Chrome also entered the 3D world, started a police patrol, showed the spawned
 police car and live objective, then cancelled the patrol and ended duty. The
 full patrol route and restart recovery passed an isolated test; it has not
 yet been driven end to end in Chrome.
+Chrome also started pizza delivery, showed the Pizzaboy scooter and first
+route objective, entered driving mode, and cancelled the mission. The three
+deliveries, payout, and restart behavior passed an isolated test; the full
+route has not been driven in Chrome.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
