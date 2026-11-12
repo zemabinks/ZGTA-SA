@@ -105,6 +105,22 @@ function nearestHome(pos, minimum = 120, excluded = []) {
 }
 function missionId() { return `mission-${crypto.randomBytes(8).toString('hex')}`; }
 function validMissionId(value) { return /^mission-[0-9a-f]{16}$/.test(value || ''); }
+function savedGarage(value, cars) {
+  return cars.map((_, slot) => {
+    const item = Array.isArray(value) ? value[slot] : null;
+    const position = Array.isArray(item?.position) && item.position.length === 4 &&
+      item.position.every(Number.isFinite) && Math.abs(item.position[0]) <= 6000 &&
+      Math.abs(item.position[1]) <= 6000 && item.position[2] >= -200 &&
+      item.position[2] <= 1000 ? item.position.map(rounded) : null;
+    return {health: Math.max(0, Math.min(1000, Math.round(finite(item?.health, 1000)))),
+      damage: typeof item?.damage === 'string' ? item.damage.slice(0, 512) : '',
+      active: item?.active === true && !!position, position};
+  });
+}
+function repairCost(entry) {
+  return entry.health >= 1000 && !entry.damage ? 0 :
+    Math.max(50, Math.ceil((1000 - entry.health) / 5));
+}
 function savedJob(value) {
   if (!value || !JOBS.some(job => job.id === value.id) ||
       !Number.isFinite(value.started) || Date.now() - value.started >= 86400000) return null;
@@ -154,9 +170,11 @@ class LocalGame {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
       for (const [id, value] of Object.entries(data.players || {})) {
         if (!/^[0-9a-f]{32}$/.test(id)) continue;
+        const cars = Array.isArray(value.cars) ? value.cars.filter(car =>
+          CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [];
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
           cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
-          cars: Array.isArray(value.cars) ? value.cars.filter(car => CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [],
+          cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
           discord: value.discord && /^\d{17,22}$/.test(String(value.discord.id || '')) ?
@@ -165,8 +183,11 @@ class LocalGame {
           settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
       }
     } catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local players:', error.message); }
-    for (const player of this.players.values()) if (player.job?.vehicleId)
-      this.addMissionVehicle(player);
+    for (const player of this.players.values()) {
+      for (let slot = 0; slot < player.garage.length; slot++)
+        if (player.garage[slot].active) this.addOwnedVehicle(player, slot);
+      if (player.job?.vehicleId) this.addMissionVehicle(player);
+    }
     this.saveTimer = null;
     this.tick = setInterval(() => this.broadcastPositions(), 200);
     this.tick.unref();
@@ -186,7 +207,8 @@ class LocalGame {
     if (this.saveTimer) {clearTimeout(this.saveTimer); this.saveTimer = null;}
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
       [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
-        cars: p.cars, homes: p.homes, job: p.job, discord: p.discord, settings: p.settings}]));
+        cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
+        discord: p.discord, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
     fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1, players}, null, 2) + '\n', {mode: 0o600});
     fs.renameSync(STATE_FILE + '.partial', STATE_FILE);
@@ -197,7 +219,8 @@ class LocalGame {
     if (!id || !this.players.has(id)) {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
-        cash: 0, xp: 0, jobsDone: 0, cars: [], homes: [], job: null, discord: null, settings: {}});
+        cash: 0, xp: 0, jobsDone: 0, cars: [], garage: [], homes: [], job: null,
+        discord: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
       if (res) res.setHeader('Set-Cookie', `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax${secure}`);
       this.save();
@@ -271,6 +294,16 @@ class LocalGame {
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
         started: active.started} : null,
       cars: player.cars.map(model => CAR_CATALOG.find(car => car.model === model)).filter(Boolean),
+      garage: player.garage.map((entry, slot) => {
+        const vehicle = this.ownedVehicle(player, slot);
+        const location = vehicle?.row || entry.position;
+        const x = vehicle ? location[3] : location?.[0];
+        const y = vehicle ? location[4] : location?.[1];
+        return {slot, active: !!vehicle, health: entry.health,
+          repairCost: repairCost(entry), distance: pos && x !== undefined && y !== undefined ?
+            Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null};
+      }),
+      onFoot: pos?.peer.state.walking === true,
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
       catalog: {jobs: JOBS,
         cars: CAR_CATALOG.map(({model, name, price, type, source}) => ({model, name, price, type, source})),
@@ -377,25 +410,80 @@ class LocalGame {
     }
   }
 
+  ownedVehicle(player, slot) {
+    return [...this.vehicles.values()].find(vehicle => vehicle.owner === player && vehicle.slot === slot);
+  }
+
+  removeOwnedVehicle(vehicle) {
+    if (!vehicle || !this.vehicles.delete(vehicle.id)) return;
+    for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: vehicle.id});
+  }
+
+  addOwnedVehicle(player, slot) {
+    const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
+    const entry = player.garage[slot];
+    if (!car || !entry?.position) return null;
+    const id = `local-${this.nextVehicle++}`;
+    const [x, y, z, heading] = entry.position;
+    const row = [id, player.name, car.car, x, y, z, heading, 0, 0,
+      entry.health, entry.damage, null];
+    const vehicle = {id, owner: player, slot, row, lastGarageSave: 0};
+    this.vehicles.set(id, vehicle);
+    for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
+    return vehicle;
+  }
+
+  updateOwnedVehicle(peer, message) {
+    if (typeof message.vehicle !== 'string') return;
+    const vehicle = this.vehicles.get(message.vehicle);
+    if (!vehicle || vehicle.owner !== peer.player || message.car !== vehicle.row[2]) return;
+    const parked = message.walking === true && message.parked &&
+      typeof message.parked === 'object' ? message.parked : null;
+    const driving = message.driving === true;
+    const report = parked || (driving ? message : null);
+    if (!report || ![report.x, report.y, report.z].every(Number.isFinite) ||
+        Math.abs(report.x) > 6000 || Math.abs(report.y) > 6000 ||
+        report.z < -200 || report.z > 1000) return;
+    const entry = peer.player.garage[vehicle.slot];
+    const before = `${entry.health}:${entry.damage}`;
+    const position = [rounded(report.x), rounded(report.y), rounded(report.z),
+      rounded(report.heading)];
+    vehicle.row[3] = position[0]; vehicle.row[4] = position[1];
+    vehicle.row[5] = position[2]; vehicle.row[6] = position[3];
+    vehicle.row[7] = rounded(report.pitch); vehicle.row[8] = rounded(report.roll);
+    if (Number.isFinite(report.health))
+      entry.health = Math.max(0, Math.min(1000, Math.round(report.health)));
+    if (typeof report.damage === 'string') entry.damage = report.damage.slice(0, 512);
+    vehicle.row[9] = entry.health; vehicle.row[10] = entry.damage;
+    entry.position = position;
+    if (parked || before !== `${entry.health}:${entry.damage}` ||
+        Date.now() - vehicle.lastGarageSave > 5000) {
+      vehicle.lastGarageSave = Date.now();
+      this.save();
+    }
+  }
+
   spawnOwnedCar(player, slot) {
     const pos = this.position(player);
     if (!pos) throw new Error('Enter the game before spawning a car.');
     const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
     if (!car) throw new Error('That car is not in your garage.');
+    const old = this.ownedVehicle(player, slot);
+    if (old) this.removeOwnedVehicle(old);
     const mine = [...this.vehicles.values()].filter(vehicle => vehicle.owner === player);
     if (mine.length >= 3) {
       const oldest = mine[0];
-      this.vehicles.delete(oldest.id);
-      for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: oldest.id});
+      player.garage[oldest.slot].active = false;
+      this.removeOwnedVehicle(oldest);
     }
-    const id = `local-${this.nextVehicle++}`;
     // Vehicle origins sit above their tyres. Ground-height origins can embed
     // the body in the map and make the physics engine launch it on entry.
-    const row = [id, player.name, car.car, rounded(pos.x + 4), rounded(pos.y + 3),
-      rounded(pos.z + 1.1), 0, 0, 0, 1000, '', null];
-    this.vehicles.set(id, {id, owner: player, row});
-    for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
-    return `${car.name} spawned nearby.`;
+    player.garage[slot].position = [rounded(pos.x + 4), rounded(pos.y + 3),
+      rounded(pos.z + 1.1), 0];
+    player.garage[slot].active = true;
+    this.addOwnedVehicle(player, slot);
+    this.save();
+    return `${car.name} ${old ? 'recalled' : 'spawned'} nearby.`;
   }
 
   action(player, action, input) {
@@ -532,6 +620,7 @@ class LocalGame {
       if (player.cash < car.price) throw new Error(`You need $${car.price}.`);
       player.cash -= car.price;
       player.cars.push(car.model);
+      player.garage.push({health: 1000, damage: '', active: false, position: null});
       message = `${car.name} bought for $${car.price}. Open My Vehicles or spawn it here.`;
       this.updatePlayer(player);
     } else if (action === 'car.spawn') {
@@ -539,6 +628,34 @@ class LocalGame {
       if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
         throw new Error('Choose a car in your garage.');
       message = this.spawnOwnedCar(player, slot);
+    } else if (action === 'car.store' || action === 'car.repair') {
+      const slot = Number(input.slot);
+      if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
+        throw new Error('Choose a car in your garage.');
+      const vehicle = this.ownedVehicle(player, slot);
+      if (!vehicle) throw new Error('Spawn this car first.');
+      if (!pos || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > 18)
+        throw new Error('Stand near your car to manage it.');
+      if (pos.peer.state.walking !== true)
+        throw new Error('Get out of the car first.');
+      const entry = player.garage[slot];
+      const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
+      if (action === 'car.store') {
+        entry.active = false;
+        this.removeOwnedVehicle(vehicle);
+        message = `${car.name} stored. Its condition was saved.`;
+        this.save();
+      } else {
+        const cost = repairCost(entry);
+        if (!cost) throw new Error('This car does not need repairs.');
+        if (player.cash < cost) throw new Error(`You need $${cost} to repair it.`);
+        player.cash -= cost;
+        entry.health = 1000; entry.damage = '';
+        this.removeOwnedVehicle(vehicle);
+        this.addOwnedVehicle(player, slot);
+        message = `${car.name} repaired for $${cost}.`;
+        this.updatePlayer(player);
+      }
     } else if (action === 'home.buy') {
       const home = HOME_CATALOG.find(item => item.id === input.home);
       if (!home) throw new Error('Unknown home.');
@@ -704,6 +821,7 @@ class LocalGame {
       }
       peer.state = message;
       peer.lastSeen = Date.now();
+      this.updateOwnedVehicle(peer, message);
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
     }
@@ -760,7 +878,8 @@ class LocalGame {
     if (text === '/jobs')
       return peer.send({t: 'note', text: `Local jobs: ${JOBS.map(job => `${job.id} ($${job.pay})`).join(', ')}. Type /job <name>.`});
     if (text.startsWith('/job ') || ['/pickup', '/checkpoint', '/repair', '/deliver', '/finish', '/canceljob'].includes(text) ||
-        text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/buyhome ')) {
+        text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/storecar ') ||
+        text.startsWith('/repaircar ') || text.startsWith('/buyhome ')) {
       try {
         const [command, value] = text.slice(1).split(/\s+/, 2);
         const actions = {job: ['job.start', {job: value}], pickup: ['job.pickup', {}],
@@ -768,6 +887,8 @@ class LocalGame {
           deliver: ['job.complete', {}], finish: ['job.complete', {}],
           canceljob: ['job.cancel', {}], buycar: ['car.buy', {model: value}],
           spawncar: ['car.spawn', {slot: Number(value) - 1}],
+          storecar: ['car.store', {slot: Number(value) - 1}],
+          repaircar: ['car.repair', {slot: Number(value) - 1}],
           buyhome: ['home.buy', {home: value}]};
         const [action, input] = actions[command];
         this.action(peer.player, action, input);
