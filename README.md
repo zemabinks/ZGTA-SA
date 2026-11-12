@@ -135,8 +135,8 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-five independent local activities: courier, taxi, mechanic, medic, and a timed
-street trial. Courier is a staged mission: collect a package where you start,
+six independent local activities: courier, taxi, mechanic, medic, a timed
+street trial, and a getaway car mission. Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
 entrance for pickup, then drive to a different entrance for drop-off. Pickup
@@ -145,7 +145,11 @@ spawns a damaged roadside car at a property entrance; reach it and repair it
 on foot. Medic spawns an ambulance; drive to a patient pickup point and return
 to the starting aid station. The time trial requires an owned car and three
 property checkpoints within three minutes. The patient and taxi passenger do
-not yet appear as characters. An objective box shows the destination,
+not yet appear as characters. In the getaway mission, take a spawned car at a
+property entrance and deliver that same car to a second property within five
+minutes. Taking it starts a wanted level. The mission car is visible to other
+players but reserved for the mission owner, and an unfinished mission returns
+after a server restart. An objective box shows the destination,
 distance, and compass direction while the panel is closed. These are
 independent local substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
 the ground vehicles listed in the archived client catalog. An owned vehicle
@@ -170,7 +174,7 @@ $250; completed races and wins are saved to each account. The lobby, active
 race, and temporary cars are session state and do not survive a server
 restart. This independent race has no 3D checkpoint rings or global
 leaderboard yet. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
@@ -218,7 +222,7 @@ Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`, and
 `node smoke_gangs.js` with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, mission vehicle cleanup, two-client visibility and
+repair, timed checkpoints, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
 wanted levels, passive mode, volunteer arrests, territory capture and contests,
@@ -237,6 +241,9 @@ cancelled a race lobby in the F6 panel; the complete race was exercised by
 two protocol test clients. LAN access checks
 passed, but a second physical device and all original game systems have not
 been verified.
+Chrome also started and cancelled the getaway mission, showing its destination
+and countdown in F6. The complete route and restart restoration were exercised
+by isolated gameplay clients; it has not yet been driven end to end in Chrome.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
@@ -245,11 +252,10 @@ bonus, and returning-account test. It makes no Discord network request.
 Double-click `ZGTA-SA Share.command` or run `zsh launch_share.sh lan` in
 Terminal. The launcher finds this Mac's `en0` IPv4 address, starts **one**
 independent server on port 8766, and prints its LAN URL. On the current network
-the URL is `http://192.168.178.33:8766/`; it can change when the Mac changes
-networks. Open that URL on a second device on the same home network. The first
-visit shows a join screen. The access code is in
-`local-only/selfhost/join-code.txt` on this Mac. Share it privately with the
-people joining your game. The file is created with owner-only permissions and
+the address can change when the Mac changes networks. Open the printed URL on
+a second device on the same home network. The first visit shows a join screen.
+The launcher also prints the private join-code file location on this Mac.
+Share the code privately with the people joining your game. The file is created with owner-only permissions and
 is ignored by Git. To change the code, stop the server, delete that file, and
 start the launcher again; everyone will need the new code.
 On a fresh GitHub checkout, run `chmod +x 'ZGTA-SA Share.command'` once before
