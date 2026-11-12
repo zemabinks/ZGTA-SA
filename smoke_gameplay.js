@@ -461,6 +461,8 @@ async function main() {
     assert.deepEqual(raceResult.body.race.results.map(item => item.pay), [600, 400]);
     assert.equal(raceResult.body.cash, 44600);
     assert.equal(raceResult.body.racesWon, 1);
+    assert.deepEqual(raceResult.body.raceLeaders.map(entry => [entry.wins, entry.finishes]),
+      [[1, 1], [0, 1]], 'race standings rank saved account results');
     assert.equal((await otherApi('/api/local/state')).body.cash, 400);
     assert.equal((await api('/api/world/cars')).body.cars.filter(car =>
       car[0].startsWith('mission-')).length, 0, 'loaner cars disappear after the race');
@@ -520,6 +522,9 @@ async function main() {
     await ready();
     assert.equal((await api('/api/local/state')).body.racesWon, 1);
     assert.equal((await otherApi('/api/local/state')).body.racesFinished, 1);
+    assert.deepEqual((await api('/api/local/state')).body.raceLeaders.map(entry =>
+      [entry.wins, entry.finishes]), [[1, 1], [0, 1]],
+    'race standings survive a server restart');
     assert.equal((await api('/api/local/state')).body.race, null,
       'active race state should not survive a server restart');
     assert.equal((await api('/api/local/state')).body.job.id, 'carthief',
