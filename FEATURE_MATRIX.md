@@ -9,6 +9,7 @@ complete rules or data held by that private server.
 | System | Independent implementation | Verification and gap |
 | --- | --- | --- |
 | 3D world and browser client | Archived client and assets served locally | Loaded in Chrome with WebGL. The archive is a discoverable snapshot, not a complete publisher asset inventory. |
+| Objective route map | F6 shows the locally archived radar map, player position, and active mission, race, territory, or exploration destination | Chrome showed the player and El Corona markers after entering the world, then hid the route map after untracking. The map does not add 3D checkpoint rings or native game map markers. |
 | Guest accounts | Local account cookie and saved player data; Discord is unnecessary | HTTP and WebSocket share an account in isolated tests. Optional Discord linking and a one-time $500 bonus pass a mocked test, but need host credentials, HTTPS, and a live sign-in check. |
 | Multiplayer | Shared walking and driving positions, passenger state, player list, and chat | Two simultaneous clients pass wire tests. A second physical device has not been tested. |
 | Private groups | Up to four players per session, invitations, leader handoff, member removal and private group chat | Chrome created and left a group through F6. Three protocol clients confirm invitations, membership and chat privacy. Isolated tests cover capacity, invite expiry, leader permissions and disconnect cleanup. Groups end when members leave or the server restarts; publisher party features are not reproduced. |
