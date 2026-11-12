@@ -108,6 +108,15 @@ const COMMUNITY_SCRIPT = `<script>
 })();
 </script>`;
 const GAMEPLAY_SCRIPT = SELFHOST ? '<script defer src="/local-gameplay.js"></script>' : '';
+const SELFHOST_TIPS_SCRIPT = SELFHOST ? `<script>
+try {
+  const key = 'world-tune';
+  const stored = JSON.parse(localStorage.getItem(key) || '{}');
+  const settings = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+  settings.hideTips = true;
+  localStorage.setItem(key, JSON.stringify(settings));
+} catch {}
+</script>` : '';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
@@ -304,7 +313,9 @@ function serve(req, res) {
     if (type.startsWith('text/html')) {
       const html = fs.readFileSync(filename, 'utf8');
       const gamePage = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded);
-      const content = Buffer.from(gamePage ? html.replace('</body>', COMMUNITY_SCRIPT + GAMEPLAY_SCRIPT + '</body>') : html);
+      const content = Buffer.from(gamePage ? html
+        .replace('</head>', SELFHOST_TIPS_SCRIPT + '</head>')
+        .replace('</body>', COMMUNITY_SCRIPT + GAMEPLAY_SCRIPT + '</body>') : html);
       res.setHeader('Content-Type', type);
       res.setHeader('Content-Length', content.length);
       res.setHeader('Accept-Ranges', 'none');
