@@ -117,6 +117,8 @@ async function main() {
     assert.equal(asset.headers.get('set-cookie'), null, 'assets must not create player accounts');
     const document = await fetch(root + '/');
     assert.equal(document.status, 200);
+    assert((await document.text()).includes("settings.hideTips = true"),
+      'the self-hosted page must disable publisher feature and Discord reward tips');
     const cookie = document.headers.get('set-cookie')?.split(';')[0];
     assert(cookie);
     const first = await fetch(root + '/api/auth/me', {headers: {Cookie: cookie}});
@@ -534,6 +536,11 @@ async function main() {
     assert(paintedCar, 'respray changes the shared vehicle appearance code');
     await ws.wait(message => message.t === 'vgone' && message.id === beforePaint[0]);
     await ws.wait(message => message.t === 'spawned' && message.v[0] === paintedCar[0]);
+    ws.send({t: 'spawn', own: 0, car: paintedCode});
+    const paintedNativeSpawn = await ws.wait(message => message.t === 'spawned' &&
+      message.v[0].startsWith('local-') && message.v[0] !== paintedCar[0] &&
+      message.v[2] === paintedCode);
+    assert(paintedNativeSpawn, 'the native My Vehicles action accepts custom paint');
     const secondTheft = await api('/api/local/action', 'POST', {action: 'job.start', job: 'carthief'});
     assert.equal(secondTheft.status, 200, JSON.stringify(secondTheft.body));
     const savedGetaway = await ws.wait(message => message.t === 'spawned' &&
@@ -559,7 +566,7 @@ async function main() {
       'unfinished getaway must survive a server restart');
     assert((await api('/api/world/cars')).body.cars.some(car => car[0] === savedGetaway.v[0]),
       'unfinished getaway car must return after a server restart');
-    console.log('PASS: guest accounts, six world-objective jobs including getaway, garage persistence and repair, two-player race and payouts, home exterior visit');
+    console.log('PASS: guest accounts, routed jobs, garage condition and custom paint, native painted-car spawn, multiplayer race, home exterior visit');
   } finally {
     otherWs?.close();
     ws?.close();
