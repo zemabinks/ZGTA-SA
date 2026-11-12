@@ -159,8 +159,13 @@ the ground vehicles listed in the archived client catalog. An owned vehicle
 can be spawned nearby and driven. Its last reported position, health, and
 damage are saved per garage slot. Active cars return after a server restart;
 you can recall a car beside you, or stand within 18 meters to store or repair
-it. Repairs cost at least $50, based on condition. This local garage does not
-reproduce the publisher's storage buildings, tuning, or fuel rules. The panel
+it. Repairs cost at least $50, based on condition. Client driving updates can
+lower saved vehicle health but cannot raise it; repairing requires the paid
+garage action. When standing near an active owned car, F6 can also respray it
+for $120. The new paint code is sent with the shared vehicle and survives a
+restart; its 3D appearance has not yet been checked in Chrome.
+This local garage does not reproduce the publisher's storage buildings, other
+tuning, or fuel rules. The panel
 sells two starter homes and the 29
 properties listed in the archived client catalog. A purchased original
 property can be visited at its world entrance. Property interiors and garage
@@ -179,7 +184,7 @@ cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
 `/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
-`/spawncar 1`, `/storecar 1`, `/repaircar 1`, and `/buyhome starter`
+`/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
 
 The independent combat layer tracks health, armour, kills, deaths, and a wanted
@@ -251,7 +256,7 @@ with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
 repair, timed checkpoints, police patrol in a marked loaner, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
-entry restrictions, owned car storage, repair, restart persistence, and a
+entry restrictions, owned car storage, repair, paid respray, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
 wanted levels, passive mode, volunteer arrests, territory capture and contests,
 cash transfers, leaderboard ranking, group invitations, private chat privacy,
