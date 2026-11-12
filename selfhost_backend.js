@@ -384,7 +384,7 @@ class LocalGame {
       }
       const contested = [...this.peers].some(peer => peer.ready &&
         peer.player.gang && peer.player.gang !== capture.gang &&
-        peer.player.health > 0 && (() => {
+        peer.player.health > 0 && !peer.player.passive && (() => {
           const at = this.position(peer.player);
           return at && Math.hypot(at.x - home.out[0], at.y - home.out[1]) <= 25;
         })());
@@ -1135,6 +1135,7 @@ class LocalGame {
         allowedHosts: (process.env.ZGTA_ALLOWED_HOSTS || '').split(',').filter(Boolean),
         features: ['local accounts', 'player positions', 'chat', 'local settings',
           'jobs and cash', 'garage ownership', 'home ownership', 'multiplayer races',
+          'combat and passive mode', 'wanted levels and arrests', 'crews and territory',
           'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
