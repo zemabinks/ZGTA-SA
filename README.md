@@ -135,8 +135,8 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-six independent local activities: courier, taxi, mechanic, medic, a timed
-street trial, and a getaway car mission. Courier is a staged mission: collect a package where you start,
+seven independent local activities: courier, taxi, mechanic, medic, a timed
+street trial, a police patrol, and a getaway car mission. Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
 entrance for pickup, then drive to a different entrance for drop-off. Pickup
@@ -174,7 +174,7 @@ $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job carthief`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
@@ -185,6 +185,12 @@ Passive mode blocks player damage; turning it off starts a two-minute cooldown.
 Wanted levels decay over time. A player on volunteer police duty can arrest a
 wanted player when both are on foot within four metres, clearing the wanted
 level and charging a small fine. F6 shows these controls and nearby suspects.
+While on police duty, a player can start a patrol. The server spawns a marked
+police car; drive it through three ordered property checkpoints within four
+minutes to earn $400 and 80 XP. A patrol in progress and its route survive a
+server restart; the loaner returns to its starting position. You cannot leave
+police duty until the patrol is finished or cancelled. This is an independent
+mission and does not reproduce the publisher's police jobs.
 The server rejects shot origins far from the shooter and hits far from the
 reported impact point. The rules still use client reported positions and do
 not provide authoritative line of sight, weapon inventory, police NPCs, or the publisher's original combat
@@ -236,11 +242,12 @@ See [FEATURE_MATRIX.md](FEATURE_MATRIX.md) for the current implementation and
 verification status of each major system.
 
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
-`node smoke_gangs.js`, `node smoke_parties.js`, and `node smoke_explore.js`
+`node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`, and
+`node smoke_patrol.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
+repair, timed checkpoints, police patrol in a marked loaner, getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
 wanted levels, passive mode, volunteer arrests, territory capture and contests,
@@ -263,6 +270,10 @@ been verified.
 Chrome also started and cancelled the getaway mission, showing its destination
 and countdown in F6. The complete route and restart restoration were exercised
 by isolated gameplay clients; it has not yet been driven end to end in Chrome.
+Chrome also entered the 3D world, started a police patrol, showed the spawned
+police car and live objective, then cancelled the patrol and ended duty. The
+full patrol route and restart recovery passed an isolated test; it has not
+yet been driven end to end in Chrome.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
