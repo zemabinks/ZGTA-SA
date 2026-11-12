@@ -138,6 +138,13 @@ async function main() {
       x: 1482, y: -1738, z: 13, health: 100, weapon: 22,
       say: '/passive'}));
     await fromB(message => message.t === 'note' && message.text.includes('Clear your wanted'));
+    b.send(JSON.stringify({t: 'shot', w: 22, o: [9999, 9999, 9999],
+      h: [1485, -1738, 13], ht: 1}));
+    b.send(JSON.stringify({t: 'hit', to: allA.id, n: 1}));
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const rejectedOrigin = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
+    assert.equal(Object.values(rejectedOrigin.players).find(player => player.name === allA.you).health,
+      67, 'a shot from outside the shooter position cannot damage another player');
     b.send(JSON.stringify({t: 'shot', w: 22, o: [1482, -1738, 13],
       h: [1485, -1738, 13], ht: 1}));
     const gunfire = await fromA(message => message.t === 'shot' &&
@@ -149,6 +156,15 @@ async function main() {
       message.from === allB.id && message.w === 22);
     assert.equal(gunHit.d, 18);
     assert.equal((await fromB(message => message.t === 'wanted' && message.l === 2)).l, 2);
+    b.send(JSON.stringify({t: 'shot', w: 22, o: [1482, -1738, 13],
+      h: [1500, -1738, 13], ht: 1}));
+    await fromA(message => message.t === 'shot' && message.h[0] === 1500);
+    await new Promise(resolve => setTimeout(resolve, 120));
+    b.send(JSON.stringify({t: 'hit', to: allA.id, n: 1}));
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const missedTarget = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
+    assert.equal(Object.values(missedTarget.players).find(player => player.name === allA.you).health,
+      49, 'a shot ending away from the target cannot damage the target');
     a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
       x: 1485, y: -1738, z: 13, health: 49, weapon: 0,
       say: '/police'}));
