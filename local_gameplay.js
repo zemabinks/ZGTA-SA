@@ -15,6 +15,10 @@
     #zgta-local-panel select{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-panel input[type=number]{width:95px;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
     #zgta-local-panel input[type=text]{min-width:0;flex:1;border:1px solid #647795;border-radius:8px;background:#172943;color:white;padding:8px;font:13px system-ui}
+    #zgta-route-map{position:relative;width:min(100%,320px);aspect-ratio:1;margin:9px auto 4px;border:2px solid #7895cc;border-radius:9px;overflow:hidden;background:#25344a url('/tools/map/radar.webp') center/100% 100% no-repeat}
+    #zgta-route-map svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+    #zgta-route-map .zgta-map-pin{position:absolute;z-index:1;width:13px;height:13px;border:2px solid white;border-radius:50%;box-shadow:0 0 0 3px #0009,0 0 9px #000;transform:translate(-50%,-50%)}
+    #zgta-route-map .zgta-map-you{background:#3f9dff}#zgta-route-map .zgta-map-target{background:#ffcf43}
     #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
     #zgta-local-objective{position:fixed;right:16px;top:72px;z-index:1000;max-width:min(330px,calc(100vw - 32px));border:1px solid #86a9ff;border-radius:10px;background:#14264ff0;color:white;padding:10px 14px;font:600 13px/1.45 system-ui;text-align:left;cursor:pointer;box-shadow:0 4px 18px #0009}
     #zgta-local-objective[hidden]{display:none}
@@ -96,6 +100,42 @@
     line.append(select, button);
     panel.append(line);
   }
+  function renderRouteMap() {
+    const race = state.race?.stage === 'running' && state.race.joined && state.race.target;
+    const turf = state.turfs?.find(item => item.capturingYou);
+    const tracked = state.exploration?.tracked;
+    const target = race || state.job?.target || turf || tracked;
+    if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)) return;
+    section('Route map');
+    const map = element('div');
+    map.id = 'zgta-route-map';
+    const toPercent = (x, y) => ({left: Math.max(0, Math.min(100, (x + 3000) / 60)),
+      top: Math.max(0, Math.min(100, (3000 - y) / 60))});
+    const destination = toPercent(target.x, target.y);
+    map.setAttribute('role', 'img');
+    map.setAttribute('aria-label', `Route map to ${target.name}`);
+    if (state.position) {
+      const you = toPercent(state.position.x, state.position.y);
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      for (const [name, value] of Object.entries({x1: you.left, y1: you.top,
+        x2: destination.left, y2: destination.top, stroke: '#ffe178', 'stroke-width': 0.7,
+        'stroke-dasharray': '1.5 1'})) line.setAttribute(name, String(value));
+      svg.append(line);
+      map.append(svg);
+      const marker = element('span', undefined, 'zgta-map-pin zgta-map-you');
+      marker.style.left = `${you.left}%`;
+      marker.style.top = `${you.top}%`;
+      map.append(marker);
+    }
+    const marker = element('span', undefined, 'zgta-map-pin zgta-map-target');
+    marker.style.left = `${destination.left}%`;
+    marker.style.top = `${destination.top}%`;
+    map.append(marker);
+    panel.append(map, element('p', `Blue: you · gold: ${target.name}`, 'zgta-muted'));
+  }
   function render() {
     if (!visible) return;
     const scrollTop = panel.scrollTop;
@@ -128,6 +168,7 @@
       panel.append(link);
     }
 
+    renderRouteMap();
     section('Jobs and missions');
     if (state.job) {
       if (state.job.mode === 'route') {
