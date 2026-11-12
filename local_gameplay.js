@@ -116,6 +116,7 @@
     panel.append(element('p', state.discord?.linked ?
       `Discord linked: ${state.discord.name}. Your guest progress remains available.` :
       'Guest play is ready. Discord is optional.', 'zgta-muted'));
+    panel.append(element('p', `Health ${state.health}/100 · Armour ${state.armour}/100 · Wanted ${state.wanted}/6 · ${state.kills} kills · ${state.deaths} deaths`, 'zgta-muted'));
     if (state.discord?.available && !state.discord.linked) {
       const link = element('button', `Link Discord · one-time $${state.discord.bonus} bonus`);
       link.type = 'button';
@@ -191,6 +192,45 @@
       } else if (race.joined)
         panel.append(element('p', 'Your race is complete. Waiting for the remaining drivers.', 'zgta-muted'));
     }
+    section('Safety and police');
+    row(`Passive mode ${state.passive ? 'on' : 'off'}${state.passiveWait ?
+      ` · ${state.passiveWait} s cooldown` : ''}`, 'safety.passive', {},
+      state.passive ? 'Turn off' : 'Turn on', !state.connected ||
+        (!state.passive && (state.wanted > 0 || state.policeDuty || state.passiveWait > 0)));
+    row(`Police duty ${state.policeDuty ? 'on' : 'off'} · ${state.arrests} arrests`,
+      'police.duty', {}, state.policeDuty ? 'End duty' : 'Start duty',
+      !state.connected || (!state.policeDuty && (state.wanted > 0 || state.passive)));
+    if (state.policeDuty) {
+      if (!state.nearbyWanted.length)
+        panel.append(element('p', 'No wanted players within 30 m. Arrests require both players on foot within 4 m.', 'zgta-muted'));
+      for (const suspect of state.nearbyWanted)
+        row(`${suspect.name} · wanted ${suspect.wanted} · ${suspect.distance} m`,
+          'police.arrest', {number: suspect.number}, 'Arrest',
+          !state.onFoot || suspect.distance > 4);
+    }
+    section('Crews and territories');
+    panel.append(element('p', state.gang ?
+      `Your crew: ${state.gangs.find(item => item.id === state.gang)?.name || state.gang} · ${state.turfCaptures} captures` :
+      'Join a crew to contest territory. Guest accounts can join.', 'zgta-muted'));
+    for (const gang of state.gangs)
+      row(gang.name, 'gang.join', {gang: gang.id},
+        state.gang === gang.id ? 'Joined' : 'Join',
+        state.gang === gang.id || state.gangSwitchWait > 0);
+    if (state.gangSwitchWait)
+      panel.append(element('p', `Crew change available in ${state.gangSwitchWait} s.`, 'zgta-muted'));
+    const myCapture = state.turfs.find(turf => turf.capturingYou);
+    for (const turf of state.turfs) {
+      const owner = state.gangs.find(item => item.id === turf.owner)?.name || 'Unclaimed';
+      const capturing = turf.capturing ?
+        ` · ${state.gangs.find(item => item.id === turf.capturing)?.name || turf.capturing} capturing ${turf.progress}%${turf.contested ? ' (contested)' : ''}` : '';
+      const label = `${turf.name} · ${owner}${capturing} · ${turf.distance ?? '?'} m`;
+      if (turf.capturingYou)
+        row(label, 'turf.leave', {}, 'Cancel');
+      else row(label, 'turf.start', {turf: turf.id}, 'Capture',
+        !state.gang || !state.onFoot || state.passive || !!state.job ||
+        turf.owner === state.gang || !!turf.capturing || !!myCapture ||
+        turf.distance === null || turf.distance > 20);
+    }
     section('Garage');
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
     state.cars.forEach((car, slot) => {
@@ -239,11 +279,12 @@
     const race = state?.race?.stage === 'running' && state.race.joined &&
       state.race.target ? state.race : null;
     const job = state?.job?.mode ? state.job : null;
-    const active = race || job;
+    const turf = state?.turfs?.find(item => item.capturingYou);
+    const active = race || job || turf;
     objective.hidden = !active || visible;
     if (!active) return;
     let direction = '';
-    if (state.position) {
+    if (state.position && (race || job)) {
       const dx = active.target.x - state.position.x;
       const dy = active.target.y - state.position.y;
       const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -251,6 +292,11 @@
     }
     if (race) {
       objective.textContent = `Multiplayer race: checkpoint ${race.index}/${race.total} · ${race.secondsLeft} s left\n${race.target.name} · ${race.remaining ?? '?'} m${direction}\nPress F6 for details`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (turf && !job) {
+      objective.textContent = `Territory capture: ${turf.name} · ${turf.progress}%${turf.contested ? ' · contested' : ''}\nStay on foot within 20 m · ${turf.distance ?? '?'} m away\nPress F6 for details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
@@ -312,5 +358,6 @@
     else if (visible && event.key === 'Escape') {event.preventDefault(); event.stopImmediatePropagation(); toggle(false);}
   }, true);
   refresh();
-  setInterval(() => {if (visible || state?.job?.mode || state?.race?.joined) refresh();}, 3000);
+  setInterval(() => {if (visible || state?.job?.mode || state?.race?.joined ||
+    state?.turfs?.some(item => item.capturingYou)) refresh();}, 3000);
 })();
