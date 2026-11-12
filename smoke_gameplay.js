@@ -95,7 +95,7 @@ async function main() {
   for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
-  let child, ws, otherWs;
+  let child, ws, otherWs, otherCookie;
   const start = () => spawn(process.execPath, ['serve_local.js'], {
     cwd: temporary, env: {...process.env, ZGTA_SELFHOST: '1', PORT: String(port),
       BIND_HOST: '127.0.0.1', ZGTA_JOIN_CODE: '', ZGTA_JOIN_CODE_FILE: '', ZGTA_ALLOWED_HOSTS: ''},
@@ -181,7 +181,7 @@ async function main() {
     }
     async function mechanic() {
       const otherDocument = await fetch(root + '/');
-      const otherCookie = otherDocument.headers.get('set-cookie')?.split(';')[0];
+      otherCookie = otherDocument.headers.get('set-cookie')?.split(';')[0];
       assert(otherCookie && otherCookie !== cookie);
       otherWs = await connect(port, otherCookie);
       otherWs.send({t: 'hi'});
@@ -411,7 +411,70 @@ async function main() {
     ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851,
       say: '/home enter willowfield'});
     await ws.wait(message => message.t === 'note' && message.text.includes('interiors'));
-    console.log('PASS: guest account, five world-objective jobs, mission vehicles, garage storage, condition, repair and restart, catalog purchases, home exterior visit');
+    x = 2483.4; y = -1999.18;
+    const otherApi = async (url, method = 'GET', body) => {
+      const response = await fetch(root + url, {method, headers: {Cookie: otherCookie,
+        ...(body ? {'Content-Type': 'application/json'} : {})},
+      ...(body ? {body: JSON.stringify(body)} : {})});
+      return {status: response.status, body: await response.json()};
+    };
+    otherWs = await connect(port, otherCookie);
+    otherWs.send({t: 'hi'});
+    await otherWs.wait(message => message.t === 'all');
+    otherWs.send({t: 'me', walking: true, skin: 7, x, y, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const createdRace = await api('/api/local/action', 'POST', {action: 'race.create'});
+    assert.equal(createdRace.status, 200, JSON.stringify(createdRace.body));
+    assert.equal(createdRace.body.state.race.stage, 'lobby');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'race.start'})).status, 400,
+      'one player cannot start a multiplayer race');
+    const joinedRace = await otherApi('/api/local/action', 'POST', {action: 'race.join'});
+    assert.equal(joinedRace.status, 200, JSON.stringify(joinedRace.body));
+    assert.equal((await otherApi('/api/local/action', 'POST', {action: 'race.start'})).status, 400,
+      'only the host can start the race');
+    const raceStart = await api('/api/local/action', 'POST', {action: 'race.start'});
+    assert.equal(raceStart.status, 200, JSON.stringify(raceStart.body));
+    const loaners = (await api('/api/world/cars')).body.cars.filter(car =>
+      car[0].startsWith('mission-'));
+    assert.equal(loaners.length, 2, 'two racers receive loaner cars');
+    for (const car of loaners) await ws.wait(message => message.t === 'spawned' && message.v[0] === car[0]);
+    otherWs.send({t: 'enter', v: loaners[0][0]});
+    assert.equal((await otherWs.wait(message => message.t === 'enter' &&
+      message.v === loaners[0][0])).ok, false, 'other player cannot take host loaner');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'race.finish'})).status, 400,
+      'finish requires checkpoints in order');
+    for (let index = 1; index <= 3; index++) {
+      const race = (await api('/api/local/state')).body.race;
+      assert.equal(race.index, index);
+      await moveTo(race.target, true);
+      otherWs.send({t: 'me', walking: false, driving: true, skin: 7,
+        x: race.target.x, y: race.target.y, z: 13});
+      await new Promise(resolve => setTimeout(resolve, 100));
+      const action = index === 3 ? 'race.finish' : 'race.checkpoint';
+      const first = await api('/api/local/action', 'POST', {action});
+      assert.equal(first.status, 200, JSON.stringify(first.body));
+      const second = await otherApi('/api/local/action', 'POST', {action});
+      assert.equal(second.status, 200, JSON.stringify(second.body));
+    }
+    const raceResult = await api('/api/local/state');
+    assert.equal(raceResult.body.race.stage, 'finished');
+    assert.deepEqual(raceResult.body.race.results.map(item => item.pay), [600, 400]);
+    assert.equal(raceResult.body.cash, 44600);
+    assert.equal(raceResult.body.racesWon, 1);
+    assert.equal((await otherApi('/api/local/state')).body.cash, 400);
+    assert.equal((await api('/api/world/cars')).body.cars.filter(car =>
+      car[0].startsWith('mission-')).length, 0, 'loaner cars disappear after the race');
+    otherWs.close(); otherWs = null;
+    ws.close(); ws = null;
+    child.kill('SIGINT');
+    await new Promise(resolve => child.once('exit', resolve));
+    child = start();
+    await ready();
+    assert.equal((await api('/api/local/state')).body.racesWon, 1);
+    assert.equal((await otherApi('/api/local/state')).body.racesFinished, 1);
+    assert.equal((await api('/api/local/state')).body.race, null,
+      'active race state should not survive a server restart');
+    console.log('PASS: guest accounts, five world-objective jobs, garage persistence and repair, two-player race and payouts, home exterior visit');
   } finally {
     otherWs?.close();
     ws?.close();
