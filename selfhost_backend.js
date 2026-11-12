@@ -356,6 +356,7 @@ class LocalGame {
 
   setWanted(player, level) {
     player.wanted = Math.max(0, Math.min(6, Math.round(level)));
+    if (player.wanted > 0) player.policeDuty = false;
     player.wantedUntil = player.wanted ? Date.now() + WANTED_DECAY_MS : 0;
     for (const peer of this.peers) if (peer.ready && peer.player === player)
       peer.send(this.wantedPacket(player));
@@ -421,13 +422,19 @@ class LocalGame {
   handleShot(peer, message) {
     const point = value => Array.isArray(value) && value.length === 3 &&
       value.every(Number.isFinite) && value.every(n => Math.abs(n) <= 10000);
+    const position = this.position(peer.player);
     if (!Number.isInteger(message.w) || message.w < 0 || message.w > 46 ||
-        !point(message.o) || !point(message.h) || !this.position(peer.player) ||
+        !point(message.o) || !point(message.h) || !position ||
         peer.player.passive) return;
+    if (Math.hypot(message.o[0] - position.x, message.o[1] - position.y,
+      message.o[2] - position.z) > 15 ||
+      Math.hypot(message.h[0] - message.o[0], message.h[1] - message.o[1],
+        message.h[2] - message.o[2]) > 200) return;
     const now = Date.now();
     if (now - (peer.lastShotAt || 0) < 70) return;
     peer.lastShotAt = now;
     peer.lastWeapon = message.w;
+    peer.lastShotHit = message.h;
     const shot = {t: 'shot', from: String(peer.player.number), w: message.w,
       o: message.o, h: message.h, ht: Number.isInteger(message.ht) ?
         Math.max(0, Math.min(10, message.ht)) : 0};
@@ -450,7 +457,9 @@ class LocalGame {
     const distance = Math.hypot(from.x - to.x, from.y - to.y);
     const gun = weapon >= 22;
     if (distance > (gun ? 90 : 4) ||
-        (gun && (Date.now() - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon))) return;
+        (gun && (Date.now() - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon ||
+          !peer.lastShotHit || Math.hypot(peer.lastShotHit[0] - to.x,
+            peer.lastShotHit[1] - to.y, peer.lastShotHit[2] - to.z) > 8))) return;
     const now = Date.now();
     if (now - (peer.lastHitAt || 0) < (gun ? 90 : 300)) return;
     peer.lastHitAt = now;
@@ -818,8 +827,8 @@ class LocalGame {
         player.passiveWaitUntil = Date.now() + PASSIVE_WAIT_MS;
         message = 'Passive mode off. You can turn it on again in two minutes.';
       } else {
-        if (player.wanted || player.policeDuty)
-          throw new Error('Clear your wanted level and leave police duty first.');
+        if (player.wanted || player.policeDuty || player.job?.id === 'carthief')
+          throw new Error('Clear your wanted level, leave police duty, and finish the getaway first.');
         if (Date.now() < player.passiveWaitUntil)
           throw new Error(`Wait ${Math.ceil((player.passiveWaitUntil - Date.now()) / 1000)} s before enabling passive mode.`);
         player.passive = true;
@@ -831,8 +840,8 @@ class LocalGame {
       this.save();
     } else if (action === 'police.duty') {
       if (!pos) throw new Error('Enter the world before changing police duty.');
-      if (!player.policeDuty && (player.wanted || player.passive))
-        throw new Error('Clear your wanted level and turn off passive mode first.');
+      if (!player.policeDuty && (player.wanted || player.passive || player.job?.id === 'carthief'))
+        throw new Error('Clear your wanted level, turn off passive mode, and finish the getaway first.');
       player.policeDuty = !player.policeDuty;
       message = player.policeDuty ? 'Police duty on. Arrest nearby wanted players from F6.' :
         'Police duty off.';
@@ -1032,6 +1041,8 @@ class LocalGame {
       if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
         throw new Error('Drive the mission vehicle to the pickup point.');
       if (player.job.id === 'carthief') {
+        if (player.passive || player.policeDuty)
+          throw new Error('Leave passive mode or police duty before taking the car.');
         if (Date.now() - player.job.started > CAR_THEFT_MS)
           throw new Error('The getaway expired. Cancel it and start again.');
         if (pos.peer.state.vehicle !== player.job.vehicleId ||
