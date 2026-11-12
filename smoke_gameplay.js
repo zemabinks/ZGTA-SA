@@ -303,6 +303,23 @@ async function main() {
     assert.equal(vehicle.v[5], 14.1, 'vehicle origin must clear the ground');
     ws.send({t: 'enter', v: vehicle.v[0]});
     assert.equal((await ws.wait(message => message.t === 'enter')).ok, true);
+    ws.send({t: 'me', walking: false, driving: true, car: vehicle.v[2],
+      vehicle: vehicle.v[0], x, y, z: 13, health: 450, damage: 'test-damage'});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/state')).body.garage[0].health, 450);
+    ws.send({t: 'me', walking: true, driving: false, skin: 7, car: vehicle.v[2],
+      vehicle: vehicle.v[0], x, y, z: 13,
+      parked: {x: vehicle.v[3], y: vehicle.v[4], z: vehicle.v[5], heading: 0,
+        health: 450, damage: 'test-damage'}});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/action', 'POST', {action: 'car.store', slot: 0})).status, 200);
+    await ws.wait(message => message.t === 'vgone' && message.id === vehicle.v[0]);
+    assert.equal((await api('/api/local/state')).body.garage[0].active, false);
+    assert.equal((await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0})).status, 200);
+    const damagedCar = await ws.wait(message => message.t === 'spawned' &&
+      message.v[0].startsWith('local-') && message.v[0] !== vehicle.v[0] &&
+      message.v[2] === vehicle.v[2]);
+    assert.equal(damagedCar.v[9], 450, 'stored condition must return on spawn');
     const noHome = await api('/api/local/action', 'POST', {action: 'home.buy', home: 'starter'});
     assert.equal(noHome.status, 400);
     await taxi();
@@ -326,6 +343,11 @@ async function main() {
     assert.equal(saved.body.cash, 200);
     assert.equal(saved.body.jobsDone, 7);
     assert.equal(saved.body.cars[0].model, 410);
+    assert.equal(saved.body.garage[0].health, 450);
+    assert.equal(saved.body.garage[0].active, true);
+    const restoredCar = (await api('/api/world/cars')).body.cars.find(car =>
+      car[2] === vehicle.v[2] && car[9] === 450);
+    assert(restoredCar, 'active damaged car must survive server restart');
     assert.equal(saved.body.homes[0].id, 'starter');
     assert.equal(saved.body.job.stage, 'delivery');
     assert.deepEqual(saved.body.job.target, deliveryTarget);
@@ -336,6 +358,14 @@ async function main() {
     assert.deepEqual(owned.cars, ['410.52.39.0.']);
     ws.send({t: 'me', walking: true, skin: 7, x, y, z: 13});
     await new Promise(resolve => setTimeout(resolve, 100));
+    await moveTo({x: restoredCar[3], y: restoredCar[4]});
+    const repairedCar = await api('/api/local/action', 'POST', {action: 'car.repair', slot: 0});
+    assert.equal(repairedCar.status, 200, JSON.stringify(repairedCar.body));
+    assert.equal(repairedCar.body.state.cash, 90);
+    assert.equal(repairedCar.body.state.garage[0].health, 1000);
+    await ws.wait(message => message.t === 'vgone' && message.id === restoredCar[0]);
+    assert((await api('/api/world/cars')).body.cars.some(car =>
+      car[2] === vehicle.v[2] && car[9] === 1000), 'repair must refresh the shared vehicle');
     const ongoing = await api('/api/local/action', 'POST', {action: 'job.start', job: 'mechanic'});
     assert.equal(ongoing.status, 200, JSON.stringify(ongoing.body));
     const missionCar = await ws.wait(message => message.t === 'spawned' &&
@@ -381,7 +411,7 @@ async function main() {
     ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851,
       say: '/home enter willowfield'});
     await ws.wait(message => message.t === 'note' && message.text.includes('interiors'));
-    console.log('PASS: guest account, five world-objective jobs, timed checkpoints, mission vehicles and persistence, catalog purchases, home status and exterior visit');
+    console.log('PASS: guest account, five world-objective jobs, mission vehicles, garage storage, condition, repair and restart, catalog purchases, home exterior visit');
   } finally {
     otherWs?.close();
     ws?.close();
