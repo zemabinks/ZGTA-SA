@@ -202,10 +202,10 @@
     row(`Passive mode ${state.passive ? 'on' : 'off'}${state.passiveWait ?
       ` · ${state.passiveWait} s cooldown` : ''}`, 'safety.passive', {},
       state.passive ? 'Turn off' : 'Turn on', !state.connected ||
-        (!state.passive && (state.wanted > 0 || state.policeDuty || state.passiveWait > 0)));
+        (!state.passive && (state.wanted > 0 || state.policeDuty || state.passiveWait > 0 || state.job?.id === 'carthief')));
     row(`Police duty ${state.policeDuty ? 'on' : 'off'} · ${state.arrests} arrests`,
       'police.duty', {}, state.policeDuty ? 'End duty' : 'Start duty',
-      !state.connected || (!state.policeDuty && (state.wanted > 0 || state.passive)));
+      !state.connected || (!state.policeDuty && (state.wanted > 0 || state.passive || state.job?.id === 'carthief')));
     if (state.policeDuty) {
       if (!state.nearbyWanted.length)
         panel.append(element('p', 'No wanted players within 30 m. Arrests require both players on foot within 4 m.', 'zgta-muted'));
