@@ -15,6 +15,8 @@ const CAR_THEFT_MS = 300000;
 const MULTIPLAYER_RACE_MS = 300000;
 const WANTED_DECAY_MS = 120000;
 const PASSIVE_WAIT_MS = 120000;
+const PARTY_INVITE_MS = 60000;
+const PARTY_LIMIT = 4;
 const TURF_CAPTURE_MS = 30000;
 const GANG_SWITCH_MS = 600000;
 const GANGS = Object.freeze([
@@ -183,6 +185,8 @@ class LocalGame {
     this.vehicles = new Map();
     this.nextVehicle = 1;
     this.race = null;
+    this.parties = new Map();
+    this.partyInvites = new Map();
     this.chat = [];
     this.chatSequence = 0;
     this.nextNumber = 1;
@@ -295,6 +299,45 @@ class LocalGame {
       Number.isFinite(item.state.x) && Number.isFinite(item.state.y));
     return peer ? {x: peer.state.x, y: peer.state.y,
       z: finite(peer.state.z, 13), peer} : null;
+  }
+
+  partyOf(player) {
+    return [...this.parties.values()].find(party => party.members.has(player)) || null;
+  }
+
+  partyView(player) {
+    const party = this.partyOf(player);
+    const invite = this.partyInvites.get(player);
+    if (invite && (Date.now() >= invite.expires || !this.parties.has(invite.partyId)))
+      this.partyInvites.delete(player);
+    const activeInvite = this.partyInvites.get(player);
+    return {you: player.number, group: party ? {id: party.id, leader: party.leader.name,
+      leaderNumber: party.leader.number,
+      isLeader: party.leader === player,
+      members: [...party.members].map(member => ({number: member.number,
+        name: member.name, online: [...this.peers].some(peer => peer.ready && peer.player === member)}))} : null,
+    invite: activeInvite ? {from: activeInvite.from.name,
+      secondsLeft: Math.max(0, Math.ceil((activeInvite.expires - Date.now()) / 1000))} : null,
+    candidates: [...this.peers].filter(peer => peer.ready && peer.player !== player &&
+      !this.partyOf(peer.player)).map(peer => ({number: peer.player.number,
+      name: peer.player.name}))};
+  }
+
+  leaveParty(player) {
+    const party = this.partyOf(player);
+    if (!party) return false;
+    party.members.delete(player);
+    this.partyInvites.delete(player);
+    if (party.members.size === 0) {
+      this.parties.delete(party.id);
+      for (const [target, invite] of this.partyInvites)
+        if (invite.partyId === party.id) this.partyInvites.delete(target);
+    } else {
+      if (party.leader === player) party.leader = party.members.values().next().value;
+      for (const member of party.members) this.note(member,
+        `${player.name} left the group. ${party.leader.name} is the leader.`);
+    }
+    return true;
   }
 
   removeRaceCar(member) {
@@ -558,6 +601,7 @@ class LocalGame {
       kills: player.kills, deaths: player.deaths, arrests: player.arrests,
       policeDuty: player.policeDuty, nearbyWanted: suspects,
       nearbyPlayers, leaderboard,
+      party: this.partyView(player),
       gang: player.gang, gangSwitchWait: Math.max(0,
         Math.ceil((player.gangSwitchUntil - Date.now()) / 1000)),
       turfCaptures: player.turfCaptures, gangs: GANGS, turfs,
@@ -768,7 +812,73 @@ class LocalGame {
     const pos = this.position(player);
     let message;
     this.expireRace();
-    if (action === 'money.transfer') {
+    if (action === 'party.create') {
+      if (this.partyOf(player)) throw new Error('You are already in a group.');
+      const id = crypto.randomBytes(6).toString('hex');
+      this.parties.set(id, {id, leader: player, members: new Set([player])});
+      message = 'Private group created. Invite another online player from F6.';
+    } else if (action === 'party.invite') {
+      const target = [...this.peers].find(peer => peer.ready && peer.player !== player &&
+        peer.player.number === Number(input.number));
+      if (!target || this.partyOf(target.player))
+        throw new Error('Choose an online player who is not already in a group.');
+      if (Date.now() - (player.lastPartyInvite || 0) < 1500)
+        throw new Error('Wait before sending another group invitation.');
+      if (this.partyInvites.has(target.player) &&
+          this.partyInvites.get(target.player).expires > Date.now())
+        throw new Error('That player already has a pending invitation.');
+      let party = this.partyOf(player);
+      if (party && party.leader !== player) throw new Error('Only the group leader can invite players.');
+      if (party && party.members.size >= PARTY_LIMIT) throw new Error('Your group is full.');
+      if (!party) {
+        const id = crypto.randomBytes(6).toString('hex');
+        party = {id, leader: player, members: new Set([player])};
+        this.parties.set(id, party);
+      }
+      player.lastPartyInvite = Date.now();
+      this.partyInvites.set(target.player, {partyId: party.id, from: player,
+        expires: Date.now() + PARTY_INVITE_MS});
+      this.note(target.player, `${player.name} invited you to a private group. Open F6 or type /party accept.`);
+      message = `Group invitation sent to ${target.player.name}.`;
+    } else if (action === 'party.accept') {
+      const invite = this.partyInvites.get(player);
+      const party = invite && this.parties.get(invite.partyId);
+      if (!invite || !party || Date.now() >= invite.expires)
+        throw new Error('No active group invitation.');
+      if (this.partyOf(player)) throw new Error('Leave your current group first.');
+      if (party.members.size >= PARTY_LIMIT) throw new Error('The group is full.');
+      this.partyInvites.delete(player);
+      party.members.add(player);
+      for (const member of party.members) this.note(member,
+        `${player.name} joined the group (${party.members.size}/${PARTY_LIMIT}).`);
+      message = `Joined ${party.leader.name}'s group.`;
+    } else if (action === 'party.decline') {
+      if (!this.partyInvites.delete(player)) throw new Error('No group invitation to decline.');
+      message = 'Group invitation declined.';
+    } else if (action === 'party.leave') {
+      if (!this.leaveParty(player)) throw new Error('You are not in a group.');
+      message = 'Left the group.';
+    } else if (action === 'party.kick') {
+      const party = this.partyOf(player);
+      const member = party && [...party.members].find(item =>
+        item !== player && item.number === Number(input.number));
+      if (!party || party.leader !== player || !member)
+        throw new Error('Only the leader can remove a member of this group.');
+      party.members.delete(member);
+      this.note(member, `${player.name} removed you from the group.`);
+      for (const remaining of party.members) this.note(remaining, `${member.name} left the group.`);
+      message = `${member.name} removed from the group.`;
+    } else if (action === 'party.chat') {
+      const party = this.partyOf(player);
+      if (!party) throw new Error('Join a group to use private chat.');
+      const line = String(input.text || '').trim().slice(0, 160);
+      if (!line) throw new Error('Write a message first.');
+      if (Date.now() - (player.lastPartyChat || 0) < 800)
+        throw new Error('Wait a moment before sending another group message.');
+      player.lastPartyChat = Date.now();
+      for (const member of party.members) this.note(member, `[Group] ${player.name}: ${line}`);
+      message = 'Group message sent.';
+    } else if (action === 'money.transfer') {
       const amount = Number(input.amount);
       if (!Number.isSafeInteger(amount) || amount < 1 || amount > 1000000)
         throw new Error('Choose a whole-dollar amount from $1 to $1,000,000.');
@@ -1212,7 +1322,7 @@ class LocalGame {
         features: ['local accounts', 'player positions', 'chat', 'local settings',
           'jobs and cash', 'garage ownership', 'home ownership', 'multiplayer races',
           'combat and passive mode', 'wanted levels and arrests', 'crews and territory',
-          'cash transfers and leaderboard',
+          'cash transfers and leaderboard', 'private groups and group chat',
           'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
@@ -1396,6 +1506,20 @@ class LocalGame {
       peer.send({t: 'note', text: `${[...this.peers].filter(p => p.ready).length} local player(s) online.`});
       return;
     }
+    if (text === '/party')
+      return peer.send({t: 'note', text: 'Group commands: /party create, invite NUMBER, accept, decline, leave, kick NUMBER. Type /p MESSAGE for private group chat.'});
+    if (text.startsWith('/party ') || text.startsWith('/p ')) {
+      try {
+        if (text.startsWith('/p ')) this.action(peer.player, 'party.chat', {text: text.slice(3)});
+        else {
+          const [command, number] = text.slice(7).trim().split(/\s+/, 2);
+          if (!['create', 'invite', 'accept', 'decline', 'leave', 'kick'].includes(command))
+            throw new Error('Unknown group command. Type /party for help.');
+          this.action(peer.player, `party.${command}`, {number: Number(number)});
+        }
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
+      return;
+    }
     if (text === '/owned' || text === '/mycars' || text === '/garage')
       return peer.send(this.owned(peer.player)), peer.send(this.homeStatus(peer.player));
     if (text === '/home' || text === '/home doors')
@@ -1544,6 +1668,8 @@ class LocalGame {
 
   remove(peer) {
     if (!this.peers.delete(peer)) return;
+    if (![...this.peers].some(other => other.player === peer.player))
+      this.leaveParty(peer.player);
     for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
   }
 }
