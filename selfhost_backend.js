@@ -12,6 +12,20 @@ const DISCORD_BONUS = 500;
 const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
 const MULTIPLAYER_RACE_MS = 300000;
+const WANTED_DECAY_MS = 120000;
+const PASSIVE_WAIT_MS = 120000;
+const TURF_CAPTURE_MS = 30000;
+const GANG_SWITCH_MS = 600000;
+const GANGS = Object.freeze([
+  {id: 'green', name: 'Green Crew'},
+  {id: 'violet', name: 'Violet Crew'},
+  {id: 'gold', name: 'Gold Crew'},
+]);
+const TURFS = Object.freeze(['elcorona', 'willowfield', 'jefferson']);
+const WEAPON_DAMAGE = Object.freeze({0: 8, 1: 10, 2: 14, 3: 14, 4: 25,
+  5: 16, 6: 18, 7: 20, 8: 18, 9: 30, 22: 18, 23: 20, 24: 40,
+  25: 35, 26: 28, 27: 32, 28: 12, 29: 18, 30: 24, 31: 24,
+  32: 14, 33: 36, 34: 70});
 const JOBS = Object.freeze([
   {id: 'courier', name: 'Courier', pay: 250, distance: 38},
   {id: 'taxi', name: 'Taxi', pay: 300, distance: 48},
@@ -168,8 +182,14 @@ class LocalGame {
     this.chat = [];
     this.chatSequence = 0;
     this.nextNumber = 1;
+    this.lastPoliceTick = 0;
+    this.lastTurfTick = 0;
+    this.territories = Object.fromEntries(TURFS.map(id => [id, null]));
+    this.turfCaptures = new Map();
     try {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
+      for (const id of TURFS) if (GANGS.some(gang => gang.id === data.territories?.[id]))
+        this.territories[id] = data.territories[id];
       for (const [id, value] of Object.entries(data.players || {})) {
         if (!/^[0-9a-f]{32}$/.test(id)) continue;
         const cars = Array.isArray(value.cars) ? value.cars.filter(car =>
@@ -177,6 +197,15 @@ class LocalGame {
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
           cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
           racesFinished: money(value.racesFinished), racesWon: money(value.racesWon),
+          health: Math.max(1, Math.min(100, Math.round(finite(value.health, 100)))),
+          armour: Math.max(0, Math.min(100, Math.round(finite(value.armour)))),
+          wanted: Math.max(0, Math.min(6, Math.round(finite(value.wanted)))),
+          wantedUntil: finite(value.wantedUntil), passive: value.passive === true,
+          passiveWaitUntil: finite(value.passiveWaitUntil),
+          kills: money(value.kills), deaths: money(value.deaths), arrests: money(value.arrests),
+          policeDuty: false,
+          gang: GANGS.some(gang => gang.id === value.gang) ? value.gang : null,
+          gangSwitchUntil: finite(value.gangSwitchUntil), turfCaptures: money(value.turfCaptures),
           cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
@@ -211,10 +240,16 @@ class LocalGame {
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
       [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
         racesFinished: p.racesFinished, racesWon: p.racesWon,
+        health: p.health, armour: p.armour, wanted: p.wanted,
+        wantedUntil: p.wantedUntil, passive: p.passive,
+        passiveWaitUntil: p.passiveWaitUntil,
+        kills: p.kills, deaths: p.deaths, arrests: p.arrests,
+        gang: p.gang, gangSwitchUntil: p.gangSwitchUntil, turfCaptures: p.turfCaptures,
         cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
         discord: p.discord, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
-    fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1, players}, null, 2) + '\n', {mode: 0o600});
+    fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1,
+      territories: this.territories, players}, null, 2) + '\n', {mode: 0o600});
     fs.renameSync(STATE_FILE + '.partial', STATE_FILE);
   }
 
@@ -224,6 +259,9 @@ class LocalGame {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
         cash: 0, xp: 0, jobsDone: 0, racesFinished: 0, racesWon: 0,
+        health: 100, armour: 0, wanted: 0, wantedUntil: 0, passive: false,
+        passiveWaitUntil: 0, kills: 0, deaths: 0, arrests: 0, policeDuty: false,
+        gang: null, gangSwitchUntil: 0, turfCaptures: 0,
         cars: [], garage: [], homes: [], job: null,
         discord: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
@@ -308,6 +346,129 @@ class LocalGame {
         seconds: result.seconds, pay: result.pay}))};
   }
 
+  wantedPacket(player) {
+    return {t: 'wanted', l: player.wanted, p: 0, h: player.wanted, s: null};
+  }
+
+  setWanted(player, level) {
+    player.wanted = Math.max(0, Math.min(6, Math.round(level)));
+    player.wantedUntil = player.wanted ? Date.now() + WANTED_DECAY_MS : 0;
+    for (const peer of this.peers) if (peer.ready && peer.player === player)
+      peer.send(this.wantedPacket(player));
+    this.save();
+  }
+
+  policeTick() {
+    const now = Date.now();
+    if (now - this.lastPoliceTick < 5000) return;
+    this.lastPoliceTick = now;
+    for (const player of this.players.values())
+      if (player.wanted > 0 && now > player.wantedUntil)
+        this.setWanted(player, player.wanted - 1);
+  }
+
+  turfTick() {
+    const now = Date.now();
+    if (now - this.lastTurfTick < 1000) return;
+    this.lastTurfTick = now;
+    for (const [id, capture] of this.turfCaptures) {
+      const home = homeAt(id);
+      const leader = this.position(capture.player);
+      if (!home || !leader || leader.peer.state.walking !== true ||
+          capture.player.health <= 0 || capture.player.passive ||
+          capture.player.gang !== capture.gang ||
+          Math.hypot(leader.x - home.out[0], leader.y - home.out[1]) > 20) {
+        this.turfCaptures.delete(id);
+        this.note(capture.player, `${home?.name || id} capture cancelled.`);
+        continue;
+      }
+      const contested = [...this.peers].some(peer => peer.ready &&
+        peer.player.gang && peer.player.gang !== capture.gang &&
+        peer.player.health > 0 && (() => {
+          const at = this.position(peer.player);
+          return at && Math.hypot(at.x - home.out[0], at.y - home.out[1]) <= 25;
+        })());
+      capture.contested = contested;
+      if (contested) {capture.lastTick = now; continue;}
+      capture.progress += Math.max(0, Math.min(1500, now - capture.lastTick));
+      capture.lastTick = now;
+      if (capture.progress < TURF_CAPTURE_MS) continue;
+      this.turfCaptures.delete(id);
+      this.territories[id] = capture.gang;
+      const rewarded = new Set();
+      for (const peer of this.peers) {
+        const player = peer.player;
+        const at = this.position(player);
+        if (!peer.ready || !at || rewarded.has(player) || player.gang !== capture.gang ||
+            Math.hypot(at.x - home.out[0], at.y - home.out[1]) > 25) continue;
+        rewarded.add(player);
+        player.cash = money(player.cash + 200);
+        player.xp = money(player.xp + 40);
+        player.turfCaptures = money(player.turfCaptures + 1);
+        this.updatePlayer(player);
+        this.note(player, `${home.name} captured for ${GANGS.find(gang => gang.id === capture.gang).name}: +$200, +40 XP.`);
+      }
+      this.save();
+      for (const peer of this.peers) if (peer.ready)
+        peer.send({t: 'note', text: `${home.name} is now controlled by ${GANGS.find(gang => gang.id === capture.gang).name}.`});
+    }
+  }
+
+  handleShot(peer, message) {
+    const point = value => Array.isArray(value) && value.length === 3 &&
+      value.every(Number.isFinite) && value.every(n => Math.abs(n) <= 10000);
+    if (!Number.isInteger(message.w) || message.w < 0 || message.w > 46 ||
+        !point(message.o) || !point(message.h) || !this.position(peer.player) ||
+        peer.player.passive) return;
+    const now = Date.now();
+    if (now - (peer.lastShotAt || 0) < 70) return;
+    peer.lastShotAt = now;
+    peer.lastWeapon = message.w;
+    const shot = {t: 'shot', from: String(peer.player.number), w: message.w,
+      o: message.o, h: message.h, ht: Number.isInteger(message.ht) ?
+        Math.max(0, Math.min(10, message.ht)) : 0};
+    if (typeof message.id === 'string' && message.id.length <= 64) shot.id = message.id;
+    if (Number.isInteger(message.bp)) shot.bp = message.bp;
+    for (const other of this.peers) if (other !== peer && other.ready) other.send(shot);
+  }
+
+  handleHit(peer, message) {
+    const target = [...this.peers].find(other => other.ready &&
+      String(other.player.number) === message.to);
+    const from = this.position(peer.player);
+    const to = target && this.position(target.player);
+    if (!from || !to || !target || target === peer ||
+        peer.player.passive || target.player.passive || target.player.health <= 0) return;
+    const weapon = Date.now() - (peer.lastShotAt || 0) <= 2000 ? peer.lastWeapon :
+      Number.isInteger(peer.state?.weapon) ? peer.state.weapon : 0;
+    const damage = WEAPON_DAMAGE[weapon];
+    if (!damage) return;
+    const distance = Math.hypot(from.x - to.x, from.y - to.y);
+    const gun = weapon >= 22;
+    if (distance > (gun ? 90 : 4) ||
+        (gun && (Date.now() - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon))) return;
+    const now = Date.now();
+    if (now - (peer.lastHitAt || 0) < (gun ? 90 : 300)) return;
+    peer.lastHitAt = now;
+    const victim = target.player;
+    const absorbed = Math.min(victim.armour, damage);
+    victim.armour -= absorbed;
+    victim.health = Math.max(0, victim.health - (damage - absorbed));
+    target.send({t: 'hit', from: String(peer.player.number), w: weapon, d: damage});
+    this.setWanted(peer.player, Math.max(1, peer.player.wanted + 1));
+    if (victim.health === 0) {
+      victim.deaths = money(victim.deaths + 1);
+      victim.lastDeath = now;
+      victim.policeDuty = false;
+      peer.player.kills = money(peer.player.kills + 1);
+      const feed = {t: 'kill', vn: victim.name, kn: peer.player.name,
+        v: String(peer.player.number), w: weapon};
+      for (const other of this.peers) if (other.ready) other.send(feed);
+      this.note(victim, 'You were defeated. Respawn to rejoin the world.');
+    }
+    this.save();
+  }
+
   gameplayState(player) {
     const pos = this.position(player);
     const active = player.job;
@@ -343,8 +504,34 @@ class LocalGame {
         radius: MISSION_RADIUS, index: active.index + 1, total: active.points.length,
         secondsLeft: Math.max(0, Math.ceil((TIME_TRIAL_MS - (Date.now() - active.started)) / 1000))};
     }
+    const suspects = player.policeDuty && pos ? [...this.peers]
+      .filter(peer => peer.ready && peer.player !== player && peer.player.wanted > 0)
+      .map(peer => ({player: peer.player, at: this.position(peer.player)}))
+      .filter(item => item.at && Math.hypot(pos.x - item.at.x, pos.y - item.at.y) <= 30)
+      .map(item => ({number: item.player.number, name: item.player.name,
+        wanted: item.player.wanted,
+        distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y))})) : [];
+    const turfs = TURFS.map(id => {
+      const home = homeAt(id);
+      if (!home) return null;
+      const capture = this.turfCaptures.get(id);
+      return {id, name: home.name, x: rounded(home.out[0]), y: rounded(home.out[1]),
+        owner: this.territories[id], capturing: capture?.gang || null,
+        capturingYou: capture?.player === player,
+        progress: capture ? Math.floor(100 * capture.progress / TURF_CAPTURE_MS) : 0,
+        contested: capture?.contested || false,
+        distance: pos ? Math.ceil(Math.hypot(pos.x - home.out[0], pos.y - home.out[1])) : null};
+    }).filter(Boolean);
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
       racesFinished: player.racesFinished || 0, racesWon: player.racesWon || 0,
+      health: player.health, armour: player.armour, wanted: player.wanted,
+      passive: player.passive, passiveWait: Math.max(0,
+        Math.ceil((player.passiveWaitUntil - Date.now()) / 1000)),
+      kills: player.kills, deaths: player.deaths, arrests: player.arrests,
+      policeDuty: player.policeDuty, nearbyWanted: suspects,
+      gang: player.gang, gangSwitchWait: Math.max(0,
+        Math.ceil((player.gangSwitchUntil - Date.now()) / 1000)),
+      turfCaptures: player.turfCaptures, gangs: GANGS, turfs,
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
@@ -550,7 +737,88 @@ class LocalGame {
     const pos = this.position(player);
     let message;
     this.expireRace();
-    if (action === 'race.create') {
+    if (action === 'gang.join') {
+      const gang = GANGS.find(item => item.id === input.gang);
+      if (!gang) throw new Error('Choose a listed crew.');
+      if (player.gang === gang.id) throw new Error('You are already in that crew.');
+      if (Date.now() < player.gangSwitchUntil)
+        throw new Error(`Wait ${Math.ceil((player.gangSwitchUntil - Date.now()) / 1000)} s before changing crew.`);
+      if ([...this.turfCaptures.values()].some(capture => capture.player === player))
+        throw new Error('Finish or leave your capture before changing crew.');
+      player.gang = gang.id;
+      player.gangSwitchUntil = Date.now() + GANG_SWITCH_MS;
+      this.save();
+      message = `Joined ${gang.name}.`;
+    } else if (action === 'turf.start') {
+      const id = input.turf;
+      const home = TURFS.includes(id) && homeAt(id);
+      if (!home) throw new Error('Unknown territory.');
+      if (!player.gang) throw new Error('Join a crew first.');
+      if (!pos || pos.peer.state.walking !== true || player.health <= 0 || player.passive ||
+          Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 20)
+        throw new Error('Stand on foot within 20 m of the territory marker with passive mode off.');
+      if (player.job || (this.race?.members.has(player) && this.race.stage !== 'finished'))
+        throw new Error('Finish your job or race first.');
+      if (this.territories[id] === player.gang) throw new Error('Your crew already controls this territory.');
+      if (this.turfCaptures.has(id)) throw new Error('This territory is already being captured.');
+      if ([...this.turfCaptures.values()].some(capture => capture.player === player))
+        throw new Error('Finish your current capture first.');
+      this.turfCaptures.set(id, {player, gang: player.gang, progress: 0,
+        lastTick: Date.now(), contested: false});
+      message = `Capturing ${home.name} for ${GANGS.find(gang => gang.id === player.gang).name}. Hold this position for 30 seconds.`;
+    } else if (action === 'turf.leave') {
+      const capture = [...this.turfCaptures].find(([, value]) => value.player === player);
+      if (!capture) throw new Error('You are not capturing a territory.');
+      this.turfCaptures.delete(capture[0]);
+      message = 'Territory capture cancelled.';
+    } else if (action === 'safety.passive') {
+      if (!pos) throw new Error('Enter the world before changing passive mode.');
+      if (player.passive) {
+        player.passive = false;
+        player.passiveWaitUntil = Date.now() + PASSIVE_WAIT_MS;
+        message = 'Passive mode off. You can turn it on again in two minutes.';
+      } else {
+        if (player.wanted || player.policeDuty)
+          throw new Error('Clear your wanted level and leave police duty first.');
+        if (Date.now() < player.passiveWaitUntil)
+          throw new Error(`Wait ${Math.ceil((player.passiveWaitUntil - Date.now()) / 1000)} s before enabling passive mode.`);
+        player.passive = true;
+        message = 'Passive mode on. You cannot hurt or be hurt by other players.';
+      }
+      for (const peer of this.peers) if (peer.ready && peer.player === player)
+        peer.send({t: 'passive', on: player.passive,
+          w: Math.max(0, Math.ceil((player.passiveWaitUntil - Date.now()) / 1000))});
+      this.save();
+    } else if (action === 'police.duty') {
+      if (!pos) throw new Error('Enter the world before changing police duty.');
+      if (!player.policeDuty && (player.wanted || player.passive))
+        throw new Error('Clear your wanted level and turn off passive mode first.');
+      player.policeDuty = !player.policeDuty;
+      message = player.policeDuty ? 'Police duty on. Arrest nearby wanted players from F6.' :
+        'Police duty off.';
+    } else if (action === 'police.arrest') {
+      if (!player.policeDuty || !pos || pos.peer.state.walking !== true)
+        throw new Error('Go on police duty and stand on foot to arrest someone.');
+      const number = Number(input.number);
+      const suspect = [...this.peers].find(peer => peer.ready &&
+        peer.player !== player && peer.player.number === number);
+      const at = suspect && this.position(suspect.player);
+      if (!suspect || !at || suspect.player.wanted < 1 ||
+          at.peer.state.walking !== true ||
+          Math.hypot(pos.x - at.x, pos.y - at.y) > 4)
+        throw new Error('The wanted player must be on foot within 4 m.');
+      const level = suspect.player.wanted;
+      const fine = Math.min(suspect.player.cash, 100 * level);
+      const pay = 50 * level;
+      suspect.player.cash -= fine;
+      player.cash = money(player.cash + pay);
+      player.arrests = money(player.arrests + 1);
+      this.setWanted(suspect.player, 0);
+      this.updatePlayer(suspect.player);
+      this.updatePlayer(player);
+      this.note(suspect.player, `Arrested by ${player.name}. Fine: $${fine}. Wanted level cleared.`);
+      message = `Arrested ${suspect.player.name}: +$${pay}.`;
+    } else if (action === 'race.create') {
       if (this.race && this.race.stage !== 'finished') throw new Error('A race lobby already exists.');
       if (!pos || player.job) throw new Error('Enter the game and finish your job before creating a race.');
       const points = [];
@@ -959,15 +1227,21 @@ class LocalGame {
       peer.ready = true;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
-        spot: [1480, -1738, 13, 0], life: [100, 0], out: [1480, -1738],
+        spot: [1480, -1738, 13, 0],
+        life: [peer.player.health, peer.player.armour], out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0});
       peer.send(this.fullState(peer));
       peer.send(this.owned(peer.player));
       peer.send(this.homeStatus(peer.player));
+      peer.send({t: 'passive', on: peer.player.passive,
+        w: Math.max(0, Math.ceil((peer.player.passiveWaitUntil - Date.now()) / 1000))});
+      peer.send(this.wantedPacket(peer.player));
       return;
     }
     if (!peer.ready) return;
     if (message.t === 'ping') return peer.send({t: 'pong', c: message.c, s: Date.now()});
+    if (message.t === 'shot') return this.handleShot(peer, message);
+    if (message.t === 'hit') return this.handleHit(peer, message);
     if (message.t === 'me') {
       const previous = peer.state;
       if (peer.player.job && !peer.player.job.mode && previous && Date.now() - peer.lastSeen < 5000 &&
@@ -983,6 +1257,23 @@ class LocalGame {
       }
       peer.state = message;
       peer.lastSeen = Date.now();
+      const reportedHealth = message.walking === true ? message.health :
+        message.driving === true ? message.life : null;
+      if (Number.isFinite(reportedHealth) && reportedHealth >= 0 && reportedHealth <= 100) {
+        const health = Math.round(reportedHealth);
+        if (health < peer.player.health) {
+          peer.player.health = health;
+          if (health === 0) {
+            peer.player.deaths = money(peer.player.deaths + 1);
+            peer.player.lastDeath = Date.now();
+          }
+          this.save();
+        } else if (peer.player.health === 0 && health > 0 &&
+            Date.now() - (peer.player.lastDeath || 0) > 2000) {
+          peer.player.health = health;
+          this.save();
+        }
+      }
       this.updateOwnedVehicle(peer, message);
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
@@ -1039,6 +1330,17 @@ class LocalGame {
       return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
     if (text === '/jobs')
       return peer.send({t: 'note', text: `Local jobs: ${JOBS.map(job => `${job.id} ($${job.pay})`).join(', ')}. Type /job <name>.`});
+    if (text === '/wanted')
+      return peer.send({t: 'note', text: `Wanted level: ${peer.player.wanted}/6. Passive mode: ${peer.player.passive ? 'on' : 'off'}.`});
+    if (text === '/passive' || text === '/police' || text.startsWith('/arrest ')) {
+      try {
+        const action = text === '/passive' ? 'safety.passive' :
+          text === '/police' ? 'police.duty' : 'police.arrest';
+        this.action(peer.player, action,
+          action === 'police.arrest' ? {number: Number(text.slice(8))} : {});
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
+      return;
+    }
     if (text === '/race')
       return peer.send({t: 'note', text: 'Race commands: /race create, join, start, checkpoint, finish, leave. F6 shows the current lobby and objectives.'});
     if (text.startsWith('/race ')) {
@@ -1097,8 +1399,8 @@ class LocalGame {
     row[15] = rounded(limited(s.vz, 150));
     row[16] = Math.round(finite(s.clock, Date.now()));
     row[17] = typeof s.horn === 'boolean' ? Number(s.horn) : Number.isInteger(s.horn) ? s.horn & 3 : 0;
-    row[18] = Math.round(Math.max(0, Math.min(walking ? 100 : 1000,
-      finite(s.health, walking ? 100 : 1000))));
+    row[18] = walking ? peer.player.health :
+      Math.round(Math.max(0, Math.min(1000, finite(s.health, 1000))));
     row[19] = typeof s.damage === 'string' ? s.damage.slice(0, 512) : '';
     row[20] = rounded(limited(s.wx, 30)); row[21] = rounded(limited(s.wy, 30));
     row[22] = rounded(limited(s.wz, 30));
@@ -1133,7 +1435,7 @@ class LocalGame {
     row[40] = driving && Number.isFinite(s.smoke) && s.smoke > 0 ? rounded(s.smoke) : null;
     row[41] = walking && !riding && typeof s.anim === 'string' ? s.anim.slice(0, 96) : null;
     row[42] = driving && Array.isArray(s.kit) ? s.kit.slice(0, 16).map(value => rounded(value)) : null;
-    row[43] = driving ? Math.round(Math.max(0, Math.min(100, finite(s.life, 100)))) : 0;
+    row[43] = driving ? peer.player.health : 0;
     return row;
   }
 
@@ -1153,6 +1455,8 @@ class LocalGame {
 
   broadcastPositions() {
     this.expireRace();
+    this.policeTick();
+    this.turfTick();
     for (const p of this.peers) {
       if (!p.ready) continue;
       const rows = [...this.peers].filter(other => other !== p).map(other => this.row(other)).filter(Boolean);
