@@ -70,7 +70,7 @@ async function main() {
     const game = require(path.join(temp, 'selfhost_backend.js'));
     const first = 'a'.repeat(32), second = 'b'.repeat(32);
     const player = name => ({number: 1, name, cash: 0, xp: 0, jobsDone: 0,
-      cars: [], homes: [], job: null, discord: null, settings: {}});
+      cars: [], garage: [], homes: [], job: null, discord: null, settings: {}});
     game.players.set(first, player('Guest one'));
     game.players.set(second, player('Guest two'));
     assert.equal(game.gameplayState(game.players.get(first)).discord.available, true);
