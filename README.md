@@ -232,6 +232,8 @@ invite or remove members; an invite lasts one minute. Group messages reach
 only group members through the local game's notification feed. Type `/party`
 in chat for invitation and membership commands, or `/p MESSAGE` for a private
 group message. Groups are session state and end after the server restarts.
+Two separate browser sessions verified an invitation, shared membership,
+and delivery of a private group message.
 This is an independent social feature, not the publisher's party system.
 
 F6 also has a twelve-location exploration trail through Los Santos, San
