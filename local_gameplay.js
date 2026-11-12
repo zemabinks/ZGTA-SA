@@ -128,7 +128,7 @@
       panel.append(link);
     }
 
-    section('Jobs and time trial');
+    section('Jobs and missions');
     if (state.job) {
       if (state.job.mode === 'route') {
         const taxi = state.job.id === 'taxi';
@@ -151,8 +151,9 @@
         row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
           !state.connected || state.job.remaining > state.job.radius);
       } else if (state.job.mode === 'checkpoints') {
-        panel.append(element('p', `Checkpoint ${state.job.index}/${state.job.total}: ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. ${state.job.secondsLeft} s left. Drive within ${state.job.radius} m.`, 'zgta-muted'));
-        row(state.job.index === state.job.total ? 'Finish time trial' : 'Pass checkpoint',
+        panel.append(element('p', `Checkpoint ${state.job.index}/${state.job.total}: ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. ${state.job.secondsLeft} s left. Drive ${state.job.id === 'patrol' ? 'the marked police car ' : ''}within ${state.job.radius} m.`, 'zgta-muted'));
+        row(state.job.index === state.job.total ?
+          (state.job.id === 'patrol' ? 'Finish patrol' : 'Finish time trial') : 'Pass checkpoint',
           state.job.index === state.job.total ? 'job.complete' : 'job.checkpoint', {},
           state.job.index === state.job.total ? 'Finish' : 'Pass',
           !state.connected || state.job.remaining > state.job.radius || state.job.secondsLeft <= 0);
@@ -163,10 +164,11 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}`,
+        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
             (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
             (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
+            (job.id === 'patrol' && !state.policeDuty) ||
             (state.race?.joined && ['lobby', 'running'].includes(state.race.stage)));
     }
     section('Multiplayer race');
