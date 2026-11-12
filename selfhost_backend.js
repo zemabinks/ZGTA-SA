@@ -8,6 +8,7 @@ const OptionalDiscord = require('./optional_discord');
 const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
 const MAX_CASH = 100000000;
+const RESPRAY_COST = 120;
 const DISCORD_BONUS = 500;
 const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
@@ -140,9 +141,12 @@ function savedGarage(value, cars) {
       item.position.every(Number.isFinite) && Math.abs(item.position[0]) <= 6000 &&
       Math.abs(item.position[1]) <= 6000 && item.position[2] >= -200 &&
       item.position[2] <= 1000 ? item.position.map(rounded) : null;
+    const paint = Array.isArray(item?.paint) && item.paint.length === 2 &&
+      item.paint.every(color => Number.isInteger(color) && color >= 0 && color <= 127) ?
+      item.paint : null;
     return {health: Math.max(0, Math.min(1000, Math.round(finite(item?.health, 1000)))),
       damage: typeof item?.damage === 'string' ? item.damage.slice(0, 512) : '',
-      active: item?.active === true && !!position, position};
+      active: item?.active === true && !!position, position, paint};
   });
 }
 function repairCost(entry) {
@@ -660,8 +664,9 @@ class LocalGame {
         const location = vehicle?.row || entry.position;
         const x = vehicle ? location[3] : location?.[0];
         const y = vehicle ? location[4] : location?.[1];
-        return {slot, active: !!vehicle, health: entry.health,
-          repairCost: repairCost(entry), distance: pos && x !== undefined && y !== undefined ?
+        return {slot, active: !!vehicle, health: entry.health, paint: entry.paint,
+          repairCost: repairCost(entry), resprayCost: RESPRAY_COST,
+          distance: pos && x !== undefined && y !== undefined ?
             Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null};
       }),
       onFoot: pos?.peer.state.walking === true,
@@ -680,9 +685,15 @@ class LocalGame {
 
   owned(player) {
     const cars = player.cars.map(model => CAR_CATALOG.find(car => car.model === model));
-    return {t: 'owned', cars: cars.map(car => car.car), out: [], login: true,
+    return {t: 'owned', cars: cars.map((_, slot) => this.vehicleCode(player, slot)), out: [], login: true,
       worth: cars.map(car => car.price), stored: [], locked: [],
       rep: {level: 1 + Math.floor(player.xp / 1000)}, licence: true};
+  }
+
+  vehicleCode(player, slot) {
+    const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
+    const paint = player.garage[slot]?.paint;
+    return paint ? `${car.model}.${paint[0]}.${paint[1]}.0.` : car.car;
   }
 
   homeStatus(player) {
@@ -791,7 +802,7 @@ class LocalGame {
     if (!car || !entry?.position) return null;
     const id = `local-${this.nextVehicle++}`;
     const [x, y, z, heading] = entry.position;
-    const row = [id, player.name, car.car, x, y, z, heading, 0, 0,
+    const row = [id, player.name, this.vehicleCode(player, slot), x, y, z, heading, 0, 0,
       entry.health, entry.damage, null];
     const vehicle = {id, owner: player, slot, row, lastGarageSave: 0};
     this.vehicles.set(id, vehicle);
@@ -818,8 +829,10 @@ class LocalGame {
     vehicle.row[5] = position[2]; vehicle.row[6] = position[3];
     vehicle.row[7] = rounded(report.pitch); vehicle.row[8] = rounded(report.roll);
     if (Number.isFinite(report.health))
-      entry.health = Math.max(0, Math.min(1000, Math.round(report.health)));
-    if (typeof report.damage === 'string') entry.damage = report.damage.slice(0, 512);
+      entry.health = Math.min(entry.health,
+        Math.max(0, Math.min(1000, Math.round(report.health))));
+    if (typeof report.damage === 'string' && report.damage)
+      entry.damage = report.damage.slice(0, 512);
     vehicle.row[9] = entry.health; vehicle.row[10] = entry.damage;
     entry.position = position;
     if (parked || before !== `${entry.health}:${entry.damage}` ||
@@ -1333,7 +1346,7 @@ class LocalGame {
       if (player.cash < car.price) throw new Error(`You need $${car.price}.`);
       player.cash -= car.price;
       player.cars.push(car.model);
-      player.garage.push({health: 1000, damage: '', active: false, position: null});
+      player.garage.push({health: 1000, damage: '', active: false, position: null, paint: null});
       message = `${car.name} bought for $${car.price}. Open My Vehicles or spawn it here.`;
       this.updatePlayer(player);
     } else if (action === 'car.spawn') {
@@ -1341,7 +1354,7 @@ class LocalGame {
       if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
         throw new Error('Choose a car in your garage.');
       message = this.spawnOwnedCar(player, slot);
-    } else if (action === 'car.store' || action === 'car.repair') {
+    } else if (action === 'car.store' || action === 'car.repair' || action === 'car.respray') {
       const slot = Number(input.slot);
       if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
         throw new Error('Choose a car in your garage.');
@@ -1358,7 +1371,7 @@ class LocalGame {
         this.removeOwnedVehicle(vehicle);
         message = `${car.name} stored. Its condition was saved.`;
         this.save();
-      } else {
+      } else if (action === 'car.repair') {
         const cost = repairCost(entry);
         if (!cost) throw new Error('This car does not need repairs.');
         if (player.cash < cost) throw new Error(`You need $${cost} to repair it.`);
@@ -1367,6 +1380,17 @@ class LocalGame {
         this.removeOwnedVehicle(vehicle);
         this.addOwnedVehicle(player, slot);
         message = `${car.name} repaired for $${cost}.`;
+        this.updatePlayer(player);
+      } else {
+        if (player.cash < RESPRAY_COST)
+          throw new Error(`You need $${RESPRAY_COST} to respray it.`);
+        const previous = this.vehicleCode(player, slot);
+        do entry.paint = [crypto.randomInt(128), crypto.randomInt(128)];
+        while (this.vehicleCode(player, slot) === previous);
+        player.cash -= RESPRAY_COST;
+        this.removeOwnedVehicle(vehicle);
+        this.addOwnedVehicle(player, slot);
+        message = `${car.name} resprayed for $${RESPRAY_COST}.`;
         this.updatePlayer(player);
       }
     } else if (action === 'home.buy') {
@@ -1669,7 +1693,8 @@ class LocalGame {
     }
     if (text.startsWith('/job ') || ['/pickup', '/checkpoint', '/repair', '/deliver', '/finish', '/canceljob'].includes(text) ||
         text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/storecar ') ||
-        text.startsWith('/repaircar ') || text.startsWith('/buyhome ')) {
+        text.startsWith('/repaircar ') || text.startsWith('/respraycar ') ||
+        text.startsWith('/buyhome ')) {
       try {
         const [command, value] = text.slice(1).split(/\s+/, 2);
         const actions = {job: ['job.start', {job: value}], pickup: ['job.pickup', {}],
@@ -1679,6 +1704,7 @@ class LocalGame {
           spawncar: ['car.spawn', {slot: Number(value) - 1}],
           storecar: ['car.store', {slot: Number(value) - 1}],
           repaircar: ['car.repair', {slot: Number(value) - 1}],
+          respraycar: ['car.respray', {slot: Number(value) - 1}],
           buyhome: ['home.buy', {home: value}]};
         const [action, input] = actions[command];
         this.action(peer.player, action, input);
