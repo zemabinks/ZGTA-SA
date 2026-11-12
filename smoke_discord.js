@@ -70,6 +70,11 @@ async function main() {
     const game = require(path.join(temp, 'selfhost_backend.js'));
     const first = 'a'.repeat(32), second = 'b'.repeat(32);
     const player = name => ({number: 1, name, cash: 0, xp: 0, jobsDone: 0,
+      racesFinished: 0, racesWon: 0, health: 100, armour: 0,
+      wanted: 0, wantedUntil: 0, passive: false, passiveWaitUntil: 0,
+      kills: 0, deaths: 0, arrests: 0, policeDuty: false,
+      gang: null, gangSwitchUntil: 0, turfCaptures: 0,
+      discoveries: [], trackedDiscovery: null,
       cars: [], garage: [], homes: [], job: null, discord: null, settings: {}});
     game.players.set(first, player('Guest one'));
     game.players.set(second, player('Guest two'));
