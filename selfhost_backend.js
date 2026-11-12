@@ -11,6 +11,7 @@ const MAX_CASH = 100000000;
 const DISCORD_BONUS = 500;
 const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
+const PATROL_MS = 240000;
 const CAR_THEFT_MS = 300000;
 const MULTIPLAYER_RACE_MS = 300000;
 const WANTED_DECAY_MS = 120000;
@@ -42,6 +43,7 @@ const JOBS = Object.freeze([
   {id: 'mechanic', name: 'Mechanic', pay: 350, distance: 55},
   {id: 'medic', name: 'Medic', pay: 350, distance: 55},
   {id: 'trial', name: 'Street time trial', pay: 450, distance: 75},
+  {id: 'patrol', name: 'Police patrol', pay: 400, distance: 75},
   {id: 'carthief', name: 'Getaway car', pay: 550, distance: 65},
 ]);
 const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json');
@@ -150,6 +152,7 @@ function repairCost(entry) {
 function savedJob(value) {
   if (!value || !JOBS.some(job => job.id === value.id) ||
       !Number.isFinite(value.started) || Date.now() - value.started >= 86400000) return null;
+  if (value.id === 'patrol' && Date.now() - value.started > PATROL_MS) return null;
   if (['courier', 'taxi', 'medic', 'carthief'].includes(value.id) && value.mode === 'route') {
     if ((value.id === 'courier' && (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
         !value.pickup.every(Number.isFinite))) ||
@@ -170,12 +173,16 @@ function savedJob(value) {
     return {id: value.id, mode: 'service', targetHome: value.targetHome,
       vehicleId: value.vehicleId, started: value.started};
   }
-  if (value.id === 'trial' && value.mode === 'checkpoints') {
+  if (['trial', 'patrol'].includes(value.id) && value.mode === 'checkpoints') {
     if (!Array.isArray(value.points) || value.points.length !== 3 ||
         !value.points.every(homeAt) || new Set(value.points).size !== 3 ||
-        !Number.isInteger(value.index) || value.index < 0 || value.index > 2) return null;
+        !Number.isInteger(value.index) || value.index < 0 || value.index > 2 ||
+        (value.id === 'patrol' && (!validMissionId(value.vehicleId) ||
+          !Array.isArray(value.station) || value.station.length !== 3 ||
+          !value.station.every(Number.isFinite)))) return null;
     return {id: value.id, mode: 'checkpoints', points: value.points,
-      index: value.index, started: value.started};
+      index: value.index, started: value.started,
+      ...(value.id === 'patrol' ? {vehicleId: value.vehicleId, station: value.station} : {})};
   }
   const goal = JOBS.find(job => job.id === value.id).distance;
   return {id: value.id, goal, progress: Math.max(0, Math.min(goal,
@@ -218,7 +225,7 @@ class LocalGame {
           wantedUntil: finite(value.wantedUntil), passive: value.passive === true,
           passiveWaitUntil: finite(value.passiveWaitUntil),
           kills: money(value.kills), deaths: money(value.deaths), arrests: money(value.arrests),
-          policeDuty: false,
+          policeDuty: savedJob(value.job)?.id === 'patrol',
           gang: GANGS.some(gang => gang.id === value.gang) ? value.gang : null,
           gangSwitchUntil: finite(value.gangSwitchUntil), turfCaptures: money(value.turfCaptures),
           discoveries: [...new Set(Array.isArray(value.discoveries) ?
@@ -576,7 +583,8 @@ class LocalGame {
         target: {x: rounded(home.out[0]), y: rounded(home.out[1]), name: home.name},
         remaining: pos ? Math.ceil(Math.hypot(pos.x - home.out[0], pos.y - home.out[1])) : null,
         radius: MISSION_RADIUS, index: active.index + 1, total: active.points.length,
-        secondsLeft: Math.max(0, Math.ceil((TIME_TRIAL_MS - (Date.now() - active.started)) / 1000))};
+        secondsLeft: Math.max(0, Math.ceil(((active.id === 'patrol' ? PATROL_MS : TIME_TRIAL_MS) -
+          (Date.now() - active.started)) / 1000))};
     }
     const suspects = player.policeDuty && pos ? [...this.peers]
       .filter(peer => peer.ready && peer.player !== player && peer.player.wanted > 0)
@@ -699,12 +707,14 @@ class LocalGame {
     if (!job?.vehicleId) return;
     const mechanic = job.id === 'mechanic';
     const thief = job.id === 'carthief';
+    const patrol = job.id === 'patrol';
     const point = mechanic ? homeAt(job.targetHome)?.out :
       thief ? homeAt(job.pickupHome)?.out : job.station;
     if (!point) return;
     const id = job.vehicleId;
     const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
-      mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' : '416.1.1.0.',
+      mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' :
+        patrol ? '596.0.1.0.' : '416.1.1.0.',
       rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
       0, 0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
@@ -1017,6 +1027,8 @@ class LocalGame {
       this.save();
     } else if (action === 'police.duty') {
       if (!pos) throw new Error('Enter the world before changing police duty.');
+      if (player.policeDuty && player.job?.id === 'patrol')
+        throw new Error('Finish or cancel your patrol before leaving police duty.');
       if (!player.policeDuty && (player.wanted || player.passive || player.job?.id === 'carthief'))
         throw new Error('Clear your wanted level, turn off passive mode, and finish the getaway first.');
       player.policeDuty = !player.policeDuty;
@@ -1190,8 +1202,11 @@ class LocalGame {
           vehicleId: missionId(), stage: 'pickup', started: Date.now()};
         this.addMissionVehicle(player);
         message = `Medical call started. An ambulance is nearby. Drive to the patient near ${home.name}.`;
-      } else if (job.id === 'trial') {
-        if (player.cars.length === 0) throw new Error('Own a car before entering the time trial.');
+      } else if (job.id === 'trial' || job.id === 'patrol') {
+        if (job.id === 'trial' && player.cars.length === 0)
+          throw new Error('Own a car before entering the time trial.');
+        if (job.id === 'patrol' && !player.policeDuty)
+          throw new Error('Go on police duty before starting a patrol.');
         const points = [];
         let from = pos;
         for (let i = 0; i < 3; i++) {
@@ -1201,8 +1216,13 @@ class LocalGame {
           from = {x: home.out[0], y: home.out[1]};
         }
         player.job = {id: job.id, mode: 'checkpoints', points,
-          index: 0, started: Date.now()};
-        message = `Street time trial started. Drive through three checkpoints within ${TIME_TRIAL_MS / 60000} minutes.`;
+          index: 0, started: Date.now(),
+          ...(job.id === 'patrol' ? {vehicleId: missionId(),
+            station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)]} : {})};
+        if (job.id === 'patrol') this.addMissionVehicle(player);
+        message = job.id === 'patrol' ?
+          `Patrol started. Take the nearby police car through three checkpoints within ${PATROL_MS / 60000} minutes.` :
+          `Street time trial started. Drive through three checkpoints within ${TIME_TRIAL_MS / 60000} minutes.`;
       } else {
         player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
         message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
@@ -1235,15 +1255,20 @@ class LocalGame {
             'Patient aboard. Return to the aid station.';
       this.save();
     } else if (action === 'job.checkpoint') {
-      if (player.job?.id !== 'trial' || player.job.mode !== 'checkpoints' ||
+      if (!['trial', 'patrol'].includes(player.job?.id) || player.job.mode !== 'checkpoints' ||
           player.job.index >= player.job.points.length - 1)
         throw new Error('No intermediate checkpoint is active.');
-      if (Date.now() - player.job.started > TIME_TRIAL_MS)
-        throw new Error('The time trial expired. Cancel it and start again.');
+      if (Date.now() - player.job.started >
+          (player.job.id === 'patrol' ? PATROL_MS : TIME_TRIAL_MS))
+        throw new Error('The route expired. Cancel it and start again.');
       const home = homeAt(player.job.points[player.job.index]);
       if (!pos || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS ||
           pos.peer.state.driving !== true)
         throw new Error('Drive into the active checkpoint.');
+      if (player.job.id === 'patrol' && (!player.policeDuty ||
+          pos.peer.state.vehicle !== player.job.vehicleId ||
+          pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+        throw new Error('Drive the marked police car while on duty.');
       player.job.index++;
       message = `Checkpoint ${player.job.index} passed. Drive to ${homeAt(player.job.points[player.job.index]).name}.`;
       this.save();
@@ -1275,11 +1300,17 @@ class LocalGame {
             Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS ||
             pos.peer.state.driving !== true)
           throw new Error('Drive through the final checkpoint.');
+        if (player.job.id === 'patrol' && (!player.policeDuty ||
+            pos.peer.state.vehicle !== player.job.vehicleId ||
+            pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+          throw new Error('Finish in the marked police car while on duty.');
       } else if (player.job.progress < player.job.goal)
         throw new Error(`Travel ${Math.ceil(player.job.goal - player.job.progress)} m more.`);
       const job = JOBS.find(item => item.id === player.job.id);
       if (job.id === 'trial' && Date.now() - player.job.started > TIME_TRIAL_MS)
         throw new Error('The time trial expired. Cancel it and start again.');
+      if (job.id === 'patrol' && Date.now() - player.job.started > PATROL_MS)
+        throw new Error('The patrol expired. Cancel it and start again.');
       if (job.id === 'carthief' && Date.now() - player.job.started > CAR_THEFT_MS)
         throw new Error('The getaway expired. Cancel it and start again.');
       player.cash = money(player.cash + job.pay);
@@ -1390,6 +1421,7 @@ class LocalGame {
           'jobs and cash', 'garage ownership', 'home ownership', 'multiplayer races',
           'combat and passive mode', 'wanted levels and arrests', 'crews and territory',
           'cash transfers and leaderboard', 'private groups and group chat',
+          'police patrol mission',
           'saved exploration trail',
           'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
