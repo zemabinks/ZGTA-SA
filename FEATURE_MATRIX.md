@@ -17,9 +17,10 @@ complete rules or data held by that private server.
 | Mechanic | Damaged roadside mission car at a property entrance; approach and repair on foot | Browser objective and isolated location, on-foot, payout, cleanup, and restart tests pass. A second test client sees the car but cannot take it. No towing, repair animation, or general vehicle damage system yet. |
 | Medic | Mission ambulance, patient pickup point, and return to starting aid station | Browser showed the ambulance and patient objective; isolated driving, pickup, payout, and cleanup tests pass. No visible patient, hospital system, or healing yet. |
 | Street time trial | Three world checkpoints in an owned car within three minutes | Order, driving requirement, timer, and payout pass isolated tests. No visible checkpoint markers or leaderboard yet. |
+| Multiplayer race | Shared lobby, two or more racers, temporary cars, three ordered checkpoints, finish ranking, and payouts | Two-client route, rank, payout, car cleanup, and account-stat persistence pass isolated tests. No 3D checkpoint rings or persistent leaderboard; active race is lost on server restart. |
 | Economy | Cash, XP, job payouts, car and home prices | Transactions and saved balances pass isolated tests. Publisher rules, businesses, shops, taxes, and trading are not reproduced. |
 | Homes | Purchase, owned markers, exterior visit | Purchase and native home-status tests pass. Interiors rendered as empty space in a Chrome probe, so entry, storage, and garage actions remain disabled. |
-| Police, combat, gangs, races | No independent implementations | These advertised or client-facing systems need behavioral specifications, original code/data, or independent designs and tests. |
+| Police, combat, gangs | No independent implementations | These advertised or client-facing systems need behavioral specifications, original code/data, or independent designs and tests. |
 | Internet hosting | LAN launcher and private join code | Join and local LAN-address checks pass. No public deployment, domain, HTTPS endpoint, or internet device test exists. |
 
 The local game should be described as a growing independent implementation.
@@ -36,7 +37,8 @@ those files out of GitHub.
    fuel, and tuning rules.
 3. Add health, combat, wanted levels, and police behavior with rules enforced
    by the server.
-4. Add gangs, territory control, and races as multiplayer systems.
+4. Add gangs and territory control; expand races with visible checkpoint
+   markers and a persistent leaderboard.
 5. Build an original public web experience with guest accounts, configure
    optional Discord linking, HTTPS, abuse controls, and a licensed asset path.
 
