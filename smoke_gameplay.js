@@ -117,8 +117,11 @@ async function main() {
     assert.equal(asset.headers.get('set-cookie'), null, 'assets must not create player accounts');
     const document = await fetch(root + '/');
     assert.equal(document.status, 200);
-    assert((await document.text()).includes("settings.hideTips = true"),
-      'the self-hosted page must disable publisher feature and Discord reward tips');
+    const html = await document.text();
+    const tipSetting = html.indexOf('settings.hideTips = true');
+    const firstClientScript = html.indexOf('<script src="/_next/');
+    assert(tipSetting > 0 && firstClientScript > tipSetting,
+      'disable publisher feature and Discord reward tips before the client scripts run');
     const cookie = document.headers.get('set-cookie')?.split(';')[0];
     assert(cookie);
     const first = await fetch(root + '/api/auth/me', {headers: {Cookie: cookie}});
