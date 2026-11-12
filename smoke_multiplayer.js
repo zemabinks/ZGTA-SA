@@ -124,9 +124,82 @@ async function main() {
     b.send(JSON.stringify({t: 'board'}));
     const board = await fromB(message => message.t === 'board');
     assert.equal(board.rows.length, 2);
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 75, weapon: 0}));
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13, health: 100, weapon: 0}));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    b.send(JSON.stringify({t: 'hit', to: allA.id, n: 1}));
+    const melee = await fromA(message => message.t === 'hit' &&
+      message.from === allB.id);
+    assert.equal(melee.d, 8);
+    assert.equal((await fromB(message => message.t === 'wanted' && message.l === 1)).l, 1);
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13, health: 100, weapon: 22,
+      say: '/passive'}));
+    await fromB(message => message.t === 'note' && message.text.includes('Clear your wanted'));
+    b.send(JSON.stringify({t: 'shot', w: 22, o: [1482, -1738, 13],
+      h: [1485, -1738, 13], ht: 1}));
+    const gunfire = await fromA(message => message.t === 'shot' &&
+      message.from === allB.id);
+    assert.equal(gunfire.w, 22);
+    await new Promise(resolve => setTimeout(resolve, 150));
+    b.send(JSON.stringify({t: 'hit', to: allA.id, n: 1}));
+    const gunHit = await fromA(message => message.t === 'hit' &&
+      message.from === allB.id && message.w === 22);
+    assert.equal(gunHit.d, 18);
+    assert.equal((await fromB(message => message.t === 'wanted' && message.l === 2)).l, 2);
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 49, weapon: 0,
+      say: '/police'}));
+    await fromA(message => message.t === 'note' && message.text.includes('Police duty on'));
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 49, weapon: 0,
+      say: `/arrest ${allB.id}`}));
+    await fromA(message => message.t === 'note' && message.text.includes('Arrested'));
+    assert.equal((await fromB(message => message.t === 'wanted' && message.l === 0)).l, 0);
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13, health: 100, weapon: 0,
+      say: '/passive'}));
+    assert.equal((await fromB(message => message.t === 'passive' && message.on === true)).on, true);
+    a.send(JSON.stringify({t: 'hit', to: allB.id, n: 1}));
+    await new Promise(resolve => setTimeout(resolve, 450));
+    const combatSave = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
+    const officer = Object.values(combatSave.players).find(player => player.name === allA.you);
+    const suspect = Object.values(combatSave.players).find(player => player.name === allB.you);
+    assert.equal(officer.health, 49);
+    assert.equal(officer.arrests, 1);
+    assert.equal(officer.cash, 100);
+    assert.equal(suspect.health, 100, 'passive mode prevents player damage');
+    assert.equal(suspect.wanted, 0);
+    assert.equal(suspect.passive, true);
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13, health: 100, weapon: 34,
+      say: '/passive'}));
+    await fromB(message => message.t === 'note' && message.text.includes('Passive mode off'));
+    b.send(JSON.stringify({t: 'shot', w: 34, o: [1482, -1738, 13],
+      h: [1485, -1738, 13], ht: 1}));
+    await fromA(message => message.t === 'shot' && message.w === 34);
+    b.send(JSON.stringify({t: 'hit', to: allA.id, n: 1}));
+    await fromA(message => message.t === 'kill' && message.vn === allA.you);
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const defeated = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
+    const deadOfficer = Object.values(defeated.players).find(player => player.name === allA.you);
+    const killer = Object.values(defeated.players).find(player => player.name === allB.you);
+    assert.equal(deadOfficer.health, 0);
+    assert.equal(deadOfficer.deaths, 1);
+    assert.equal(killer.kills, 1);
+    assert.equal(killer.wanted, 1);
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
+      x: 1485, y: -1738, z: 13, health: 100, weapon: 0}));
+    await new Promise(resolve => setTimeout(resolve, 400));
+    const recovered = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
+    assert.equal(Object.values(recovered.players).find(player =>
+      player.name === allA.you).health, 100, 'client respawn restores local health');
     b.close();
     await fromA(message => message.t === 'gone' && message.id === allB.id);
-    console.log('PASS: account creation, two players, walking, passenger, driving, chat, board, disconnect');
+    console.log('PASS: account creation, two players, movement, chat, combat, kill feed, wanted level, arrest, passive mode, respawn');
   } finally {
     for (const ws of clients) if (ws.readyState === WebSocket.OPEN) ws.close();
     child.kill('SIGINT');
