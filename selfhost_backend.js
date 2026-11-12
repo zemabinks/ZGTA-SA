@@ -11,6 +11,7 @@ const MAX_CASH = 100000000;
 const DISCORD_BONUS = 500;
 const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
+const CAR_THEFT_MS = 300000;
 const MULTIPLAYER_RACE_MS = 300000;
 const WANTED_DECAY_MS = 120000;
 const PASSIVE_WAIT_MS = 120000;
@@ -32,6 +33,7 @@ const JOBS = Object.freeze([
   {id: 'mechanic', name: 'Mechanic', pay: 350, distance: 55},
   {id: 'medic', name: 'Medic', pay: 350, distance: 55},
   {id: 'trial', name: 'Street time trial', pay: 450, distance: 75},
+  {id: 'carthief', name: 'Getaway car', pay: 550, distance: 65},
 ]);
 const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json');
 let clientCatalog = {vehicles: [], homes: []};
@@ -139,17 +141,19 @@ function repairCost(entry) {
 function savedJob(value) {
   if (!value || !JOBS.some(job => job.id === value.id) ||
       !Number.isFinite(value.started) || Date.now() - value.started >= 86400000) return null;
-  if (['courier', 'taxi', 'medic'].includes(value.id) && value.mode === 'route') {
+  if (['courier', 'taxi', 'medic', 'carthief'].includes(value.id) && value.mode === 'route') {
     if ((value.id === 'courier' && (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
         !value.pickup.every(Number.isFinite))) ||
         (value.id !== 'courier' && !homeAt(value.pickupHome)) ||
         (value.id !== 'medic' && !homeAt(value.drop)) ||
         (value.id === 'medic' && (!Array.isArray(value.station) || value.station.length !== 3 ||
           !value.station.every(Number.isFinite) || !validMissionId(value.vehicleId))) ||
+        (value.id === 'carthief' && !validMissionId(value.vehicleId)) ||
         !['pickup', 'delivery'].includes(value.stage)) return null;
     return {id: value.id, mode: 'route',
       ...(value.id === 'courier' ? {pickup: value.pickup} : {pickupHome: value.pickupHome}),
       ...(value.id === 'medic' ? {station: value.station, vehicleId: value.vehicleId} : {drop: value.drop}),
+      ...(value.id === 'carthief' ? {vehicleId: value.vehicleId} : {}),
       stage: value.stage, started: value.started};
   }
   if (value.id === 'mechanic' && value.mode === 'service') {
@@ -484,7 +488,9 @@ class LocalGame {
           name: active.stage === 'pickup' ? (pickupHome?.name || 'Package pickup') :
             (dropHome?.name || 'Aid station')},
         remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
-        radius: MISSION_RADIUS};
+        radius: MISSION_RADIUS,
+        ...(active.id === 'carthief' ? {secondsLeft:
+          Math.max(0, Math.ceil((CAR_THEFT_MS - (Date.now() - active.started)) / 1000))} : {})};
     } else if (active?.mode === 'service') {
       const home = homeAt(active.targetHome);
       const vehicle = this.vehicles.get(active.vehicleId);
@@ -605,13 +611,15 @@ class LocalGame {
     const job = player.job;
     if (!job?.vehicleId) return;
     const mechanic = job.id === 'mechanic';
-    const point = mechanic ? homeAt(job.targetHome)?.out : job.station;
+    const thief = job.id === 'carthief';
+    const point = mechanic ? homeAt(job.targetHome)?.out :
+      thief ? homeAt(job.pickupHome)?.out : job.station;
     if (!point) return;
     const id = job.vehicleId;
-    const row = [id, mechanic ? 'Roadside call' : player.name,
-      mechanic ? '410.52.39.0.' : '416.1.1.0.',
+    const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
+      mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' : '416.1.1.0.',
       rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
-      0, 0, 0, mechanic ? 350 : 1000, '', null];
+      0, 0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
   }
@@ -971,6 +979,16 @@ class LocalGame {
             drop: drop.id, stage: 'pickup', started: Date.now()};
           message = `Taxi fare started. Drive to ${nearest.name} for pickup.`;
         }
+      } else if (job.id === 'carthief') {
+        if (player.passive || player.policeDuty)
+          throw new Error('Turn off passive mode and leave police duty before starting a getaway.');
+        const pickup = nearestHome(pos);
+        const drop = pickup && nearestHome({x: pickup.out[0], y: pickup.out[1]}, 180, [pickup.id]);
+        if (!pickup || !drop) throw new Error('Getaway locations are unavailable.');
+        player.job = {id: job.id, mode: 'route', pickupHome: pickup.id,
+          drop: drop.id, vehicleId: missionId(), stage: 'pickup', started: Date.now()};
+        this.addMissionVehicle(player);
+        message = `Getaway started. Steal the marked car at ${pickup.name} and deliver it to ${drop.name} within five minutes.`;
       } else if (job.id === 'mechanic') {
         const home = nearestHome(pos);
         if (!home) throw new Error('Roadside service locations are unavailable.');
@@ -1005,19 +1023,28 @@ class LocalGame {
       }
       this.save();
     } else if (action === 'job.pickup') {
-      if (!['courier', 'taxi', 'medic'].includes(player.job?.id) || player.job.mode !== 'route' ||
+      if (!['courier', 'taxi', 'medic', 'carthief'].includes(player.job?.id) || player.job.mode !== 'route' ||
           player.job.stage !== 'pickup') throw new Error('No pickup is ready.');
       const pickup = player.job.id === 'courier' ? player.job.pickup :
         homeAt(player.job.pickupHome)?.out;
       if (!pos || !pickup || Math.hypot(pos.x - pickup[0], pos.y - pickup[1]) > MISSION_RADIUS)
         throw new Error('Travel to the pickup point.');
       if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
-        throw new Error('Drive to collect the passenger or patient.');
+        throw new Error('Drive the mission vehicle to the pickup point.');
+      if (player.job.id === 'carthief') {
+        if (Date.now() - player.job.started > CAR_THEFT_MS)
+          throw new Error('The getaway expired. Cancel it and start again.');
+        if (pos.peer.state.vehicle !== player.job.vehicleId ||
+            pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2])
+          throw new Error('Get in the marked getaway car.');
+        this.setWanted(player, Math.max(2, player.wanted));
+      }
       player.job.stage = 'delivery';
       const home = homeAt(player.job.drop);
       message = player.job.id === 'courier' ? `Package collected. Deliver it to ${home.name}.` :
         player.job.id === 'taxi' ? `Passenger aboard. Drive to ${home.name}.` :
-          'Patient aboard. Return to the aid station.';
+          player.job.id === 'carthief' ? `Car taken. Drive to ${home.name} before time runs out.` :
+            'Patient aboard. Return to the aid station.';
       this.save();
     } else if (action === 'job.checkpoint') {
       if (player.job?.id !== 'trial' || player.job.mode !== 'checkpoints' ||
@@ -1044,6 +1071,10 @@ class LocalGame {
           throw new Error('Travel to the delivery destination.');
         if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
           throw new Error('Finish the fare or medical call while driving.');
+        if (player.job.id === 'carthief' &&
+            (pos.peer.state.vehicle !== player.job.vehicleId ||
+              pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+          throw new Error('Deliver the marked getaway car.');
       } else if (player.job.mode === 'service') {
         const vehicle = this.vehicles.get(player.job.vehicleId);
         if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > MISSION_RADIUS)
@@ -1061,6 +1092,8 @@ class LocalGame {
       const job = JOBS.find(item => item.id === player.job.id);
       if (job.id === 'trial' && Date.now() - player.job.started > TIME_TRIAL_MS)
         throw new Error('The time trial expired. Cancel it and start again.');
+      if (job.id === 'carthief' && Date.now() - player.job.started > CAR_THEFT_MS)
+        throw new Error('The getaway expired. Cancel it and start again.');
       player.cash = money(player.cash + job.pay);
       player.xp = money(player.xp + Math.round(job.pay / 5));
       player.jobsDone++;
