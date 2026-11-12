@@ -25,6 +25,13 @@ const GANGS = Object.freeze([
   {id: 'gold', name: 'Gold Crew'},
 ]);
 const TURFS = Object.freeze(['elcorona', 'willowfield', 'jefferson']);
+const DISCOVERY_IDS = Object.freeze(['elcorona', 'willowfield', 'jefferson',
+  'santamaria', 'mulholland', 'hashbury', 'queens', 'calton',
+  'clownspocket', 'creek', 'fortcarson', 'angelpine']);
+const DISCOVERY_PAY = 75;
+const DISCOVERY_XP = 20;
+const DISCOVERY_FINISH_PAY = 500;
+const DISCOVERY_FINISH_XP = 100;
 const WEAPON_DAMAGE = Object.freeze({0: 8, 1: 10, 2: 14, 3: 14, 4: 25,
   5: 16, 6: 18, 7: 20, 8: 18, 9: 30, 22: 18, 23: 20, 24: 40,
   25: 35, 26: 28, 27: 32, 28: 12, 29: 18, 30: 24, 31: 24,
@@ -214,6 +221,10 @@ class LocalGame {
           policeDuty: false,
           gang: GANGS.some(gang => gang.id === value.gang) ? value.gang : null,
           gangSwitchUntil: finite(value.gangSwitchUntil), turfCaptures: money(value.turfCaptures),
+          discoveries: [...new Set(Array.isArray(value.discoveries) ?
+            value.discoveries.filter(id => DISCOVERY_IDS.includes(id)) : [])],
+          trackedDiscovery: DISCOVERY_IDS.includes(value.trackedDiscovery) ?
+            value.trackedDiscovery : null,
           cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
@@ -253,6 +264,7 @@ class LocalGame {
         passiveWaitUntil: p.passiveWaitUntil,
         kills: p.kills, deaths: p.deaths, arrests: p.arrests,
         gang: p.gang, gangSwitchUntil: p.gangSwitchUntil, turfCaptures: p.turfCaptures,
+        discoveries: p.discoveries, trackedDiscovery: p.trackedDiscovery,
         cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
         discord: p.discord, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
@@ -270,6 +282,7 @@ class LocalGame {
         health: 100, armour: 0, wanted: 0, wantedUntil: 0, passive: false,
         passiveWaitUntil: 0, kills: 0, deaths: 0, arrests: 0, policeDuty: false,
         gang: null, gangSwitchUntil: 0, turfCaptures: 0,
+        discoveries: [], trackedDiscovery: null,
         cars: [], garage: [], homes: [], job: null,
         discord: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
@@ -585,6 +598,13 @@ class LocalGame {
       .map((entry, index) => ({place: index + 1, name: entry.name, xp: entry.xp,
         jobsDone: entry.jobsDone, racesWon: entry.racesWon || 0,
         turfCaptures: entry.turfCaptures || 0}));
+    const raceLeaders = [...this.players.values()]
+      .filter(entry => (entry.racesFinished || 0) > 0)
+      .sort((a, b) => (b.racesWon || 0) - (a.racesWon || 0) ||
+        b.racesFinished - a.racesFinished || a.number - b.number)
+      .slice(0, 10)
+      .map((entry, index) => ({place: index + 1, name: entry.name,
+        wins: entry.racesWon || 0, finishes: entry.racesFinished}));
     const turfs = TURFS.map(id => {
       const home = homeAt(id);
       if (!home) return null;
@@ -596,6 +616,15 @@ class LocalGame {
         contested: capture?.contested || false,
         distance: pos ? Math.ceil(Math.hypot(pos.x - home.out[0], pos.y - home.out[1])) : null};
     }).filter(Boolean);
+    const discoveries = DISCOVERY_IDS.map(id => {
+      const home = homeAt(id);
+      if (!home) return null;
+      return {id, name: home.name, city: home.city,
+        x: rounded(home.out[0]), y: rounded(home.out[1]),
+        found: player.discoveries.includes(id),
+        distance: pos ? Math.ceil(Math.hypot(pos.x - home.out[0], pos.y - home.out[1])) : null};
+    }).filter(Boolean);
+    const tracked = discoveries.find(item => item.id === player.trackedDiscovery && !item.found) || null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
       racesFinished: player.racesFinished || 0, racesWon: player.racesWon || 0,
       health: player.health, armour: player.armour, wanted: player.wanted,
@@ -603,11 +632,13 @@ class LocalGame {
         Math.ceil((player.passiveWaitUntil - Date.now()) / 1000)),
       kills: player.kills, deaths: player.deaths, arrests: player.arrests,
       policeDuty: player.policeDuty, nearbyWanted: suspects,
-      nearbyPlayers, leaderboard,
+      nearbyPlayers, leaderboard, raceLeaders,
       party: this.partyView(player),
       gang: player.gang, gangSwitchWait: Math.max(0,
         Math.ceil((player.gangSwitchUntil - Date.now()) / 1000)),
       turfCaptures: player.turfCaptures, gangs: GANGS, turfs,
+      exploration: {found: player.discoveries.length, total: discoveries.length,
+        tracked, items: discoveries, reward: DISCOVERY_PAY, finishReward: DISCOVERY_FINISH_PAY},
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
@@ -815,7 +846,39 @@ class LocalGame {
     const pos = this.position(player);
     let message;
     this.expireRace();
-    if (action === 'party.create') {
+    if (action === 'explore.track') {
+      if (input.id === null) {
+        player.trackedDiscovery = null;
+        message = 'Exploration marker cleared.';
+      } else {
+        const home = DISCOVERY_IDS.includes(input.id) && homeAt(input.id);
+        if (!home) throw new Error('Choose a listed discovery.');
+        if (player.discoveries.includes(home.id)) throw new Error('You already found this location.');
+        player.trackedDiscovery = home.id;
+        message = `Tracking ${home.name}. Follow the objective box.`;
+      }
+      this.save();
+    } else if (action === 'explore.claim') {
+      const id = input.id || player.trackedDiscovery;
+      const home = DISCOVERY_IDS.includes(id) && homeAt(id);
+      if (!home) throw new Error('Choose a listed discovery to claim.');
+      if (player.discoveries.includes(id)) throw new Error('You already found this location.');
+      if (!pos || pos.peer.state.walking !== true ||
+          Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS)
+        throw new Error('Stand on foot within 12 m of the marked location.');
+      player.discoveries.push(id);
+      if (player.trackedDiscovery === id) player.trackedDiscovery = null;
+      player.cash = money(player.cash + DISCOVERY_PAY);
+      player.xp = money(player.xp + DISCOVERY_XP);
+      const finished = player.discoveries.length === DISCOVERY_IDS.length;
+      if (finished) {
+        player.cash = money(player.cash + DISCOVERY_FINISH_PAY);
+        player.xp = money(player.xp + DISCOVERY_FINISH_XP);
+      }
+      this.updatePlayer(player);
+      message = `${home.name} discovered: +$${DISCOVERY_PAY}, +${DISCOVERY_XP} XP.` +
+        (finished ? ` Trail complete: +$${DISCOVERY_FINISH_PAY}, +${DISCOVERY_FINISH_XP} XP bonus.` : '');
+    } else if (action === 'party.create') {
       if (this.partyOf(player)) throw new Error('You are already in a group.');
       const id = crypto.randomBytes(6).toString('hex');
       this.parties.set(id, {id, leader: player, members: new Set([player])});
@@ -1327,6 +1390,7 @@ class LocalGame {
           'jobs and cash', 'garage ownership', 'home ownership', 'multiplayer races',
           'combat and passive mode', 'wanted levels and arrests', 'crews and territory',
           'cash transfers and leaderboard', 'private groups and group chat',
+          'saved exploration trail',
           'client catalogs']});
     if (url.pathname === '/api/local/diagnostics' && process.env.ZGTA_DEBUG_SELFHOST === '1') {
       const keys = ['x', 'y', 'z', 'at', 'position', 'car', 'walking', 'driving', 'heading',
@@ -1536,6 +1600,19 @@ class LocalGame {
       return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
     if (text === '/jobs')
       return peer.send({t: 'note', text: `Local jobs: ${JOBS.map(job => `${job.id} ($${job.pay})`).join(', ')}. Type /job <name>.`});
+    if (text === '/explore')
+      return peer.send({t: 'note', text: 'Exploration: /explore track LOCATION, /explore claim, /explore clear. F6 lists every location.'});
+    if (text.startsWith('/explore ')) {
+      try {
+        const command = text.slice(9).trim();
+        if (command === 'claim') this.action(peer.player, 'explore.claim', {});
+        else if (command === 'clear') this.action(peer.player, 'explore.track', {id: null});
+        else if (command.startsWith('track '))
+          this.action(peer.player, 'explore.track', {id: command.slice(6).trim()});
+        else throw new Error('Type /explore for commands.');
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
+      return;
+    }
     if (text === '/wanted')
       return peer.send({t: 'note', text: `Wanted level: ${peer.player.wanted}/6. Passive mode: ${peer.player.passive ? 'on' : 'off'}.`});
     if (text === '/passive' || text === '/police' || text.startsWith('/arrest ')) {
