@@ -200,6 +200,11 @@
       } else if (race.joined)
         panel.append(element('p', 'Your race is complete. Waiting for the remaining drivers.', 'zgta-muted'));
     }
+    if (state.raceLeaders?.length) {
+      panel.append(element('p', 'Saved race standings · ranked by wins, then finishes', 'zgta-muted'));
+      for (const entry of state.raceLeaders)
+        panel.append(element('p', `#${entry.place} ${entry.name} · ${entry.wins} wins · ${entry.finishes} finishes`, 'zgta-muted'));
+    }
     section('Safety and police');
     row(`Passive mode ${state.passive ? 'on' : 'off'}${state.passiveWait ?
       ` · ${state.passiveWait} s cooldown` : ''}`, 'safety.passive', {},
@@ -238,6 +243,17 @@
         !state.gang || !state.onFoot || state.passive || !!state.job ||
         turf.owner === state.gang || !!turf.capturing || !!myCapture ||
         turf.distance === null || turf.distance > 20);
+    }
+    section('Exploration trail');
+    panel.append(element('p', `${state.exploration.found}/${state.exploration.total} locations found · $${state.exploration.reward} and 20 XP each · $${state.exploration.finishReward} completion bonus`, 'zgta-muted'));
+    for (const place of state.exploration.items) {
+      const label = `${place.name} · ${place.city.toUpperCase()} · ${place.found ? 'found' : `${place.distance ?? '?'} m away`}`;
+      if (place.found) row(label, 'explore.track', {}, 'Found', true);
+      else if (state.connected && state.onFoot && place.distance !== null && place.distance <= 12)
+        row(label, 'explore.claim', {id: place.id}, 'Discover');
+      else if (state.exploration.tracked?.id === place.id)
+        row(label, 'explore.track', {id: null}, 'Untrack');
+      else row(label, 'explore.track', {id: place.id}, 'Track');
     }
     section('Private group');
     if (state.party.invite) {
@@ -342,13 +358,17 @@
       state.race.target ? state.race : null;
     const job = state?.job?.mode ? state.job : null;
     const turf = state?.turfs?.find(item => item.capturingYou);
-    const active = race || job || turf;
+    const found = state?.exploration?.tracked;
+    const explore = found ? {target: {x: found.x, y: found.y, name: found.name},
+      remaining: found.distance} : null;
+    const active = race || job || turf || explore;
     objective.hidden = !active || visible;
     if (!active) return;
     let direction = '';
-    if (state.position && (race || job)) {
-      const dx = active.target.x - state.position.x;
-      const dy = active.target.y - state.position.y;
+    const directionTarget = race?.target || job?.target || (!turf && explore?.target);
+    if (state.position && directionTarget) {
+      const dx = directionTarget.x - state.position.x;
+      const dy = directionTarget.y - state.position.y;
       const compass = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
       direction = ` ${compass[Math.round(Math.atan2(dx, dy) / (Math.PI / 4) + 8) % 8]}`;
     }
@@ -359,6 +379,11 @@
     }
     if (turf && !job) {
       objective.textContent = `Territory capture: ${turf.name} · ${turf.progress}%${turf.contested ? ' · contested' : ''}\nStay on foot within 20 m · ${turf.distance ?? '?'} m away\nPress F6 for details`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (explore && !job) {
+      objective.textContent = `Explore: ${explore.target.name}\n${explore.remaining ?? '?'} m${direction} · stand within 12 m\nPress F6 to claim`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
@@ -422,5 +447,5 @@
   }, true);
   refresh();
   setInterval(() => {if (visible || state?.job?.mode || state?.race?.joined ||
-    state?.turfs?.some(item => item.capturingYou)) refresh();}, 3000);
+    state?.turfs?.some(item => item.capturingYou) || state?.exploration?.tracked) refresh();}, 3000);
 })();
