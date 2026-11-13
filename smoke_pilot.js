@@ -48,8 +48,10 @@ try {
     x: from[0], y: from[1], z: from[2] + 45, speed: 20});
   assert.equal(player.job.stage, 'takeoff', 'another aircraft cannot count as takeoff');
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: planeId,
-    x: from[0], y: from[1], z: from[2] + 45, speed: 20});
+    x: from[0], y: from[1], z: from[2] + 45, speed: 20, health: 1000});
   assert.equal(player.job.stage, 'landing');
+  assert.equal(player.job.reportedHealth, true);
+  assert.equal(player.job.minHealth, 1000);
   assert(sent.some(packet => packet.t === 'note' && /Airborne/.test(packet.text)));
   game.flushSync(); clearInterval(game.tick);
   delete require.cache[require.resolve(backend)];
@@ -57,6 +59,7 @@ try {
   const resumed = game.players.get(id);
   assert.equal(resumed.job.stage, 'landing');
   assert.equal(resumed.job.landingSince, null);
+  assert.equal(resumed.job.reportedHealth, true);
   assert.equal(game.vehicles.get(planeId).row[2], '593.1.1.0.');
   sent = [];
   peer = {player: resumed, ready: true, lastSeen: Date.now(),
@@ -74,28 +77,56 @@ try {
   peer.state.vehicle = 'wrong';
   assert.throws(() => game.action(resumed, 'job.complete', {}), /marked Dodo/);
   peer.state.vehicle = planeId;
+  resumed.pilotStreak = 4;
+  resumed.pilotFlights = 4;
   const finished = game.action(resumed, 'job.complete', {});
   assert.equal(finished.state.job, null);
-  assert.equal(resumed.cash, 700);
-  assert.equal(resumed.xp, 140);
+  assert.equal(resumed.cash, 1450);
+  assert.equal(resumed.xp, 290);
+  assert.equal(resumed.pilotFlights, 5);
+  assert.equal(resumed.pilotStreak, 5);
+  assert.match(finished.message, /smooth flight, early landing, fifth flight/);
   assert.equal(resumed.jobsDone, 1);
   assert.equal(game.vehicles.has(planeId), false);
   assert(sent.some(packet => packet.t === 'vgone' && packet.id === planeId));
 
   game.action(resumed, 'job.start', {job: 'pilot'});
+  const damagedId = resumed.job.vehicleId;
+  const nextFrom = airport(resumed.job.from).stand;
+  const nextTo = airport(resumed.job.to).stand;
+  resumed.job.started = Date.now() - 540000;
+  game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: damagedId,
+    x: nextFrom[0], y: nextFrom[1], z: nextFrom[2] + 40, speed: 20, health: 700});
+  assert.equal(resumed.job.minHealth, 700);
+  game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: damagedId,
+    x: nextTo[0], y: nextTo[1], z: nextTo[2] + 2, speed: 0, health: 800});
+  assert.equal(resumed.job.minHealth, 700, 'later health report cannot restore smooth status');
+  resumed.job.landingSince -= 2100;
+  const damagedFinish = game.action(resumed, 'job.complete', {});
+  assert.equal(resumed.cash, 2150);
+  assert.equal(resumed.xp, 430);
+  assert.equal(resumed.pilotFlights, 6);
+  assert.equal(resumed.pilotStreak, 6);
+  assert(!/pilot bonus/.test(damagedFinish.message));
+
+  game.action(resumed, 'job.start', {job: 'pilot'});
   const cancelledId = resumed.job.vehicleId;
   game.action(resumed, 'job.cancel', {});
   assert.equal(game.vehicles.has(cancelledId), false);
+  assert.equal(resumed.pilotStreak, 0);
   game.action(resumed, 'job.start', {job: 'pilot'});
   const expiredId = resumed.job.vehicleId;
+  resumed.pilotStreak = 2;
   resumed.job.started = Date.now() - 601000;
   game.flushSync(); clearInterval(game.tick);
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   assert.equal(game.players.get(id).job, null);
+  assert.equal(game.players.get(id).pilotStreak, 0);
+  assert.equal(game.players.get(id).pilotFlights, 6);
   assert.equal(game.vehicles.has(expiredId), false);
   clearInterval(game.tick);
-  console.log('PASS: pilot aircraft, airborne gate, landing hold, restart, payout and expiry');
+  console.log('PASS: pilot aircraft, landing hold, bonuses, streak, restart, payout and expiry');
 } finally {
   fs.rmSync(temporary, {recursive: true, force: true});
 }
