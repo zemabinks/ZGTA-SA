@@ -54,7 +54,7 @@ Static REA analysis of the archived chunk directory recorded parent evidence
 `ev_e676b08c9c7dc2182b28bc549d8833c514ab2acc2c74472547dee4655cf4855a`
 for SHA-256 `f5c275ced14ae2abf38e1eb0e7bf58fbc4fe6488561691888dbe4cebdce04e15`.
 It parsed 80 JavaScript files without parse failures, but its semantic graph
-coverage was partial because of resource limits. The local route and payout
+coverage was partial because of resource limits. The local routes and payouts
 above are design choices of this independent server.
 
 ## Next acceptance targets
