@@ -53,6 +53,7 @@
   let busy = false;
   let selectedCarModel = '';
   let selectedAircraftModel = '';
+  let selectedPilotModel = '593';
   let selectedHomeId = '';
   const transferAmounts = new Map();
   let partyDraft = '';
@@ -203,7 +204,7 @@
             ((thief || trucker) && state.job.secondsLeft <= 0));
       } else if (state.job.mode === 'flight') {
         if (state.job.stage === 'takeoff')
-          panel.append(element('p', `Board the marked Dodo at ${state.job.from} and climb ${state.job.takeoffAltitude} m above the airport. Current height: ${state.job.altitude ?? '?'} m. Destination: ${state.job.target.name}. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
+          panel.append(element('p', `Board the marked ${state.job.plane} at ${state.job.from} and climb ${state.job.takeoffAltitude} m above the airport. Current height: ${state.job.altitude ?? '?'} m. Destination: ${state.job.target.name}. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
         else panel.append(element('p', `Land at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Stop within ${state.job.radius} m and hold still for two seconds. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
         panel.append(element('p', `Bonuses: +$${state.pilot.smoothBonus} for a clean aircraft with reported condition, +$${state.pilot.earlyBonus} with at least two minutes left, +$${state.pilot.fifthBonus} every fifth completed flight in a row.`, 'zgta-muted'));
         row('Complete pilot flight', 'job.complete', {}, 'Finish',
@@ -224,6 +225,20 @@
             !state.connected || fire.remaining > 23 || fire.secondsLeft <= 0);
         else row('Rescue trapped person', 'job.complete', {}, 'Rescue',
           !state.onFoot || fire.remaining > 10 || fire.secondsLeft <= 0);
+      } else if (state.job.mode === 'heist') {
+        const heist = state.job;
+        if (heist.stage === 'plan') {
+          panel.append(element('p', `Enter ${heist.target.name} on foot (${heist.target.x}, ${heist.target.y}) to take the bag. ${heist.remaining ?? '?'} m away · ${heist.secondsLeft} s left. The marked Sultan is your getaway car.`, 'zgta-muted'));
+          row('Take the heist bag', 'heist.rob', {}, 'Rob',
+            !state.onFoot || heist.remaining > heist.radius || heist.secondsLeft <= 0);
+        } else {
+          panel.append(element('p', `Lose the police, then drive the marked Sultan to ${heist.target.name} (${heist.target.x}, ${heist.target.y}). ${heist.remaining ?? '?'} m away · wanted ${heist.wanted}/6 · ${heist.secondsLeft} s left.`, 'zgta-muted'));
+          if (heist.crewCount)
+            panel.append(element('p', `${heist.crewCount} group member${heist.crewCount === 1 ? '' : 's'} joined at the robbery. Each nearby member at the drop-off can earn $${heist.crewBonus}.`, 'zgta-muted'));
+          row('Deliver heist bag', 'job.complete', {}, 'Deliver',
+            !state.connected || heist.remaining > heist.radius ||
+            heist.wanted > 0 || heist.secondsLeft <= 0);
+        }
       } else if (state.job.mode === 'service') {
         panel.append(element('p', `Repair the stranded vehicle at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m and stand on foot.`, 'zgta-muted'));
         row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
@@ -244,15 +259,41 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}${job.id === 'fire' ? ' · eight-minute call · loaner fire truck' : ''}`,
+        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}${job.id === 'fire' ? ' · eight-minute call · loaner fire truck' : ''}${job.id === 'heist' ? ` · ten-minute route · loaner Sultan${state.heistCooldown ? ` · ${state.heistCooldown} s cooldown` : ''}` : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
             (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
             (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
+            (job.id === 'heist' && (state.passive || state.policeDuty ||
+              state.wanted > 0 || state.heistCooldown > 0)) ||
             (job.id === 'patrol' && !state.policeDuty) ||
             (state.race?.joined && ['lobby', 'running'].includes(state.race.stage)));
     }
     section('Pilot record');
-    panel.append(element('p', `${state.pilot.flights} flights completed · ${state.pilot.streak} in a row · ${5 - state.pilot.streak % 5} until the next fifth-flight bonus. Cancelling a flight breaks the streak.`, 'zgta-muted'));
+    panel.append(element('p', `Level ${state.pilot.level} · ${state.pilot.flights} flights completed · ${state.pilot.streak} in a row · ${5 - state.pilot.streak % 5} until the next fifth-flight bonus. Every three completed flights unlocks a level; cancelling breaks the streak.`, 'zgta-muted'));
+    if (!state.job && state.pilot.aircraft?.length) {
+      const line = element('div', undefined, 'zgta-row');
+      const select = element('select');
+      select.setAttribute('aria-label', 'Pilot aircraft');
+      for (const plane of state.pilot.aircraft) {
+        const option = element('option', `${plane.name} · level ${plane.level}${plane.premium ? ` · +$${plane.premium}` : ''}`);
+        option.value = String(plane.model);
+        option.disabled = !plane.unlocked;
+        select.append(option);
+      }
+      if (state.pilot.aircraft.some(item => item.unlocked && String(item.model) === selectedPilotModel))
+        select.value = selectedPilotModel;
+      else select.value = '593';
+      selectedPilotModel = select.value;
+      select.addEventListener('change', () => {selectedPilotModel = select.value;});
+      const fly = element('button', 'Fly selected');
+      fly.type = 'button';
+      fly.disabled = busy || !state.connected ||
+        (state.race?.joined && ['lobby', 'running'].includes(state.race.stage));
+      fly.addEventListener('click', () => perform('job.start',
+        {job: 'pilot', model: Number(select.value)}));
+      line.append(select, fly);
+      panel.append(line);
+    }
     section('Multiplayer race');
     const race = state.race;
     if (!race || race.stage === 'finished') {
@@ -293,10 +334,12 @@
     row(`Passive mode ${state.passive ? 'on' : 'off'}${state.passiveWait ?
       ` · ${state.passiveWait} s cooldown` : ''}`, 'safety.passive', {},
       state.passive ? 'Turn off' : 'Turn on', !state.connected ||
-        (!state.passive && (state.wanted > 0 || state.policeDuty || state.passiveWait > 0 || state.job?.id === 'carthief')));
+        (!state.passive && (state.wanted > 0 || state.policeDuty || state.passiveWait > 0 ||
+          ['carthief', 'heist'].includes(state.job?.id))));
     row(`Police duty ${state.policeDuty ? 'on' : 'off'} · ${state.arrests} arrests`,
       'police.duty', {}, state.policeDuty ? 'End duty' : 'Start duty',
-      !state.connected || (!state.policeDuty && (state.wanted > 0 || state.passive || state.job?.id === 'carthief')));
+      !state.connected || (!state.policeDuty && (state.wanted > 0 || state.passive ||
+        ['carthief', 'heist'].includes(state.job?.id))));
     if (state.policeDuty) {
       if (!state.nearbyWanted.length)
         panel.append(element('p', 'No wanted players within 30 m. Arrests require both players on foot within 4 m.', 'zgta-muted'));
@@ -493,8 +536,8 @@
     }
     if (job.mode === 'flight') {
       objective.textContent = job.stage === 'takeoff' ?
-        `Pilot flight: take off from ${job.from} · ${job.secondsLeft} s left\nClimb to ${job.takeoffAltitude} m · now ${job.altitude ?? '?'} m\nPress F6 for details` :
-        `Pilot flight: land at ${job.target.name} · ${job.secondsLeft} s left\n${job.remaining ?? '?'} m${direction} · stop on apron for 2 s\nPress F6 for details`;
+        `${job.plane} flight: take off from ${job.from} · ${job.secondsLeft} s left\nClimb to ${job.takeoffAltitude} m · now ${job.altitude ?? '?'} m\nPress F6 for details` :
+        `${job.plane} flight: land at ${job.target.name} · ${job.secondsLeft} s left\n${job.remaining ?? '?'} m${direction} · stop on apron for 2 s\nPress F6 for details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
@@ -503,6 +546,13 @@
         job.stage === 'extinguish' ? `suppress fire ${job.index + 1}/${job.total}` :
           'rescue on foot';
       objective.textContent = `Fire response: ${step} · ${job.secondsLeft} s left\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nPress F6 for details`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (job.mode === 'heist') {
+      const task = job.stage === 'plan' ? 'take the bag on foot' :
+        `lose the police (${job.wanted} stars), then deliver in the Sultan`;
+      objective.textContent = `Getaway heist: ${task} · ${job.secondsLeft} s left\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nPress F6 for details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
