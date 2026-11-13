@@ -84,7 +84,9 @@
     select.setAttribute('aria-label', label || (action === 'car.buy' ? 'Vehicle catalog' : 'Property catalog'));
     for (const item of items) {
       const unavailable = label === 'Aircraft catalog' && state.hangar?.within &&
-        !item.airports?.includes(state.hangar.id);
+        !item.airports?.includes(state.hangar.id) ||
+        label === 'Ground dealership catalog' && state.dealer?.within &&
+        !item.dealers?.includes(state.dealer.id);
       const option = element('option', `${item.name} · $${item.price.toLocaleString()}` +
         (unavailable ? ' · not sold here' : ''));
       option.value = String(action === 'car.buy' ? item.model : item.id);
@@ -437,19 +439,29 @@
     for (const entry of state.leaderboard)
       panel.append(element('p', `#${entry.place} ${entry.name} · ${entry.xp} XP · ${entry.jobsDone} jobs · ${entry.racesWon} race wins · ${entry.turfCaptures} captures`, 'zgta-muted'));
     section('Garage');
+    if (state.homeParking) panel.append(element('p',
+      `${state.homeParking.name} parking · ${state.homeParking.distance} m away · ${state.homeParking.occupied}/${state.homeParking.capacity} spaces used. Park and retrieve cars at its exterior.`,
+      'zgta-muted'));
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
     state.cars.forEach((car, slot) => {
       const garage = state.garage?.[slot];
       const aircraft = car.type === 'plane' || car.type === 'helicopter';
       const condition = garage ? ` · ${Math.round(garage.health / 10)}% condition${garage.paint ? ' · custom paint' : ''}` : '';
-      row(`${car.name} · ${garage?.active ? 'out' : 'stored'}${condition}`,
-        'car.spawn', {slot}, garage?.active ? 'Recall' : 'Spawn',
-        !state.connected || (aircraft && !state.hangar?.within));
+      row(`${car.name} · ${garage?.active ? 'out' : garage?.parkedHomeName ?
+        `parked at ${garage.parkedHomeName}` : 'stored'}${condition}`,
+        'car.spawn', {slot}, garage?.parkedHomeName ? 'Retrieve' : garage?.active ? 'Recall' : 'Spawn',
+        !state.connected || (aircraft && !state.hangar?.within) ||
+          (garage?.parkedHome && (!state.homeParking?.within ||
+            state.homeParking.id !== garage.parkedHome)));
       if (garage?.active) {
         const nearOnFoot = state.connected && state.onFoot &&
           garage.distance !== null && garage.distance <= 18;
         row(`${car.name} · ${garage.distance ?? '?'} m away`,
           'car.store', {slot}, 'Store', !nearOnFoot);
+        if (!aircraft && state.homeParking?.within)
+          row(`${car.name} · park at ${state.homeParking.name}`,
+            'car.parkhome', {slot}, 'Park', !nearOnFoot ||
+              state.homeParking.occupied >= state.homeParking.capacity);
         if (garage.repairCost)
           row(`${car.name} · repair for $${garage.repairCost}`,
             'car.repair', {slot}, 'Repair', !nearOnFoot || state.cash < garage.repairCost);
@@ -462,10 +474,15 @@
     const originalCars = state.catalog.cars.filter(item => item.source === 'archived' &&
       item.type !== 'plane' && item.type !== 'helicopter');
     if (originalCars.length) {
+      if (state.dealer) panel.append(element('p',
+        `${state.dealer.name} · ${state.dealer.distance} m away. Buy its listed vehicles within 100 m.`,
+        'zgta-muted'));
+      else panel.append(element('p', 'Enter the world to find the nearest dealership.', 'zgta-muted'));
       panel.append(element('p', `${originalCars.length} more vehicles from the archived client catalog`, 'zgta-muted'));
       catalogPicker(originalCars, selectedCarModel, value => {selectedCarModel = value;},
         'car.buy', value => ({model: Number(value)}),
-        car => !car || state.cash < car.price || state.cars.length >= 12);
+        car => !car || !state.dealer?.within || !car.dealers?.includes(state.dealer.id) ||
+          state.cash < car.price || state.cars.length >= 12, 'Ground dealership catalog');
     }
     const aircraft = state.catalog.cars.filter(item =>
       item.type === 'plane' || item.type === 'helicopter');
