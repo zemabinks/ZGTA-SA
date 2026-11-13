@@ -141,9 +141,9 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-ten independent local activities: courier, taxi, mechanic, medic, a timed
+eleven independent local activities: courier, taxi, mechanic, medic, a timed
 street trial, a police patrol, pizza delivery, freight delivery, pilot flight,
-and a getaway car mission.
+fire response, and a getaway car mission.
 Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
@@ -171,9 +171,20 @@ at the nearest of four archived airport hangars. Climb at least 35 meters
 above the departure hangar, then land and hold still for two seconds at the
 next hangar within ten minutes for $700 and 140 XP. The server checks the
 marked aircraft, altitude, destination, speed, and timer. The stage survives
-a restart, but the two-second landing hold starts over. This route and reward
-are local rules; the archived client help only confirms the four-airport
-flight concept. In the getaway mission, take a spawned car at a
+a restart, but the two-second landing hold starts over. Completing a flight
+adds to a saved pilot record. This server pays an extra $150 for a reported
+clean aircraft, $100 with at least two minutes left, and $500 on every fifth
+consecutive completed flight. Cancelling a flight breaks the streak. These
+amounts and the route are local rules; the archived client help describes
+the bonus types and four-airport flight concept without supplying the server
+formula. Fire response spawns a reserved fire truck near the player and
+dispatches a call to an archived property entrance. Drive the truck to the
+call, use F6 to suppress three nearby fire spots from the truck or on foot,
+then get out and rescue a person at the call point within eight minutes for
+$650 and 130 XP. The mission stage and truck recover after a restart. The
+public client describes firefighting, but this local mission has no 3D flames,
+water cannon interaction, extinguisher model, or rescue character yet. In
+the getaway mission, take a spawned car at a
 property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
@@ -212,8 +223,8 @@ $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job carthief`,
-`/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job fire`, `/job carthief`,
+`/pickup`, `/checkpoint`, `/repair`, `/respond`, `/extinguish`, `/rescue`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
 
@@ -284,11 +295,11 @@ verification status of each major system.
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
-`node smoke_pilot.js`, `node smoke_convoy.js`, and `node smoke_aircraft.js`
+`node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_convoy.js`, and `node smoke_aircraft.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, police patrol, pizza delivery, freight delivery, and pilot flight
+repair, timed checkpoints, police patrol, pizza delivery, freight delivery, pilot flight, and fire response
 in marked loaners, shared convoy rewards and hangar aircraft ownership,
 getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, paid respray, restart persistence, and a
@@ -329,10 +340,16 @@ cancelled the mission. Pickup, delivery, payout, and restart behavior passed
 the isolated freight test; the full route has not been driven in Chrome.
 Chrome also started a pilot flight at Los Santos International, displayed the
 loaner Dodo in the 3D world, entered it, and cancelled the flight. Takeoff,
-landing, payout, and restart behavior passed the isolated pilot test; the full
+landing, bonus and streak payout, and restart behavior passed the isolated pilot test; the full
 flight has not been flown in Chrome. Hangar purchase, aircraft spawn, access
 restrictions, and restart recovery passed an isolated test; a purchased
 aircraft has not been spawned in Chrome.
+Chrome also started a fire response, displayed the 3D fire truck beside the
+player, entered it, showed the call route and countdown in F6, and cancelled
+the call. The dispatch, three suppression steps, rescue, payout, and restart
+behavior passed an isolated test; the route has not been driven in Chrome.
+The archived client still displays its native “press 2 to start a shift” tip
+inside the fire truck. This local mission is controlled through F6 instead.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
