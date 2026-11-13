@@ -23,6 +23,10 @@
     #zgta-local-result{min-height:22px;color:#b9dcff;font-weight:600}#zgta-local-result[data-error="true"]{color:#ffb0a8}
     #zgta-local-objective{position:fixed;right:16px;top:72px;z-index:1000;max-width:min(330px,calc(100vw - 32px));border:1px solid #86a9ff;border-radius:10px;background:#14264ff0;color:white;padding:10px 14px;font:600 13px/1.45 system-ui;text-align:left;cursor:pointer;box-shadow:0 4px 18px #0009}
     #zgta-local-objective[hidden]{display:none}
+    #zgta-waypoint{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:1000;display:flex;align-items:center;gap:9px;max-width:min(360px,calc(100vw - 150px));padding:7px 12px;border:1px solid #f9d868;border-radius:12px;background:#15213eea;color:#fff;font:700 13px/1.25 system-ui;box-shadow:0 4px 18px #0009;cursor:pointer}
+    #zgta-waypoint[hidden]{display:none}#zgta-waypoint-arrow{font-size:24px;color:#ffdf71;line-height:1}
+    #zgta-waypoint-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    @media(max-width:600px){#zgta-waypoint{top:8px;max-width:calc(100vw - 90px);font-size:11px}}
   `;
   document.head.append(css);
   const openButton = document.createElement('button');
@@ -33,6 +37,15 @@
   objective.id = 'zgta-local-objective';
   objective.type = 'button';
   objective.hidden = true;
+  const waypoint = document.createElement('button');
+  waypoint.id = 'zgta-waypoint';
+  waypoint.type = 'button';
+  waypoint.hidden = true;
+  const waypointArrow = document.createElement('span');
+  waypointArrow.id = 'zgta-waypoint-arrow';
+  const waypointLabel = document.createElement('span');
+  waypointLabel.id = 'zgta-waypoint-label';
+  waypoint.append(waypointArrow, waypointLabel);
   const shade = document.createElement('div');
   shade.id = 'zgta-local-shade';
   shade.dataset.open = 'false';
@@ -41,10 +54,11 @@
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-label', 'ZGTA:SA local gameplay');
   shade.append(panel);
-  document.body.append(openButton, objective, shade);
+  document.body.append(openButton, objective, waypoint, shade);
   new MutationObserver(() => {
-    if (!openButton.isConnected || !objective.isConnected || !shade.isConnected)
-      document.body.append(openButton, objective, shade);
+    if (!openButton.isConnected || !objective.isConnected || !waypoint.isConnected ||
+        !shade.isConnected)
+      document.body.append(openButton, objective, waypoint, shade);
   }).observe(document.documentElement, {childList: true, subtree: true});
   let visible = false;
   let state = null;
@@ -57,6 +71,7 @@
   let selectedHomeId = '';
   const transferAmounts = new Map();
   let partyDraft = '';
+  const automaticAttempts = new Map();
 
   function element(tag, text, className) {
     const item = document.createElement(tag);
@@ -517,7 +532,51 @@
     panel.append(element('p', 'Your cash, cars, homes, and active job are saved on this Mac. Press F6 to open this panel again.', 'zgta-muted'));
     panel.scrollTop = scrollTop;
   }
+  function renderWaypoint() {
+    const race = state?.race?.stage === 'running' && state.race.joined && state.race.target;
+    const turf = state?.turfs?.find(item => item.capturingYou);
+    const target = race || state?.job?.target || turf || state?.exploration?.tracked;
+    if (!state?.connected || !state.position || !target ||
+        !Number.isFinite(target.x) || !Number.isFinite(target.y) || visible) {
+      waypoint.hidden = true;
+      return;
+    }
+    const dx = target.x - state.position.x;
+    const dy = target.y - state.position.y;
+    const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    const arrows = ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'];
+    const bearing = Math.round(Math.atan2(dx, dy) / (Math.PI / 4) + 8) % 8;
+    const distance = Math.ceil(Math.hypot(dx, dy));
+    waypointArrow.textContent = distance <= (state.race?.radius || state.job?.radius || 12) ?
+      '◎' : arrows[bearing];
+    waypointLabel.textContent = `${target.name} · ${distance} m ${directions[bearing]}`;
+    waypoint.title = `Open the route to ${target.name}`;
+    waypoint.hidden = false;
+  }
+  function maybeAutoCheckpoint() {
+    if (!state?.connected || !state.driving || busy || visible) return;
+    const race = state.race?.stage === 'running' && state.race.joined && state.race.target ?
+      state.race : null;
+    const job = !race && state.job?.mode === 'checkpoints' ? state.job : null;
+    const route = race || job;
+    if (!route || route.secondsLeft <= 0 || route.remaining === null ||
+        route.remaining > route.radius) return;
+    if (job && ['patrol', 'pizza'].includes(job.id) &&
+        state.drivingVehicle !== job.vehicleId) return;
+    const action = race ? (race.index === race.total ? 'race.finish' : 'race.checkpoint') :
+      (job.index === job.total ? 'job.complete' : 'job.checkpoint');
+    const key = `${race ? 'race' : job.id}:${route.started}:${route.index}:${action}`;
+    const now = Date.now();
+    if (now - (automaticAttempts.get(key) || 0) < 5000) return;
+    automaticAttempts.set(key, now);
+    if (automaticAttempts.size > 100) {
+      for (const [past, when] of automaticAttempts)
+        if (now - when > 60000) automaticAttempts.delete(past);
+    }
+    perform(action, {});
+  }
   function renderObjective() {
+    renderWaypoint();
     const race = state?.race?.stage === 'running' && state.race.joined &&
       state.race.target ? state.race : null;
     const job = state?.job?.mode ? state.job : null;
@@ -594,6 +653,7 @@
         render();
         renderObjective();
       }
+      maybeAutoCheckpoint();
     } catch (failure) { result = failure.message; error = true; render(); }
   }
   async function perform(action, payload) {
@@ -626,6 +686,7 @@
   }
   openButton.addEventListener('click', () => toggle(true));
   objective.addEventListener('click', () => toggle(true));
+  waypoint.addEventListener('click', () => toggle(true));
   shade.addEventListener('click', event => {if (event.target === shade) toggle(false);});
   panel.addEventListener('keydown', event => event.stopPropagation());
   window.addEventListener('keydown', event => {
