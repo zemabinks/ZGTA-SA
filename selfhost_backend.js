@@ -14,6 +14,7 @@ const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
 const PATROL_MS = 240000;
 const PIZZA_MS = 360000;
+const TRUCKER_MS = 420000;
 const CAR_THEFT_MS = 300000;
 const MULTIPLAYER_RACE_MS = 300000;
 const WANTED_DECAY_MS = 120000;
@@ -47,6 +48,7 @@ const JOBS = Object.freeze([
   {id: 'trial', name: 'Street time trial', pay: 450, distance: 75},
   {id: 'patrol', name: 'Police patrol', pay: 400, distance: 75},
   {id: 'pizza', name: 'Pizza delivery', pay: 400, distance: 75},
+  {id: 'trucker', name: 'Freight delivery', pay: 500, distance: 90},
   {id: 'carthief', name: 'Getaway car', pay: 550, distance: 65},
 ]);
 const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json');
@@ -160,7 +162,8 @@ function savedJob(value) {
       !Number.isFinite(value.started) || Date.now() - value.started >= 86400000) return null;
   if (value.id === 'patrol' && Date.now() - value.started > PATROL_MS) return null;
   if (value.id === 'pizza' && Date.now() - value.started > PIZZA_MS) return null;
-  if (['courier', 'taxi', 'medic', 'carthief'].includes(value.id) && value.mode === 'route') {
+  if (value.id === 'trucker' && Date.now() - value.started > TRUCKER_MS) return null;
+  if (['courier', 'taxi', 'medic', 'carthief', 'trucker'].includes(value.id) && value.mode === 'route') {
     if ((value.id === 'courier' && (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
         !value.pickup.every(Number.isFinite))) ||
         (value.id !== 'courier' && !homeAt(value.pickupHome)) ||
@@ -168,11 +171,15 @@ function savedJob(value) {
         (value.id === 'medic' && (!Array.isArray(value.station) || value.station.length !== 3 ||
           !value.station.every(Number.isFinite) || !validMissionId(value.vehicleId))) ||
         (value.id === 'carthief' && !validMissionId(value.vehicleId)) ||
+        (value.id === 'trucker' && (!validMissionId(value.vehicleId) ||
+          !Array.isArray(value.station) || value.station.length !== 3 ||
+          !value.station.every(Number.isFinite))) ||
         !['pickup', 'delivery'].includes(value.stage)) return null;
     return {id: value.id, mode: 'route',
       ...(value.id === 'courier' ? {pickup: value.pickup} : {pickupHome: value.pickupHome}),
       ...(value.id === 'medic' ? {station: value.station, vehicleId: value.vehicleId} : {drop: value.drop}),
       ...(value.id === 'carthief' ? {vehicleId: value.vehicleId} : {}),
+      ...(value.id === 'trucker' ? {vehicleId: value.vehicleId, station: value.station} : {}),
       stage: value.stage, started: value.started};
   }
   if (value.id === 'mechanic' && value.mode === 'service') {
@@ -572,8 +579,9 @@ class LocalGame {
             (dropHome?.name || 'Aid station')},
         remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
         radius: MISSION_RADIUS,
-        ...(active.id === 'carthief' ? {secondsLeft:
-          Math.max(0, Math.ceil((CAR_THEFT_MS - (Date.now() - active.started)) / 1000))} : {})};
+        ...(['carthief', 'trucker'].includes(active.id) ? {secondsLeft:
+          Math.max(0, Math.ceil(((active.id === 'trucker' ? TRUCKER_MS : CAR_THEFT_MS) -
+            (Date.now() - active.started)) / 1000))} : {})};
     } else if (active?.mode === 'service') {
       const home = homeAt(active.targetHome);
       const vehicle = this.vehicles.get(active.vehicleId);
@@ -723,6 +731,7 @@ class LocalGame {
     if (!job?.vehicleId) return;
     const mechanic = job.id === 'mechanic';
     const thief = job.id === 'carthief';
+    const trucker = job.id === 'trucker';
     const patrol = job.id === 'patrol';
     const pizza = job.id === 'pizza';
     const point = mechanic ? homeAt(job.targetHome)?.out :
@@ -731,7 +740,8 @@ class LocalGame {
     const id = job.vehicleId;
     const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
       mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' :
-        patrol ? '596.0.1.0.' : pizza ? '448.1.1.0.' : '416.1.1.0.',
+        patrol ? '596.0.1.0.' : pizza ? '448.1.1.0.' :
+          trucker ? '414.25.1.0.' : '416.1.1.0.',
       rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
       0, 0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
@@ -1196,6 +1206,15 @@ class LocalGame {
             drop: drop.id, stage: 'pickup', started: Date.now()};
           message = `Taxi fare started. Drive to ${nearest.name} for pickup.`;
         }
+      } else if (job.id === 'trucker') {
+        const pickup = nearestHome(pos);
+        const drop = pickup && nearestHome({x: pickup.out[0], y: pickup.out[1]}, 180, [pickup.id]);
+        if (!pickup || !drop) throw new Error('Freight stops are unavailable.');
+        player.job = {id: job.id, mode: 'route', pickupHome: pickup.id,
+          drop: drop.id, station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)],
+          vehicleId: missionId(), stage: 'pickup', started: Date.now()};
+        this.addMissionVehicle(player);
+        message = `Freight delivery started. Take the nearby Mule to ${pickup.name} for cargo, then deliver it to ${drop.name} within seven minutes.`;
       } else if (job.id === 'carthief') {
         if (player.passive || player.policeDuty)
           throw new Error('Turn off passive mode and leave police duty before starting a getaway.');
@@ -1250,7 +1269,7 @@ class LocalGame {
       }
       this.save();
     } else if (action === 'job.pickup') {
-      if (!['courier', 'taxi', 'medic', 'carthief'].includes(player.job?.id) || player.job.mode !== 'route' ||
+      if (!['courier', 'taxi', 'medic', 'carthief', 'trucker'].includes(player.job?.id) || player.job.mode !== 'route' ||
           player.job.stage !== 'pickup') throw new Error('No pickup is ready.');
       const pickup = player.job.id === 'courier' ? player.job.pickup :
         homeAt(player.job.pickupHome)?.out;
@@ -1258,6 +1277,13 @@ class LocalGame {
         throw new Error('Travel to the pickup point.');
       if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
         throw new Error('Drive the mission vehicle to the pickup point.');
+      if (player.job.id === 'trucker') {
+        if (Date.now() - player.job.started > TRUCKER_MS)
+          throw new Error('The freight deadline passed. Cancel and start again.');
+        if (pos.peer.state.vehicle !== player.job.vehicleId ||
+            pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2])
+          throw new Error('Drive the marked Mule to collect the cargo.');
+      }
       if (player.job.id === 'carthief') {
         if (player.passive || player.policeDuty)
           throw new Error('Leave passive mode or police duty before taking the car.');
@@ -1272,6 +1298,7 @@ class LocalGame {
       const home = homeAt(player.job.drop);
       message = player.job.id === 'courier' ? `Package collected. Deliver it to ${home.name}.` :
         player.job.id === 'taxi' ? `Passenger aboard. Drive to ${home.name}.` :
+          player.job.id === 'trucker' ? `Cargo loaded. Deliver it to ${home.name} before time runs out.` :
           player.job.id === 'carthief' ? `Car taken. Drive to ${home.name} before time runs out.` :
             'Patient aboard. Return to the aid station.';
       this.save();
@@ -1316,6 +1343,10 @@ class LocalGame {
             (pos.peer.state.vehicle !== player.job.vehicleId ||
               pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
           throw new Error('Deliver the marked getaway car.');
+        if (player.job.id === 'trucker' &&
+            (pos.peer.state.vehicle !== player.job.vehicleId ||
+              pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+          throw new Error('Deliver cargo in the marked Mule.');
       } else if (player.job.mode === 'service') {
         const vehicle = this.vehicles.get(player.job.vehicleId);
         if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > MISSION_RADIUS)
@@ -1347,6 +1378,8 @@ class LocalGame {
         throw new Error('The pizzas went cold. Cancel and start again.');
       if (job.id === 'carthief' && Date.now() - player.job.started > CAR_THEFT_MS)
         throw new Error('The getaway expired. Cancel it and start again.');
+      if (job.id === 'trucker' && Date.now() - player.job.started > TRUCKER_MS)
+        throw new Error('The freight deadline passed. Cancel and start again.');
       player.cash = money(player.cash + job.pay);
       player.xp = money(player.xp + Math.round(job.pay / 5));
       player.jobsDone++;
