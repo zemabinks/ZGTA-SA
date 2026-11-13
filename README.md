@@ -208,6 +208,10 @@ territory, or tracked exploration target. Its radar image is served only
 from the Mac's ignored local asset archive. These are independent local
 substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars,
 the ground vehicles, and fourteen priced aircraft listed in the archived client catalog.
+Archived ground vehicles must be bought within 100 meters of a dealership
+that lists the selected model. F6 shows the nearest dealership and marks
+models unavailable there. Starter cars remain available anywhere as a local
+onboarding choice.
 Aircraft can be bought and spawned within 100 meters of a hangar that lists
 that model; the panel shows the nearest hangar. An owned vehicle
 can be spawned nearby and driven. Its last reported position, health, and
@@ -218,8 +222,13 @@ lower saved vehicle health but cannot raise it; repairing requires the paid
 garage action. When standing near an active owned car, F6 can also respray it
 for $120. The new paint code is sent with the shared vehicle and survives a
 restart; its 3D appearance has not yet been checked in Chrome.
-This local garage does not reproduce the publisher's storage buildings, other
-tuning, or fuel rules. The panel
+An owned property with an exterior has two local parking spaces. Bring an
+owned ground vehicle to within 25 meters of that exterior, leave it, and
+park it through F6. The car disappears from the shared world and keeps its
+condition and paint through a restart. It can only be retrieved at that
+property. This is exterior parking, not an interior garage or the
+publisher's storage system. Fuel and other tuning rules remain unavailable.
+The panel
 sells two starter homes and the 29
 properties listed in the archived client catalog. A purchased original
 property can be visited at its world entrance. Property interiors and garage
@@ -309,7 +318,8 @@ Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
 `node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_heist.js`,
-`node smoke_convoy.js`, and `node smoke_aircraft.js`
+`node smoke_convoy.js`, `node smoke_aircraft.js`, and
+`node smoke_property_garage.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
