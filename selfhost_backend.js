@@ -16,6 +16,11 @@ const PATROL_MS = 240000;
 const PIZZA_MS = 360000;
 const TRUCKER_MS = 420000;
 const PILOT_MS = 600000;
+const PILOT_SMOOTH_BONUS = 150;
+const PILOT_EARLY_BONUS = 100;
+const PILOT_STREAK_BONUS = 500;
+const FIRE_MS = 480000;
+const FIRE_OFFSETS = Object.freeze([[0, 0], [18, 0], [-18, 0]]);
 const CONVOY_BONUS = 100;
 const CONVOY_RADIUS = 80;
 const CAR_THEFT_MS = 300000;
@@ -53,6 +58,7 @@ const JOBS = Object.freeze([
   {id: 'pizza', name: 'Pizza delivery', pay: 400, distance: 75},
   {id: 'trucker', name: 'Freight delivery', pay: 500, distance: 90},
   {id: 'pilot', name: 'Pilot flight', pay: 700, distance: 120},
+  {id: 'fire', name: 'Fire response', pay: 650, distance: 100},
   {id: 'carthief', name: 'Getaway car', pay: 550, distance: 65},
 ]);
 const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json');
@@ -153,6 +159,11 @@ function limited(value, limit, fallback = 0) {
 function rounded(value, fallback = 0) { return Math.round(finite(value, fallback) * 1000) / 1000; }
 function money(value) { return Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_CASH, value)) : 0; }
 function homeAt(id) { return HOME_CATALOG.find(home => home.id === id && home.out); }
+function fireSpot(job) {
+  const home = homeAt(job?.incidentHome);
+  const offset = FIRE_OFFSETS[job?.index];
+  return home && offset ? [home.out[0] + offset[0], home.out[1] + offset[1], home.out[2]] : null;
+}
 function nearestHome(pos, minimum = 120, excluded = []) {
   return HOME_CATALOG.filter(home => home.out && !excluded.includes(home.id) &&
     Math.hypot(home.out[0] - pos.x, home.out[1] - pos.y) >= minimum)
@@ -187,15 +198,31 @@ function savedJob(value) {
   if (value.id === 'pizza' && Date.now() - value.started > PIZZA_MS) return null;
   if (value.id === 'trucker' && Date.now() - value.started > TRUCKER_MS) return null;
   if (value.id === 'pilot' && Date.now() - value.started > PILOT_MS) return null;
+  if (value.id === 'fire' && Date.now() - value.started > FIRE_MS) return null;
   if (value.id === 'pilot' && value.mode === 'flight') {
     if (!airportAt(value.from) || !airportAt(value.to) || value.from === value.to ||
         !validMissionId(value.vehicleId) ||
         !['takeoff', 'landing'].includes(value.stage)) return null;
     return {id: value.id, mode: 'flight', from: value.from, to: value.to,
       vehicleId: value.vehicleId, stage: value.stage, landingSince: null,
+      minHealth: Math.max(0, Math.min(1000, finite(value.minHealth, 1000))),
+      reportedHealth: value.reportedHealth === true,
       started: value.started};
   }
   if (value.id === 'pilot') return null;
+  if (value.id === 'fire' && value.mode === 'fire') {
+    if (!homeAt(value.incidentHome) || !validMissionId(value.vehicleId) ||
+        !Array.isArray(value.station) || value.station.length !== 3 ||
+        !value.station.every(Number.isFinite) ||
+        !['respond', 'extinguish', 'rescue'].includes(value.stage) ||
+        !Number.isInteger(value.index) || value.index < 0 || value.index > FIRE_OFFSETS.length ||
+        (value.stage === 'rescue' && value.index !== FIRE_OFFSETS.length) ||
+        (value.stage === 'extinguish' && value.index >= FIRE_OFFSETS.length)) return null;
+    return {id: value.id, mode: 'fire', incidentHome: value.incidentHome,
+      vehicleId: value.vehicleId, station: value.station, stage: value.stage,
+      index: value.index, started: value.started};
+  }
+  if (value.id === 'fire') return null;
   if (['courier', 'taxi', 'medic', 'carthief', 'trucker'].includes(value.id) && value.mode === 'route') {
     if ((value.id === 'courier' && (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
         !value.pickup.every(Number.isFinite))) ||
@@ -267,6 +294,8 @@ class LocalGame {
           CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [];
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
           cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
+          pilotFlights: money(value.pilotFlights), pilotStreak:
+            value.job?.id === 'pilot' && !savedJob(value.job) ? 0 : money(value.pilotStreak),
           racesFinished: money(value.racesFinished), racesWon: money(value.racesWon),
           health: Math.max(1, Math.min(100, Math.round(finite(value.health, 100)))),
           armour: Math.max(0, Math.min(100, Math.round(finite(value.armour)))),
@@ -314,6 +343,7 @@ class LocalGame {
     if (this.saveTimer) {clearTimeout(this.saveTimer); this.saveTimer = null;}
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
       [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
+        pilotFlights: p.pilotFlights, pilotStreak: p.pilotStreak,
         racesFinished: p.racesFinished, racesWon: p.racesWon,
         health: p.health, armour: p.armour, wanted: p.wanted,
         wantedUntil: p.wantedUntil, passive: p.passive,
@@ -334,7 +364,8 @@ class LocalGame {
     if (!id || !this.players.has(id)) {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
-        cash: 0, xp: 0, jobsDone: 0, racesFinished: 0, racesWon: 0,
+        cash: 0, xp: 0, jobsDone: 0, pilotFlights: 0, pilotStreak: 0,
+        racesFinished: 0, racesWon: 0,
         health: 100, armour: 0, wanted: 0, wantedUntil: 0, passive: false,
         passiveWaitUntil: 0, kills: 0, deaths: 0, arrests: 0, policeDuty: false,
         gang: null, gangSwitchUntil: 0, turfCaptures: 0,
@@ -626,10 +657,24 @@ class LocalGame {
         remaining: pos ? Math.ceil(Math.hypot(pos.x - to.stand[0], pos.y - to.stand[1])) : null,
         altitude: pos ? Math.max(0, Math.round(pos.z - from.stand[2])) : null,
         takeoffAltitude: 35, radius: 70,
+        smoothEligible: active.reportedHealth && active.minHealth >= 950,
+        earlyEligible: PILOT_MS - (Date.now() - active.started) >= 120000,
         landingReady: !!active.landingSince && Date.now() - active.landingSince >= 2000,
         landingSeconds: active.landingSince ? Math.max(0,
           Math.ceil((2000 - (Date.now() - active.landingSince)) / 1000)) : 2,
         secondsLeft: Math.max(0, Math.ceil((PILOT_MS -
+          (Date.now() - active.started)) / 1000))};
+    } else if (active?.mode === 'fire') {
+      const home = homeAt(active.incidentHome);
+      const target = active.stage === 'extinguish' ? fireSpot(active) : home?.out;
+      if (target) objective = {mode: 'fire', stage: active.stage,
+        target: {x: rounded(target[0]), y: rounded(target[1]),
+          name: `${active.stage === 'extinguish' ? `Fire ${active.index + 1} near` :
+            active.stage === 'rescue' ? 'Rescue near' : 'Fire call near'} ${home.name}`},
+        remaining: pos ? Math.ceil(Math.hypot(pos.x - target[0], pos.y - target[1])) : null,
+        radius: active.stage === 'respond' ? 25 : active.stage === 'rescue' ? 10 : 8,
+        index: active.index, total: FIRE_OFFSETS.length,
+        secondsLeft: Math.max(0, Math.ceil((FIRE_MS -
           (Date.now() - active.started)) / 1000))};
     } else if (active?.mode === 'service') {
       const home = homeAt(active.targetHome);
@@ -700,6 +745,9 @@ class LocalGame {
     }).filter(Boolean);
     const tracked = discoveries.find(item => item.id === player.trackedDiscovery && !item.found) || null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
+      pilot: {flights: player.pilotFlights || 0, streak: player.pilotStreak || 0,
+        smoothBonus: PILOT_SMOOTH_BONUS, earlyBonus: PILOT_EARLY_BONUS,
+        fifthBonus: PILOT_STREAK_BONUS},
       racesFinished: player.racesFinished || 0, racesWon: player.racesWon || 0,
       health: player.health, armour: player.armour, wanted: player.wanted,
       passive: player.passive, passiveWait: Math.max(0,
@@ -793,6 +841,7 @@ class LocalGame {
     const thief = job.id === 'carthief';
     const trucker = job.id === 'trucker';
     const pilot = job.id === 'pilot';
+    const fire = job.id === 'fire';
     const patrol = job.id === 'patrol';
     const pizza = job.id === 'pizza';
     const point = mechanic ? homeAt(job.targetHome)?.out :
@@ -802,7 +851,8 @@ class LocalGame {
     const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
       mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' :
         patrol ? '596.0.1.0.' : pizza ? '448.1.1.0.' :
-          trucker ? '414.25.1.0.' : pilot ? '593.1.1.0.' : '416.1.1.0.',
+          trucker ? '414.25.1.0.' : pilot ? '593.1.1.0.' :
+            fire ? '407.3.1.0.' : '416.1.1.0.',
       rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
       0, 0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
@@ -1290,11 +1340,20 @@ class LocalGame {
         const to = AIRPORTS[(AIRPORTS.indexOf(from) + 1) % AIRPORTS.length];
         player.job = {id: job.id, mode: 'flight', from: from.id, to: to.id,
           vehicleId: missionId(), stage: 'takeoff', landingSince: null,
+          minHealth: 1000, reportedHealth: false,
           started: Date.now()};
         this.addMissionVehicle(player);
         pos.peer.send({t: 'tp', x: from.stand[0], y: from.stand[1],
           z: from.stand[2] + 1, h: 0, g: 1});
         message = `Pilot flight started at ${from.name}. Board the marked Dodo, climb 35 m above the airport, then land at ${to.name} within ten minutes.`;
+      } else if (job.id === 'fire') {
+        const home = nearestHome(pos, 180);
+        if (!home) throw new Error('Fire call locations are unavailable.');
+        player.job = {id: job.id, mode: 'fire', incidentHome: home.id,
+          station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)],
+          vehicleId: missionId(), stage: 'respond', index: 0, started: Date.now()};
+        this.addMissionVehicle(player);
+        message = `Fire dispatch: take the marked fire truck to ${home.name} within eight minutes. Put out three fires and rescue the person on foot.`;
       } else if (job.id === 'carthief') {
         if (player.passive || player.policeDuty)
           throw new Error('Turn off passive mode and leave police duty before starting a getaway.');
@@ -1346,6 +1405,36 @@ class LocalGame {
       } else {
         player.job = {id: job.id, goal: job.distance, progress: 0, started: Date.now()};
         message = `${job.name} started. Travel ${job.distance} m, then complete the task.`;
+      }
+      this.save();
+    } else if (action === 'job.respond' || action === 'job.extinguish') {
+      const fire = player.job;
+      if (fire?.mode !== 'fire') throw new Error('No active fire call.');
+      if (Date.now() - fire.started > FIRE_MS)
+        throw new Error('The fire call expired. Cancel and start again.');
+      const truck = this.vehicles.get(fire.vehicleId);
+      const inTruck = pos?.peer.state.driving === true &&
+        pos.peer.state.vehicle === fire.vehicleId &&
+        pos.peer.state.car === truck?.row[2];
+      if (action === 'job.respond') {
+        if (fire.stage !== 'respond') throw new Error('The fire truck has already arrived.');
+        const home = homeAt(fire.incidentHome);
+        if (!pos || !home || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 25 ||
+            !inTruck) throw new Error('Drive the marked fire truck to the active call.');
+        fire.stage = 'extinguish';
+        message = `Arrived at ${home.name}. Extinguish the three fire spots with the truck or on foot.`;
+      } else {
+        if (fire.stage !== 'extinguish') throw new Error('No fire spot is ready.');
+        const target = fireSpot(fire);
+        const distance = pos && target ? Math.hypot(pos.x - target[0], pos.y - target[1]) : Infinity;
+        if (!(inTruck && distance <= 23) &&
+            !(pos?.peer.state.walking === true && distance <= 8))
+          throw new Error('Get the marked fire truck within 23 m, or approach the fire on foot within 8 m.');
+        fire.index++;
+        if (fire.index === FIRE_OFFSETS.length) {
+          fire.stage = 'rescue';
+          message = 'All fires are out. Get out and rescue the person near the call location.';
+        } else message = `Fire ${fire.index}/${FIRE_OFFSETS.length} out. Move to the next fire spot.`;
       }
       this.save();
     } else if (action === 'job.pickup') {
@@ -1411,7 +1500,13 @@ class LocalGame {
       if (!player.job) throw new Error('No active job.');
       if (!pos) throw new Error('Enter the game to complete this job.');
       if (Date.now() - player.job.started < 3000) throw new Error('The task started too recently.');
-      if (player.job.mode === 'route') {
+      if (player.job.mode === 'fire') {
+        const home = homeAt(player.job.incidentHome);
+        if (player.job.stage !== 'rescue') throw new Error('Put out all three fires first.');
+        if (!home || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 10 ||
+            pos.peer.state.walking !== true)
+          throw new Error('Reach the rescue point on foot.');
+      } else if (player.job.mode === 'route') {
         if (player.job.stage !== 'delivery') throw new Error('Complete the pickup first.');
         const home = homeAt(player.job.drop);
         const target = player.job.id === 'medic' ? player.job.station : home?.out;
@@ -1477,6 +1572,8 @@ class LocalGame {
         throw new Error('The freight deadline passed. Cancel and start again.');
       if (job.id === 'pilot' && Date.now() - player.job.started > PILOT_MS)
         throw new Error('The flight deadline passed. Cancel and start again.');
+      if (job.id === 'fire' && Date.now() - player.job.started > FIRE_MS)
+        throw new Error('The fire call expired. Cancel and start again.');
       let convoyBonus = 0;
       if (job.id === 'trucker' && !player.job.bonusAwarded) {
         const party = this.partyOf(player);
@@ -1504,16 +1601,37 @@ class LocalGame {
           }
         }
       }
-      player.cash = money(player.cash + job.pay + convoyBonus);
-      player.xp = money(player.xp + Math.round(job.pay / 5) + convoyBonus / 5);
+      let pilotBonus = 0;
+      const pilotExtras = [];
+      if (job.id === 'pilot') {
+        player.pilotFlights = money((player.pilotFlights || 0) + 1);
+        player.pilotStreak = money((player.pilotStreak || 0) + 1);
+        if (player.job.reportedHealth && player.job.minHealth >= 950) {
+          pilotBonus += PILOT_SMOOTH_BONUS;
+          pilotExtras.push('smooth flight');
+        }
+        if (PILOT_MS - (Date.now() - player.job.started) >= 120000) {
+          pilotBonus += PILOT_EARLY_BONUS;
+          pilotExtras.push('early landing');
+        }
+        if (player.pilotStreak % 5 === 0) {
+          pilotBonus += PILOT_STREAK_BONUS;
+          pilotExtras.push('fifth flight');
+        }
+      }
+      player.cash = money(player.cash + job.pay + convoyBonus + pilotBonus);
+      player.xp = money(player.xp + Math.round(job.pay / 5) +
+        (convoyBonus + pilotBonus) / 5);
       player.jobsDone++;
       this.removeMissionVehicle(player);
       player.job = null;
       message = `${job.name} complete: +$${job.pay}${convoyBonus ?
-        ` and $${convoyBonus} convoy bonus` : ''}. Balance: $${player.cash}.`;
+        ` and $${convoyBonus} convoy bonus` : ''}${pilotBonus ?
+        ` and $${pilotBonus} pilot bonus (${pilotExtras.join(', ')})` : ''}. Balance: $${player.cash}.`;
       this.updatePlayer(player);
     } else if (action === 'job.cancel') {
       if (!player.job) throw new Error('No active job.');
+      if (player.job.id === 'pilot') player.pilotStreak = 0;
       this.removeMissionVehicle(player);
       player.job = null;
       message = 'Job cancelled.';
@@ -1756,6 +1874,15 @@ class LocalGame {
         const aboard = message.driving === true && message.vehicle === flight.vehicleId &&
           message.car === plane?.row[2];
         const from = airportAt(flight.from), to = airportAt(flight.to);
+        if (aboard && Number.isFinite(message.health) && message.health >= 0 &&
+            message.health <= 1000) {
+          const firstReport = !flight.reportedHealth;
+          flight.reportedHealth = true;
+          const health = Math.round(message.health);
+          const damaged = health < flight.minHealth;
+          if (damaged) flight.minHealth = health;
+          if (firstReport || damaged) this.save();
+        }
         if (aboard && from && to && Number.isFinite(message.z) &&
             flight.stage === 'takeoff' && message.z >= from.stand[2] + 35) {
           flight.stage = 'landing';
@@ -1896,7 +2023,8 @@ class LocalGame {
       } catch (error) { peer.send({t: 'note', text: error.message}); }
       return;
     }
-    if (text.startsWith('/job ') || ['/pickup', '/checkpoint', '/repair', '/deliver', '/finish', '/canceljob'].includes(text) ||
+    if (text.startsWith('/job ') || ['/pickup', '/checkpoint', '/repair', '/deliver', '/finish', '/canceljob',
+        '/respond', '/extinguish', '/rescue'].includes(text) ||
         text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/storecar ') ||
         text.startsWith('/repaircar ') || text.startsWith('/respraycar ') ||
         text.startsWith('/buyhome ')) {
@@ -1904,6 +2032,8 @@ class LocalGame {
         const [command, value] = text.slice(1).split(/\s+/, 2);
         const actions = {job: ['job.start', {job: value}], pickup: ['job.pickup', {}],
           checkpoint: ['job.checkpoint', {}], repair: ['job.complete', {}],
+          respond: ['job.respond', {}], extinguish: ['job.extinguish', {}],
+          rescue: ['job.complete', {}],
           deliver: [peer.player.job?.id === 'pizza' && peer.player.job.index < 2 ?
             'job.checkpoint' : 'job.complete', {}], finish: ['job.complete', {}],
           canceljob: ['job.cancel', {}], buycar: ['car.buy', {model: value}],
