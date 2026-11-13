@@ -141,8 +141,8 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-eight independent local activities: courier, taxi, mechanic, medic, a timed
-street trial, a police patrol, pizza delivery, and a getaway car mission.
+nine independent local activities: courier, taxi, mechanic, medic, a timed
+street trial, a police patrol, pizza delivery, freight delivery, and a getaway car mission.
 Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
@@ -157,7 +157,12 @@ scooter and sends its driver to three ordered property entrances within six
 minutes for $400 and 80 XP. The route, scooter, and completed stops recover
 after a server restart; an expired route is discarded. The archived client
 lists a pizza job and Pizzaboy vehicle, but these delivery rules are original
-to this local server. In the getaway mission, take a spawned car at a
+to this local server. Freight delivery spawns a reserved Mule truck near the
+player. Drive to a cargo pickup, then deliver to a second property entrance
+within seven minutes for $500 and 100 XP. The cargo stage and truck return
+after a server restart; an expired route is discarded. The archived client's
+help describes trucker work and a Mule, while this server uses its own route
+and payment rules. In the getaway mission, take a spawned car at a
 property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
@@ -194,7 +199,7 @@ $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job carthief`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
@@ -265,11 +270,11 @@ verification status of each major system.
 
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
-`node smoke_patrol.js`, and `node smoke_pizza.js`
+`node smoke_patrol.js`, `node smoke_pizza.js`, and `node smoke_trucker.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, police patrol and pizza delivery in marked loaners,
+repair, timed checkpoints, police patrol, pizza delivery, and freight delivery in marked loaners,
 getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, paid respray, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
@@ -303,6 +308,10 @@ Chrome also started pizza delivery, showed the Pizzaboy scooter and first
 route objective, entered driving mode, and cancelled the mission. The three
 deliveries, payout, and restart behavior passed an isolated test; the full
 route has not been driven in Chrome.
+Chrome also started a freight delivery, displayed its F6 route map and timer,
+showed the spawned Mule in the 3D world, entered its driving mode, and then
+cancelled the mission. Pickup, delivery, payout, and restart behavior passed
+the isolated freight test; the full route has not been driven in Chrome.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
