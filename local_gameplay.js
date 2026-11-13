@@ -514,6 +514,30 @@
           state.cash < car.price ||
           state.cars.length >= 12, 'Aircraft catalog');
     }
+    section('Workshop supplies');
+    panel.append(element('p',
+      `Buy at a ground dealership on foot. Use supplies beside an owned active vehicle, or give one to a player within 8 m.`,
+      'zgta-muted'));
+    for (const item of state.catalog.supplies) {
+      const count = state.supplies[item.id] || 0;
+      row(`${item.name} · ${count}/${item.capacity} · $${item.price}`,
+        'supply.buy', {item: item.id}, 'Buy',
+        !state.dealer?.within || !state.onFoot || state.cash < item.price ||
+        count >= item.capacity);
+      if (!count) continue;
+      state.cars.forEach((car, slot) => {
+        const garage = state.garage?.[slot];
+        if (!garage?.active) return;
+        row(`${item.name} on ${car.name} · ${garage.distance ?? '?'} m away`,
+          'supply.use', {item: item.id, slot}, 'Use',
+          !state.onFoot || garage.distance === null || garage.distance > 18 ||
+          (item.id === 'repair_kit' && !garage.repairCost));
+      });
+      for (const other of state.nearbyPlayers.filter(entry => entry.distance <= 8))
+        row(`Give ${item.name.toLowerCase()} to ${other.name}`,
+          'supply.give', {item: item.id, number: other.number}, 'Give',
+          !state.onFoot || !other.onFoot);
+    }
     section('Homes');
     for (const home of state.catalog.homes.filter(item => item.source === 'starter')) {
       const owned = state.homes.some(item => item.id === home.id);
