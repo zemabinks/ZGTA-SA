@@ -531,7 +531,7 @@ class LocalGame {
     const home = member && race.stage === 'running' && !member.finishedAt && !member.left ?
       homeAt(race.points[member.index]) : null;
     const target = home ? {x: rounded(home.out[0]), y: rounded(home.out[1]), name: home.name} : null;
-    return {stage: race.stage, host: race.host.name, isHost: race.host === player,
+    return {stage: race.stage, started: race.started, host: race.host.name, isHost: race.host === player,
       joined: !!member, start: {x: race.start[0], y: race.start[1]},
       startDistance: pos ? Math.ceil(Math.hypot(pos.x - race.start[0], pos.y - race.start[1])) : null,
       players: [...race.members].map(([racer, entry]) => ({name: racer.name,
@@ -854,6 +854,7 @@ class LocalGame {
         occupied: player.garage.filter(entry => entry.parkedHome === nearHome.id).length,
         capacity: 2} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
+        vehicleId: active.vehicleId || null,
         ...(objective || {goal: active.goal, progress: Math.floor(active.progress),
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
         ...(active.id === 'trucker' ? {convoyBonusAwarded: active.bonusAwarded === true,
@@ -873,6 +874,9 @@ class LocalGame {
             Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null};
       }),
       onFoot: pos?.peer.state.walking === true,
+      driving: pos?.peer.state.driving === true,
+      drivingVehicle: typeof pos?.peer.state.vehicle === 'string' ?
+        pos.peer.state.vehicle : null,
       race: this.raceView(player, pos),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
       catalog: {jobs: JOBS,
