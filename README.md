@@ -202,7 +202,9 @@ property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
 after a server restart. An objective box shows the destination,
-distance, and compass direction while the panel is closed. F6 shows a route
+distance, and compass direction while the panel is closed. A compact in-world
+waypoint badge also points to the target and shows its distance; clicking it
+opens F6. F6 shows a route
 map with the player's current position and the active mission, race,
 territory, or tracked exploration target. Its radar image is served only
 from the Mac's ignored local asset archive. These are independent local
@@ -228,9 +230,8 @@ park it through F6. The car disappears from the shared world and keeps its
 condition and paint through a restart. It can only be retrieved at that
 property. This is exterior parking, not an interior garage or the
 publisher's storage system. Fuel and other tuning rules remain unavailable.
-The panel
-sells two starter homes and the 29
-properties listed in the archived client catalog. A purchased original
+The panel sells two starter homes and the 29 properties listed in the archived
+client catalog. A purchased original
 property can be visited at its world entrance. Property interiors and garage
 buildings are not implemented. The client shows owned-house markers; its house
 entry prompt reports that interior actions are unavailable. A Chrome test of
@@ -244,7 +245,14 @@ within five minutes. First place earns $600, second $400, and later finishers
 $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
-race has no 3D checkpoint rings. Chat commands
+race has no 3D checkpoint rings.
+
+During the local time trial, police patrol, pizza delivery, and multiplayer
+race, a driver who reaches the active checkpoint triggers the F6 checkpoint
+action automatically. The server still checks route order, distance, time,
+and the marked mission vehicle when required. Other missions keep their
+explicit pickup, robbery, rescue, or delivery actions.
+Chat commands
 `/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job pilot 511`, `/job fire`, `/job heist`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/respond`, `/extinguish`, `/rescue`, `/rob`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
@@ -319,7 +327,8 @@ Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
 `node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_heist.js`,
 `node smoke_convoy.js`, `node smoke_aircraft.js`, and
-`node smoke_property_garage.js`
+`node smoke_property_garage.js`. Run `node smoke_route_ui.js` for the
+browser-side waypoint and automatic-checkpoint gates.
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
