@@ -224,6 +224,12 @@ lower saved vehicle health but cannot raise it; repairing requires the paid
 garage action. When standing near an active owned car, F6 can also respray it
 for $120. The new paint code is sent with the shared vehicle and survives a
 restart; its 3D appearance has not yet been checked in Chrome.
+Ground dealerships also sell local workshop supplies: a $125 repair kit and
+a $100 paint can, up to five of each. On foot beside an active owned car,
+the kit restores its condition and the can changes its paint. Either item
+can be handed to another on-foot player within 8 meters. Counts, ownership,
+and transfers are checked by the server and saved across restarts. These
+supplies are local features, not copied publisher inventory rules.
 An owned property with an exterior has two local parking spaces. Bring an
 owned ground vehicle to within 25 meters of that exterior, leave it, and
 park it through F6. The car disappears from the shared world and keeps its
@@ -255,7 +261,9 @@ explicit pickup, robbery, rescue, or delivery actions.
 Chat commands
 `/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job pilot 511`, `/job fire`, `/job heist`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/respond`, `/extinguish`, `/rescue`, `/rob`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
-`/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
+`/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`,
+`/supplies`, `/buykit`, `/usekit 1`, `/givekit 2`, `/buypaint`,
+`/usepaint 1`, `/givepaint 2`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
 
 The independent combat layer tracks health, armour, kills, deaths, and a wanted
@@ -327,7 +335,8 @@ Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
 `node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_heist.js`,
 `node smoke_convoy.js`, `node smoke_aircraft.js`, and
-`node smoke_property_garage.js`. Run `node smoke_route_ui.js` for the
+`node smoke_property_garage.js`, and `node smoke_supplies.js`. Run
+`node smoke_route_ui.js` for the
 browser-side waypoint and automatic-checkpoint gates.
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
