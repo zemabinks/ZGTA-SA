@@ -205,9 +205,25 @@
         if (state.job.stage === 'takeoff')
           panel.append(element('p', `Board the marked Dodo at ${state.job.from} and climb ${state.job.takeoffAltitude} m above the airport. Current height: ${state.job.altitude ?? '?'} m. Destination: ${state.job.target.name}. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
         else panel.append(element('p', `Land at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Stop within ${state.job.radius} m and hold still for two seconds. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
+        panel.append(element('p', `Bonuses: +$${state.pilot.smoothBonus} for a clean aircraft with reported condition, +$${state.pilot.earlyBonus} with at least two minutes left, +$${state.pilot.fifthBonus} every fifth completed flight in a row.`, 'zgta-muted'));
         row('Complete pilot flight', 'job.complete', {}, 'Finish',
           !state.connected || state.job.stage !== 'landing' ||
           !state.job.landingReady || state.job.secondsLeft <= 0);
+      } else if (state.job.mode === 'fire') {
+        const fire = state.job;
+        const instruction = fire.stage === 'respond' ?
+          'Drive the marked fire truck to the incident.' : fire.stage === 'extinguish' ?
+            `Suppress fire ${fire.index + 1}/${fire.total} using the marked truck within 23 m or on foot within 8 m.` :
+            'Leave the truck and rescue the person on foot within 10 m.';
+        panel.append(element('p', `${instruction} ${fire.target.name} (${fire.target.x}, ${fire.target.y}) · ${fire.remaining ?? '?'} m away · ${fire.secondsLeft} s left.`, 'zgta-muted'));
+        if (fire.stage === 'respond')
+          row('Arrive at fire call', 'job.respond', {}, 'Arrive',
+            !state.connected || fire.remaining > 25 || fire.secondsLeft <= 0);
+        else if (fire.stage === 'extinguish')
+          row(`Suppress fire ${fire.index + 1}`, 'job.extinguish', {}, 'Extinguish',
+            !state.connected || fire.remaining > 23 || fire.secondsLeft <= 0);
+        else row('Rescue trapped person', 'job.complete', {}, 'Rescue',
+          !state.onFoot || fire.remaining > 10 || fire.secondsLeft <= 0);
       } else if (state.job.mode === 'service') {
         panel.append(element('p', `Repair the stranded vehicle at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m and stand on foot.`, 'zgta-muted'));
         row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
@@ -228,13 +244,15 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}`,
+        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}${job.id === 'fire' ? ' · eight-minute call · loaner fire truck' : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
             (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
             (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
             (job.id === 'patrol' && !state.policeDuty) ||
             (state.race?.joined && ['lobby', 'running'].includes(state.race.stage)));
     }
+    section('Pilot record');
+    panel.append(element('p', `${state.pilot.flights} flights completed · ${state.pilot.streak} in a row · ${5 - state.pilot.streak % 5} until the next fifth-flight bonus. Cancelling a flight breaks the streak.`, 'zgta-muted'));
     section('Multiplayer race');
     const race = state.race;
     if (!race || race.stage === 'finished') {
@@ -477,6 +495,14 @@
       objective.textContent = job.stage === 'takeoff' ?
         `Pilot flight: take off from ${job.from} · ${job.secondsLeft} s left\nClimb to ${job.takeoffAltitude} m · now ${job.altitude ?? '?'} m\nPress F6 for details` :
         `Pilot flight: land at ${job.target.name} · ${job.secondsLeft} s left\n${job.remaining ?? '?'} m${direction} · stop on apron for 2 s\nPress F6 for details`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (job.mode === 'fire') {
+      const step = job.stage === 'respond' ? 'drive the marked truck' :
+        job.stage === 'extinguish' ? `suppress fire ${job.index + 1}/${job.total}` :
+          'rescue on foot';
+      objective.textContent = `Fire response: ${step} · ${job.secondsLeft} s left\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nPress F6 for details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
