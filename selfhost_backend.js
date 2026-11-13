@@ -10,6 +10,10 @@ const MAX_PEERS = 32;
 const MAX_CASH = 100000000;
 const RESPRAY_COST = 120;
 const DISCORD_BONUS = 500;
+const SUPPLIES = Object.freeze([
+  {id: 'repair_kit', name: 'Repair kit', price: 125, capacity: 5},
+  {id: 'paint_can', name: 'Paint can', price: 100, capacity: 5},
+]);
 const MISSION_RADIUS = 12;
 const TIME_TRIAL_MS = 180000;
 const PATROL_MS = 240000;
@@ -189,6 +193,10 @@ function limited(value, limit, fallback = 0) {
 }
 function rounded(value, fallback = 0) { return Math.round(finite(value, fallback) * 1000) / 1000; }
 function money(value) { return Number.isSafeInteger(value) ? Math.max(0, Math.min(MAX_CASH, value)) : 0; }
+function savedSupplies(value) {
+  return Object.fromEntries(SUPPLIES.map(item => [item.id,
+    Math.max(0, Math.min(item.capacity, Math.floor(finite(value?.[item.id]))))]));
+}
 function homeAt(id) { return HOME_CATALOG.find(home => home.id === id && home.out); }
 function fireSpot(job) {
   const home = homeAt(job?.incidentHome);
@@ -358,6 +366,7 @@ class LocalGame {
             value.discoveries.filter(id => DISCOVERY_IDS.includes(id)) : [])],
           trackedDiscovery: DISCOVERY_IDS.includes(value.trackedDiscovery) ?
             value.trackedDiscovery : null,
+          supplies: savedSupplies(value.supplies),
           cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
@@ -400,6 +409,7 @@ class LocalGame {
         kills: p.kills, deaths: p.deaths, arrests: p.arrests,
         gang: p.gang, gangSwitchUntil: p.gangSwitchUntil, turfCaptures: p.turfCaptures,
         discoveries: p.discoveries, trackedDiscovery: p.trackedDiscovery,
+        supplies: p.supplies,
         cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
         discord: p.discord, settings: p.settings}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
@@ -420,6 +430,7 @@ class LocalGame {
         passiveWaitUntil: 0, kills: 0, deaths: 0, arrests: 0, policeDuty: false,
         gang: null, gangSwitchUntil: 0, turfCaptures: 0,
         discoveries: [], trackedDiscovery: null,
+        supplies: savedSupplies(),
         cars: [], garage: [], homes: [], job: null,
         discord: null, settings: {}});
       const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
@@ -772,7 +783,8 @@ class LocalGame {
       .map(peer => ({player: peer.player, at: this.position(peer.player)}))
       .filter(item => item.at && Math.hypot(pos.x - item.at.x, pos.y - item.at.y) <= 15)
       .map(item => ({number: item.player.number, name: item.player.name,
-        distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y))})) : [];
+        distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y)),
+        onFoot: item.at.peer.state.walking === true})) : [];
     const leaderboard = [...this.players.values()].filter(entry => entry.xp > 0 ||
       [...this.peers].some(peer => peer.ready && peer.player === entry))
       .sort((a, b) => b.xp - a.xp ||
@@ -827,6 +839,7 @@ class LocalGame {
       kills: player.kills, deaths: player.deaths, arrests: player.arrests,
       policeDuty: player.policeDuty, nearbyWanted: suspects,
       nearbyPlayers, leaderboard, raceLeaders,
+      supplies: {...player.supplies},
       party: this.partyView(player),
       gang: player.gang, gangSwitchWait: Math.max(0,
         Math.ceil((player.gangSwitchUntil - Date.now()) / 1000)),
@@ -880,6 +893,7 @@ class LocalGame {
       race: this.raceView(player, pos),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
       catalog: {jobs: JOBS,
+        supplies: SUPPLIES,
         cars: CAR_CATALOG.map(car => ({model: car.model, name: car.name,
           price: car.price, type: car.type, source: car.source,
           ...(car.source === 'archived' && !isAircraft(car) ?
@@ -1021,6 +1035,13 @@ class LocalGame {
     return [...this.vehicles.values()].find(vehicle => vehicle.owner === player && vehicle.slot === slot);
   }
 
+  assertVehicleUnoccupied(vehicle) {
+    if (vehicle && [...this.peers].some(peer => peer.ready &&
+        peer.state?.vehicle === vehicle.id &&
+        (peer.state.driving === true || peer.state.passenger === true)))
+      throw new Error('Wait until everyone leaves this vehicle.');
+  }
+
   removeOwnedVehicle(vehicle) {
     if (!vehicle || !this.vehicles.delete(vehicle.id)) return;
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: vehicle.id});
@@ -1086,6 +1107,10 @@ class LocalGame {
     if (isAircraft(car) && !hangar)
       throw new Error('Go to an airport hangar to spawn this aircraft.');
     const old = this.ownedVehicle(player, slot);
+    this.assertVehicleUnoccupied(old);
+    const remaining = [...this.vehicles.values()].filter(vehicle =>
+      vehicle.owner === player && vehicle !== old);
+    if (remaining.length >= 3) this.assertVehicleUnoccupied(remaining[0]);
     if (old) this.removeOwnedVehicle(old);
     const mine = [...this.vehicles.values()].filter(vehicle => vehicle.owner === player);
     if (mine.length >= 3) {
@@ -1227,6 +1252,67 @@ class LocalGame {
       this.updatePlayer(target.player);
       this.note(target.player, `${player.name} gave you $${amount}.`);
       message = `Gave $${amount} to ${target.player.name}.`;
+    } else if (action === 'supply.buy') {
+      const item = SUPPLIES.find(entry => entry.id === input.item);
+      if (!item) throw new Error('Choose a listed workshop supply.');
+      const dealer = nearestGroundDealer(pos);
+      if (!dealer || !pos || pos.peer.state.walking !== true ||
+          Math.hypot(pos.x - dealer.stand[0], pos.y - dealer.stand[1]) > 100)
+        throw new Error('Visit a ground dealership on foot to buy workshop supplies.');
+      if (player.supplies[item.id] >= item.capacity)
+        throw new Error(`You can carry only ${item.capacity} ${item.name.toLowerCase()}s.`);
+      if (player.cash < item.price) throw new Error(`You need $${item.price}.`);
+      player.cash -= item.price;
+      player.supplies[item.id]++;
+      message = `${item.name} bought at ${dealer.name} for $${item.price}.`;
+      this.updatePlayer(player);
+    } else if (action === 'supply.use') {
+      const item = SUPPLIES.find(entry => entry.id === input.item);
+      if (!item) throw new Error('Choose a listed workshop supply.');
+      if (!player.supplies[item.id]) throw new Error(`You do not have a ${item.name.toLowerCase()}.`);
+      const slot = Number(input.slot);
+      if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
+        throw new Error('Choose one of your vehicles.');
+      const vehicle = this.ownedVehicle(player, slot);
+      if (!vehicle || !pos || pos.peer.state.walking !== true ||
+          Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > 18)
+        throw new Error('Stand on foot within 18 m of your active vehicle.');
+      this.assertVehicleUnoccupied(vehicle);
+      const entry = player.garage[slot];
+      const car = CAR_CATALOG.find(value => value.model === player.cars[slot]);
+      if (item.id === 'repair_kit') {
+        if (!repairCost(entry)) throw new Error('This vehicle does not need repairs.');
+        entry.health = 1000;
+        entry.damage = '';
+      } else {
+        const previous = this.vehicleCode(player, slot);
+        do entry.paint = [crypto.randomInt(128), crypto.randomInt(128)];
+        while (this.vehicleCode(player, slot) === previous);
+      }
+      player.supplies[item.id]--;
+      this.removeOwnedVehicle(vehicle);
+      this.addOwnedVehicle(player, slot);
+      message = `${item.name} used on ${car.name}.`;
+      this.updatePlayer(player);
+    } else if (action === 'supply.give') {
+      const item = SUPPLIES.find(entry => entry.id === input.item);
+      if (!item) throw new Error('Choose a listed workshop supply.');
+      if (!player.supplies[item.id]) throw new Error(`You do not have a ${item.name.toLowerCase()}.`);
+      const target = [...this.peers].find(peer => peer.ready && peer.player !== player &&
+        peer.player.number === Number(input.number));
+      const at = target && this.position(target.player);
+      if (!pos || pos.peer.state.walking !== true || !at ||
+          at.peer.state.walking !== true ||
+          Math.hypot(pos.x - at.x, pos.y - at.y) > 8)
+        throw new Error('Both players must stand on foot within 8 m.');
+      if (target.player.supplies[item.id] >= item.capacity)
+        throw new Error(`${target.player.name} cannot carry another ${item.name.toLowerCase()}.`);
+      player.supplies[item.id]--;
+      target.player.supplies[item.id]++;
+      this.updatePlayer(player);
+      this.updatePlayer(target.player);
+      this.note(target.player, `${player.name} gave you a ${item.name.toLowerCase()}.`);
+      message = `Gave a ${item.name.toLowerCase()} to ${target.player.name}.`;
     } else if (action === 'gang.join') {
       const gang = GANGS.find(item => item.id === input.gang);
       if (!gang) throw new Error('Choose a listed crew.');
@@ -1859,6 +1945,7 @@ class LocalGame {
         throw new Error('Stand near your car to manage it.');
       if (pos.peer.state.walking !== true)
         throw new Error('Get out of the car first.');
+      this.assertVehicleUnoccupied(vehicle);
       const entry = player.garage[slot];
       const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
       if (action === 'car.parkhome') {
@@ -2198,6 +2285,9 @@ class LocalGame {
     }
     if (text === '/balance' || text === '/money')
       return peer.send({t: 'note', text: `Balance: $${peer.player.cash}. Jobs completed: ${peer.player.jobsDone}.`});
+    if (text === '/supplies')
+      return peer.send({t: 'note', text: `Workshop supplies: ${SUPPLIES.map(item =>
+        `${item.name} ${peer.player.supplies[item.id]}/${item.capacity}`).join(', ')}. Buy at a ground dealership; use F6 or /buykit, /usekit SLOT, /givekit PLAYER, /buypaint, /usepaint SLOT, /givepaint PLAYER.`});
     if (text === '/discord')
       return peer.send({t: 'note', text: 'ZGTA:SA community: https://discord.gg/Cg39cguVUa. Joining is optional.'});
     if (text === '/jobs')
@@ -2241,6 +2331,9 @@ class LocalGame {
         '/respond', '/extinguish', '/rescue', '/rob'].includes(text) ||
         text.startsWith('/buycar ') || text.startsWith('/spawncar ') || text.startsWith('/storecar ') ||
         text.startsWith('/repaircar ') || text.startsWith('/respraycar ') ||
+        ['/buykit', '/buypaint'].includes(text) ||
+        text.startsWith('/usekit ') || text.startsWith('/givekit ') ||
+        text.startsWith('/usepaint ') || text.startsWith('/givepaint ') ||
         text.startsWith('/buyhome ')) {
       try {
         const [command, value, extra] = text.slice(1).trim().split(/\s+/, 3);
@@ -2257,6 +2350,12 @@ class LocalGame {
           storecar: ['car.store', {slot: Number(value) - 1}],
           repaircar: ['car.repair', {slot: Number(value) - 1}],
           respraycar: ['car.respray', {slot: Number(value) - 1}],
+          buykit: ['supply.buy', {item: 'repair_kit'}],
+          usekit: ['supply.use', {item: 'repair_kit', slot: Number(value) - 1}],
+          givekit: ['supply.give', {item: 'repair_kit', number: Number(value)}],
+          buypaint: ['supply.buy', {item: 'paint_can'}],
+          usepaint: ['supply.use', {item: 'paint_can', slot: Number(value) - 1}],
+          givepaint: ['supply.give', {item: 'paint_can', number: Number(value)}],
           buyhome: ['home.buy', {home: value}]};
         const [action, input] = actions[command];
         this.action(peer.player, action, input);
