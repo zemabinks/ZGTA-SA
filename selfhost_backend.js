@@ -15,6 +15,9 @@ const TIME_TRIAL_MS = 180000;
 const PATROL_MS = 240000;
 const PIZZA_MS = 360000;
 const TRUCKER_MS = 420000;
+const PILOT_MS = 600000;
+const CONVOY_BONUS = 100;
+const CONVOY_RADIUS = 80;
 const CAR_THEFT_MS = 300000;
 const MULTIPLAYER_RACE_MS = 300000;
 const WANTED_DECAY_MS = 120000;
@@ -49,6 +52,7 @@ const JOBS = Object.freeze([
   {id: 'patrol', name: 'Police patrol', pay: 400, distance: 75},
   {id: 'pizza', name: 'Pizza delivery', pay: 400, distance: 75},
   {id: 'trucker', name: 'Freight delivery', pay: 500, distance: 90},
+  {id: 'pilot', name: 'Pilot flight', pay: 700, distance: 120},
   {id: 'carthief', name: 'Getaway car', pay: 550, distance: 65},
 ]);
 const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json');
@@ -64,11 +68,12 @@ const starterModels = new Set(STARTER_CARS.map(car => car.model));
 const CAR_CATALOG = Object.freeze([...STARTER_CARS, ...(clientCatalog.vehicles || [])
   .filter(item => Number.isInteger(item.model) && Number.isSafeInteger(item.price) && item.price > 0 &&
     Array.isArray(item.dealers) && item.dealers.length > 0 &&
-    ['car', 'bike', 'bicycle', 'quad'].includes(item.type) && !starterModels.has(item.model))
+    ['car', 'bike', 'bicycle', 'quad', 'plane', 'helicopter'].includes(item.type) &&
+    !starterModels.has(item.model))
   .map(item => ({model: item.model, name: String(item.name).slice(0, 80), price: item.price,
     car: `${item.model}.${Number.isInteger(item.colors?.[0]) ? item.colors[0] : 1}.` +
       `${Number.isInteger(item.colors?.[1]) ? item.colors[1] : 1}.0.`,
-    type: item.type, source: 'archived'}))]);
+    type: item.type, dealers: item.dealers, source: 'archived'}))]);
 const HOME_CATALOG = Object.freeze([
   {id: 'starter', name: 'Starter apartment', price: 1500, source: 'starter'},
   {id: 'loft', name: 'City loft', price: 5000, source: 'starter'},
@@ -79,6 +84,24 @@ const HOME_CATALOG = Object.freeze([
       city: String(item.city || '').slice(0, 8), tier: String(item.tier || '').slice(0, 20),
       out: item.out, source: 'archived'})),
 ]);
+const AIRPORTS = Object.freeze((clientCatalog.dealers || [])
+  .filter(item => typeof item.key === 'string' && typeof item.air === 'string' &&
+    Array.isArray(item.stand) && item.stand.length === 3 && item.stand.every(Number.isFinite))
+  .map(item => ({id: item.air, dealer: item.key,
+    name: String(item.name).slice(0, 80), stand: item.stand})));
+function airportAt(id) { return AIRPORTS.find(airport => airport.id === id); }
+function isAircraft(car) { return car?.type === 'plane' || car?.type === 'helicopter'; }
+function nearestHangar(pos, car) {
+  if (!pos) return null;
+  return AIRPORTS.filter(airport => !car || car.dealers?.includes(airport.dealer))
+    .sort((a, b) => Math.hypot(pos.x - a.stand[0], pos.y - a.stand[1]) -
+      Math.hypot(pos.x - b.stand[0], pos.y - b.stand[1]))[0] || null;
+}
+function hangarFor(pos, car) {
+  const hangar = nearestHangar(pos, car);
+  return hangar && Math.hypot(pos.x - hangar.stand[0], pos.y - hangar.stand[1]) <= 100 ?
+    hangar : null;
+}
 const STATE_FILE = path.join(__dirname, 'local-only', 'selfhost', 'players.json');
 const DISCORD_CONFIG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'discord-oauth.json');
 let discordConfig = {};
@@ -163,6 +186,16 @@ function savedJob(value) {
   if (value.id === 'patrol' && Date.now() - value.started > PATROL_MS) return null;
   if (value.id === 'pizza' && Date.now() - value.started > PIZZA_MS) return null;
   if (value.id === 'trucker' && Date.now() - value.started > TRUCKER_MS) return null;
+  if (value.id === 'pilot' && Date.now() - value.started > PILOT_MS) return null;
+  if (value.id === 'pilot' && value.mode === 'flight') {
+    if (!airportAt(value.from) || !airportAt(value.to) || value.from === value.to ||
+        !validMissionId(value.vehicleId) ||
+        !['takeoff', 'landing'].includes(value.stage)) return null;
+    return {id: value.id, mode: 'flight', from: value.from, to: value.to,
+      vehicleId: value.vehicleId, stage: value.stage, landingSince: null,
+      started: value.started};
+  }
+  if (value.id === 'pilot') return null;
   if (['courier', 'taxi', 'medic', 'carthief', 'trucker'].includes(value.id) && value.mode === 'route') {
     if ((value.id === 'courier' && (!Array.isArray(value.pickup) || value.pickup.length !== 2 ||
         !value.pickup.every(Number.isFinite))) ||
@@ -179,7 +212,8 @@ function savedJob(value) {
       ...(value.id === 'courier' ? {pickup: value.pickup} : {pickupHome: value.pickupHome}),
       ...(value.id === 'medic' ? {station: value.station, vehicleId: value.vehicleId} : {drop: value.drop}),
       ...(value.id === 'carthief' ? {vehicleId: value.vehicleId} : {}),
-      ...(value.id === 'trucker' ? {vehicleId: value.vehicleId, station: value.station} : {}),
+      ...(value.id === 'trucker' ? {vehicleId: value.vehicleId, station: value.station,
+        bonusAwarded: value.bonusAwarded === true} : {}),
       stage: value.stage, started: value.started};
   }
   if (value.id === 'mechanic' && value.mode === 'service') {
@@ -565,6 +599,7 @@ class LocalGame {
 
   gameplayState(player) {
     const pos = this.position(player);
+    const nearHangar = nearestHangar(pos);
     const active = player.job;
     let objective = null;
     if (active?.mode === 'route') {
@@ -582,6 +617,20 @@ class LocalGame {
         ...(['carthief', 'trucker'].includes(active.id) ? {secondsLeft:
           Math.max(0, Math.ceil(((active.id === 'trucker' ? TRUCKER_MS : CAR_THEFT_MS) -
             (Date.now() - active.started)) / 1000))} : {})};
+    } else if (active?.mode === 'flight') {
+      const from = airportAt(active.from);
+      const to = airportAt(active.to);
+      if (from && to) objective = {mode: 'flight', stage: active.stage,
+        from: from.name,
+        target: {x: rounded(to.stand[0]), y: rounded(to.stand[1]), name: to.name},
+        remaining: pos ? Math.ceil(Math.hypot(pos.x - to.stand[0], pos.y - to.stand[1])) : null,
+        altitude: pos ? Math.max(0, Math.round(pos.z - from.stand[2])) : null,
+        takeoffAltitude: 35, radius: 70,
+        landingReady: !!active.landingSince && Date.now() - active.landingSince >= 2000,
+        landingSeconds: active.landingSince ? Math.max(0,
+          Math.ceil((2000 - (Date.now() - active.landingSince)) / 1000)) : 2,
+        secondsLeft: Math.max(0, Math.ceil((PILOT_MS -
+          (Date.now() - active.started)) / 1000))};
     } else if (active?.mode === 'service') {
       const home = homeAt(active.targetHome);
       const vehicle = this.vehicles.get(active.vehicleId);
@@ -667,9 +716,17 @@ class LocalGame {
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
+      hangar: nearHangar ? {
+        id: nearHangar.id, name: nearHangar.name,
+        distance: Math.ceil(Math.hypot(pos.x - nearHangar.stand[0],
+          pos.y - nearHangar.stand[1])),
+        within: !!hangarFor(pos), x: nearHangar.stand[0],
+        y: nearHangar.stand[1]} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
         ...(objective || {goal: active.goal, progress: Math.floor(active.progress),
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
+        ...(active.id === 'trucker' ? {convoyBonusAwarded: active.bonusAwarded === true,
+          convoyBonus: CONVOY_BONUS} : {}),
         started: active.started} : null,
       cars: player.cars.map(model => CAR_CATALOG.find(car => car.model === model)).filter(Boolean),
       garage: player.garage.map((entry, slot) => {
@@ -686,7 +743,10 @@ class LocalGame {
       race: this.raceView(player, pos),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
       catalog: {jobs: JOBS,
-        cars: CAR_CATALOG.map(({model, name, price, type, source}) => ({model, name, price, type, source})),
+        cars: CAR_CATALOG.map(car => ({model: car.model, name: car.name,
+          price: car.price, type: car.type, source: car.source,
+          ...(isAircraft(car) ? {airports: AIRPORTS.filter(airport =>
+            car.dealers?.includes(airport.dealer)).map(airport => airport.id)} : {})})),
         homes: HOME_CATALOG.map(({id, name, price, city, tier, source}) =>
           ({id, name, price, city, tier, source}))}};
   }
@@ -732,16 +792,17 @@ class LocalGame {
     const mechanic = job.id === 'mechanic';
     const thief = job.id === 'carthief';
     const trucker = job.id === 'trucker';
+    const pilot = job.id === 'pilot';
     const patrol = job.id === 'patrol';
     const pizza = job.id === 'pizza';
     const point = mechanic ? homeAt(job.targetHome)?.out :
-      thief ? homeAt(job.pickupHome)?.out : job.station;
+      thief ? homeAt(job.pickupHome)?.out : pilot ? airportAt(job.from)?.stand : job.station;
     if (!point) return;
     const id = job.vehicleId;
     const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
       mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' :
         patrol ? '596.0.1.0.' : pizza ? '448.1.1.0.' :
-          trucker ? '414.25.1.0.' : '416.1.1.0.',
+          trucker ? '414.25.1.0.' : pilot ? '593.1.1.0.' : '416.1.1.0.',
       rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
       0, 0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
@@ -863,6 +924,9 @@ class LocalGame {
     if (!pos) throw new Error('Enter the game before spawning a car.');
     const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
     if (!car) throw new Error('That car is not in your garage.');
+    const hangar = isAircraft(car) ? hangarFor(pos, car) : null;
+    if (isAircraft(car) && !hangar)
+      throw new Error('Go to an airport hangar to spawn this aircraft.');
     const old = this.ownedVehicle(player, slot);
     if (old) this.removeOwnedVehicle(old);
     const mine = [...this.vehicles.values()].filter(vehicle => vehicle.owner === player);
@@ -873,12 +937,14 @@ class LocalGame {
     }
     // Vehicle origins sit above their tyres. Ground-height origins can embed
     // the body in the map and make the physics engine launch it on entry.
-    player.garage[slot].position = [rounded(pos.x + 4), rounded(pos.y + 3),
-      rounded(pos.z + 1.1), 0];
+    player.garage[slot].position = hangar ?
+      [rounded(hangar.stand[0] + 4), rounded(hangar.stand[1] + 3),
+        rounded(hangar.stand[2] + 1.1), 0] :
+      [rounded(pos.x + 4), rounded(pos.y + 3), rounded(pos.z + 1.1), 0];
     player.garage[slot].active = true;
     this.addOwnedVehicle(player, slot);
     this.save();
-    return `${car.name} ${old ? 'recalled' : 'spawned'} nearby.`;
+    return `${car.name} ${old ? 'recalled' : 'spawned'} at ${hangar?.name || 'your location'}.`;
   }
 
   action(player, action, input) {
@@ -1212,9 +1278,23 @@ class LocalGame {
         if (!pickup || !drop) throw new Error('Freight stops are unavailable.');
         player.job = {id: job.id, mode: 'route', pickupHome: pickup.id,
           drop: drop.id, station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)],
-          vehicleId: missionId(), stage: 'pickup', started: Date.now()};
+          vehicleId: missionId(), stage: 'pickup', bonusAwarded: false,
+          started: Date.now()};
         this.addMissionVehicle(player);
         message = `Freight delivery started. Take the nearby Mule to ${pickup.name} for cargo, then deliver it to ${drop.name} within seven minutes.`;
+      } else if (job.id === 'pilot') {
+        if (AIRPORTS.length < 2) throw new Error('Airport locations are unavailable.');
+        const from = [...AIRPORTS].sort((a, b) =>
+          Math.hypot(pos.x - a.stand[0], pos.y - a.stand[1]) -
+          Math.hypot(pos.x - b.stand[0], pos.y - b.stand[1]))[0];
+        const to = AIRPORTS[(AIRPORTS.indexOf(from) + 1) % AIRPORTS.length];
+        player.job = {id: job.id, mode: 'flight', from: from.id, to: to.id,
+          vehicleId: missionId(), stage: 'takeoff', landingSince: null,
+          started: Date.now()};
+        this.addMissionVehicle(player);
+        pos.peer.send({t: 'tp', x: from.stand[0], y: from.stand[1],
+          z: from.stand[2] + 1, h: 0, g: 1});
+        message = `Pilot flight started at ${from.name}. Board the marked Dodo, climb 35 m above the airport, then land at ${to.name} within ten minutes.`;
       } else if (job.id === 'carthief') {
         if (player.passive || player.policeDuty)
           throw new Error('Turn off passive mode and leave police duty before starting a getaway.');
@@ -1347,6 +1427,21 @@ class LocalGame {
             (pos.peer.state.vehicle !== player.job.vehicleId ||
               pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
           throw new Error('Deliver cargo in the marked Mule.');
+      } else if (player.job.mode === 'flight') {
+        const to = airportAt(player.job.to);
+        const plane = this.vehicles.get(player.job.vehicleId);
+        if (player.job.stage !== 'landing')
+          throw new Error('Take off in the marked plane before landing.');
+        if (!to || !plane || pos.peer.state.driving !== true ||
+            pos.peer.state.vehicle !== player.job.vehicleId ||
+            pos.peer.state.car !== plane.row[2])
+          throw new Error('Land in the marked Dodo.');
+        if (Math.hypot(pos.x - to.stand[0], pos.y - to.stand[1]) > 70 ||
+            Math.abs(pos.z - to.stand[2]) > 16 ||
+            Math.abs(finite(pos.peer.state.speed)) > 1.5)
+          throw new Error('Stop the plane on the destination apron.');
+        if (!player.job.landingSince || Date.now() - player.job.landingSince < 2000)
+          throw new Error('Hold the plane still for two seconds.');
       } else if (player.job.mode === 'service') {
         const vehicle = this.vehicles.get(player.job.vehicleId);
         if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > MISSION_RADIUS)
@@ -1380,12 +1475,42 @@ class LocalGame {
         throw new Error('The getaway expired. Cancel it and start again.');
       if (job.id === 'trucker' && Date.now() - player.job.started > TRUCKER_MS)
         throw new Error('The freight deadline passed. Cancel and start again.');
-      player.cash = money(player.cash + job.pay);
-      player.xp = money(player.xp + Math.round(job.pay / 5));
+      if (job.id === 'pilot' && Date.now() - player.job.started > PILOT_MS)
+        throw new Error('The flight deadline passed. Cancel and start again.');
+      let convoyBonus = 0;
+      if (job.id === 'trucker' && !player.job.bonusAwarded) {
+        const party = this.partyOf(player);
+        const partners = party ? [...party.members].filter(other => {
+          if (other === player || other.job?.id !== 'trucker' ||
+              other.job.stage !== 'delivery' || other.job.bonusAwarded ||
+              other.job.drop !== player.job.drop ||
+              Date.now() - other.job.started > TRUCKER_MS) return false;
+          const at = this.position(other);
+          const vehicle = this.vehicles.get(other.job.vehicleId);
+          return at && vehicle && at.peer.state.driving === true &&
+            at.peer.state.vehicle === other.job.vehicleId &&
+            at.peer.state.car === vehicle.row[2] &&
+            Math.hypot(at.x - pos.x, at.y - pos.y) <= CONVOY_RADIUS;
+        }) : [];
+        if (partners.length) {
+          convoyBonus = CONVOY_BONUS;
+          player.job.bonusAwarded = true;
+          for (const other of partners) {
+            other.cash = money(other.cash + CONVOY_BONUS);
+            other.xp = money(other.xp + CONVOY_BONUS / 5);
+            other.job.bonusAwarded = true;
+            this.updatePlayer(other);
+            this.note(other, `Convoy bonus: +$${CONVOY_BONUS} for staying with the freight group.`);
+          }
+        }
+      }
+      player.cash = money(player.cash + job.pay + convoyBonus);
+      player.xp = money(player.xp + Math.round(job.pay / 5) + convoyBonus / 5);
       player.jobsDone++;
       this.removeMissionVehicle(player);
       player.job = null;
-      message = `${job.name} complete: +$${job.pay}. Balance: $${player.cash}.`;
+      message = `${job.name} complete: +$${job.pay}${convoyBonus ?
+        ` and $${convoyBonus} convoy bonus` : ''}. Balance: $${player.cash}.`;
       this.updatePlayer(player);
     } else if (action === 'job.cancel') {
       if (!player.job) throw new Error('No active job.');
@@ -1396,6 +1521,8 @@ class LocalGame {
     } else if (action === 'car.buy') {
       const car = CAR_CATALOG.find(item => item.model === Number(input.model));
       if (!car) throw new Error('Unknown car.');
+      if (isAircraft(car) && !hangarFor(pos, car))
+        throw new Error('Go to an airport hangar that sells this aircraft to buy it.');
       if (player.cars.length >= 12) throw new Error('Your garage is full.');
       if (player.cash < car.price) throw new Error(`You need $${car.price}.`);
       player.cash -= car.price;
@@ -1623,6 +1750,27 @@ class LocalGame {
       }
       peer.state = message;
       peer.lastSeen = Date.now();
+      const flight = peer.player.job;
+      if (flight?.mode === 'flight') {
+        const plane = this.vehicles.get(flight.vehicleId);
+        const aboard = message.driving === true && message.vehicle === flight.vehicleId &&
+          message.car === plane?.row[2];
+        const from = airportAt(flight.from), to = airportAt(flight.to);
+        if (aboard && from && to && Number.isFinite(message.z) &&
+            flight.stage === 'takeoff' && message.z >= from.stand[2] + 35) {
+          flight.stage = 'landing';
+          this.save();
+          this.note(peer.player, `Airborne. Land the marked Dodo at ${to.name}.`);
+        }
+        if (flight.stage === 'landing') {
+          const stopped = aboard && to && [message.x, message.y, message.z].every(Number.isFinite) &&
+            Math.hypot(message.x - to.stand[0], message.y - to.stand[1]) <= 70 &&
+            Math.abs(message.z - to.stand[2]) <= 16 &&
+            Math.abs(finite(message.speed)) <= 1.5;
+          if (stopped) flight.landingSince ||= Date.now();
+          else flight.landingSince = null;
+        }
+      }
       const reportedHealth = message.walking === true ? message.health :
         message.driving === true ? message.life : null;
       if (Number.isFinite(reportedHealth) && reportedHealth >= 0 && reportedHealth <= 100) {
