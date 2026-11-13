@@ -111,8 +111,23 @@ const AIRPORTS = Object.freeze((clientCatalog.dealers || [])
     Array.isArray(item.stand) && item.stand.length === 3 && item.stand.every(Number.isFinite))
   .map(item => ({id: item.air, dealer: item.key,
     name: String(item.name).slice(0, 80), stand: item.stand})));
+const GROUND_DEALERS = Object.freeze((clientCatalog.dealers || [])
+  .filter(item => typeof item.key === 'string' && !item.air &&
+    Array.isArray(item.stand) && item.stand.length === 3 && item.stand.every(Number.isFinite))
+  .map(item => ({id: item.key, name: String(item.name).slice(0, 80), stand: item.stand})));
 function airportAt(id) { return AIRPORTS.find(airport => airport.id === id); }
 function isAircraft(car) { return car?.type === 'plane' || car?.type === 'helicopter'; }
+function nearestGroundDealer(pos) {
+  if (!pos) return null;
+  return GROUND_DEALERS.slice().sort((a, b) =>
+    Math.hypot(pos.x - a.stand[0], pos.y - a.stand[1]) -
+    Math.hypot(pos.x - b.stand[0], pos.y - b.stand[1]))[0] || null;
+}
+function groundDealerFor(pos, car) {
+  if (!pos || !car?.dealers) return null;
+  return GROUND_DEALERS.find(dealer => car.dealers.includes(dealer.id) &&
+    Math.hypot(pos.x - dealer.stand[0], pos.y - dealer.stand[1]) <= 100) || null;
+}
 function nearestHangar(pos, car) {
   if (!pos) return null;
   return AIRPORTS.filter(airport => !car || car.dealers?.includes(airport.dealer))
@@ -200,7 +215,8 @@ function savedGarage(value, cars) {
       item.paint : null;
     return {health: Math.max(0, Math.min(1000, Math.round(finite(item?.health, 1000)))),
       damage: typeof item?.damage === 'string' ? item.damage.slice(0, 512) : '',
-      active: item?.active === true && !!position, position, paint};
+      active: item?.active === true && !!position, position, paint,
+      parkedHome: homeAt(item?.parkedHome) ? item.parkedHome : null};
   });
 }
 function repairCost(entry) {
@@ -791,6 +807,10 @@ class LocalGame {
         distance: pos ? Math.ceil(Math.hypot(pos.x - home.out[0], pos.y - home.out[1])) : null};
     }).filter(Boolean);
     const tracked = discoveries.find(item => item.id === player.trackedDiscovery && !item.found) || null;
+    const nearDealer = nearestGroundDealer(pos);
+    const nearHome = pos ? player.homes.map(homeAt).filter(Boolean)
+      .sort((a, b) => Math.hypot(pos.x - a.out[0], pos.y - a.out[1]) -
+        Math.hypot(pos.x - b.out[0], pos.y - b.out[1]))[0] : null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
       pilot: {flights: player.pilotFlights || 0, streak: player.pilotStreak || 0,
         level: pilotLevel(player),
@@ -822,6 +842,17 @@ class LocalGame {
           pos.y - nearHangar.stand[1])),
         within: !!hangarFor(pos), x: nearHangar.stand[0],
         y: nearHangar.stand[1]} : null,
+      dealer: nearDealer ? {id: nearDealer.id, name: nearDealer.name,
+        distance: Math.ceil(Math.hypot(pos.x - nearDealer.stand[0],
+          pos.y - nearDealer.stand[1])),
+        within: Math.hypot(pos.x - nearDealer.stand[0],
+          pos.y - nearDealer.stand[1]) <= 100,
+        x: nearDealer.stand[0], y: nearDealer.stand[1]} : null,
+      homeParking: nearHome ? {id: nearHome.id, name: nearHome.name,
+        distance: Math.ceil(Math.hypot(pos.x - nearHome.out[0], pos.y - nearHome.out[1])),
+        within: Math.hypot(pos.x - nearHome.out[0], pos.y - nearHome.out[1]) <= 25,
+        occupied: player.garage.filter(entry => entry.parkedHome === nearHome.id).length,
+        capacity: 2} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
         ...(objective || {goal: active.goal, progress: Math.floor(active.progress),
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
@@ -835,6 +866,8 @@ class LocalGame {
         const x = vehicle ? location[3] : location?.[0];
         const y = vehicle ? location[4] : location?.[1];
         return {slot, active: !!vehicle, health: entry.health, paint: entry.paint,
+          parkedHome: entry.parkedHome,
+          parkedHomeName: homeAt(entry.parkedHome)?.name || null,
           repairCost: repairCost(entry), resprayCost: RESPRAY_COST,
           distance: pos && x !== undefined && y !== undefined ?
             Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null};
@@ -845,6 +878,8 @@ class LocalGame {
       catalog: {jobs: JOBS,
         cars: CAR_CATALOG.map(car => ({model: car.model, name: car.name,
           price: car.price, type: car.type, source: car.source,
+          ...(car.source === 'archived' && !isAircraft(car) ?
+            {dealers: car.dealers.filter(key => GROUND_DEALERS.some(dealer => dealer.id === key))} : {}),
           ...(isAircraft(car) ? {airports: AIRPORTS.filter(airport =>
             car.dealers?.includes(airport.dealer)).map(airport => airport.id)} : {})})),
         homes: HOME_CATALOG.map(({id, name, price, city, tier, source}) =>
@@ -1038,6 +1073,11 @@ class LocalGame {
     if (!pos) throw new Error('Enter the game before spawning a car.');
     const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
     if (!car) throw new Error('That car is not in your garage.');
+    const entry = player.garage[slot];
+    const parkedHome = homeAt(entry.parkedHome);
+    if (parkedHome && (!player.homes.includes(parkedHome.id) ||
+        Math.hypot(pos.x - parkedHome.out[0], pos.y - parkedHome.out[1]) > 25))
+      throw new Error(`Go to ${parkedHome.name} to retrieve this parked vehicle.`);
     const hangar = isAircraft(car) ? hangarFor(pos, car) : null;
     if (isAircraft(car) && !hangar)
       throw new Error('Go to an airport hangar to spawn this aircraft.');
@@ -1051,14 +1091,15 @@ class LocalGame {
     }
     // Vehicle origins sit above their tyres. Ground-height origins can embed
     // the body in the map and make the physics engine launch it on entry.
-    player.garage[slot].position = hangar ?
+    entry.position = hangar ?
       [rounded(hangar.stand[0] + 4), rounded(hangar.stand[1] + 3),
         rounded(hangar.stand[2] + 1.1), 0] :
       [rounded(pos.x + 4), rounded(pos.y + 3), rounded(pos.z + 1.1), 0];
-    player.garage[slot].active = true;
+    entry.active = true;
+    entry.parkedHome = null;
     this.addOwnedVehicle(player, slot);
     this.save();
-    return `${car.name} ${old ? 'recalled' : 'spawned'} at ${hangar?.name || 'your location'}.`;
+    return `${car.name} ${parkedHome ? 'retrieved' : old ? 'recalled' : 'spawned'} at ${hangar?.name || parkedHome?.name || 'your location'}.`;
   }
 
   action(player, action, input) {
@@ -1788,11 +1829,14 @@ class LocalGame {
       if (!car) throw new Error('Unknown car.');
       if (isAircraft(car) && !hangarFor(pos, car))
         throw new Error('Go to an airport hangar that sells this aircraft to buy it.');
+      if (car.source === 'archived' && !isAircraft(car) && !groundDealerFor(pos, car))
+        throw new Error('Go to a dealership that sells this vehicle to buy it.');
       if (player.cars.length >= 12) throw new Error('Your garage is full.');
       if (player.cash < car.price) throw new Error(`You need $${car.price}.`);
       player.cash -= car.price;
       player.cars.push(car.model);
-      player.garage.push({health: 1000, damage: '', active: false, position: null, paint: null});
+      player.garage.push({health: 1000, damage: '', active: false, position: null,
+        paint: null, parkedHome: null});
       message = `${car.name} bought for $${car.price}. Open My Vehicles or spawn it here.`;
       this.updatePlayer(player);
     } else if (action === 'car.spawn') {
@@ -1800,7 +1844,8 @@ class LocalGame {
       if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
         throw new Error('Choose a car in your garage.');
       message = this.spawnOwnedCar(player, slot);
-    } else if (action === 'car.store' || action === 'car.repair' || action === 'car.respray') {
+    } else if (action === 'car.store' || action === 'car.repair' ||
+        action === 'car.respray' || action === 'car.parkhome') {
       const slot = Number(input.slot);
       if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
         throw new Error('Choose a car in your garage.');
@@ -1812,8 +1857,24 @@ class LocalGame {
         throw new Error('Get out of the car first.');
       const entry = player.garage[slot];
       const car = CAR_CATALOG.find(item => item.model === player.cars[slot]);
-      if (action === 'car.store') {
+      if (action === 'car.parkhome') {
+        if (isAircraft(car)) throw new Error('Aircraft must be stored at an airport hangar.');
+        const home = player.homes.map(homeAt).filter(Boolean).find(item =>
+          Math.hypot(pos.x - item.out[0], pos.y - item.out[1]) <= 25 &&
+          Math.hypot(vehicle.row[3] - item.out[0], vehicle.row[4] - item.out[1]) <= 25);
+        if (!home) throw new Error('Bring this car to the exterior of a home you own.');
+        if (player.garage.filter(item => item.parkedHome === home.id).length >= 2)
+          throw new Error('This property already has two parked vehicles.');
         entry.active = false;
+        entry.parkedHome = home.id;
+        entry.position = [rounded(vehicle.row[3]), rounded(vehicle.row[4]),
+          rounded(vehicle.row[5]), rounded(vehicle.row[6])];
+        this.removeOwnedVehicle(vehicle);
+        message = `${car.name} parked at ${home.name}. Retrieve it from the property exterior.`;
+        this.save();
+      } else if (action === 'car.store') {
+        entry.active = false;
+        entry.parkedHome = null;
         this.removeOwnedVehicle(vehicle);
         message = `${car.name} stored. Its condition was saved.`;
         this.save();
