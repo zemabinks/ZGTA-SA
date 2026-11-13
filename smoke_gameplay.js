@@ -408,6 +408,14 @@ async function main() {
     await ws.wait(message => message.t === 'home' && Array.isArray(message.own));
     ws.send({t: 'me', walking: true, skin: 7, x: 1480, y: -1738, z: 13});
     assert.equal((await api('/api/local/state')).body.connected, true);
+    const wrongDealer = await api('/api/local/action', 'POST', {action: 'car.buy', model: 401});
+    assert.equal(wrongDealer.status, 400, 'archived cars require their catalog dealership');
+    assert.match(wrongDealer.body.error, /dealership/);
+    ws.send({t: 'me', walking: true, skin: 7, x: 2130, y: -1146, z: 23.63});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal((await api('/api/local/state')).body.dealer.id, 'coutt');
+    const wrongLot = await api('/api/local/action', 'POST', {action: 'car.buy', model: 402});
+    assert.equal(wrongLot.status, 400, 'dealer cannot sell a vehicle from another catalog');
     const originalCar = await api('/api/local/action', 'POST', {action: 'car.buy', model: 401});
     assert.equal(originalCar.status, 200, JSON.stringify(originalCar.body));
     assert.equal(originalCar.body.state.cash, 80000);
@@ -423,6 +431,21 @@ async function main() {
     ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851,
       say: '/home enter willowfield'});
     await ws.wait(message => message.t === 'note' && message.text.includes('interiors'));
+    assert.equal((await api('/api/local/state')).body.homeParking.id, 'willowfield');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0})).status, 200);
+    const parkedAtHome = await api('/api/local/action', 'POST', {action: 'car.parkhome', slot: 0});
+    assert.equal(parkedAtHome.status, 200, JSON.stringify(parkedAtHome.body));
+    assert.equal(parkedAtHome.body.state.garage[0].parkedHome, 'willowfield');
+    assert.equal(parkedAtHome.body.state.garage[0].active, false);
+    ws.send({t: 'me', walking: true, skin: 7, x: 1480, y: -1738, z: 13});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const remoteRetrieve = await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0});
+    assert.equal(remoteRetrieve.status, 400, 'property parking must prevent remote retrieval');
+    ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851});
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const retrieved = await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0});
+    assert.equal(retrieved.status, 200, JSON.stringify(retrieved.body));
+    assert.equal(retrieved.body.state.garage[0].parkedHome, null);
     x = 2483.4; y = -1999.18;
     const otherApi = async (url, method = 'GET', body) => {
       const response = await fetch(root + url, {method, headers: {Cookie: otherCookie,
@@ -569,7 +592,7 @@ async function main() {
       'unfinished getaway must survive a server restart');
     assert((await api('/api/world/cars')).body.cars.some(car => car[0] === savedGetaway.v[0]),
       'unfinished getaway car must return after a server restart');
-    console.log('PASS: guest accounts, routed jobs, garage condition and custom paint, native painted-car spawn, multiplayer race, home exterior visit');
+    console.log('PASS: guest accounts, routed jobs, catalog dealerships, property parking, garage condition and custom paint, native painted-car spawn, multiplayer race, home exterior visit');
   } finally {
     otherWs?.close();
     ws?.close();
