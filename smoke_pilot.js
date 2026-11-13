@@ -27,6 +27,10 @@ try {
     state: {walking: true, x: 1480, y: -1738, z: 13},
     send: packet => otherSent.push(packet)};
   game.peers.add(peer); game.peers.add(otherPeer);
+  assert.throws(() => game.action(player, 'job.start', {job: 'pilot', model: 511}),
+    /level 4/);
+  assert.equal(game.gameplayState(player).pilot.level, 1);
+  assert.equal(game.gameplayState(player).pilot.aircraft.find(item => item.model === 511).unlocked, false);
 
   const begun = game.action(player, 'job.start', {job: 'pilot'});
   assert.equal(begun.state.job.mode, 'flight');
@@ -125,8 +129,36 @@ try {
   assert.equal(game.players.get(id).pilotStreak, 0);
   assert.equal(game.players.get(id).pilotFlights, 6);
   assert.equal(game.vehicles.has(expiredId), false);
+  const unlocked = game.players.get(id);
+  unlocked.pilotFlights = 9;
+  const airportPeer = {player: unlocked, ready: true, lastSeen: Date.now(),
+    state: {walking: true, x: 1480, y: -1738, z: 13}, send() {}};
+  game.peers.add(airportPeer);
+  assert.equal(game.gameplayState(unlocked).pilot.level, 4);
+  assert.equal(game.gameplayState(unlocked).pilot.aircraft.find(item => item.model === 511).unlocked, true);
+  const beagle = game.action(unlocked, 'job.start', {job: 'pilot', model: 511});
+  assert.equal(beagle.state.job.plane, 'Beagle');
+  assert.equal(beagle.state.job.radius, 75);
+  const beagleId = unlocked.job.vehicleId;
+  const beagleCode = game.vehicles.get(beagleId).row[2];
+  assert.equal(beagleCode.split('.')[0], '511');
+  unlocked.job.started = Date.now() - 3100;
+  const beagleFrom = airport(unlocked.job.from).stand;
+  const beagleTo = airport(unlocked.job.to).stand;
+  game.onMessage(airportPeer, {t: 'me', driving: true, car: beagleCode,
+    vehicle: beagleId, x: beagleFrom[0], y: beagleFrom[1],
+    z: beagleFrom[2] + 40, speed: 20, health: 1000});
+  game.onMessage(airportPeer, {t: 'me', driving: true, car: beagleCode,
+    vehicle: beagleId, x: beagleTo[0] + 73, y: beagleTo[1],
+    z: beagleTo[2] + 2, speed: 0, health: 1000});
+  unlocked.job.landingSince -= 2100;
+  const beagleFinished = game.action(unlocked, 'job.complete', {});
+  assert.match(beagleFinished.message, /Beagle aircraft/);
+  assert.equal(unlocked.cash, 3250);
+  assert.equal(unlocked.xp, 650);
+  assert.equal(unlocked.pilotFlights, 10);
   clearInterval(game.tick);
-  console.log('PASS: pilot aircraft, landing hold, bonuses, streak, restart, payout and expiry');
+  console.log('PASS: pilot unlocks, aircraft, landing hold, bonuses, streak, restart and expiry');
 } finally {
   fs.rmSync(temporary, {recursive: true, force: true});
 }
