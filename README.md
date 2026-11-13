@@ -141,8 +141,9 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-nine independent local activities: courier, taxi, mechanic, medic, a timed
-street trial, a police patrol, pizza delivery, freight delivery, and a getaway car mission.
+ten independent local activities: courier, taxi, mechanic, medic, a timed
+street trial, a police patrol, pizza delivery, freight delivery, pilot flight,
+and a getaway car mission.
 Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
@@ -162,7 +163,17 @@ player. Drive to a cargo pickup, then deliver to a second property entrance
 within seven minutes for $500 and 100 XP. The cargo stage and truck return
 after a server restart; an expired route is discarded. The archived client's
 help describes trucker work and a Mule, while this server uses its own route
-and payment rules. In the getaway mission, take a spawned car at a
+and payment rules. Two members of the same private group can earn a one-time
+$100 and 20 XP convoy bonus each when their marked Mules are within 80 meters
+of the same delivery destination as one member finishes. The bonus survives a
+restart and cannot be claimed twice for one route. Pilot flight loans a Dodo
+at the nearest of four archived airport hangars. Climb at least 35 meters
+above the departure hangar, then land and hold still for two seconds at the
+next hangar within ten minutes for $700 and 140 XP. The server checks the
+marked aircraft, altitude, destination, speed, and timer. The stage survives
+a restart, but the two-second landing hold starts over. This route and reward
+are local rules; the archived client help only confirms the four-airport
+flight concept. In the getaway mission, take a spawned car at a
 property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
@@ -171,8 +182,10 @@ distance, and compass direction while the panel is closed. F6 shows a route
 map with the player's current position and the active mission, race,
 territory, or tracked exploration target. Its radar image is served only
 from the Mac's ignored local asset archive. These are independent local
-substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars and
-the ground vehicles listed in the archived client catalog. An owned vehicle
+substitutes, not the publisher's job missions. The panel sells three inexpensive starter cars,
+the ground vehicles, and fourteen priced aircraft listed in the archived client catalog.
+Aircraft can be bought and spawned within 100 meters of a hangar that lists
+that model; the panel shows the nearest hangar. An owned vehicle
 can be spawned nearby and driven. Its last reported position, health, and
 damage are saved per garage slot. Active cars return after a server restart;
 you can recall a car beside you, or stand within 18 meters to store or repair
@@ -258,8 +271,8 @@ volunteer arrests, local territory capture, nearby cash transfers, private
 groups, an exploration trail, and a local leaderboard, plus
 property ownership and exterior visits. The extracted catalog contains 212
 vehicle definitions, of which 110 have listed prices. Purchases use this
-independent server's cash balance; they do not reproduce the publisher's
-dealer locations, sale rules, or economy. The original service's job missions, economy rules,
+independent server's cash balance and the archived hangar list for aircraft;
+other publisher dealer rules and the original economy are unavailable. The original service's job missions, economy rules,
 property interiors, the publisher's race formats and combat and gang rules,
 administration, and other
 server systems still need independent implementations. The browser download
@@ -270,11 +283,13 @@ verification status of each major system.
 
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
-`node smoke_patrol.js`, `node smoke_pizza.js`, and `node smoke_trucker.js`
+`node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
+`node smoke_pilot.js`, `node smoke_convoy.js`, and `node smoke_aircraft.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, police patrol, pizza delivery, and freight delivery in marked loaners,
+repair, timed checkpoints, police patrol, pizza delivery, freight delivery, and pilot flight
+in marked loaners, shared convoy rewards and hangar aircraft ownership,
 getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, paid respray, restart persistence, and a
 two-player race with ordered checkpoints and payouts, player combat, kill feed,
@@ -312,6 +327,12 @@ Chrome also started a freight delivery, displayed its F6 route map and timer,
 showed the spawned Mule in the 3D world, entered its driving mode, and then
 cancelled the mission. Pickup, delivery, payout, and restart behavior passed
 the isolated freight test; the full route has not been driven in Chrome.
+Chrome also started a pilot flight at Los Santos International, displayed the
+loaner Dodo in the 3D world, entered it, and cancelled the flight. Takeoff,
+landing, payout, and restart behavior passed the isolated pilot test; the full
+flight has not been flown in Chrome. Hangar purchase, aircraft spawn, access
+restrictions, and restart recovery passed an isolated test; a purchased
+aircraft has not been spawned in Chrome.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
