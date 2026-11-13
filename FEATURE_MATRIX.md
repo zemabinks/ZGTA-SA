@@ -22,8 +22,9 @@ complete rules or data held by that private server.
 | Police patrol | Volunteer duty unlocks a four-minute route with a marked loaner police car, three checkpoints, $400 and 80 XP | Chrome started and cancelled a patrol, showed its 3D police car and live objective, then restored duty off. Isolated tests cover duty gate, wrong-car rejection, ordered checkpoints, payout, loaner cleanup, and restart recovery. A full route has not yet been driven in Chrome; there are no 3D checkpoint rings or police NPCs. |
 | Pizza delivery | A six-minute, three-address route on a reserved Pizzaboy scooter; $400 and 80 XP on completion | The archived client lists a pizza job and Pizzaboy model. Chrome started a local delivery, showed the scooter and first destination, entered driving mode, and cancelled the route. An isolated test covers the scooter's owner restriction, wrong vehicle, ordered deliveries, payout, cancellation, expiry, and restart recovery. The full route has not been driven in Chrome, and no publisher pizza rules are claimed. |
 | Freight delivery and convoy | A seven-minute cargo pickup and delivery route in a reserved Mule truck; $500 and 100 XP on completion; a one-time $100 and 20 XP bonus to each nearby private-group convoy member | The archived English help lists trucker work and the Mule. Chrome showed the F6 route and timer, spawned the 3D truck, entered driving mode, and cancelled the route. Isolated tests cover owner restriction, wrong vehicle, pickup and delivery order, payout, cancellation, expiry, restart recovery, group membership, nearby truck checks, outsider exclusion, and prevention of a second convoy payout. The full route and convoy have not been driven in Chrome. Depots, damage bonus, and publisher trucker rules are not reproduced. |
-| Pilot flight and record | Ten-minute flight in a reserved Dodo from one archived airport hangar to the next; airborne gate, landing zone and two-second stop; $700 and 140 XP base pay, plus local clean, early, and fifth-flight bonuses | Archived English help describes four airports, a two-second stop, and these bonus types. Chrome started the mission at Los Santos International, showed the 3D Dodo, entered it, and cancelled the flight. Isolated tests cover marked plane restriction, takeoff altitude, landing location and hold, damaged versus clean flights, early and fifth-flight rewards, saved flight record, cancellation, expiry, and restart recovery. A complete flight has not been flown in Chrome. The loaner teleport, route, and bonus amounts are local design choices. Larger aircraft unlocks are not implemented. |
+| Pilot flight and record | Ten-minute flight in one of eight level-unlocked loaner aircraft between archived airport hangars; airborne gate, model-sized landing zone and two-second stop; $700 and 140 XP base pay, plus local aircraft, clean, early, and fifth-flight bonuses | Archived English help describes four airports, a two-second stop, bonus types, and the aircraft unlock levels. Chrome started the Dodo mission, showed the 3D aircraft, entered it, and cancelled the flight. It also displayed the F6 aircraft selector with level locks. Isolated tests cover locked Beagle rejection, its level-four unlock, model-specific vehicle spawn and wider landing, premium payout, takeoff, clean versus damaged flights, streak rewards, cancellation, expiry, and restart recovery. A complete flight or larger aircraft flight has not been flown in Chrome. The local level formula adds one level for every three completed flights; the loaner teleport, route, and bonus amounts are also local design choices. |
 | Fire response | Eight-minute dispatch to an archived property entrance in a reserved fire truck; three fire spots, then an on-foot rescue; $650 and 130 XP | Archived English help describes a fire truck, multiple fires, and rescues. Chrome started the mission, showed the truck and route, entered it, and cancelled the call. An isolated test covers truck reservation, arrival location and correct vehicle, ordered suppression, on-foot rescue, payout, cancellation, expiry, and restart recovery. The fire spots are controlled through F6; there are no 3D flames, water cannon interaction, extinguisher model, rescued character, or publisher fire-level rules. The original client's “press 2 to start a shift” prompt still appears in the truck and does not reflect this local F6 mission. |
+| Getaway heist | Ten-minute route: take a bag on foot at a property entrance, gain two wanted stars, lose police, and deliver it in a reserved Sultan; $900 and 180 XP plus a nearby private-group share | Archived heist help describes a getaway vehicle, robbery, police response, and drop-off. Chrome started the local route, showed the F6 objective, entered its 3D Sultan, and cancelled the test. Isolated checks cover the marked vehicle, proximity and on-foot robbery, two-star escape, saved cooldown and stage, crew snapshot and outsider exclusion, payout, death and arrest failure, cancellation, expiry, and restart recovery. The local target is an archived property entrance; publisher stores, banks, casinos, guards, interiors, and visible bag assets are unavailable. A complete route has not been driven in Chrome. |
 | Getaway car | Timed car theft route using a reserved mission vehicle; taking the car raises wanted level | Chrome started and cancelled the mission and displayed its location and timer. Isolated tests cover another player's entry denial, wrong-car rejection, pickup, delivery, payout, cleanup, and restart restoration. This is an independent mission, not the publisher's car thief rules. |
 | Exploration trail | Twelve one-time property-entrance discoveries across the map, with cash and XP rewards and a completion bonus | Isolated tests cover on-foot proximity, duplicate rejection, rewards, and restart persistence. Chrome verified F6 track and untrack controls. F6 offers a direction objective; there are no 3D collectible models or publisher collectible locations. |
 | Multiplayer race | Shared lobby, two or more racers, temporary cars, three ordered checkpoints, finish ranking, payouts, and saved standings by wins and finishes | Chrome created and cancelled a lobby. Two protocol clients pass route, rank, payout, car cleanup, and account-stat persistence tests. Saved standings survive a restart. A full browser race has not been driven; there are no 3D checkpoint rings. Active race is lost on server restart. |
@@ -41,7 +42,7 @@ public release using the original client or game assets, the host needs a
 distribution plan that respects the owners' rights. The source repository keeps
 those files out of GitHub.
 
-## Archived client evidence for freight, pilot, and fire
+## Archived client evidence for freight, pilot, fire, and heist
 
 The locally archived English client chunk
 `local-only/site/_next/static/chunks/612.b99cc7b46756e1c2.js` contains
@@ -52,9 +53,13 @@ The same chunk has `jobHelp_pilot_1` through `jobHelp_pilot_3`, describing
 four airports, a flight, and a two-second stop after landing. The archived
 catalog lists the four hangar locations, Dodo, and other aircraft prices.
 `jobHelp_pilot_5` describes smooth, early, and fifth-flight bonuses without
-their exact payout formula. `jobHelp_fire_1` through `jobHelp_fire_8` describe
+their exact payout formula. `jobHelp_pilot_6` lists the Beagle, Maverick,
+Shamal, Nevada, Leviathan, AT-400, and Andromada unlock levels.
+`jobHelp_fire_1` through `jobHelp_fire_8` describe
 fire trucks, suppression, rescue, later call types, and crews. These are
 client-facing instructions rather than the private server implementation.
+`jobHelp_heist_1` through `jobHelp_heist_8` describe a getaway car, robbery,
+police escape, drop-off, crew participation, and failed escapes.
 Static REA analysis of the archived chunk directory recorded parent evidence
 `ev_e676b08c9c7dc2182b28bc549d8833c514ab2acc2c74472547dee4655cf4855a`
 for SHA-256 `f5c275ced14ae2abf38e1eb0e7bf58fbc4fe6488561691888dbe4cebdce04e15`.
@@ -64,7 +69,7 @@ above are design choices of this independent server.
 
 ## Next acceptance targets
 
-1. Drive the freight, pilot flight, fire response, pizza, mechanic, medic, time trial, and exploration objectives in a
+1. Drive the freight, pilot flight, heist, fire response, pizza, mechanic, medic, time trial, and exploration objectives in a
    real browser and on a second physical device; add visible world markers.
 2. Add server-validated vehicle collisions and damage, then property garages,
    fuel, and tuning rules.
