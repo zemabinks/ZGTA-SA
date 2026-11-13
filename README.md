@@ -141,9 +141,9 @@ mocked OAuth test passes, but a live Discord sign-in has not been tested
 because no application credentials or public callback URL have been provided.
 
 Press **F6** in the game to open the ZGTA:SA local gameplay panel. It offers
-eleven independent local activities: courier, taxi, mechanic, medic, a timed
+twelve independent local activities: courier, taxi, mechanic, medic, a timed
 street trial, a police patrol, pizza delivery, freight delivery, pilot flight,
-fire response, and a getaway car mission.
+fire response, a getaway heist, and a getaway car mission.
 Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
@@ -177,14 +177,27 @@ clean aircraft, $100 with at least two minutes left, and $500 on every fifth
 consecutive completed flight. Cancelling a flight breaks the streak. These
 amounts and the route are local rules; the archived client help describes
 the bonus types and four-airport flight concept without supplying the server
-formula. Fire response spawns a reserved fire truck near the player and
+formula. Every three completed flights adds one local pilot level, up to 50.
+F6 offers the Dodo, Beagle, Maverick, Shamal, Nevada, Leviathan, AT-400, and
+Andromada at the unlock levels shown in the archived help. Larger aircraft
+have wider landing zones and local model pay premiums. The loaner aircraft
+and unlocked selection survive a mission restart. Fire response spawns a reserved fire truck near the player and
 dispatches a call to an archived property entrance. Drive the truck to the
 call, use F6 to suppress three nearby fire spots from the truck or on foot,
 then get out and rescue a person at the call point within eight minutes for
 $650 and 130 XP. The mission stage and truck recover after a restart. The
 public client describes firefighting, but this local mission has no 3D flames,
-water cannon interaction, extinguisher model, or rescue character yet. In
-the getaway mission, take a spawned car at a
+water cannon interaction, extinguisher model, or rescue character yet.
+Getaway heist spawns a reserved Sultan. Visit a local robbery site at an
+archived property entrance and collect the bag on foot; this raises wanted
+level to two. Lose the police, then drive the marked car to the drop-off
+within ten minutes for $900 and 180 XP. Up to three private-group members
+present when the bag is taken can each earn $200 and 40 XP if they remain
+near the final drop-off; the leader earns the same bonus. The robbery starts
+a five-minute repeat cooldown. Death or arrest after taking the bag fails
+the mission. The route, cooldown, and bag stage survive a server restart.
+This local heist does not reproduce the publisher's 24/7, bank, casino,
+interior, guard, or bag-model systems. In the getaway car mission, take a spawned car at a
 property entrance and deliver that same car to a second property within five
 minutes. Taking it starts a wanted level. The mission car is visible to other
 players but reserved for the mission owner, and an unfinished mission returns
@@ -223,8 +236,8 @@ $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job fire`, `/job carthief`,
-`/pickup`, `/checkpoint`, `/repair`, `/respond`, `/extinguish`, `/rescue`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job pilot 511`, `/job fire`, `/job heist`, `/job carthief`,
+`/pickup`, `/checkpoint`, `/repair`, `/respond`, `/extinguish`, `/rescue`, `/rob`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
 
@@ -295,11 +308,13 @@ verification status of each major system.
 Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
-`node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_convoy.js`, and `node smoke_aircraft.js`
+`node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_heist.js`,
+`node smoke_convoy.js`, and `node smoke_aircraft.js`
 with Node.js 24 to
 test the local wire protocol, two-player exchange, courier pickup and delivery,
 taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, police patrol, pizza delivery, freight delivery, pilot flight, and fire response
+repair, timed checkpoints, police patrol, pizza delivery, freight delivery,
+pilot flight, fire response, and a heist route
 in marked loaners, shared convoy rewards and hangar aircraft ownership,
 getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
 entry restrictions, owned car storage, repair, paid respray, restart persistence, and a
@@ -350,6 +365,11 @@ the call. The dispatch, three suppression steps, rescue, payout, and restart
 behavior passed an isolated test; the route has not been driven in Chrome.
 The archived client still displays its native “press 2 to start a shift” tip
 inside the fire truck. This local mission is controlled through F6 instead.
+Chrome displayed the pilot aircraft selector with level locks and started a
+heist, showed its route and marked Sultan, entered the Sultan, and cancelled
+the mission. The robbery, wanted escape, group bonus, death, arrest, cooldown,
+and restart checks passed an isolated test. The full heist route has not been
+driven in Chrome.
 Run `node smoke_discord.js` for an isolated mocked OAuth, identity, one-time
 bonus, and returning-account test. It makes no Discord network request.
 
