@@ -21,6 +21,7 @@ complete rules or data held by that private server.
 | Street time trial | Three world checkpoints in an owned car within three minutes | Order, driving requirement, timer, and payout pass isolated tests. No visible checkpoint markers or leaderboard yet. |
 | Police patrol | Volunteer duty unlocks a four-minute route with a marked loaner police car, three checkpoints, $400 and 80 XP | Chrome started and cancelled a patrol, showed its 3D police car and live objective, then restored duty off. Isolated tests cover duty gate, wrong-car rejection, ordered checkpoints, payout, loaner cleanup, and restart recovery. A full route has not yet been driven in Chrome; there are no 3D checkpoint rings or police NPCs. |
 | Pizza delivery | A six-minute, three-address route on a reserved Pizzaboy scooter; $400 and 80 XP on completion | The archived client lists a pizza job and Pizzaboy model. Chrome started a local delivery, showed the scooter and first destination, entered driving mode, and cancelled the route. An isolated test covers the scooter's owner restriction, wrong vehicle, ordered deliveries, payout, cancellation, expiry, and restart recovery. The full route has not been driven in Chrome, and no publisher pizza rules are claimed. |
+| Freight delivery | A seven-minute cargo pickup and delivery route in a reserved Mule truck; $500 and 100 XP on completion | The archived English help lists trucker work and the Mule. Chrome showed the F6 route and timer, spawned the 3D truck, entered driving mode, and cancelled the route. An isolated test covers owner restriction, wrong vehicle, pickup and delivery order, payout, cancellation, expiry, and restart recovery. The full route has not been driven in Chrome. Depot, convoy, damage bonus, and publisher trucker rules are not reproduced. |
 | Getaway car | Timed car theft route using a reserved mission vehicle; taking the car raises wanted level | Chrome started and cancelled the mission and displayed its location and timer. Isolated tests cover another player's entry denial, wrong-car rejection, pickup, delivery, payout, cleanup, and restart restoration. This is an independent mission, not the publisher's car thief rules. |
 | Exploration trail | Twelve one-time property-entrance discoveries across the map, with cash and XP rewards and a completion bonus | Isolated tests cover on-foot proximity, duplicate rejection, rewards, and restart persistence. Chrome verified F6 track and untrack controls. F6 offers a direction objective; there are no 3D collectible models or publisher collectible locations. |
 | Multiplayer race | Shared lobby, two or more racers, temporary cars, three ordered checkpoints, finish ranking, payouts, and saved standings by wins and finishes | Chrome created and cancelled a lobby. Two protocol clients pass route, rank, payout, car cleanup, and account-stat persistence tests. Saved standings survive a restart. A full browser race has not been driven; there are no 3D checkpoint rings. Active race is lost on server restart. |
@@ -38,9 +39,23 @@ public release using the original client or game assets, the host needs a
 distribution plan that respects the owners' rights. The source repository keeps
 those files out of GitHub.
 
+## Archived client evidence for freight
+
+The locally archived English client chunk
+`local-only/site/_next/static/chunks/612.b99cc7b46756e1c2.js` contains
+`jobHelp_trucker_1` through `jobHelp_trucker_3`. They describe a Mule,
+pickup from a work board, and a timed delivery. This is evidence of the
+client's displayed help text, not evidence of the publisher's server rules.
+Static REA analysis of the archived chunk directory recorded parent evidence
+`ev_e676b08c9c7dc2182b28bc549d8833c514ab2acc2c74472547dee4655cf4855a`
+for SHA-256 `f5c275ced14ae2abf38e1eb0e7bf58fbc4fe6488561691888dbe4cebdce04e15`.
+It parsed 80 JavaScript files without parse failures, but its semantic graph
+coverage was partial because of resource limits. The local route and payout
+above are design choices of this independent server.
+
 ## Next acceptance targets
 
-1. Check the new mechanic, medic, time trial, and exploration objectives in a
+1. Drive the freight, pizza, mechanic, medic, time trial, and exploration objectives in a
    real browser and on a second physical device; add visible world markers.
 2. Add server-validated vehicle collisions and damage, then property garages,
    fuel, and tuning rules.
