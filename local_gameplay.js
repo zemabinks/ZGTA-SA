@@ -52,6 +52,7 @@
   let error = false;
   let busy = false;
   let selectedCarModel = '';
+  let selectedAircraftModel = '';
   let selectedHomeId = '';
   const transferAmounts = new Map();
   let partyDraft = '';
@@ -75,13 +76,16 @@
     line.append(button);
     panel.append(line);
   }
-  function catalogPicker(items, value, onChange, action, payload, disabled) {
+  function catalogPicker(items, value, onChange, action, payload, disabled, label) {
     if (!items.length) return;
     const line = element('div', undefined, 'zgta-row');
     const select = element('select');
-    select.setAttribute('aria-label', action === 'car.buy' ? 'Vehicle catalog' : 'Property catalog');
+    select.setAttribute('aria-label', label || (action === 'car.buy' ? 'Vehicle catalog' : 'Property catalog'));
     for (const item of items) {
-      const option = element('option', `${item.name} · $${item.price.toLocaleString()}`);
+      const unavailable = label === 'Aircraft catalog' && state.hangar?.within &&
+        !item.airports?.includes(state.hangar.id);
+      const option = element('option', `${item.name} · $${item.price.toLocaleString()}` +
+        (unavailable ? ' · not sold here' : ''));
       option.value = String(action === 'car.buy' ? item.model : item.id);
       select.append(option);
     }
@@ -186,6 +190,9 @@
           (trucker ? 'Load cargo into the marked Mule' : thief ? 'Take the marked car' : taxi ? 'Collect the passenger' : medic ? 'Collect the patient' : 'Collect the package') :
           (trucker ? 'Deliver cargo in the marked Mule' : thief ? 'Deliver the marked car' : taxi ? 'Drop off the passenger' : medic ? 'Return the patient' : 'Deliver the package');
         panel.append(element('p', `${task} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.${taxi || medic || thief || trucker ? ' You must be driving.' : ''}${thief || trucker ? ` ${state.job.secondsLeft} s left.` : ''}`, 'zgta-muted'));
+        if (trucker) panel.append(element('p', state.job.convoyBonusAwarded ?
+          `Your $${state.job.convoyBonus} group convoy bonus was paid.` :
+          `A group mate delivering to the same stop in their own Mule within 80 m earns both drivers a $${state.job.convoyBonus} convoy bonus.`, 'zgta-muted'));
         if (state.job.stage === 'pickup')
           row(trucker ? 'Load freight' : thief ? 'Take getaway car' : taxi ? 'Pick up passenger' : medic ? 'Pick up patient' : 'Pick up package',
             'job.pickup', {}, trucker ? 'Load' : thief ? 'Take' : 'Collect', !state.connected || state.job.remaining > state.job.radius ||
@@ -194,6 +201,13 @@
           'job.complete', {}, taxi ? 'Drop off' : medic ? 'Return' : 'Deliver',
           !state.connected || state.job.remaining > state.job.radius ||
             ((thief || trucker) && state.job.secondsLeft <= 0));
+      } else if (state.job.mode === 'flight') {
+        if (state.job.stage === 'takeoff')
+          panel.append(element('p', `Board the marked Dodo at ${state.job.from} and climb ${state.job.takeoffAltitude} m above the airport. Current height: ${state.job.altitude ?? '?'} m. Destination: ${state.job.target.name}. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
+        else panel.append(element('p', `Land at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Stop within ${state.job.radius} m and hold still for two seconds. ${state.job.secondsLeft} s left.`, 'zgta-muted'));
+        row('Complete pilot flight', 'job.complete', {}, 'Finish',
+          !state.connected || state.job.stage !== 'landing' ||
+          !state.job.landingReady || state.job.secondsLeft <= 0);
       } else if (state.job.mode === 'service') {
         panel.append(element('p', `Repair the stranded vehicle at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m and stand on foot.`, 'zgta-muted'));
         row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
@@ -214,7 +228,7 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}`,
+        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
             (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
             (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
@@ -365,9 +379,11 @@
     if (state.cars.length === 0) panel.append(element('p', 'No cars owned yet.', 'zgta-muted'));
     state.cars.forEach((car, slot) => {
       const garage = state.garage?.[slot];
+      const aircraft = car.type === 'plane' || car.type === 'helicopter';
       const condition = garage ? ` · ${Math.round(garage.health / 10)}% condition${garage.paint ? ' · custom paint' : ''}` : '';
       row(`${car.name} · ${garage?.active ? 'out' : 'stored'}${condition}`,
-        'car.spawn', {slot}, garage?.active ? 'Recall' : 'Spawn', !state.connected);
+        'car.spawn', {slot}, garage?.active ? 'Recall' : 'Spawn',
+        !state.connected || (aircraft && !state.hangar?.within));
       if (garage?.active) {
         const nearOnFoot = state.connected && state.onFoot &&
           garage.distance !== null && garage.distance <= 18;
@@ -382,12 +398,28 @@
     });
     for (const car of state.catalog.cars.filter(item => item.source === 'starter'))
       row(`${car.name} · $${car.price}`, 'car.buy', {model: car.model}, 'Buy', state.cash < car.price);
-    const originalCars = state.catalog.cars.filter(item => item.source === 'archived');
+    const originalCars = state.catalog.cars.filter(item => item.source === 'archived' &&
+      item.type !== 'plane' && item.type !== 'helicopter');
     if (originalCars.length) {
       panel.append(element('p', `${originalCars.length} more vehicles from the archived client catalog`, 'zgta-muted'));
       catalogPicker(originalCars, selectedCarModel, value => {selectedCarModel = value;},
         'car.buy', value => ({model: Number(value)}),
         car => !car || state.cash < car.price || state.cars.length >= 12);
+    }
+    const aircraft = state.catalog.cars.filter(item =>
+      item.type === 'plane' || item.type === 'helicopter');
+    if (aircraft.length) {
+      section('Hangars and aircraft');
+      if (state.hangar) panel.append(element('p',
+        `${state.hangar.name} · ${state.hangar.distance} m away. Buy and spawn aircraft within 100 m of a hangar.`,
+        'zgta-muted'));
+      else panel.append(element('p', 'Enter the world to find the nearest hangar.', 'zgta-muted'));
+      panel.append(element('p', `${aircraft.length} aircraft from the archived client catalog`, 'zgta-muted'));
+      catalogPicker(aircraft, selectedAircraftModel, value => {selectedAircraftModel = value;},
+        'car.buy', value => ({model: Number(value)}),
+        car => !car || !state.hangar?.within || !car.airports?.includes(state.hangar.id) ||
+          state.cash < car.price ||
+          state.cars.length >= 12, 'Aircraft catalog');
     }
     section('Homes');
     for (const home of state.catalog.homes.filter(item => item.source === 'starter')) {
@@ -438,6 +470,13 @@
     }
     if (explore && !job) {
       objective.textContent = `Explore: ${explore.target.name}\n${explore.remaining ?? '?'} m${direction} · stand within 12 m\nPress F6 to claim`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (job.mode === 'flight') {
+      objective.textContent = job.stage === 'takeoff' ?
+        `Pilot flight: take off from ${job.from} · ${job.secondsLeft} s left\nClimb to ${job.takeoffAltitude} m · now ${job.altitude ?? '?'} m\nPress F6 for details` :
+        `Pilot flight: land at ${job.target.name} · ${job.secondsLeft} s left\n${job.remaining ?? '?'} m${direction} · stop on apron for 2 s\nPress F6 for details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
