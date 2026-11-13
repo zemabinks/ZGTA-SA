@@ -212,7 +212,7 @@ $250; completed races and wins are saved to each account. F6 shows saved race
 standings ranked by wins, then finishes. The lobby, active race, and temporary
 cars are session state and do not survive a server restart. This independent
 race has no 3D checkpoint rings. Chat commands
-`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job carthief`,
+`/jobs`, `/job courier`, `/job taxi`, `/job mechanic`, `/job medic`, `/job trial`, `/job patrol`, `/job pizza`, `/job trucker`, `/job pilot`, `/job carthief`,
 `/pickup`, `/checkpoint`, `/repair`, `/finish`, `/deliver`, `/balance`, `/garage`, `/buycar 410`,
 `/spawncar 1`, `/storecar 1`, `/repaircar 1`, `/respraycar 1`, and `/buyhome starter`
 expose the same local systems. Type `/race` for the multiplayer race commands.
