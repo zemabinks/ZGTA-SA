@@ -44,6 +44,38 @@ public release using the original client or game assets, the host needs a
 distribution plan that respects the owners' rights. The source repository keeps
 those files out of GitHub.
 
+## Native iOS parity audit
+
+The native app is a separate Swift and Metal client, not a wrapper around the
+archived browser client. The following is the observed state of the 14 November
+2026 simulator build. “Implemented” means the named behavior exists in the
+native app; it does not mean the publisher's rules are reproduced.
+
+| Area | Native state | Remaining parity work |
+| --- | --- | --- |
+| World | Streams local WRL2 and SCL2 city data and renders textured geometry through Metal. | World objects, effects, interiors, lighting, water, weather, traffic, and visibility rules have not been audited or matched one by one. |
+| Characters and camera | Locally converted DFF/TXD skins and baked ANP3 idle, walk, run, jump, fist, and pistol clips. Separate camera and facing headings; the simulator showed forward and sideways movement. | The full original animation state machine, transitions, swimming, crouching, climbing, death, vehicle entry/exit animations, and camera behavior remain incomplete. |
+| Vehicles | Streams converted vehicle models; native movement and collision feed the local multiplayer server. Touch gas and brake and controller triggers now drive. | Original per-model handling, damage, fuel, sound, doors, passengers, aircraft and boat controls, and vehicle interaction animations are not reproduced. |
+| HUD and map | Archived radar image, full city map, health, armour, clock, cash, weapon, wanted level, and local objective markers. Main HUD text uses derived archived San Andreas glyphs. | Exact HUD geometry and all browser map marker types need comparison; gameplay panels and status text still use system fonts. |
+| Touch and controller | Floating ZGTA V Native style circles, contextual on-foot and driving actions, two floating sticks, and basic GameController mapping. The persistent top navigation bar is removed. The simulator entered a taxi, showed gas and brake in place of the on-foot buttons, moved about 30 m with a held gas press, then restored on-foot buttons after exit. | Controller button mapping across all activities, accessibility, and small-screen layouts need further device checks. |
+| Combat | Fist and Colt .45 local animations and local-server hit requests; pistol ammo/reload are client-side. | Other weapons, pickups, inventory, aim modes, server-owned ammo, effects, and publisher hit rules are absent. |
+| Audio and radio | Native AVPlayer station cycling can load owner-supplied local tracks and reports playback failures. | The public archive's `/game/radio/index` was unavailable, and no original station audio was captured. Engine, footsteps, voice, effects, and original station behavior are not matched. |
+| Jobs and economy | Native panels call the independent local server's jobs, garage, races, homes, crews, and economy actions. | Publisher missions and private server formulas are unavailable; job-specific animations, 3D effects, NPCs, interactions, and every browser command are not native. |
+| Multiplayer and sign-in | Native client shares the independent guest-account server with the self-hosted browser game; Discord is optional. | It does not connect to the publisher's private multiplayer backend. Authoritative movement, anti-cheat, latency handling, and cross-device LAN gameplay need broader testing. |
+
+For this audit, REA parsed the 80 archived JavaScript chunks (12,056,571 text
+bytes, 1,758,567 AST nodes) with no parse failures. The retained parent evidence
+is `ev_38c37e65a97dface6426a556dfb175315c955289f5280597ec06f8115f4c0dc7`.
+Its semantic graph was incomplete because of result-size and memory limits, so
+it cannot certify an exhaustive function list. Static facts from the large
+`9737.c81ad6ccfd85b371.js` chunk include HUD font/radar/weapon requests and
+a `/game/radio/index` fetch. The archived client's command strings include
+separate taxi, trucker, car thief, police, fire, mechanic, heist, medic, pizza,
+pilot, race editor, gang, weapon, radio, and property interactions. Those are
+client-facing entry points; their private server behavior cannot be inferred
+from strings alone. A 1:1 result requires individual browser observation,
+native implementation, and runtime checks for each interaction.
+
 ## Archived client evidence for freight, pilot, fire, and heist
 
 The locally archived English client chunk

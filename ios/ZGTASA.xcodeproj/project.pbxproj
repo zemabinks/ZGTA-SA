@@ -7,14 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		07A2EDAC9E86D797E85E0067 /* NativeVehicleRadio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E6C536AED882DF9A6555DD1 /* NativeVehicleRadio.swift */; };
 		0B27B787CB36660EB60BA947 /* ServerAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9910D3BADE96802B5B7E345 /* ServerAddress.swift */; };
 		0D15B6412B6C858454BBADBC /* Style.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E5C4091FF57DC58D6C219E2 /* Style.swift */; };
 		36C5754DD98547AC06A81754 /* NativeGameplayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23A47E76CCEE38AC4EC0FE1F /* NativeGameplayPanel.swift */; };
+		37A8D93437783ADD0FEC8E7E /* NativeGameHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0260B8C458933E996D829557 /* NativeGameHUD.swift */; };
 		4A9F4549E076D75780C75E9F /* NativeGameplayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */; };
 		544DC345322237E7096945DD /* NativeWorldRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8839C5FCEC16A960B012E3C8 /* NativeWorldRenderer.swift */; };
 		54DDE12A75BD4B81259536BD /* NativeActorAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2987F67DA4F5463FEFF776 /* NativeActorAnimation.swift */; };
 		73A8066A6D45F55EB19FCAFA /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = E404FF2979C061CFF21192D9 /* App.swift */; };
 		98EAC25E30DF938359F08B3B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6E58C53F7B0963EE17D86DA1 /* Assets.xcassets */; };
+		9A6319D331B41445AF5F6B4E /* NativeCityMapViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */; };
 		A04EB9A2AA84E43AE0417110 /* MainMenuViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF3FFE41D4B8C5B0F20E99A /* MainMenuViewController.swift */; };
 		ACD126EF6D1B8AB684EC440E /* NativeGameViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2326D5F1610E7F3B8859A41D /* NativeGameViewController.swift */; };
 		C823EE3D654F8DB60E898A71 /* WorldCollision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101F6D0A7F914965384FFFDD /* WorldCollision.swift */; };
@@ -25,6 +28,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0260B8C458933E996D829557 /* NativeGameHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameHUD.swift; sourceTree = "<group>"; };
 		087E7CB2B5881BBC13A9B417 /* HomeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewController.swift; sourceTree = "<group>"; };
 		101F6D0A7F914965384FFFDD /* WorldCollision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldCollision.swift; sourceTree = "<group>"; };
 		1AF69E8CCF1AC866E1B91582 /* WorldShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = WorldShaders.metal; sourceTree = "<group>"; };
@@ -33,6 +37,8 @@
 		23A47E76CCEE38AC4EC0FE1F /* NativeGameplayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameplayPanel.swift; sourceTree = "<group>"; };
 		2EFB846F84FEA989E01BBD29 /* ZGTASA.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ZGTASA.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		347138D73FE552378B05699E /* NativeMultiplayerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMultiplayerClient.swift; sourceTree = "<group>"; };
+		3E6C536AED882DF9A6555DD1 /* NativeVehicleRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleRadio.swift; sourceTree = "<group>"; };
+		4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCityMapViewController.swift; sourceTree = "<group>"; };
 		6E58C53F7B0963EE17D86DA1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameplayClient.swift; sourceTree = "<group>"; };
 		8839C5FCEC16A960B012E3C8 /* NativeWorldRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldRenderer.swift; sourceTree = "<group>"; };
@@ -54,10 +60,13 @@
 				8B6E1BEA395F88AFB175F6CE /* Info.plist */,
 				DAF3FFE41D4B8C5B0F20E99A /* MainMenuViewController.swift */,
 				8A2987F67DA4F5463FEFF776 /* NativeActorAnimation.swift */,
+				4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */,
+				0260B8C458933E996D829557 /* NativeGameHUD.swift */,
 				770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */,
 				23A47E76CCEE38AC4EC0FE1F /* NativeGameplayPanel.swift */,
 				2326D5F1610E7F3B8859A41D /* NativeGameViewController.swift */,
 				347138D73FE552378B05699E /* NativeMultiplayerClient.swift */,
+				3E6C536AED882DF9A6555DD1 /* NativeVehicleRadio.swift */,
 				8839C5FCEC16A960B012E3C8 /* NativeWorldRenderer.swift */,
 				F9910D3BADE96802B5B7E345 /* ServerAddress.swift */,
 				1E5C4091FF57DC58D6C219E2 /* Style.swift */,
@@ -159,10 +168,13 @@
 				EE609E92C2D112EE11CB59E4 /* HomeViewController.swift in Sources */,
 				A04EB9A2AA84E43AE0417110 /* MainMenuViewController.swift in Sources */,
 				54DDE12A75BD4B81259536BD /* NativeActorAnimation.swift in Sources */,
+				9A6319D331B41445AF5F6B4E /* NativeCityMapViewController.swift in Sources */,
+				37A8D93437783ADD0FEC8E7E /* NativeGameHUD.swift in Sources */,
 				ACD126EF6D1B8AB684EC440E /* NativeGameViewController.swift in Sources */,
 				4A9F4549E076D75780C75E9F /* NativeGameplayClient.swift in Sources */,
 				36C5754DD98547AC06A81754 /* NativeGameplayPanel.swift in Sources */,
 				E7A53B4875F9C6E3F03EA27C /* NativeMultiplayerClient.swift in Sources */,
+				07A2EDAC9E86D797E85E0067 /* NativeVehicleRadio.swift in Sources */,
 				544DC345322237E7096945DD /* NativeWorldRenderer.swift in Sources */,
 				0B27B787CB36660EB60BA947 /* ServerAddress.swift in Sources */,
 				0D15B6412B6C858454BBADBC /* Style.swift in Sources */,

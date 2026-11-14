@@ -6,14 +6,22 @@ final class NativeGameViewController: UIViewController {
     private let server: ServerAddress
     private let network: NativeMultiplayerClient
     private let gameplay: NativeGameplayClient
+    private let radio: NativeVehicleRadio
     private let renderer: NativeWorldRenderer?
     private let status = UILabel()
     private let players = UILabel()
     private let objective = UILabel()
-    private let vehicleButton = UIButton(type: .system)
-    private let attackButton = UIButton(type: .system)
-    private let weaponButton = UIButton(type: .system)
-    private let reloadButton = UIButton(type: .system)
+    private let gameHUD = NativeGameHUD()
+    private let mapButton = UIButton(type: .custom)
+    private let vehicleButton = NativeIconButton()
+    private let radioButton = NativeIconButton()
+    private let attackButton = NativeIconButton()
+    private let weaponButton = NativeIconButton()
+    private let reloadButton = NativeIconButton()
+    private let runButton = NativeIconButton()
+    private let jumpButton = NativeIconButton()
+    private let gasButton = NativeIconButton()
+    private let brakeButton = NativeIconButton()
     private let ammoLabel = UILabel()
     private let vitals = UILabel()
     private let stick = VirtualStick()
@@ -24,10 +32,13 @@ final class NativeGameViewController: UIViewController {
     private var lastTime: CFTimeInterval = 0
     private var lastNetwork: CFTimeInterval = 0
     private var lastGameplay: CFTimeInterval = 0
+    private var lastHUD: CFTimeInterval = 0
     private var lastVehicleButton = false
     private var lastJobsButton = false
     private var lastAutomaticCheckpoint: [String: Date] = [:]
     private var run = false
+    private var gasPressed = false
+    private var brakePressed = false
     private var lastJumpButton = false
     private var lastAttackButton = false
     private var lastWeaponButton = false
@@ -41,6 +52,7 @@ final class NativeGameViewController: UIViewController {
         self.server = server
         self.network = NativeMultiplayerClient(server: server)
         self.gameplay = NativeGameplayClient(server: server)
+        self.radio = NativeVehicleRadio(server: server)
         self.renderer = NativeWorldRenderer()
         super.init(nibName: nil, bundle: nil)
     }
@@ -83,24 +95,36 @@ final class NativeGameViewController: UIViewController {
             self.currentVehicle = vehicle
             self.renderer?.enter(vehicle)
             self.vehicleButton.setTitle("EXIT CAR", for: .normal)
-            self.status.text = "DRIVING \(vehicle.name.uppercased())"
+            let modelName = self.vehicleModelName(vehicle)
+            self.status.text = "DRIVING \(modelName.uppercased())"
+            self.gameHUD.updateVehicle(name: modelName, speed: 0)
+            self.setDrivingControls(true)
+            self.radio.resume()
         }
         network.onTeleport = { [weak self] point in self?.renderer?.teleport(x: point.x, y: point.y, z: point.z) }
         network.onVitals = { [weak self] health, armour in
             self?.vitals.text = "HEALTH \(health)  ·  ARMOUR \(armour)"
+            self?.gameHUD.updateVitals(health: health, armour: armour)
             self?.attackButton.setTitle(health == 0 ? "RESPAWN" :
                                           (self?.usingPistol == true ? "FIRE" : "HIT"), for: .normal)
         }
         gameplay.onState = { [weak self] state in
             guard let self else { return }
             self.network.syncVitals(from: state)
+            if let amount = state["cash"] as? NSNumber { self.gameHUD.updateCash(amount.intValue) }
+            if let wanted = state["wanted"] as? NSNumber { self.gameHUD.updateWanted(wanted.intValue) }
             self.gameplayPanel?.update(state)
             self.showObjective(state)
+            self.updateRadarTarget(state)
             self.maybeAdvanceCheckpoint(state)
         }
         gameplay.onResult = { [weak self] result in self?.status.text = result.uppercased() }
+        radio.onStatus = { [weak self] message in self?.status.text = message }
         network.connect()
         gameplay.refresh()
+        gameHUD.radar.loadMap(server: server)
+        gameHUD.loadFont(server: server)
+        gameHUD.loadWeaponIcon(server: server, weapon: 0)
         NotificationCenter.default.addObserver(self, selector: #selector(controllerChanged), name: .GCControllerDidConnect, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(controllerChanged), name: .GCControllerDidDisconnect, object: nil)
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -112,70 +136,77 @@ final class NativeGameViewController: UIViewController {
         super.viewWillDisappear(animated)
         displayLink?.invalidate()
         network.disconnect()
+        radio.stop()
     }
 
     private func installHUD() {
-        let top = UIView()
-        top.backgroundColor = UIColor.black.withAlphaComponent(0.76)
-        top.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(top)
-        let brand = label("ZGTA:SA  /  NATIVE", size: 18, bold: true)
-        top.addSubview(brand)
         let menu = button("MENU", action: #selector(close))
-        top.addSubview(menu)
+        styleControl(menu, icon: "Touch_pause", fallback: "pause.fill", accessibility: "Pause and return to menu")
+        view.addSubview(menu)
         let missions = button("JOBS / GARAGE", action: #selector(openGameplay))
-        top.addSubview(missions)
-        let divider = UIView()
-        divider.backgroundColor = UIColor(red: 0.18, green: 0.44, blue: 0.83, alpha: 1)
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(divider)
+        styleControl(missions, icon: nil, fallback: "briefcase.fill", accessibility: "Jobs and garage")
+        view.addSubview(missions)
         status.text = "LOADING LOCAL CITY"
         status.textColor = .white
-        status.font = .systemFont(ofSize: 13, weight: .semibold)
-        status.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        status.font = .systemFont(ofSize: 12, weight: .bold, width: .condensed)
+        status.backgroundColor = UIColor.black.withAlphaComponent(0.38)
         status.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(status)
         players.text = "CONNECTING TO MULTIPLAYER"
         players.textColor = .white
-        players.font = .systemFont(ofSize: 12, weight: .semibold)
-        players.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        players.font = .systemFont(ofSize: 10, weight: .semibold, width: .condensed)
+        players.backgroundColor = UIColor.black.withAlphaComponent(0.38)
         players.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(players)
-        vitals.text = "HEALTH 100  ·  ARMOUR 0"
-        vitals.textColor = .white
-        vitals.font = .systemFont(ofSize: 12, weight: .semibold)
-        vitals.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-        vitals.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(vitals)
-        ammoLabel.textColor = .white
-        ammoLabel.font = .systemFont(ofSize: 12, weight: .bold)
-        ammoLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-        ammoLabel.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(ammoLabel)
         objective.textColor = .white
-        objective.font = .systemFont(ofSize: 13, weight: .bold, width: .condensed)
+        objective.font = .systemFont(ofSize: 11, weight: .bold, width: .condensed)
         objective.numberOfLines = 2
-        objective.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        objective.backgroundColor = UIColor.black.withAlphaComponent(0.38)
         objective.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(objective)
+        gameHUD.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(gameHUD)
+        mapButton.translatesAutoresizingMaskIntoConstraints = false
+        mapButton.accessibilityLabel = "Open city map"
+        mapButton.addTarget(self, action: #selector(openMap), for: .touchUpInside)
+        view.addSubview(mapButton)
         stick.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stick)
         let look = lookStick
         look.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(look)
-        let lookText = label("LOOK", size: 14, bold: true)
-        lookText.textAlignment = .center
-        look.addSubview(lookText)
-        let runButton = button("RUN", action: #selector(toggleRun))
-        runButton.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        runButton.setTitle("RUN", for: .normal)
+        runButton.addTarget(self, action: #selector(toggleRun), for: .touchUpInside)
+        styleControl(runButton, icon: nil, fallback: "figure.run", accessibility: "Toggle sprint")
+        runButton.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(runButton)
-        let jumpButton = button("JUMP", action: #selector(jump))
-        jumpButton.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        jumpButton.setTitle("JUMP", for: .normal)
+        jumpButton.translatesAutoresizingMaskIntoConstraints = false
+        jumpButton.addTarget(self, action: #selector(jump), for: .touchUpInside)
+        styleControl(jumpButton, icon: "Touch_jump", fallback: "figure.run", accessibility: "Jump")
         view.addSubview(jumpButton)
+        gasButton.setTitle("GAS", for: .normal)
+        gasButton.translatesAutoresizingMaskIntoConstraints = false
+        styleControl(gasButton, icon: "Touch_gas", fallback: "pedal.accelerator.fill",
+                     accessibility: "Hold to accelerate")
+        gasButton.addTarget(self, action: #selector(pressGas), for: .touchDown)
+        gasButton.addTarget(self, action: #selector(releaseGas),
+                            for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        gasButton.isHidden = true
+        view.addSubview(gasButton)
+        brakeButton.setTitle("BRAKE", for: .normal)
+        brakeButton.translatesAutoresizingMaskIntoConstraints = false
+        styleControl(brakeButton, icon: nil, fallback: "minus.circle.fill",
+                     accessibility: "Hold to brake or reverse")
+        brakeButton.addTarget(self, action: #selector(pressBrake), for: .touchDown)
+        brakeButton.addTarget(self, action: #selector(releaseBrake),
+                              for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        brakeButton.isHidden = true
+        view.addSubview(brakeButton)
         attackButton.setTitle("HIT", for: .normal)
         attackButton.setTitleColor(.white, for: .normal)
         attackButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
-        attackButton.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        styleControl(attackButton, icon: nil, fallback: "hand.raised.fingers.spread.fill", accessibility: "Hit")
         attackButton.translatesAutoresizingMaskIntoConstraints = false
         attackButton.addTarget(self, action: #selector(attack), for: .touchUpInside)
         view.addSubview(attackButton)
@@ -184,7 +215,9 @@ final class NativeGameViewController: UIViewController {
             control.setTitle(title, for: .normal)
             control.setTitleColor(.white, for: .normal)
             control.titleLabel?.font = .systemFont(ofSize: 15, weight: .black, width: .condensed)
-            control.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+            styleControl(control, icon: control === weaponButton ? "Touch_weapons" : "Touch_reload",
+                         fallback: control === weaponButton ? "circle.grid.2x2.fill" : "arrow.clockwise",
+                         accessibility: title)
             control.translatesAutoresizingMaskIntoConstraints = false
             control.addTarget(self, action: action, for: .touchUpInside)
             view.addSubview(control)
@@ -193,67 +226,114 @@ final class NativeGameViewController: UIViewController {
         vehicleButton.setTitle("ENTER CAR", for: .normal)
         vehicleButton.setTitleColor(.white, for: .normal)
         vehicleButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
-        vehicleButton.backgroundColor = UIColor.black.withAlphaComponent(0.72)
+        styleControl(vehicleButton, icon: "Touch_enter_exit", fallback: "car.side.fill", accessibility: "Enter vehicle")
         vehicleButton.translatesAutoresizingMaskIntoConstraints = false
         vehicleButton.addTarget(self, action: #selector(toggleVehicle), for: .touchUpInside)
+        vehicleButton.isHidden = true
         view.addSubview(vehicleButton)
+        radioButton.setTitle("RADIO OFF", for: .normal)
+        radioButton.setTitleColor(.white, for: .normal)
+        radioButton.titleLabel?.font = .systemFont(ofSize: 12, weight: .black, width: .condensed)
+        radioButton.titleLabel?.adjustsFontSizeToFitWidth = true
+        styleControl(radioButton, icon: nil, fallback: "radio.fill", accessibility: "Change radio station")
+        radioButton.translatesAutoresizingMaskIntoConstraints = false
+        radioButton.isHidden = true
+        radioButton.addTarget(self, action: #selector(nextRadioStation), for: .touchUpInside)
+        view.addSubview(radioButton)
         NSLayoutConstraint.activate([
-            top.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            top.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            top.topAnchor.constraint(equalTo: view.topAnchor),
-            top.heightAnchor.constraint(equalToConstant: 47),
-            brand.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            brand.centerYAnchor.constraint(equalTo: top.centerYAnchor),
             menu.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-            menu.centerYAnchor.constraint(equalTo: top.centerYAnchor),
-            missions.trailingAnchor.constraint(equalTo: menu.leadingAnchor, constant: -24),
-            missions.centerYAnchor.constraint(equalTo: top.centerYAnchor),
-            divider.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            divider.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            divider.topAnchor.constraint(equalTo: top.bottomAnchor),
-            divider.heightAnchor.constraint(equalToConstant: 4),
+            menu.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
+            menu.widthAnchor.constraint(equalToConstant: 42),
+            menu.heightAnchor.constraint(equalTo: menu.widthAnchor),
+            missions.trailingAnchor.constraint(equalTo: menu.leadingAnchor, constant: -8),
+            missions.centerYAnchor.constraint(equalTo: menu.centerYAnchor),
+            missions.widthAnchor.constraint(equalToConstant: 42),
+            missions.heightAnchor.constraint(equalTo: missions.widthAnchor),
             status.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
-            status.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 8),
+            status.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 9),
             players.leadingAnchor.constraint(equalTo: status.leadingAnchor),
             players.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 4),
-            vitals.leadingAnchor.constraint(equalTo: players.leadingAnchor),
-            vitals.topAnchor.constraint(equalTo: players.bottomAnchor, constant: 4),
-            ammoLabel.leadingAnchor.constraint(equalTo: vitals.leadingAnchor),
-            ammoLabel.topAnchor.constraint(equalTo: vitals.bottomAnchor, constant: 4),
             objective.leadingAnchor.constraint(equalTo: status.leadingAnchor),
-            objective.topAnchor.constraint(equalTo: ammoLabel.bottomAnchor, constant: 5),
+            objective.topAnchor.constraint(equalTo: players.bottomAnchor, constant: 5),
             objective.widthAnchor.constraint(lessThanOrEqualToConstant: 390),
-            stick.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 30),
-            stick.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-            stick.widthAnchor.constraint(equalToConstant: 122),
-            stick.heightAnchor.constraint(equalToConstant: 122),
-            look.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -30),
-            look.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -25),
-            look.widthAnchor.constraint(equalToConstant: 104),
-            look.heightAnchor.constraint(equalToConstant: 104),
-            lookText.centerXAnchor.constraint(equalTo: look.centerXAnchor),
-            lookText.centerYAnchor.constraint(equalTo: look.centerYAnchor),
+            gameHUD.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
+            gameHUD.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            gameHUD.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 60),
+            gameHUD.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            mapButton.leadingAnchor.constraint(equalTo: gameHUD.radar.leadingAnchor),
+            mapButton.topAnchor.constraint(equalTo: gameHUD.radar.topAnchor),
+            mapButton.widthAnchor.constraint(equalTo: gameHUD.radar.widthAnchor),
+            mapButton.heightAnchor.constraint(equalTo: gameHUD.radar.heightAnchor),
+            stick.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 10),
+            stick.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6),
+            stick.widthAnchor.constraint(equalToConstant: 190),
+            stick.heightAnchor.constraint(equalToConstant: 155),
+            look.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -10),
+            look.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6),
+            look.widthAnchor.constraint(equalToConstant: 150),
+            look.heightAnchor.constraint(equalToConstant: 155),
             runButton.trailingAnchor.constraint(equalTo: look.leadingAnchor, constant: -14),
             runButton.bottomAnchor.constraint(equalTo: look.centerYAnchor, constant: -5),
+            runButton.widthAnchor.constraint(equalToConstant: 48),
+            runButton.heightAnchor.constraint(equalTo: runButton.widthAnchor),
             jumpButton.trailingAnchor.constraint(equalTo: look.leadingAnchor, constant: -14),
-            jumpButton.topAnchor.constraint(equalTo: look.centerYAnchor, constant: 5)
+            jumpButton.topAnchor.constraint(equalTo: look.centerYAnchor, constant: 5),
+            jumpButton.widthAnchor.constraint(equalToConstant: 48),
+            jumpButton.heightAnchor.constraint(equalTo: jumpButton.widthAnchor)
+            ,gasButton.trailingAnchor.constraint(equalTo: runButton.trailingAnchor),
+            gasButton.centerYAnchor.constraint(equalTo: runButton.centerYAnchor),
+            gasButton.widthAnchor.constraint(equalToConstant: 48),
+            gasButton.heightAnchor.constraint(equalTo: gasButton.widthAnchor),
+            brakeButton.trailingAnchor.constraint(equalTo: jumpButton.trailingAnchor),
+            brakeButton.centerYAnchor.constraint(equalTo: jumpButton.centerYAnchor),
+            brakeButton.widthAnchor.constraint(equalToConstant: 48),
+            brakeButton.heightAnchor.constraint(equalTo: brakeButton.widthAnchor)
             ,attackButton.trailingAnchor.constraint(equalTo: runButton.leadingAnchor, constant: -12),
             attackButton.centerYAnchor.constraint(equalTo: runButton.centerYAnchor),
-            attackButton.widthAnchor.constraint(equalToConstant: 72),
-            attackButton.heightAnchor.constraint(equalToConstant: 42)
+            attackButton.widthAnchor.constraint(equalToConstant: 48),
+            attackButton.heightAnchor.constraint(equalTo: attackButton.widthAnchor)
             ,weaponButton.trailingAnchor.constraint(equalTo: attackButton.trailingAnchor),
             weaponButton.bottomAnchor.constraint(equalTo: attackButton.topAnchor, constant: -7),
-            weaponButton.widthAnchor.constraint(equalToConstant: 72),
-            weaponButton.heightAnchor.constraint(equalToConstant: 35),
+            weaponButton.widthAnchor.constraint(equalToConstant: 48),
+            weaponButton.heightAnchor.constraint(equalTo: weaponButton.widthAnchor),
             reloadButton.trailingAnchor.constraint(equalTo: weaponButton.leadingAnchor, constant: -7),
             reloadButton.centerYAnchor.constraint(equalTo: weaponButton.centerYAnchor),
-            reloadButton.widthAnchor.constraint(equalToConstant: 72),
-            reloadButton.heightAnchor.constraint(equalToConstant: 35)
-            ,vehicleButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -30),
-            vehicleButton.bottomAnchor.constraint(equalTo: look.topAnchor, constant: -12),
-            vehicleButton.heightAnchor.constraint(equalToConstant: 35),
-            vehicleButton.widthAnchor.constraint(equalToConstant: 108)
+            reloadButton.widthAnchor.constraint(equalToConstant: 48),
+            reloadButton.heightAnchor.constraint(equalTo: reloadButton.widthAnchor)
+            ,vehicleButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14),
+            vehicleButton.bottomAnchor.constraint(equalTo: look.topAnchor, constant: 46),
+            vehicleButton.heightAnchor.constraint(equalToConstant: 48),
+            vehicleButton.widthAnchor.constraint(equalTo: vehicleButton.heightAnchor),
+            radioButton.trailingAnchor.constraint(equalTo: vehicleButton.leadingAnchor, constant: -8),
+            radioButton.centerYAnchor.constraint(equalTo: vehicleButton.centerYAnchor),
+            radioButton.heightAnchor.constraint(equalToConstant: 48),
+            radioButton.widthAnchor.constraint(equalTo: radioButton.heightAnchor)
         ])
+    }
+
+    private func styleControl(_ button: UIButton, icon name: String?, fallback: String,
+                              accessibility: String) {
+        let icon = name.flatMap { UIImage(named: $0) }
+        if let icon {
+            let scaled = UIGraphicsImageRenderer(size: CGSize(width: 26, height: 26)).image { _ in
+                icon.draw(in: CGRect(x: 0, y: 0, width: 26, height: 26))
+            }
+            button.setImage(scaled.withRenderingMode(.alwaysTemplate), for: .normal)
+        } else {
+            button.setImage(UIImage(systemName: fallback,
+                                    withConfiguration: UIImage.SymbolConfiguration(pointSize: 23, weight: .bold)),
+                            for: .normal)
+        }
+        button.accessibilityLabel = accessibility
+        button.tintColor = .white
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        button.layer.cornerRadius = 24
+        button.layer.borderWidth = 1
+        button.layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.25
+        button.layer.shadowRadius = 5
+        button.imageView?.contentMode = .scaleAspectFit
     }
 
     private func label(_ text: String, size: CGFloat, bold: Bool) -> UILabel {
@@ -265,8 +345,8 @@ final class NativeGameViewController: UIViewController {
         return result
     }
 
-    private func button(_ text: String, action: Selector) -> UIButton {
-        let result = UIButton(type: .system)
+    private func button(_ text: String, action: Selector) -> NativeIconButton {
+        let result = NativeIconButton()
         result.setTitle(text, for: .normal)
         result.setTitleColor(.white, for: .normal)
         result.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
@@ -276,16 +356,67 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func close() { dismiss(animated: true) }
+    @objc private func openMap() {
+        guard presentedViewController == nil else { return }
+        let map = NativeCityMapViewController(image: gameHUD.radar.mapImage,
+                                              position: gameHUD.radar.position,
+                                              players: gameHUD.radar.players,
+                                              vehicles: gameHUD.radar.vehicles,
+                                              target: gameHUD.radar.target)
+        map.modalPresentationStyle = .overFullScreen
+        present(map, animated: true)
+    }
     @objc private func controllerChanged() { status.text = GCController.controllers().isEmpty ? "TOUCH CONTROLS ACTIVE" : "CONTROLLER CONNECTED" }
-    @objc private func toggleRun() { run.toggle() }
+    @objc private func toggleRun() {
+        run.toggle()
+        runButton.layer.borderColor = (run ? UIColor(red: 0.365, green: 0.714, blue: 0.898, alpha: 1) :
+                                       UIColor.white.withAlphaComponent(0.3)).cgColor
+        runButton.layer.borderWidth = run ? 2.5 : 1
+    }
     @objc private func jump() { renderer?.jump() }
+    @objc private func pressGas() { gasPressed = true }
+    @objc private func releaseGas() { gasPressed = false }
+    @objc private func pressBrake() { brakePressed = true }
+    @objc private func releaseBrake() { brakePressed = false }
+    @objc private func nextRadioStation() {
+        guard currentVehicle != nil else { return }
+        radio.next()
+        radioButton.setTitle(radio.stationName, for: .normal)
+    }
 
     private func updateWeaponHUD() {
         weaponButton.setTitle(usingPistol ? "FISTS" : "PISTOL", for: .normal)
-        reloadButton.isHidden = !usingPistol
+        reloadButton.isHidden = currentVehicle != nil || !usingPistol || magazine >= 17 || reserve == 0
         ammoLabel.text = usingPistol ? "COLT .45  ·  \(magazine) / \(reserve)" : "FISTS EQUIPPED"
+        gameHUD.updateWeapon(pistol: usingPistol, magazine: magazine, reserve: reserve)
+        gameHUD.loadWeaponIcon(server: server, weapon: usingPistol ? 22 : 0)
         attackButton.setTitle(network.health == 0 ? "RESPAWN" :
                               (usingPistol ? "FIRE" : "HIT"), for: .normal)
+        styleControl(attackButton, icon: usingPistol ? "Touch_fire" : nil,
+                     fallback: usingPistol ? "scope" : "hand.raised.fingers.spread.fill",
+                     accessibility: network.health == 0 ? "Respawn" : usingPistol ? "Fire" : "Hit")
+    }
+
+    private func setDrivingControls(_ driving: Bool) {
+        vehicleButton.isHidden = false
+        radioButton.isHidden = !driving
+        runButton.isHidden = driving
+        jumpButton.isHidden = driving
+        gasButton.isHidden = !driving
+        brakeButton.isHidden = !driving
+        weaponButton.isHidden = driving
+        attackButton.isHidden = driving
+        reloadButton.isHidden = driving || !usingPistol || magazine >= 17 || reserve == 0
+        if !driving { gasPressed = false; brakePressed = false }
+    }
+
+    private func vehicleModelName(_ vehicle: RemoteVehicle) -> String {
+        guard let model = Int(vehicle.code.split(separator: ".").first ?? ""),
+              let catalog = gameplay.state["catalog"] as? [String: Any],
+              let cars = catalog["cars"] as? [[String: Any]],
+              let entry = cars.first(where: { ($0["model"] as? NSNumber)?.intValue == model }),
+              let name = entry["name"] as? String else { return "VEHICLE" }
+        return name
     }
 
     @objc private func toggleWeapon() {
@@ -314,6 +445,8 @@ final class NativeGameViewController: UIViewController {
                 currentVehicle = nil
                 renderer.exitVehicle()
                 vehicleButton.setTitle("ENTER CAR", for: .normal)
+                setDrivingControls(false)
+                radio.stop()
             }
             renderer.teleport(x: 1480, y: -1738, z: 13)
             status.text = "RESPAWNED AT THE CITY CENTRE"
@@ -377,6 +510,9 @@ final class NativeGameViewController: UIViewController {
             currentVehicle = nil
             renderer.exitVehicle()
             vehicleButton.setTitle("ENTER CAR", for: .normal)
+            gameHUD.updateVehicle(name: nil, speed: 0)
+            setDrivingControls(false)
+            radio.stop()
             return
         }
         guard let nearest = network.vehicles.values.min(by: {
@@ -412,6 +548,19 @@ final class NativeGameViewController: UIViewController {
         } else if job != nil {
             objective.text = "\(name)  ·  \(stage)\nOPEN JOBS FOR OBJECTIVE"
         } else { objective.text = "" }
+    }
+
+    private func updateRadarTarget(_ state: [String: Any]) {
+        let race = state["race"] as? [String: Any]
+        let activeRace = race?["stage"] as? String == "running" && race?["joined"] as? Bool == true
+        let job = state["job"] as? [String: Any]
+        let exploration = state["exploration"] as? [String: Any]
+        let target = activeRace ? race?["target"] as? [String: Any] :
+            job?["target"] as? [String: Any] ?? exploration?["tracked"] as? [String: Any]
+        if let x = (target?["x"] as? NSNumber)?.floatValue,
+           let y = (target?["y"] as? NSNumber)?.floatValue {
+            gameHUD.radar.target = SIMD2(x, y)
+        } else { gameHUD.radar.target = nil }
     }
 
     private func maybeAdvanceCheckpoint(_ state: [String: Any]) {
@@ -472,7 +621,15 @@ final class NativeGameViewController: UIViewController {
             if abs(ry) > 0.05 { lookVertical = ry }
             gamepadRunning = pad.buttonA.isPressed
             gamepadJumping = pad.buttonB.isPressed
-            gamepadAttacking = pad.rightTrigger.isPressed
+            if currentVehicle != nil {
+                steering = abs(lx) > 0.05 ? lx : steering
+                sideways = 0
+                let throttle = pad.rightTrigger.value
+                let braking = pad.leftTrigger.value
+                if throttle > 0.05 || braking > 0.05 { forward = throttle - braking }
+            } else {
+                gamepadAttacking = pad.rightTrigger.isPressed
+            }
             gamepadWeapon = pad.leftShoulder.isPressed
             gamepadReload = pad.rightShoulder.isPressed
             if pad.buttonX.isPressed && !lastVehicleButton { toggleVehicle() }
@@ -488,12 +645,30 @@ final class NativeGameViewController: UIViewController {
         lastWeaponButton = gamepadWeapon
         if gamepadReload && !lastReloadButton { reload() }
         lastReloadButton = gamepadReload
+        if currentVehicle != nil {
+            if gasPressed { forward = 1 }
+            if brakePressed { forward = -1 }
+        }
         let walking = abs(forward) + abs(sideways) > 0.05
         let running = run || gamepadRunning
         if currentVehicle != nil { steering = max(-1, min(1, steering + sideways)) }
         renderer?.move(forward: forward, sideways: currentVehicle == nil ? sideways : 0,
                        turn: steering, delta: delta, running: running,
                        lookVertical: lookVertical)
+        if link.timestamp - lastHUD > 0.1, let renderer {
+            lastHUD = link.timestamp
+            gameHUD.radar.position = SIMD2(renderer.position.x, renderer.position.y)
+            gameHUD.radar.heading = renderer.direction
+            gameHUD.radar.players = network.players.values.map { SIMD2($0.position.x, $0.position.y) }
+            gameHUD.radar.vehicles = network.vehicles.values.map { SIMD2($0.position.x, $0.position.y) }
+            gameHUD.updateVehicle(name: currentVehicle.map(vehicleModelName), speed: renderer.drivingSpeed)
+            gameHUD.updateClock()
+            if currentVehicle == nil {
+                vehicleButton.isHidden = !network.vehicles.values.contains {
+                    simd_distance($0.position, renderer.position) <= 8
+                }
+            }
+        }
         if link.timestamp - lastNetwork > 0.2, let renderer {
             lastNetwork = link.timestamp
             network.sendPosition(renderer.position, heading: renderer.direction, moving: walking,
@@ -509,20 +684,35 @@ final class NativeGameViewController: UIViewController {
     }
 }
 
+private final class NativeIconButton: UIButton {
+    override func setTitle(_ title: String?, for state: UIControl.State) {
+        if state == .normal { accessibilityLabel = title }
+        super.setTitle(nil, for: state)
+    }
+}
+
 private final class VirtualStick: UIView {
+    private let ring = UIView()
     private let knob = UIView()
     private(set) var value = CGPoint.zero
+    private var origin = CGPoint.zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = UIColor.black.withAlphaComponent(0.34)
-        layer.cornerRadius = 61
-        layer.borderColor = UIColor.white.withAlphaComponent(0.45).cgColor
-        layer.borderWidth = 2
-        knob.backgroundColor = UIColor.white.withAlphaComponent(0.8)
-        knob.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
-        knob.layer.cornerRadius = 20
+        backgroundColor = .clear
+        ring.bounds.size = CGSize(width: 110, height: 110)
+        ring.layer.cornerRadius = 55
+        ring.layer.borderWidth = 2
+        ring.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
+        ring.backgroundColor = UIColor.black.withAlphaComponent(0.12)
+        ring.isUserInteractionEnabled = false
+        ring.isHidden = true
+        addSubview(ring)
+        knob.bounds.size = CGSize(width: 42, height: 42)
+        knob.backgroundColor = UIColor.white.withAlphaComponent(0.5)
+        knob.layer.cornerRadius = 21
         knob.isUserInteractionEnabled = false
+        knob.isHidden = true
         addSubview(knob)
         isMultipleTouchEnabled = false
     }
@@ -531,25 +721,35 @@ private final class VirtualStick: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.cornerRadius = min(bounds.width, bounds.height) / 2
-        let radius = min(bounds.width, bounds.height) * 0.34
-        knob.center = CGPoint(x: bounds.midX + value.x * radius,
-                              y: bounds.midY + value.y * radius)
+        ring.center = origin
+        knob.center = CGPoint(x: origin.x + value.x * 44,
+                              y: origin.y + value.y * 44)
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { update(touches.first?.location(in: self)) }
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let point = touches.first?.location(in: self) else { return }
+        origin = point
+        value = .zero
+        ring.isHidden = false
+        knob.isHidden = false
+        setNeedsLayout()
+    }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) { update(touches.first?.location(in: self)) }
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) { update(nil) }
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { update(nil) }
 
     private func update(_ point: CGPoint?) {
         if let point {
-            let dx = point.x - bounds.midX, dy = point.y - bounds.midY
+            let dx = point.x - origin.x, dy = point.y - origin.y
             let length = max(1, hypot(dx, dy))
-            let radius = max(1, min(bounds.width, bounds.height) * 0.34)
+            let radius: CGFloat = 44
             let scale = min(1, radius / length)
             value = CGPoint(x: dx * scale / radius, y: dy * scale / radius)
-        } else { value = .zero }
+        } else {
+            value = .zero
+            ring.isHidden = true
+            knob.isHidden = true
+        }
         setNeedsLayout()
     }
 }

@@ -126,6 +126,7 @@ const MIME = {
   '.woff2': 'font/woff2', '.bin': 'application/octet-stream',
   '.dff': 'application/octet-stream', '.txd': 'application/octet-stream',
   '.glb': 'model/gltf-binary', '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
 };
 
 function securityHeaders(res) {

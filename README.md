@@ -497,6 +497,7 @@ On this Mac, prepare the ignored local game files once:
     python3 archive_public_models.py
     python3 prepare_native_models.py --all
     python3 prepare_native_animations.py --all
+    python3 prepare_native_hud.py
 
 The model archive command fetches public DFF and TXD files that are missing
 from `local-only/site/game/`. It currently fills all 212 listed vehicle model
@@ -511,6 +512,22 @@ The native Metal renderer selects the matching frames while moving or fighting;
 remote clients can show the same clips when their local pedestrian model has
 been prepared. Generated animation and attachment files stay ignored local game
 data. Regenerate them with `python3 prepare_native_animations.py --all --force`.
+The HUD converter derives San Andreas font atlases and glyph metrics from the
+archived font on this Mac. The derivative images remain under `local-only/`.
+The native HUD loads those glyphs, the archived radar map, and weapon icons at
+runtime. Tapping the radar opens a full city map. In gameplay, the ZGTA V Native
+style touch buttons float over the world without a top navigation bar. On foot,
+only movement, jump, sprint, combat, weapon, and nearby vehicle actions appear;
+driving swaps those for enter/exit, radio, accelerator, and brake actions.
+Controller triggers accelerate and brake while driving, and fire on foot.
+
+Radio station selection is implemented natively. To play audio you provide
+tracks on your Mac under `local-only/site/game/radio/custom/` as `CH.mp3`,
+`CO.mp3`, `CR.mp3`, `DS.mp3`, `HC.mp3`, `MH.mp3`, `MR.mp3`, `NJ.mp3`, `RE.mp3`,
+`RG.mp3`, `TK.mp3`, or `USER.mp3`; `.m4a` and `.wav` are also accepted. The
+public archive has no original station streams, so station names and controls
+work but original radio music is unavailable. Supply only audio you have the
+right to use. These tracks also stay outside GitHub.
 
 Start the server with zsh launch_share.sh lan for iPhone access on the same
 Wi-Fi. In the iOS app, enter the LAN address and join code printed by that
@@ -553,6 +570,14 @@ The compact iPhone 13 mini simulator
 displayed the menu. A signed
 physical-iPhone build has not been verified; the generic device target compiles
 unsigned.
+The iPhone 15 Pro simulator also showed the new circular radar and full city
+map, San Andreas bitmap HUD font, weapon icon, health, money, and compact touch
+buttons after loading the independent multiplayer world. A local taxi mission
+spawned a cab; entering it replaced the on-foot buttons with radio, gas, brake,
+and exit, and a held gas press moved the cab about 30 m. Exiting restored the
+on-foot buttons, then the test mission was ended. Simulator and generic iPhone
+builds passed after the controls changed. Radio playback with a real track and
+the native app on a physical iPhone still need testing.
 
 This remains a native gameplay work in progress. The iOS client does not yet
 reproduce the browser vehicle
