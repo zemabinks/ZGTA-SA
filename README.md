@@ -110,6 +110,12 @@ settings, cash, XP, owned cars, owned homes, and an active job are saved in
 ignored `local-only/selfhost/players.json`; type `/name Your Name` in chat to
 change a local name.
 
+For LAN play, run `zsh launch_share.sh lan`. The same listener serves friends on
+the LAN and the Mac's `127.0.0.1` address, so the browser and native simulator
+share one world and one saved player file. A second server process using that
+file is rejected to prevent competing saves. Local guest cookies persist across
+browser restarts, and the native app keeps a separate guest identity per server.
+
 Self-hosted pages turn off the archived client's built-in tips, which describe
 publisher-only features and an unrelated Discord reward. F6 provides the
 ZGTA:SA community invite, and `/discord` in chat shows it too. Joining that

@@ -2758,6 +2758,42 @@ class Peer {
   }
 }
 
+// Both localhost and LAN can use one listener. A second process with the same
+// save directory would otherwise overwrite newer players when either exits.
+const STATE_LOCK = STATE_FILE + '.lock';
+function acquireStateLock() {
+  fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = fs.openSync(STATE_LOCK, 'wx', 0o600);
+      let written = false;
+      try {fs.writeFileSync(fd, String(process.pid)); written = true;}
+      finally {
+        fs.closeSync(fd);
+        if (!written) fs.unlinkSync(STATE_LOCK);
+      }
+      return;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      const holder = Number(fs.readFileSync(STATE_LOCK, 'utf8').trim());
+      if (!Number.isSafeInteger(holder) || holder <= 0)
+        throw new Error(`Local player state lock is invalid: ${STATE_LOCK}`);
+      let alive = true;
+      try {process.kill(holder, 0);}
+      catch (problem) {if (problem.code === 'ESRCH') alive = false;}
+      if (alive) throw new Error(`Local player state is already in use by PID ${holder}. Use one server for localhost and LAN.`);
+      fs.unlinkSync(STATE_LOCK);
+    }
+  }
+  throw new Error(`Could not claim local player state lock: ${STATE_LOCK}`);
+}
+acquireStateLock();
+process.on('exit', () => {
+  try {
+    if (fs.readFileSync(STATE_LOCK, 'utf8').trim() === String(process.pid))
+      fs.unlinkSync(STATE_LOCK);
+  } catch (error) {if (error.code !== 'ENOENT') console.error('Could not release local player state lock:', error.message);}
+});
 const game = new LocalGame();
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
   try {game.flushSync();} catch (error) {console.error('Could not save local players:', error.message);}

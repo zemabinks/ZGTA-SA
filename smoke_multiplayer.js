@@ -77,6 +77,20 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert(ready, `Local test server did not start: ${errors}`);
+    const duplicatePort = await freePort();
+    const duplicate = spawn(process.execPath, ['serve_local.js'], {
+      cwd: temporary, env: {...process.env, ZGTA_SELFHOST: '1', PORT: String(duplicatePort),
+        BIND_HOST: '127.0.0.1', ZGTA_JOIN_CODE: '', ZGTA_JOIN_CODE_FILE: '', ZGTA_ALLOWED_HOSTS: ''},
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    let duplicateError = '';
+    duplicate.stderr.on('data', bytes => {duplicateError += bytes.toString();});
+    const duplicateExit = await new Promise(resolve => {
+      const timer = setTimeout(() => duplicate.kill('SIGTERM'), 3000);
+      duplicate.once('exit', code => {clearTimeout(timer); resolve(code);});
+    });
+    assert.notEqual(duplicateExit, 0, 'A second server must not write the same player file');
+    assert.match(duplicateError, /Local player state is already in use/);
     const firstApi = await fetch(`http://127.0.0.1:${port}/api/auth/me`);
     assert.equal(firstApi.status, 200);
     assert.match(firstApi.headers.get('set-cookie') || '', /^zgta_local=/);
