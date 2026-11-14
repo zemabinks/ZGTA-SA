@@ -68,6 +68,7 @@
   let selectedCarModel = '';
   let selectedAircraftModel = '';
   let selectedPilotModel = '593';
+  let selectedTaxiModel = '420';
   let selectedHomeId = '';
   const transferAmounts = new Map();
   let partyDraft = '';
@@ -208,6 +209,9 @@
           (trucker ? 'Load cargo into the marked Mule' : thief ? 'Take the marked car' : taxi ? 'Collect the passenger' : medic ? 'Collect the patient' : 'Collect the package') :
           (trucker ? 'Deliver cargo in the marked Mule' : thief ? 'Deliver the marked car' : taxi ? 'Drop off the passenger' : medic ? 'Return the patient' : 'Deliver the package');
         panel.append(element('p', `${task} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.${taxi || medic || thief || trucker ? ' You must be driving.' : ''}${thief || trucker ? ` ${state.job.secondsLeft} s left.` : ''}`, 'zgta-muted'));
+        if (taxi) panel.append(element('p',
+          `Use the marked ${state.job.fare.cab}. Fare $${state.job.fare.base}${state.job.fare.cabPremium ? ` · cab +$${state.job.fare.cabPremium}` : ''} · clean +$${state.job.fare.cleanBonus} when condition stays at 95% or better · quick +$${state.job.fare.quickBonus} within ${state.job.fare.quickSeconds} s from pickup · streak bonus now $${state.job.fare.streakBonus}. ${state.job.stage === 'delivery' ? `Ride ${state.job.fare.rideSeconds} s · clean ${state.job.fare.cleanEligible ? 'eligible' : 'not yet verified'}.` : ''}`,
+          'zgta-muted'));
         if (trucker) panel.append(element('p', state.job.convoyBonusAwarded ?
           `Your $${state.job.convoyBonus} group convoy bonus was paid.` :
           `A group mate delivering to the same stop in their own Mule within 80 m earns both drivers a $${state.job.convoyBonus} convoy bonus.`, 'zgta-muted'));
@@ -275,14 +279,40 @@
       row('End this task', 'job.cancel', {}, 'Cancel');
     } else {
       for (const job of state.catalog.jobs)
-        row(`${job.name} · earn $${job.pay}${['taxi', 'trial'].includes(job.id) ? ' · needs a car' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}${job.id === 'fire' ? ' · eight-minute call · loaner fire truck' : ''}${job.id === 'heist' ? ` · ten-minute route · loaner Sultan${state.heistCooldown ? ` · ${state.heistCooldown} s cooldown` : ''}` : ''}`,
+        row(`${job.name} · earn $${job.pay}${job.id === 'trial' ? ' · needs a car' : ''}${job.id === 'taxi' ? ' · loaner cab · fare bonuses' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}${job.id === 'fire' ? ' · eight-minute call · loaner fire truck' : ''}${job.id === 'heist' ? ` · ten-minute route · loaner Sultan${state.heistCooldown ? ` · ${state.heistCooldown} s cooldown` : ''}` : ''}`,
           'job.start', {job: job.id}, 'Start', !state.connected ||
-            (['taxi', 'trial'].includes(job.id) && !state.cars.length) ||
+            (job.id === 'trial' && !state.cars.length) ||
             (job.id === 'carthief' && (state.passive || state.policeDuty)) ||
             (job.id === 'heist' && (state.passive || state.policeDuty ||
               state.wanted > 0 || state.heistCooldown > 0)) ||
             (job.id === 'patrol' && !state.policeDuty) ||
             (state.race?.joined && ['lobby', 'running'].includes(state.race.stage)));
+    }
+    section('Taxi record');
+    panel.append(element('p', `Level ${state.taxi.level} · ${state.taxi.fares} fares completed · ${state.taxi.streak} in a row. A fare pays $300, with local cab, clean, quick, and streak bonuses. Every three fares unlocks a level; cancelling breaks the streak.`, 'zgta-muted'));
+    if (!state.job && state.taxi.cabs?.length) {
+      const line = element('div', undefined, 'zgta-row');
+      const select = element('select');
+      select.setAttribute('aria-label', 'Taxi cab');
+      for (const cab of state.taxi.cabs) {
+        const option = element('option', `${cab.name} · level ${cab.level}${cab.premium ? ` · +$${cab.premium}` : ''}`);
+        option.value = String(cab.model);
+        option.disabled = !cab.unlocked;
+        select.append(option);
+      }
+      if (state.taxi.cabs.some(item => item.unlocked && String(item.model) === selectedTaxiModel))
+        select.value = selectedTaxiModel;
+      else select.value = '420';
+      selectedTaxiModel = select.value;
+      select.addEventListener('change', () => {selectedTaxiModel = select.value;});
+      const startCab = element('button', 'Start selected cab');
+      startCab.type = 'button';
+      startCab.disabled = busy || !state.connected ||
+        (state.race?.joined && ['lobby', 'running'].includes(state.race.stage));
+      startCab.addEventListener('click', () => perform('job.start',
+        {job: 'taxi', model: Number(select.value)}));
+      line.append(select, startCab);
+      panel.append(line);
     }
     section('Pilot record');
     panel.append(element('p', `Level ${state.pilot.level} · ${state.pilot.flights} flights completed · ${state.pilot.streak} in a row · ${5 - state.pilot.streak % 5} until the next fifth-flight bonus. Every three completed flights unlocks a level; cancelling breaks the streak.`, 'zgta-muted'));
@@ -657,6 +687,11 @@
     }
     if (job.mode === 'service') {
       objective.textContent = `Mechanic: ${job.repairPart} ${job.repairProgress}% · ${Math.min(job.repairStep + 1, job.repairTotal)}/${job.repairTotal}\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nStand beside the car on foot`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (job.id === 'taxi' && job.mode === 'route') {
+      objective.textContent = `Taxi: ${job.stage === 'pickup' ? 'collect the passenger' : 'drive to drop-off'} · $${job.fare.base} base${job.fare.streakBonus ? ` + $${job.fare.streakBonus} streak` : ''}\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nUse the marked cab · press F6 for fare details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
