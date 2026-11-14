@@ -176,20 +176,23 @@ final class NativeGameViewController: UIViewController {
         var forward = Float(-stick.value.y)
         var sideways = Float(stick.value.x)
         var steering = turn
+        var gamepadRunning = false
+        var gamepadJumping = false
         if let pad = GCController.controllers().compactMap(\.extendedGamepad).first {
             let lx = pad.leftThumbstick.xAxis.value, ly = pad.leftThumbstick.yAxis.value
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
             let rx = pad.rightThumbstick.xAxis.value
             if abs(rx) > 0.05 { steering = rx }
-            if pad.buttonA.isPressed { run = true }
-            if pad.buttonB.isPressed { jumping = true }
+            gamepadRunning = pad.buttonA.isPressed
+            gamepadJumping = pad.buttonB.isPressed
         }
         let walking = abs(forward) + abs(sideways) > 0.05
-        renderer?.move(forward: forward * (run ? 2 : 1), sideways: sideways * (run ? 2 : 1), turn: steering, delta: delta)
+        let speed: Float = (run || gamepadRunning) ? 2 : 1
+        renderer?.move(forward: forward * speed, sideways: sideways * speed, turn: steering, delta: delta)
         if link.timestamp - lastNetwork > 0.2, let renderer {
             lastNetwork = link.timestamp
             var position = renderer.position
-            if jumping { position.z += 1 }
+            if jumping || gamepadJumping { position.z += 1 }
             network.sendPosition(position, heading: renderer.direction, moving: walking)
         }
     }

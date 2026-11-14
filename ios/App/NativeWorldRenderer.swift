@@ -25,6 +25,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
     private var loading: Set<String> = []
+    private var retryAfter: [String: Date] = [:]
     private var activeDetail = "c59"
     private var camera = SIMD3<Float>(1480, -1738, 18)
     private var heading: Float = 0
@@ -101,7 +102,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func load(name: String) {
-        guard meshes[name] == nil, !loading.contains(name), let server else { return }
+        guard meshes[name] == nil, !loading.contains(name),
+              Date() >= (retryAfter[name] ?? .distantPast), let server else { return }
         loading.insert(name)
         onStatus?("LOADING CITY: \(name.uppercased())")
         let binURL = server.path("game/world/\(name).bin")
@@ -110,16 +112,21 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var bin: Data?
         var png: Data?
         var fetchError: Error?
+        let lock = NSLock()
         group.enter()
         URLSession.shared.dataTask(with: binURL) { data, response, error in
+            lock.lock()
             if let response = response as? HTTPURLResponse, response.statusCode == 200 { bin = data }
             else { fetchError = error ?? NSError(domain: "World", code: (response as? HTTPURLResponse)?.statusCode ?? -1) }
+            lock.unlock()
             group.leave()
         }.resume()
         group.enter()
         URLSession.shared.dataTask(with: imageURL) { data, response, error in
+            lock.lock()
             if let response = response as? HTTPURLResponse, response.statusCode == 200 { png = data }
             else { fetchError = error ?? NSError(domain: "World", code: (response as? HTTPURLResponse)?.statusCode ?? -1) }
+            lock.unlock()
             group.leave()
         }.resume()
         group.notify(queue: .main) { [weak self] in
@@ -127,6 +134,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             self.loading.remove(name)
             if name.hasPrefix("c"), name != self.activeDetail { return }
             guard let bin, let png else {
+                self.retryAfter[name] = Date().addingTimeInterval(5)
                 self.onStatus?("CITY FILE UNAVAILABLE: \(name.uppercased()) \(fetchError?.localizedDescription ?? "")")
                 return
             }
@@ -139,6 +147,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                                             length: world.vertices.count * MemoryLayout<NativeVertex>.stride),
                       let indices = self.device.makeBuffer(bytes: world.indices,
                                                            length: world.indices.count * MemoryLayout<UInt32>.stride) else {
+                    self.retryAfter[name] = Date().addingTimeInterval(5)
                     self.onStatus?("INVALID CITY TEXTURE: \(name.uppercased())")
                     return
                 }
@@ -146,6 +155,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                          indexCount: world.indices.count, atlas: atlas)
                 self.onStatus?("CITY READY: \(name.uppercased())")
             } catch {
+                self.retryAfter[name] = Date().addingTimeInterval(5)
                 self.onStatus?("CITY DATA ERROR: \(error.localizedDescription)")
             }
         }
