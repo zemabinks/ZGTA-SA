@@ -66,9 +66,12 @@ try {
   assert.equal(peer.player.cash, 425);
   assert.equal(peer.player.taxiFares, 1);
   assert.equal(peer.player.taxiStreak, 1);
-  assert(!game.vehicles.has(cab.id));
-  place(drop);
-  cab = start();
+  assert.match(first.message, /Next passenger/);
+  assert(game.vehicles.has(cab.id), 'one cab stays out for the whole shift');
+  assert.equal(game.gameplayState(peer.player).job.stage, 'pickup');
+  assert.equal(game.gameplayState(peer.player).job.fare.shiftFares, 1);
+  assert.throws(() => game.action(peer.player, 'job.start', {job: 'taxi'}),
+    /Finish or cancel/);
   place(game.gameplayState(peer.player).job.target, cab, 700);
   game.action(peer.player, 'job.pickup', {});
   peer.player.job.started = Date.now() - 360000;
@@ -81,6 +84,8 @@ try {
   assert.equal(peer.player.cash, 775);
   assert.equal(peer.player.taxiFares, 2);
   assert.equal(peer.player.taxiStreak, 2);
+  assert.equal(game.gameplayState(peer.player).job.fare.shiftFares, 2);
+  assert(game.vehicles.has(cab.id));
   game.flushSync();
   delete require.cache[require.resolve(backend)];
   game = require(backend);
@@ -90,9 +95,13 @@ try {
   assert.equal(peer.player.cash, 775);
   assert.equal(peer.player.taxiFares, 2);
   assert.equal(peer.player.taxiStreak, 2);
-  place({x: 1480, y: -1738});
-  cab = start();
+  cab = game.vehicles.get(peer.player.job.vehicleId);
+  assert(cab, 'multi-fare shift and cab survive restart');
+  assert.equal(game.gameplayState(peer.player).job.fare.shiftFares, 2);
   assert.equal(game.gameplayState(peer.player).job.fare.streakBonus, 100);
+  assert.throws(() => game.action(peer.player, 'job.cancel', {}),
+    /Get out of the marked cab/);
+  place({x: 1480, y: -1738});
   game.action(peer.player, 'job.cancel', {});
   assert.equal(peer.player.taxiStreak, 0);
   assert(!game.vehicles.has(cab.id));
@@ -125,7 +134,14 @@ try {
   const premiumFare = game.action(peer.player, 'job.complete', {});
   assert.match(premiumFare.message, /\$200 taxi bonus \(Limousine fare\)/);
   assert.equal(peer.player.cash, 1275);
-  console.log('PASS: guest cab, marked fare, bonuses, unlockable cabs, streak and restart');
+  assert.equal(game.gameplayState(peer.player).job.fare.shiftFares, 1);
+  assert(game.vehicles.has(cab.id));
+  assert.throws(() => game.action(peer.player, 'job.cancel', {}),
+    /Get out of the marked cab/);
+  place(limoDrop);
+  game.action(peer.player, 'job.cancel', {});
+  assert(!game.vehicles.has(cab.id));
+  console.log('PASS: guest cab, multi-fare shift, bonuses, unlockable cabs, streak and restart');
 } finally {
   fs.rmSync(temporary, {recursive: true, force: true});
 }
