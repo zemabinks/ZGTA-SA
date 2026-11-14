@@ -257,9 +257,8 @@
             heist.wanted > 0 || heist.secondsLeft <= 0);
         }
       } else if (state.job.mode === 'service') {
-        panel.append(element('p', `Repair the stranded vehicle at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m and stand on foot.`, 'zgta-muted'));
-        row('Repair stranded vehicle', 'job.complete', {}, 'Repair',
-          !state.connected || state.job.remaining > state.job.radius);
+        panel.append(element('p', `Repair the stranded vehicle at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Stand on foot within ${state.job.radius} m and hold position. Moving away resets the current stage.`, 'zgta-muted'));
+        panel.append(element('p', `${state.job.repairPart} · stage ${Math.min(state.job.repairStep + 1, state.job.repairTotal)}/${state.job.repairTotal} · ${state.job.repairProgress}%`, 'zgta-muted'));
       } else if (state.job.mode === 'checkpoints') {
         const pizza = state.job.id === 'pizza';
         panel.append(element('p', `${pizza ? 'Pizza delivery' : 'Checkpoint'} ${state.job.index}/${state.job.total}: ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. ${state.job.secondsLeft} s left. Drive ${state.job.id === 'patrol' ? 'the marked police car ' : pizza ? 'the marked Pizzaboy scooter ' : ''}within ${state.job.radius} m.`, 'zgta-muted'));
@@ -653,6 +652,11 @@
       const task = job.stage === 'plan' ? 'take the bag on foot' :
         `lose the police (${job.wanted} stars), then deliver in the Sultan`;
       objective.textContent = `Getaway heist: ${task} · ${job.secondsLeft} s left\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nPress F6 for details`;
+      objective.style.whiteSpace = 'pre-line';
+      return;
+    }
+    if (job.mode === 'service') {
+      objective.textContent = `Mechanic: ${job.repairPart} ${job.repairProgress}% · ${Math.min(job.repairStep + 1, job.repairTotal)}/${job.repairTotal}\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nStand beside the car on foot`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
