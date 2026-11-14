@@ -15,6 +15,8 @@ const SUPPLIES = Object.freeze([
   {id: 'paint_can', name: 'Paint can', price: 100, capacity: 5},
 ]);
 const MISSION_RADIUS = 12;
+const MECHANIC_STAGES = Object.freeze(['engine', 'tyres', 'bodywork']);
+const MECHANIC_STAGE_MS = 3000;
 const TIME_TRIAL_MS = 180000;
 const PATROL_MS = 240000;
 const PIZZA_MS = 360000;
@@ -301,7 +303,12 @@ function savedJob(value) {
   if (value.id === 'mechanic' && value.mode === 'service') {
     if (!homeAt(value.targetHome) || !validMissionId(value.vehicleId)) return null;
     return {id: value.id, mode: 'service', targetHome: value.targetHome,
-      vehicleId: value.vehicleId, started: value.started};
+      vehicleId: value.vehicleId,
+      repairStep: Number.isInteger(value.repairStep) && value.repairStep >= 0 &&
+        value.repairStep <= MECHANIC_STAGES.length ? value.repairStep : 0,
+      repairProgress: Math.max(0, Math.min(MECHANIC_STAGE_MS - 1,
+        finite(value.repairProgress))),
+      started: value.started};
   }
   if (['trial', 'patrol', 'pizza'].includes(value.id) && value.mode === 'checkpoints') {
     if (!Array.isArray(value.points) || value.points.length !== 3 ||
@@ -759,7 +766,10 @@ class LocalGame {
         objective = {mode: 'service', stage: 'repair',
           target: {x: rounded(x), y: rounded(y), name: `Roadside call near ${home.name}`},
           remaining: pos ? Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null,
-          radius: MISSION_RADIUS};
+          radius: 8, repairStep: active.repairStep || 0,
+          repairTotal: MECHANIC_STAGES.length,
+          repairPart: MECHANIC_STAGES[active.repairStep || 0] || 'finishing',
+          repairProgress: Math.floor(100 * (active.repairProgress || 0) / MECHANIC_STAGE_MS)};
       }
     } else if (active?.mode === 'checkpoints') {
       const home = homeAt(active.points[active.index]);
@@ -1585,9 +1595,10 @@ class LocalGame {
         const home = nearestHome(pos);
         if (!home) throw new Error('Roadside service locations are unavailable.');
         player.job = {id: job.id, mode: 'service', targetHome: home.id,
-          vehicleId: missionId(), started: Date.now()};
+          vehicleId: missionId(), repairStep: 0, repairProgress: 0,
+          repairTick: Date.now(), started: Date.now()};
         this.addMissionVehicle(player);
-        message = `Roadside call started. Go to the broken-down car near ${home.name}, then repair it on foot.`;
+        message = `Roadside call started. Go to the broken-down car near ${home.name}; stand beside it on foot to fix its engine, tyres, and bodywork.`;
       } else if (job.id === 'medic') {
         const home = nearestHome(pos);
         if (!home) throw new Error('Patient locations are unavailable.');
@@ -1685,6 +1696,10 @@ class LocalGame {
         throw new Error('Travel to the pickup point.');
       if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
         throw new Error('Drive the mission vehicle to the pickup point.');
+      if (player.job.id === 'medic' &&
+          (pos.peer.state.vehicle !== player.job.vehicleId ||
+            pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+        throw new Error('Drive the marked ambulance to the patient.');
       if (player.job.id === 'trucker') {
         if (Date.now() - player.job.started > TRUCKER_MS)
           throw new Error('The freight deadline passed. Cancel and start again.');
@@ -1764,6 +1779,10 @@ class LocalGame {
           throw new Error('Travel to the delivery destination.');
         if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
           throw new Error('Finish the fare or medical call while driving.');
+        if (player.job.id === 'medic' &&
+            (pos.peer.state.vehicle !== player.job.vehicleId ||
+              pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+          throw new Error('Return the patient in the marked ambulance.');
         if (player.job.id === 'carthief' &&
             (pos.peer.state.vehicle !== player.job.vehicleId ||
               pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
@@ -1790,10 +1809,12 @@ class LocalGame {
           throw new Error('Hold the plane still for two seconds.');
       } else if (player.job.mode === 'service') {
         const vehicle = this.vehicles.get(player.job.vehicleId);
-        if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > MISSION_RADIUS)
+        if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > 8)
           throw new Error('Go to the stranded vehicle to repair it.');
         if (pos.peer.state.walking !== true)
           throw new Error('Get out and repair the vehicle on foot.');
+        if ((player.job.repairStep || 0) < MECHANIC_STAGES.length)
+          throw new Error('Keep working beside the vehicle until the engine, tyres, and bodywork are repaired.');
       } else if (player.job.mode === 'checkpoints') {
         const home = homeAt(player.job.points[player.job.index]);
         if (player.job.index !== player.job.points.length - 1 || !home ||
@@ -2445,10 +2466,44 @@ class LocalGame {
       rows: online.map(p => [String(p.player.number), p.player.name, 0, 0, p.player.number])};
   }
 
+  mechanicTick() {
+    const now = Date.now();
+    for (const player of this.players.values()) {
+      const job = player.job;
+      if (job?.id !== 'mechanic' || job.mode !== 'service') continue;
+      const previous = job.repairTick;
+      job.repairTick = now;
+      if (!previous) continue;
+      const vehicle = this.vehicles.get(job.vehicleId);
+      const pos = this.position(player);
+      const besideCar = vehicle && pos && pos.peer.state.walking === true &&
+        player.health > 0 && Math.hypot(pos.x - vehicle.row[3],
+          pos.y - vehicle.row[4]) <= 8;
+      if (!besideCar) {
+        if (job.repairProgress) {job.repairProgress = 0; this.save();}
+        continue;
+      }
+      if (job.repairStep >= MECHANIC_STAGES.length) {
+        this.action(player, 'job.complete', {});
+        continue;
+      }
+      job.repairProgress += Math.min(300, Math.max(0, now - previous));
+      if (job.repairProgress >= MECHANIC_STAGE_MS) {
+        const finished = MECHANIC_STAGES[job.repairStep];
+        job.repairStep++;
+        job.repairProgress = 0;
+        this.note(player, `${finished[0].toUpperCase()}${finished.slice(1)} repaired${job.repairStep < MECHANIC_STAGES.length ?
+          `. Now repair the ${MECHANIC_STAGES[job.repairStep]}.` : '. Roadside call complete.'}`);
+      }
+      this.save();
+    }
+  }
+
   broadcastPositions() {
     this.expireRace();
     this.policeTick();
     this.turfTick();
+    this.mechanicTick();
     for (const p of this.peers) {
       if (!p.ready) continue;
       const rows = [...this.peers].filter(other => other !== p).map(other => this.row(other)).filter(Boolean);
