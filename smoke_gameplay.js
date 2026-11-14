@@ -322,8 +322,15 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 100));
       const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
-      assert.equal(delivered.body.state.job, null);
+      assert.equal(delivered.body.state.job.stage, 'pickup');
+      assert.equal(delivered.body.state.job.vehicleId, cab.v[0]);
+      assert.equal(delivered.body.state.job.fare.shiftFares, 1);
       assert.equal(delivered.body.state.taxi.fares, 1);
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.cancel'})).status, 400,
+        'seated driver must exit before cab removal');
+      ws.send({t: 'me', walking: true, driving: false, skin: 7, x, y, z: 13});
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.cancel'})).status, 200);
       await ws.wait(message => message.t === 'vgone' && message.id === cab.v[0]);
     }
 
