@@ -196,7 +196,7 @@ async function main() {
       assert.equal(started.status, 200, JSON.stringify(started.body));
       assert.equal(started.body.state.job.mode, 'service');
       const broken = await ws.wait(message => message.t === 'spawned' &&
-        message.v[0].startsWith('mission-'));
+        message.v[0] === started.body.state.job.vehicleId);
       assert.equal(broken.v[9], 350, 'roadside car starts damaged');
       const shared = await otherWs.wait(message => message.t === 'spawned' &&
         message.v[0] === broken.v[0]);
@@ -289,28 +289,47 @@ async function main() {
       const started = await api('/api/local/action', 'POST', {action: 'job.start', job: 'taxi'});
       assert.equal(started.status, 200, JSON.stringify(started.body));
       assert.equal(started.body.state.job.stage, 'pickup');
+      const cab = await ws.wait(message => message.t === 'spawned' &&
+        message.v[0] === started.body.state.job.vehicleId &&
+        message.v[2] === '420.6.1.0.');
+      assert.equal(cab.v[0], started.body.state.job.vehicleId);
+      ws.send({t: 'enter', v: cab.v[0]});
+      assert.equal((await ws.wait(message => message.t === 'enter' && message.v === cab.v[0])).ok, true);
       await moveTo(started.body.state.job.target);
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
         'passenger pickup requires driving');
       ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
       await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
+        'another vehicle cannot collect the passenger');
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
+        vehicle: cab.v[0], car: cab.v[2]});
+      await new Promise(resolve => setTimeout(resolve, 100));
       const pickup = await api('/api/local/action', 'POST', {action: 'job.pickup'});
       assert.equal(pickup.status, 200, JSON.stringify(pickup.body));
       assert.equal(pickup.body.state.job.stage, 'delivery');
-      await moveTo(pickup.body.state.job.target, true);
+      await moveTo(pickup.body.state.job.target, true, cab.v);
       ws.send({t: 'me', walking: true, driving: false, skin: 7, x, y, z: 13});
       await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
         'passenger drop-off requires driving');
       ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
       await new Promise(resolve => setTimeout(resolve, 3100));
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
+        'another vehicle cannot drop off the passenger');
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
+        vehicle: cab.v[0], car: cab.v[2]});
+      await new Promise(resolve => setTimeout(resolve, 100));
       const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
       assert.equal(delivered.body.state.job, null);
+      assert.equal(delivered.body.state.taxi.fares, 1);
+      await ws.wait(message => message.t === 'vgone' && message.id === cab.v[0]);
     }
 
-    assert.equal((await api('/api/local/action', 'POST', {action: 'job.start', job: 'taxi'})).status, 400,
-      'taxi requires an owned car');
+    const guestTaxi = await api('/api/local/action', 'POST', {action: 'job.start', job: 'taxi'});
+    assert.equal(guestTaxi.status, 200, 'taxi gives a loaner cab to a new guest');
+    assert.equal((await api('/api/local/action', 'POST', {action: 'job.cancel'})).status, 200);
     assert.equal((await api('/api/local/action', 'POST', {action: 'job.start', job: 'trial'})).status, 400,
       'time trial requires an owned car');
     await mechanic();
@@ -404,7 +423,7 @@ async function main() {
     const ongoing = await api('/api/local/action', 'POST', {action: 'job.start', job: 'mechanic'});
     assert.equal(ongoing.status, 200, JSON.stringify(ongoing.body));
     const missionCar = await ws.wait(message => message.t === 'spawned' &&
-      message.v[0].startsWith('mission-'));
+      message.v[0] === ongoing.body.state.job.vehicleId);
     ws.close(); ws = null;
     child.kill('SIGINT');
     await new Promise(resolve => child.once('exit', resolve));
