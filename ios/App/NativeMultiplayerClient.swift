@@ -9,6 +9,7 @@ struct RemotePlayer {
     let heading: Float
     let animation: String
     let weapon: Int
+    let vehicleID: String?
 }
 
 struct RemoteVehicle {
@@ -288,6 +289,9 @@ final class NativeMultiplayerClient {
                   let x = (row[3] as? NSNumber)?.floatValue,
                   let y = (row[4] as? NSNumber)?.floatValue,
                   let z = (row[5] as? NSNumber)?.floatValue else { continue }
+            let code = row[2] as? String ?? "s7"
+            let driving = !code.hasPrefix("s")
+            let vehicleID = driving && row.count > 35 ? row[35] as? String : nil
             let wireAnimation = row.count > 41 ? row[41] as? String ?? "" : ""
             let animation = wireAnimation.contains("colt45_fire") ? "colt45_fire" :
                 wireAnimation.contains("gun_stand") ? "gun_stand" :
@@ -296,12 +300,29 @@ final class NativeMultiplayerClient {
                 wireAnimation.contains("walk") ? "walk_player" :
                 (row.count > 27 && (row[27] as? NSNumber)?.intValue == 22) ? "gun_stand" : "idle_stance"
             updated[id] = RemotePlayer(id: id, name: name, position: SIMD3(x, y, z),
-                                       code: row[2] as? String ?? "s7",
+                                       code: code,
                                        heading: row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0,
                                        animation: animation,
-                                       weapon: row.count > 27 ? (row[27] as? NSNumber)?.intValue ?? 0 : 0)
+                                       weapon: row.count > 27 ? (row[27] as? NSNumber)?.intValue ?? 0 : 0,
+                                       vehicleID: vehicleID)
+            if let vehicleID, var vehicle = vehicles[vehicleID] {
+                vehicle.position = SIMD3(x, y, z)
+                vehicle.heading = row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0
+                vehicles[vehicleID] = vehicle
+            } else if !driving, row.count > 35,
+                      let parkedID = row[35] as? String,
+                      let parked = row[33] as? [Any], parked.count >= 5,
+                      var vehicle = vehicles[parkedID],
+                      let parkedX = (parked[1] as? NSNumber)?.floatValue,
+                      let parkedY = (parked[2] as? NSNumber)?.floatValue,
+                      let parkedZ = (parked[3] as? NSNumber)?.floatValue {
+                vehicle.position = SIMD3(parkedX, parkedY, parkedZ)
+                vehicle.heading = (parked[4] as? NSNumber)?.floatValue ?? vehicle.heading
+                vehicles[parkedID] = vehicle
+            }
         }
         players = updated
         onPlayers?(Array(updated.values))
+        onVehicles?(Array(vehicles.values))
     }
 }

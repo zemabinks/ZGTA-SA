@@ -588,6 +588,11 @@ In another simulator check, a native chat message appeared in the server echo
 and the in-game feed. A courier pickup drew the Metal objective marker, and its
 contextual touch button collected the package without reopening Jobs. The
 objective changed to delivery; the test mission was then cancelled.
+The native multiplayer client now uses the browser-compatible vehicle ID in
+position updates to move a remote driver's car and suppress its old parked
+copy. It also applies the parked position sent when that driver gets out.
+The isolated multiplayer wire test passes; a second-device visual drive is
+still needed to verify this rendering path end to end.
 
 This remains a native gameplay work in progress. The iOS client does not yet
 reproduce the browser vehicle

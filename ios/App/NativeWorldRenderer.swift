@@ -537,7 +537,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                        player.weapon))
             }
         }
+        let drivenVehicleIDs = Set(remotePlayers.compactMap(\.vehicleID))
         for vehicle in remoteVehicles where vehicle.id != currentVehicleID &&
+            !drivenVehicleIDs.contains(vehicle.id) &&
             simd_distance(vehicle.position, camera) < 130 {
             if let name = actorName(code: vehicle.code) {
                 modelInstances.append((name, vehicle.position, vehicle.heading, "", 0, 0))
