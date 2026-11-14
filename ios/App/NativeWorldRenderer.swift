@@ -90,6 +90,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var cameraPitch: Float = 0
     private var collision: WorldCollision?
     private(set) var drivingSpeed: Float = 0
+    private(set) var vehicleHealth = 1000
     private var verticalSpeed: Float = 0
     private var vehicleHandling: [String: VehicleHandling] = [:]
     private var vehicleInfo: [String: [String: String]] = [:]
@@ -183,9 +184,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if clip != ownClip { ownClip = clip; ownClipTime = 0 }
         else { ownClipTime += Double(delta * (inputLength < 0.05 ? 1 : inputLength)) }
         let start = camera
+        let startHeading = heading
         var next = camera
         if driving {
             steeringInput = max(-1, min(1, turn))
+            let throttle = vehicleHealth > 0 ? forward : 0
             let table = activeHandling
             let speedLimit = table?.roadTopSpeed ?? 32
             let acceleration = max(1.5, (table?.acceleration ?? 20) * 0.24)
@@ -194,21 +197,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let grip = max(0.35, min(1.8, table?.traction ?? 0.8))
             if vehicleKind == "helicopter" {
                 heading += steeringInput * delta * 0.95
-                drivingSpeed += (forward * 24 - drivingSpeed) * min(1, delta * 1.6)
+                drivingSpeed += (throttle * 24 - drivingSpeed) * min(1, delta * 1.6)
                 next.x += (sin(heading) * drivingSpeed + cos(heading) * sideways * 15) * delta
                 next.y += (cos(heading) * drivingSpeed - sin(heading) * sideways * 15) * delta
-                flightVerticalSpeed += (lift * 8 - flightVerticalSpeed) * min(1, delta * 1.8)
+                flightVerticalSpeed += ((vehicleHealth > 0 ? lift : 0) * 8 -
+                    flightVerticalSpeed) * min(1, delta * 1.8)
                 next.z += flightVerticalSpeed * delta
-                vehiclePitch += (forward * 0.16 - vehiclePitch) * min(1, delta * 2)
+                vehiclePitch += (throttle * 0.16 - vehiclePitch) * min(1, delta * 2)
             } else if vehicleKind == "plane" && activeVehicleModel != "539" {
                 let top = max(35, min(95, (table?.maxVelocity ?? 200) / 3.6))
-                let target = max(0, min(top, forward > 0 ? top * forward : 0))
-                let rate = forward < 0 ? max(3, braking) : forward > 0 ? max(3, acceleration) : 1.2
+                let target = max(0, min(top, throttle > 0 ? top * throttle : 0))
+                let rate = throttle < 0 ? max(3, braking) : throttle > 0 ? max(3, acceleration) : 1.2
                 drivingSpeed += max(-rate * delta, min(rate * delta, target - drivingSpeed))
                 // Keep a touch-only takeoff climbing above the airport's
                 // terminal and container roofs. A right-stick input overrides
                 // the assist, so a pilot can level or descend at any time.
-                let autoRotate = drivingSpeed > 15 && forward > 0.05 &&
+                let autoRotate = drivingSpeed > 15 && throttle > 0.05 &&
                     camera.z < flightStartHeight + 120
                 let requestedPitch = abs(lookVertical) > 0.05 ? lookVertical * 0.35 :
                     autoRotate ? 0.22 : 0
@@ -225,7 +229,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     vehicleKind == "bike" ? 3 : vehicleKind == "train" ? 8 : 9
                 let top = vehicleKind == "boat" ? min(speedLimit, 35) :
                     vehicleKind == "bicycle" ? min(speedLimit, 15) : speedLimit
-                let input = max(-1, min(1, forward))
+                let input = max(-1, min(1, throttle))
                 if input > 0.05 {
                     drivingSpeed = min(top, drivingSpeed +
                         (drivingSpeed < 0 ? braking : acceleration) * input * delta)
@@ -269,8 +273,30 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         let radius: Float = driving ? (vehicleKind == "bike" || vehicleKind == "bicycle" ? 0.48 : 0.9) : 0.32
         let height: Float = driving ? (vehicleKind == "plane" ? 2.5 : 1.4) : 1.8
-        if collision?.canMove(from: start, to: next, radius: radius, bodyHeight: height) == false {
-            if driving { drivingSpeed = 0; flightVerticalSpeed = 0 }
+        let bodyBlocked = collision?.canMove(from: start, to: next,
+                                             radius: radius, bodyHeight: height) == false
+        let length: Float = vehicleKind == "plane" || vehicleKind == "helicopter" ? 4.5 :
+            vehicleKind == "bike" || vehicleKind == "bicycle" ? 0.9 :
+            vehicleKind == "boat" ? 2.8 : 2.1
+        let lead = drivingSpeed >= 0 ? length : -length
+        let oldBumper = start + SIMD3<Float>(sin(startHeading) * lead,
+                                             cos(startHeading) * lead, 0)
+        let newBumper = next + SIMD3<Float>(sin(heading) * lead,
+                                            cos(heading) * lead, 0)
+        let bumperBlocked = driving && abs(drivingSpeed) > 0.05 &&
+            collision?.canMove(from: oldBumper, to: newBumper,
+                               radius: radius, bodyHeight: height) == false
+        if bodyBlocked || bumperBlocked {
+            if driving {
+                if abs(drivingSpeed) > 8 {
+                    let damage = Int(min(300, max(12, (abs(drivingSpeed) - 7) * 3)))
+                    vehicleHealth = max(0, vehicleHealth - damage)
+                    onStatus?(vehicleHealth == 0 ? "VEHICLE DISABLED · REPAIR IT AT A WORKSHOP" :
+                        "COLLISION · VEHICLE HEALTH \(vehicleHealth) / 1000")
+                }
+                drivingSpeed = 0
+                flightVerticalSpeed = 0
+            }
             next = start
         }
         camera = next
@@ -330,6 +356,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         heading = vehicle.heading
         actorHeading = heading
         drivingSpeed = 0
+        vehicleHealth = vehicle.health
         verticalSpeed = 0
         flightVerticalSpeed = 0
         flightStartHeight = vehicle.position.z

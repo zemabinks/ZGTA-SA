@@ -639,7 +639,10 @@ final class NativeGameViewController: UIViewController {
     @objc private func toggleVehicle() {
         guard let renderer else { return }
         if currentVehicle != nil {
-            if let currentVehicle { network.sendExit(renderer.position, heading: renderer.direction, vehicle: currentVehicle) }
+            if let currentVehicle {
+                network.sendExit(renderer.position, heading: renderer.direction,
+                                 vehicle: currentVehicle, vehicleHealth: renderer.vehicleHealth)
+            }
             currentVehicle = nil
             renderer.exitVehicle()
             vehicleButton.setTitle("ENTER CAR", for: .normal)
@@ -824,6 +827,7 @@ final class NativeGameViewController: UIViewController {
                                  running: running,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
                                  steer: renderer.steeringInput, pitch: renderer.vehicleNose,
+                                 vehicleHealth: renderer.vehicleHealth,
                                  airborne: renderer.isAirborne, weapon: usingPistol ? 22 : 0,
                                  firing: renderer.isFiring)
         }

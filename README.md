@@ -511,6 +511,14 @@ table from the Mac and uses each model's acceleration, braking, steering,
 traction, drag, and speed inputs. Cars, motorcycles, bicycles, boats, planes,
 and helicopters have separate movement rules. These rules are still an
 approximation of the browser physics rather than the full original solver.
+Hard impacts against the archived collision mesh now reduce native vehicle
+health; the updated value is reported to the local multiplayer server and
+saved for owned vehicles. A vehicle at zero health cannot accelerate until it
+is repaired. In the simulator a taxi hit a downtown wall, the HUD reported
+910/1000 health, and the server saved 910 for that mission vehicle. Collision
+queries now include the front or rear bumper so the vehicle stops before its
+centre reaches a wall; a second simulator impact showed the taxi stopping at
+the wall with its rear still on the sidewalk.
 The animation converter bakes idle, walk, run, jump, pistol standing and firing,
 and fist attack frames from the archived ANP3 clips and each DFF skin rig. It
 also writes right-hand attachment transforms so the Colt .45 DFF/TXD model

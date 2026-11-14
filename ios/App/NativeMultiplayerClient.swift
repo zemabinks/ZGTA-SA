@@ -19,6 +19,7 @@ struct RemoteVehicle {
     let code: String
     var position: SIMD3<Float>
     var heading: Float
+    var health: Int
 
     init?(row: [Any]) {
         guard row.count >= 7, let id = row[0] as? String,
@@ -31,6 +32,7 @@ struct RemoteVehicle {
         self.code = code
         position = SIMD3(x, y, z)
         heading = (row[6] as? NSNumber)?.floatValue ?? 0
+        health = max(0, min(1000, (row.count > 9 ? row[9] as? NSNumber : nil)?.intValue ?? 1000))
     }
 }
 
@@ -79,6 +81,7 @@ final class NativeMultiplayerClient {
     func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool, running: Bool,
                       vehicle: RemoteVehicle? = nil, speed: Float = 0,
                       steer: Float = 0, pitch: Float = 0,
+                      vehicleHealth: Int = 1000,
                       airborne: Bool = false, weapon: Int = 0, firing: Bool = false) {
         if let vehicle {
             var packet: [String: Any] = ["t": "me", "driving": true, "car": vehicle.code,
@@ -86,7 +89,7 @@ final class NativeMultiplayerClient {
                   "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
                   "heading": Double(heading), "pitch": Double(pitch),
                   "speed": Double(speed), "steer": Double(steer),
-                  "health": 1000, "life": health, "armour": armour]
+                  "health": vehicleHealth, "life": health, "armour": armour]
             addPendingChat(to: &packet)
             send(packet)
             return
@@ -172,7 +175,8 @@ final class NativeMultiplayerClient {
         onVitals?(health, armour)
     }
 
-    func sendExit(_ position: SIMD3<Float>, heading: Float, vehicle: RemoteVehicle) {
+    func sendExit(_ position: SIMD3<Float>, heading: Float, vehicle: RemoteVehicle,
+                  vehicleHealth: Int) {
         send(["t": "me", "walking": true, "skin": 7,
               "vehicle": vehicle.id, "car": vehicle.code,
               "x": Double(position.x + cos(heading) * 2.5),
@@ -180,7 +184,7 @@ final class NativeMultiplayerClient {
               "heading": Double(heading), "health": health, "armour": armour,
               "parked": ["x": Double(position.x), "y": Double(position.y),
                          "z": Double(position.z), "heading": Double(heading),
-                         "pitch": 0, "roll": 0, "health": 1000]])
+                         "pitch": 0, "roll": 0, "health": vehicleHealth]])
     }
 
     private func send(_ object: [String: Any]) {
