@@ -149,9 +149,13 @@ then travel to a real property entrance from the archived map catalog and
 deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
 entrance for pickup, then drive to a different entrance for drop-off. Pickup
 and drop-off both require the player to be driving within 12 meters. Mechanic
-spawns a damaged roadside car at a property entrance; reach it and repair it
-on foot. Medic spawns an ambulance; drive to a patient pickup point and return
-to the starting aid station. The time trial requires an owned car and three
+spawns a damaged roadside car at a property entrance. Stand on foot within
+8 meters to repair its engine, tyres, then bodywork, three seconds per stage.
+Leaving the car resets the current stage. The job pays automatically when
+all three stages are done, and finished stages survive a server restart.
+These stage names come from the archived client help; the timing and automatic
+payout are local rules. Medic spawns a reserved ambulance; drive that ambulance
+to a patient pickup point and return to the starting aid station. The time trial requires an owned car and three
 property checkpoints within three minutes. The patient and taxi passenger do
 not yet appear as characters. Pizza delivery spawns a reserved Pizzaboy
 scooter and sends its driver to three ordered property entrances within six
@@ -334,14 +338,13 @@ Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_gangs.js`, `node smoke_parties.js`, `node smoke_explore.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
 `node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_heist.js`,
-`node smoke_convoy.js`, `node smoke_aircraft.js`, and
-`node smoke_property_garage.js`, and `node smoke_supplies.js`. Run
-`node smoke_route_ui.js` for the
-browser-side waypoint and automatic-checkpoint gates.
-with Node.js 24 to
+`node smoke_convoy.js`, `node smoke_aircraft.js`,
+`node smoke_property_garage.js`, `node smoke_supplies.js`, and
+`node smoke_mechanic_stages.js` with Node.js 24. Run `node smoke_route_ui.js`
+for the browser-side waypoint and automatic-checkpoint gates. These checks
 test the local wire protocol, two-player exchange, courier pickup and delivery,
-taxi and medic pickup and drop-off with driving requirements, mechanic roadside
-repair, timed checkpoints, police patrol, pizza delivery, freight delivery,
+taxi and medic pickup and drop-off with driving and marked-ambulance requirements, staged mechanic
+roadside repair, timed checkpoints, police patrol, pizza delivery, freight delivery,
 pilot flight, fire response, and a heist route
 in marked loaners, shared convoy rewards and hangar aircraft ownership,
 getaway car pickup and delivery, mission vehicle cleanup, two-client visibility and
