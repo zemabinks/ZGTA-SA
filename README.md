@@ -146,10 +146,20 @@ street trial, a police patrol, pizza delivery, freight delivery, pilot flight,
 fire response, a getaway heist, and a getaway car mission.
 Courier is a staged mission: collect a package where you start,
 then travel to a real property entrance from the archived map catalog and
-deliver within 12 meters. Taxi is a staged fare: own a car, drive to a property
-entrance for pickup, then drive to a different entrance for drop-off. Pickup
-and drop-off both require the player to be driving within 12 meters. Mechanic
-spawns a damaged roadside car at a property entrance. Stand on foot within
+deliver within 12 meters. Taxi now gives a new guest a marked cab with no
+car purchase required. Drive it to an archived property entrance for pickup,
+then to a second entrance for drop-off. Both stops require the same cab
+within 12 meters. The fare pays $300, plus a local $75 clean ride bonus when
+the reported cab condition stays at 95% or better, $50 for a quick ride, and
+up to $250 for consecutive fares completed within ten minutes of each other.
+F6 shows the base fare, time window, condition, and streak. Every three completed
+fares unlocks a local taxi level. At level 8 a Cabbie can earn an extra $75 per
+fare; at level 20 a limousine can earn an extra $200. Select either cab in F6.
+The cab choice, fare count, and streak survive a restart; cancelling a fare
+breaks the streak. These levels and premiums are local rules. A passenger
+character, cab rank, mood meter, upgrades, continuous shift, and publisher fare
+rules are not implemented.
+Mechanic spawns a damaged roadside car at a property entrance. Stand on foot within
 8 meters to repair its engine, tyres, then bodywork, three seconds per stage.
 Leaving the car resets the current stage. The job pays automatically when
 all three stages are done, and finished stages survive a server restart.
@@ -339,11 +349,12 @@ Run `node smoke_multiplayer.js`, `node smoke_gameplay.js`,
 `node smoke_patrol.js`, `node smoke_pizza.js`, `node smoke_trucker.js`,
 `node smoke_pilot.js`, `node smoke_fire.js`, `node smoke_heist.js`,
 `node smoke_convoy.js`, `node smoke_aircraft.js`,
-`node smoke_property_garage.js`, `node smoke_supplies.js`, and
-`node smoke_mechanic_stages.js` with Node.js 24. Run `node smoke_route_ui.js`
+`node smoke_property_garage.js`, `node smoke_supplies.js`,
+`node smoke_mechanic_stages.js`, and `node smoke_taxi.js` with Node.js 24.
+Run `node smoke_route_ui.js`
 for the browser-side waypoint and automatic-checkpoint gates. These checks
 test the local wire protocol, two-player exchange, courier pickup and delivery,
-taxi and medic pickup and drop-off with driving and marked-ambulance requirements, staged mechanic
+taxi and medic pickup and drop-off with assigned-vehicle requirements, staged mechanic
 roadside repair, timed checkpoints, police patrol, pizza delivery, freight delivery,
 pilot flight, fire response, and a heist route
 in marked loaners, shared convoy rewards and hangar aircraft ownership,
@@ -361,7 +372,11 @@ courier route, claim its payout in the HUD, buy and spawn a Manana, enter it,
 and drive it in the 3D world. A later Chrome check started and cancelled the
 mechanic and medic missions, displayed their objectives, and showed the medic
 ambulance beside the player. The full new routes were exercised by the
-isolated gameplay test, not by driving them in Chrome. Chrome also created and
+isolated gameplay test, not by driving them in Chrome. Chrome also started a
+guest taxi fare at $0, showed the F6 fare meter and route, displayed the 3D
+cab after reentering the game, entered and drove it, then cancelled the fare.
+The full fare and level-unlocked cabs were checked in isolated tests, not driven
+in Chrome. Chrome also created and
 cancelled a race lobby in the F6 panel; the complete race was exercised by
 two protocol test clients. Chrome verified exploration tracking and clearing
 in F6. It also loaded the route map with the archived radar image, showed
