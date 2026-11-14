@@ -156,9 +156,13 @@ F6 shows the base fare, time window, condition, and streak. Every three complete
 fares unlocks a local taxi level. At level 8 a Cabbie can earn an extra $75 per
 fare; at level 20 a limousine can earn an extra $200. Select either cab in F6.
 The cab choice, fare count, and streak survive a restart; cancelling a fare
-breaks the streak. These levels and premiums are local rules. A passenger
-character, cab rank, mood meter, upgrades, continuous shift, and publisher fare
-rules are not implemented.
+breaks the streak. After each drop-off, another pickup appears and the same cab
+stays with the driver until the shift is ended in F6. Get out of the cab before
+ending the shift so the archived client removes it from the world. A shift in progress and
+its completed-fare count survive a server restart. These levels and premiums
+are local rules. A passenger character, cab rank, mood meter, upgrades, and
+publisher fare rules are not implemented. The archived client's “press 2 to
+start a shift” tip still appears inside the cab; use F6 for this local shift.
 Mechanic spawns a damaged roadside car at a property entrance. Stand on foot within
 8 meters to repair its engine, tyres, then bodywork, three seconds per stage.
 Leaving the car resets the current stage. The job pays automatically when
@@ -374,8 +378,9 @@ mechanic and medic missions, displayed their objectives, and showed the medic
 ambulance beside the player. The full new routes were exercised by the
 isolated gameplay test, not by driving them in Chrome. Chrome also started a
 guest taxi fare at $0, showed the F6 fare meter and route, displayed the 3D
-cab after reentering the game, entered and drove it, then cancelled the fare.
-The full fare and level-unlocked cabs were checked in isolated tests, not driven
+cab after reentering the game, entered and drove it. A later check showed
+F6 disabled End shift while seated; after exiting, ending the shift removed
+the cab from the 3D world. The full fare and level-unlocked cabs were checked in isolated tests, not driven
 in Chrome. Chrome also created and
 cancelled a race lobby in the F6 panel; the complete race was exercised by
 two protocol test clients. Chrome verified exploration tracking and clearing
