@@ -322,25 +322,35 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depth)
         encoder.setCullMode(.none)
-        let farX = max(0, min(3, Int(floor((camera.x + 3000) / 1500))))
-        let farY = max(0, min(3, Int(floor((camera.y + 3000) / 1500))))
-        let currentFar = "t\(farY * 4 + farX)"
-        for (name, mesh) in meshes where name != currentFar || meshes[activeDetail] == nil {
-            var uniforms = Uniforms(viewProjection: matrix,
-                                    settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height),
-                                                    0, name.hasPrefix("c") ? 128 : 64))
-            encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentTexture(mesh.atlas, index: 0)
-            encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
-                                          indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: 0)
+        // Keep the full far block under the 375 m detailed cell. Omitting the
+        // entire 1.5 km block leaves a large empty square around the player.
+        // A slight depth bias lets detailed geometry win where both overlap.
+        for (name, mesh) in meshes where name.hasPrefix("t") {
+            encoder.setDepthBias(0.0005, slopeScale: 0, clamp: 0)
+            draw(mesh: mesh, cellSize: 64, matrix: matrix, encoder: encoder)
+        }
+        encoder.setDepthBias(0, slopeScale: 0, clamp: 0)
+        if let mesh = meshes[activeDetail] {
+            draw(mesh: mesh, cellSize: 128, matrix: matrix, encoder: encoder)
         }
         drawActors(encoder: encoder, matrix: matrix)
         encoder.endEncoding()
         command.present(drawable)
         command.commit()
         onFrame?()
+    }
+
+    private func draw(mesh: Mesh, cellSize: Float, matrix: simd_float4x4,
+                      encoder: MTLRenderCommandEncoder) {
+        var uniforms = Uniforms(viewProjection: matrix,
+                                settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height),
+                                                0, cellSize))
+        encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        encoder.setFragmentTexture(mesh.atlas, index: 0)
+        encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
+                                      indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: 0)
     }
 
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {

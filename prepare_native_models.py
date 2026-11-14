@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Convert archived RenderWare DFF geometry into local-only WRL2 actor meshes.
 
-The source DFF files and generated meshes stay under local-only/, which is
-ignored by Git. This handles geometry, frame transforms and material colors;
-animation and TXD textures require further native work.
+The source DFF/TXD files and generated meshes and texture atlases stay under
+local-only/, which is ignored by Git. This handles static geometry, frame
+transforms, material colors, and supported TXD textures. Animation remains
+separate work.
 """
 import argparse
 import json
@@ -243,8 +244,8 @@ def convert(source, destination, pedestrian=False):
         floor = min(point[1] for point, _, _, _ in vertices)
         vertices = [((point[0], -point[2], point[1] - floor), tint, uv, slot)
                     for point, tint, uv, slot in vertices]
-    # WRL2 is the world parser's compact, validated binary layout. The model
-    # uses a single white atlas cell and vertex colors from the DFF materials.
+    # WRL2 is the world parser's compact, validated binary layout. Layer zero
+    # is white for untextured materials; other layers use decoded TXD images.
     result = bytearray(struct.pack('<IIII', 0x324c5257, len(vertices), len(indices), len(texture_names) + 1))
     for point, _, _, _ in vertices:
         result.extend(struct.pack('<3f', *point))
