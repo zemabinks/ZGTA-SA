@@ -7,6 +7,7 @@ struct RemotePlayer {
     let position: SIMD3<Float>
     let code: String
     let heading: Float
+    let animation: String
 }
 
 struct RemoteVehicle {
@@ -64,7 +65,7 @@ final class NativeMultiplayerClient {
         socket = nil
     }
 
-    func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool,
+    func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool, running: Bool,
                       vehicle: RemoteVehicle? = nil, speed: Float = 0,
                       airborne: Bool = false) {
         if let vehicle {
@@ -80,7 +81,7 @@ final class NativeMultiplayerClient {
               "heading": Double(heading), "health": 100, "armour": 0,
               "air": airborne,
               "anim": airborne ? "ped/jump_launch/l/1" :
-                  moving ? "ped/walk/l/1" : "ped/idle/l/1"])
+                  moving ? (running ? "ped/run/l/1" : "ped/walk/l/1") : "ped/idle/l/1"])
         positionPackets += 1
         if positionPackets % 10 == 0 { send(["t": "board"]) }
     }
@@ -182,9 +183,14 @@ final class NativeMultiplayerClient {
                   let x = (row[3] as? NSNumber)?.floatValue,
                   let y = (row[4] as? NSNumber)?.floatValue,
                   let z = (row[5] as? NSNumber)?.floatValue else { continue }
+            let wireAnimation = row.count > 41 ? row[41] as? String ?? "" : ""
+            let animation = wireAnimation.contains("jump") ? "jump_launch" :
+                wireAnimation.contains("run") ? "run_player" :
+                wireAnimation.contains("walk") ? "walk_player" : "idle_stance"
             updated[id] = RemotePlayer(id: id, name: name, position: SIMD3(x, y, z),
                                        code: row[2] as? String ?? "s7",
-                                       heading: row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0)
+                                       heading: row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0,
+                                       animation: animation)
         }
         players = updated
         onPlayers?(Array(updated.values))

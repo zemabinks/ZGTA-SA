@@ -347,6 +347,7 @@ final class NativeGameViewController: UIViewController {
         if link.timestamp - lastNetwork > 0.2, let renderer {
             lastNetwork = link.timestamp
             network.sendPosition(renderer.position, heading: renderer.direction, moving: walking,
+                                 running: speed > 1,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
                                  airborne: renderer.isAirborne)
         }

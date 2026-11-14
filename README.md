@@ -487,12 +487,19 @@ On this Mac, prepare the ignored local game files once:
     python3 prepare_native_assets.py --all-details
     python3 archive_public_models.py
     python3 prepare_native_models.py --all
+    python3 prepare_native_animations.py --all
 
 The model archive command fetches public DFF and TXD files that are missing
 from `local-only/site/game/`. It currently fills all 212 listed vehicle model
 and texture pairs. The converter prepares 212 vehicle and 265 pedestrian meshes
 under `local-only/site/game/native/models/`. These binaries and textures are
 excluded from GitHub by `.gitignore`.
+The animation converter bakes idle, walk, run, and jump frames from the archived
+ANP3 pedestrian clips and each DFF skin rig. All 265 available pedestrian
+models were baked on this Mac. The native Metal renderer selects the matching
+frames while moving; remote clients can show the same clips when their local
+pedestrian model has been prepared. Generated animation files are also ignored
+local game data.
 
 Start the server with zsh launch_share.sh lan for iPhone access on the same
 Wi-Fi. In the iOS app, enter the LAN address and join code printed by that
@@ -502,8 +509,9 @@ cd ios && xcodegen generate --spec project.yml, then open
 ios/ZGTASA.xcodeproj.
 
 The iPhone 15 Pro simulator loaded the textured city, drew an archived
-pedestrian and taxi model, walked across the road using the archived collision
-mesh, entered and drove a marked taxi, and started and advanced a courier
+pedestrian and taxi model, displayed a baked San Andreas walk pose, walked
+across the road using the archived collision mesh, entered and drove a marked
+taxi, and started and advanced a courier
 mission from the native Jobs panel. A second multiplayer client observed native
 walking, driving, and jump height updates. The local server's taxi smoke test
 also checks that a mission cab follows its driver and remains at the exit
@@ -511,7 +519,7 @@ point. The compact iPhone 13 mini simulator displayed the menu. A signed
 physical-iPhone build has not been verified.
 
 This remains a native gameplay work in progress. The iOS client does not yet
-decode the archived pedestrian animation data, reproduce the browser vehicle
+reproduce the browser vehicle
 physics, or expose every browser interaction. Its native panels now show jobs,
 garage and workshop supplies, the vehicle catalog, races, police and safety,
 crews and territory, exploration, homes, private groups, cash transfers, and

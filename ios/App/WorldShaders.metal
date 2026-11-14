@@ -34,6 +34,20 @@ vertex Raster worldVertex(uint id [[vertex_id]],
     return out;
 }
 
+vertex Raster animatedActorVertex(uint id [[vertex_id]],
+                                  const device NativeVertex *vertices [[buffer(0)]],
+                                  constant Uniforms &uniforms [[buffer(1)]],
+                                  const device packed_float3 *positions [[buffer(2)]]) {
+    NativeVertex source = vertices[id];
+    Raster out;
+    out.position = uniforms.viewProjection * float4(float3(positions[id]), 1.0);
+    out.uv = source.uvLayer.xy;
+    out.layer = source.uvLayer.z;
+    out.tint = source.tint;
+    out.dusk = source.dusk;
+    return out;
+}
+
 fragment half4 worldFragment(Raster in [[stage_in]],
                              texture2d<half> atlas [[texture(0)]],
                              constant Uniforms &uniforms [[buffer(1)]]) {

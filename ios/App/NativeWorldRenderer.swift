@@ -21,10 +21,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
+    private let animatedPipeline: MTLRenderPipelineState
     private let depth: MTLDepthStencilState
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
     private var actorMeshes: [String: Mesh] = [:]
+    private var actorAnimations: [String: NativeActorAnimation] = [:]
     private var actorLoading: Set<String> = []
     private var vehicleModels: [String: String] = [:]
     private var pedModels: [String: String] = [:]
@@ -37,6 +39,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var collision: WorldCollision?
     private(set) var drivingSpeed: Float = 0
     private var verticalSpeed: Float = 0
+    private var ownClip = "idle_stance"
+    private var ownClipTime: Double = 0
     var driving = false
     var remotePlayers: [RemotePlayer] = []
     var remoteVehicles: [RemoteVehicle] = []
@@ -49,6 +53,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               let queue = device.makeCommandQueue(),
               let library = device.makeDefaultLibrary(),
               let vertex = library.makeFunction(name: "worldVertex"),
+              let animatedVertex = library.makeFunction(name: "animatedActorVertex"),
               let fragment = library.makeFunction(name: "worldFragment") else { return nil }
         let view = MTKView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm
@@ -68,6 +73,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
         descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        descriptor.vertexFunction = animatedVertex
+        guard let animatedPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
         let depthDescriptor = MTLDepthStencilDescriptor()
         depthDescriptor.depthCompareFunction = .less
         depthDescriptor.isDepthWriteEnabled = true
@@ -76,6 +83,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.device = device
         self.queue = queue
         self.pipeline = pipeline
+        self.animatedPipeline = animatedPipeline
         self.depth = depth
         textureLoader = MTKTextureLoader(device: device)
         super.init()
@@ -87,6 +95,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var isAirborne: Bool { verticalSpeed != 0 }
 
     func move(forward: Float, sideways: Float, turn: Float, delta: Float) {
+        let clip = !driving && verticalSpeed != 0 ? "jump_launch" :
+            abs(forward) + abs(sideways) < 0.05 ? "idle_stance" :
+            max(abs(forward), abs(sideways)) > 1.5 ? "run_player" : "walk_player"
+        if clip != ownClip { ownClip = clip; ownClipTime = 0 }
+        else { ownClipTime += Double(delta) }
         let start = camera
         var next = camera
         if driving {
@@ -281,6 +294,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let lock = NSLock()
         var binary: Data?
         var image: Data?
+        var animation: Data?
         group.enter()
         URLSession.shared.dataTask(with: server.path("game/native/models/\(name).bin")) { data, response, _ in
             lock.lock()
@@ -295,6 +309,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             lock.unlock()
             group.leave()
         }.resume()
+        if pedModels.values.contains(name) {
+            group.enter()
+            URLSession.shared.dataTask(with: server.path("game/native/models/\(name).anim.bin")) { data, response, _ in
+                lock.lock()
+                if (response as? HTTPURLResponse)?.statusCode == 200 { animation = data }
+                lock.unlock()
+                group.leave()
+            }.resume()
+        }
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.actorLoading.remove(name)
@@ -307,6 +330,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                                       length: world.indices.count * MemoryLayout<UInt32>.stride) else { return }
             self.actorMeshes[name] = Mesh(vertices: vertices, indices: indices,
                                           indexCount: world.indices.count, atlas: atlas)
+            if let animation,
+               let frames = NativeActorAnimation(data: animation, vertexCount: world.vertices.count,
+                                                 device: self.device) {
+                self.actorAnimations[name] = frames
+            }
         }
     }
 
@@ -359,27 +387,28 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
-        var modelInstances: [(String, SIMD3<Float>, Float)] = []
+        var modelInstances: [(String, SIMD3<Float>, Float, String, Double)] = []
         if driving {
             let code = remoteVehicles.first(where: { $0.id == currentVehicleID })?.code ?? "420.6.1.0."
             if let name = actorName(code: code) {
-                modelInstances.append((name, camera, heading))
+                modelInstances.append((name, camera, heading, "", 0))
             }
         } else if let name = pedModels["7"] {
-            modelInstances.append((name, camera, heading))
+            modelInstances.append((name, camera, heading, ownClip, ownClipTime))
         }
         for player in remotePlayers where simd_distance(player.position, camera) < 130 {
             if let name = actorName(code: player.code) {
-                modelInstances.append((name, player.position, player.heading))
+                modelInstances.append((name, player.position, player.heading,
+                                       player.animation, ProcessInfo.processInfo.systemUptime))
             }
         }
         for vehicle in remoteVehicles where vehicle.id != currentVehicleID &&
             simd_distance(vehicle.position, camera) < 130 {
             if let name = actorName(code: vehicle.code) {
-                modelInstances.append((name, vehicle.position, vehicle.heading))
+                modelInstances.append((name, vehicle.position, vehicle.heading, "", 0))
             }
         }
-        for (name, position, angle) in modelInstances {
+        for (name, position, angle, clip, elapsed) in modelInstances {
             guard let mesh = actorMeshes[name] else { loadActor(name); continue }
             let c = cos(angle), s = sin(angle)
             let transform = simd_float4x4(columns: (
@@ -387,6 +416,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 SIMD4(0, 0, 1, 0), SIMD4(position.x, position.y, position.z, 1)))
             var uniforms = Uniforms(viewProjection: matrix * transform,
                                     settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), 0, 128))
+            if let frame = actorAnimations[name]?.frame(clip: clip, elapsed: elapsed) {
+                encoder.setRenderPipelineState(animatedPipeline)
+                encoder.setVertexBuffer(frame, offset: 0, index: 2)
+            } else {
+                encoder.setRenderPipelineState(pipeline)
+            }
             encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
