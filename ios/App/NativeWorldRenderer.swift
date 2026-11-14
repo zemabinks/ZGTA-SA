@@ -31,6 +31,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var loading: Set<String> = []
     private var retryAfter: [String: Date] = [:]
     private var activeDetail = "c59"
+    private var activeFar: Set<String> = []
     private var camera = SIMD3<Float>(1480, -1738, 13)
     private var heading: Float = 0
     private var collision: WorldCollision?
@@ -160,16 +161,19 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let gy = max(0, min(15, Int(floor((camera.y + 3000) / 375))))
         let detail = gy * 16 + gx
         activeDetail = "c\(detail)"
-        meshes = meshes.filter { !$0.key.hasPrefix("c") || $0.key == activeDetail }
         // The camera sits behind the player; draw the adjacent 1.5 km blocks
         // as well so a block edge never cuts across the horizon.
+        var far: Set<String> = []
         for dx in [Float(-750), 0, 750] {
             for dy in [Float(-750), 0, 750] {
                 let tx = max(0, min(3, Int(floor((camera.x + 3000 + dx) / 1500))))
                 let ty = max(0, min(3, Int(floor((camera.y + 3000 + dy) / 1500))))
-                load(name: "t\(ty * 4 + tx)")
+                far.insert("t\(ty * 4 + tx)")
             }
         }
+        activeFar = far
+        meshes = meshes.filter { $0.key == activeDetail || far.contains($0.key) }
+        for name in far { load(name: name) }
         load(name: activeDetail)
     }
 
@@ -215,6 +219,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let self else { return }
             self.loading.remove(name)
             if name.hasPrefix("c"), name != self.activeDetail { return }
+            if name.hasPrefix("t"), !self.activeFar.contains(name) { return }
             guard let bin, let png else {
                 self.retryAfter[name] = Date().addingTimeInterval(5)
                 self.onStatus?("CITY FILE UNAVAILABLE: \(name.uppercased()) \(fetchError?.localizedDescription ?? "")")
