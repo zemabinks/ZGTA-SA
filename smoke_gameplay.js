@@ -147,13 +147,14 @@ async function main() {
     const earlyBuy = await api('/api/local/action', 'POST', {action: 'car.buy', model: 410});
     assert.equal(earlyBuy.status, 400);
     let x = 1480, y = -1738;
-    async function moveTo(target, driving = false) {
+    async function moveTo(target, driving = false, vehicle = null) {
       const startX = x, startY = y;
       const steps = Math.ceil(Math.hypot(target.x - x, target.y - y) / 5);
       for (let i = 1; i <= steps; i++) {
         x = startX + (target.x - startX) * i / steps;
         y = startY + (target.y - startY) * i / steps;
-        ws.send({t: 'me', walking: !driving, driving, skin: 7, x, y, z: 13});
+        ws.send({t: 'me', walking: !driving, driving, skin: 7, x, y, z: 13,
+          ...(vehicle ? {vehicle: vehicle[0], car: vehicle[2]} : {})});
         // Match an actual client's update cadence; the server limits bursts.
         await new Promise(resolve => setTimeout(resolve, 20));
       }
@@ -210,9 +211,19 @@ async function main() {
         'mechanic must leave the vehicle to repair');
       ws.send({t: 'me', walking: true, driving: false, skin: 7, x, y, z: 13});
       await new Promise(resolve => setTimeout(resolve, 100));
-      const repaired = await api('/api/local/action', 'POST', {action: 'job.complete'});
-      assert.equal(repaired.status, 200, JSON.stringify(repaired.body));
-      assert.equal(repaired.body.state.job, null);
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
+        'mechanic must finish all three repair stages');
+      const parts = new Set();
+      let repaired;
+      for (let i = 0; i < 35; i++) {
+        repaired = await api('/api/local/state');
+        if (!repaired.body.job) break;
+        parts.add(repaired.body.job.repairPart);
+        await new Promise(resolve => setTimeout(resolve, 350));
+      }
+      assert.equal(repaired.body.job, null, 'standing beside the car completes the call');
+      assert(parts.has('engine') && parts.has('tyres') && parts.has('bodywork'),
+        `mechanic stages were not all observed: ${[...parts].join(', ')}`);
       await ws.wait(message => message.t === 'vgone' && message.id === broken.v[0]);
       await otherWs.wait(message => message.t === 'vgone' && message.id === broken.v[0]);
       otherWs.close(); otherWs = null;
@@ -231,11 +242,23 @@ async function main() {
         'patient pickup requires driving');
       ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
       await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
+        'another vehicle cannot collect the patient');
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
+        vehicle: ambulance.v[0], car: ambulance.v[2]});
+      await new Promise(resolve => setTimeout(resolve, 100));
       const pickup = await api('/api/local/action', 'POST', {action: 'job.pickup'});
       assert.equal(pickup.status, 200, JSON.stringify(pickup.body));
       assert.equal(pickup.body.state.job.stage, 'delivery');
-      await moveTo(pickup.body.state.job.target, true);
+      await moveTo(pickup.body.state.job.target, true, ambulance.v);
       await new Promise(resolve => setTimeout(resolve, 3100));
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
+        'another vehicle cannot return the patient');
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
+        vehicle: ambulance.v[0], car: ambulance.v[2]});
+      await new Promise(resolve => setTimeout(resolve, 100));
       const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
       assert.equal(delivered.body.state.job, null);
