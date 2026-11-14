@@ -104,7 +104,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     func move(forward: Float, sideways: Float, turn: Float, delta: Float,
               running: Bool = false, lookVertical: Float = 0) {
-        cameraPitch = max(-0.4, min(0.5, cameraPitch + lookVertical * delta * 1.2))
+        cameraPitch = max(-0.4, min(0.5, cameraPitch + lookVertical * delta * 0.45))
         actionTimeRemaining = max(0, actionTimeRemaining - delta)
         let inputLength = min(1, hypot(forward, sideways))
         let clip = !driving && actionTimeRemaining > 0 ? actionClip :
@@ -408,10 +408,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return }
         let aspect = max(0.1, Float(view.drawableSize.width / max(1, view.drawableSize.height)))
         let distance: Float = driving ? 11 : 4.5
+        // Raise or lower the camera around a nearby focus point. Changing only
+        // the look-at height used to push the player off screen at pitch limits.
+        let eyeHeight: Float = driving ?
+            max(1.2, min(7, 4.5 - cameraPitch * 6)) :
+            max(0.65, min(4.5, 2.4 - cameraPitch * 3.5))
         let eye = camera + SIMD3<Float>(-sin(heading) * distance, -cos(heading) * distance,
-                                        driving ? 4.5 : 2.4)
-        let target = camera + SIMD3<Float>(sin(heading) * 4, cos(heading) * 4,
-                                           (driving ? 1.1 : 1.2) + tan(cameraPitch) * 4)
+                                        eyeHeight)
+        let focusAhead: Float = driving ? 4 : 2
+        let target = camera + SIMD3<Float>(sin(heading) * focusAhead,
+                                           cos(heading) * focusAhead,
+                                           (driving ? 1.1 : 1.2) + cameraPitch)
         let matrix = Self.perspective(aspect: aspect) * Self.lookAt(eye: eye, target: target)
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depth)

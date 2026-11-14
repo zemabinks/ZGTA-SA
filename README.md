@@ -545,6 +545,10 @@ RenderWare pedestrian meshes are turned to match the world's heading axis.
 Walk and run travel are scaled to the archived animation cycles, and Metal
 blends adjacent baked frames. These movement changes were checked visually in
 the iPhone 15 Pro simulator in forward, sideways, and camera-orbit views.
+Vertical LOOK movement now raises or lowers the camera around a focus point
+near the character at a slower rate. The previous fixed-eye pitch pushed the
+character off screen; the simulator now keeps the full character visible at
+both vertical limits.
 The compact iPhone 13 mini simulator
 displayed the menu. A signed
 physical-iPhone build has not been verified; the generic device target compiles
