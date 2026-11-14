@@ -39,6 +39,9 @@ final class NativeMultiplayerClient {
     private(set) var vehicles: [String: RemoteVehicle] = [:]
     private(set) var localName = "LOCAL PLAYER"
     private(set) var cash = 0
+    private(set) var health = 100
+    private(set) var armour = 0
+    private(set) var passive = false
     private var positionPackets = 0
     var onStatus: ((String) -> Void)?
     var onPlayers: (([RemotePlayer]) -> Void)?
@@ -46,6 +49,7 @@ final class NativeMultiplayerClient {
     var onVehicles: (([RemoteVehicle]) -> Void)?
     var onEnter: ((String, Bool) -> Void)?
     var onTeleport: ((SIMD3<Float>) -> Void)?
+    var onVitals: ((Int, Int) -> Void)?
 
     init(server: ServerAddress) { self.server = server }
 
@@ -73,12 +77,13 @@ final class NativeMultiplayerClient {
                   "vehicle": vehicle.id, "skin": 7,
                   "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
                   "heading": Double(heading), "speed": Double(speed), "steer": 0,
-                  "health": 1000, "life": 100, "armour": 0])
+                  "health": 1000, "life": health, "armour": armour])
             return
         }
         send(["t": "me", "walking": true, "skin": 7,
               "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
-              "heading": Double(heading), "health": 100, "armour": 0,
+              "heading": Double(heading), "health": health, "armour": armour,
+              "weapon": 0,
               "air": airborne,
               "anim": airborne ? "ped/jump_launch/l/1" :
                   moving ? (running ? "ped/run/l/1" : "ped/walk/l/1") : "ped/idle/l/1"])
@@ -88,12 +93,35 @@ final class NativeMultiplayerClient {
 
     func requestEnter(_ vehicle: RemoteVehicle) { send(["t": "enter", "v": vehicle.id]) }
 
+    func sendMeleeHit(to player: String) {
+        guard health > 0, !passive else { return }
+        send(["t": "hit", "to": player])
+    }
+
+    func respawn() {
+        guard health == 0 else { return }
+        health = 100
+        armour = 0
+        onVitals?(health, armour)
+    }
+
+    func syncVitals(from state: [String: Any]) {
+        guard let current = state["health"] as? NSNumber,
+              let protected = state["armour"] as? NSNumber else { return }
+        let nextHealth = max(0, min(100, current.intValue))
+        let nextArmour = max(0, min(100, protected.intValue))
+        guard health != nextHealth || armour != nextArmour else { return }
+        health = nextHealth
+        armour = nextArmour
+        onVitals?(health, armour)
+    }
+
     func sendExit(_ position: SIMD3<Float>, heading: Float, vehicle: RemoteVehicle) {
         send(["t": "me", "walking": true, "skin": 7,
               "vehicle": vehicle.id, "car": vehicle.code,
               "x": Double(position.x + cos(heading) * 2.5),
               "y": Double(position.y - sin(heading) * 2.5), "z": Double(position.z),
-              "heading": Double(heading), "health": 100, "armour": 0,
+              "heading": Double(heading), "health": health, "armour": armour,
               "parked": ["x": Double(position.x), "y": Double(position.y),
                          "z": Double(position.z), "heading": Double(heading),
                          "pitch": 0, "roll": 0, "health": 1000]])
@@ -131,6 +159,11 @@ final class NativeMultiplayerClient {
     private func handle(_ message: [String: Any]) {
         switch message["t"] as? String {
         case "hello":
+            if let life = message["life"] as? [NSNumber], life.count >= 2 {
+                health = max(0, min(100, life[0].intValue))
+                armour = max(0, min(100, life[1].intValue))
+                onVitals?(health, armour)
+            }
             onStatus?("CONNECTED TO LOCAL WORLD")
             send(["t": "board"])
         case "all":
@@ -152,6 +185,16 @@ final class NativeMultiplayerClient {
             onPresence?((message["players"] as? Int) ?? rows.count, names)
         case "note":
             if let note = message["text"] as? String { onStatus?(note.uppercased()) }
+        case "passive":
+            passive = message["on"] as? Bool == true
+        case "hit":
+            let damage = max(0, (message["d"] as? NSNumber)?.intValue ?? 0)
+            let absorbed = min(armour, damage)
+            armour -= absorbed
+            health = max(0, health - (damage - absorbed))
+            onVitals?(health, armour)
+            onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE" :
+                         "HIT — \(health) HEALTH REMAINING")
         case "spawned":
             if let row = message["v"] as? [Any], let vehicle = RemoteVehicle(row: row) {
                 vehicles[vehicle.id] = vehicle

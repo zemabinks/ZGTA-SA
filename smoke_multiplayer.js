@@ -80,10 +80,19 @@ async function main() {
     const firstApi = await fetch(`http://127.0.0.1:${port}/api/auth/me`);
     assert.equal(firstApi.status, 200);
     assert.match(firstApi.headers.get('set-cookie') || '', /^zgta_local=/);
+    assert.match(firstApi.headers.get('set-cookie') || '', /Max-Age=31536000/,
+      'The guest account cookie must survive an app restart');
     const auth = await firstApi.json();
     assert.equal(auth.loggedIn, true, 'The browser must see a playable account');
     assert.equal(auth.available, true);
     assert.match(auth.username, /^Local /);
+    const existingApi = await fetch(`http://127.0.0.1:${port}/api/auth/me`, {
+      headers: {Cookie: firstApi.headers.get('set-cookie').split(';')[0]},
+    });
+    assert.equal((await existingApi.json()).username, auth.username,
+      'Reconnecting with the guest cookie must keep the same player');
+    assert.match(existingApi.headers.get('set-cookie') || '', /Max-Age=31536000/,
+      'Existing guest accounts must have their persistent cookie renewed');
     await new Promise(resolve => setTimeout(resolve, 400));
     const saved = JSON.parse(fs.readFileSync(path.join(local, 'selfhost', 'players.json')));
     assert.equal(Object.keys(saved.players).length, 1, 'An API-first visit must create one account');

@@ -481,6 +481,9 @@ texture atlases from your Mac. It also loads locally converted San Andreas DFF
 character and vehicle geometry with TXD textures. Metal renders the scene;
 the iPhone sends movement and vehicle state to the same independent local
 multiplayer server used by the self-hosted browser game. Discord is not needed.
+Local guest accounts survive app restarts and stay separate for each Mac server
+address. The app stores the guest token in Keychain when available; unsigned
+Simulator builds use app preferences when Keychain is unavailable.
 
 On this Mac, prepare the ignored local game files once:
 
@@ -515,7 +518,13 @@ taxi, and started and advanced a courier
 mission from the native Jobs panel. A second multiplayer client observed native
 walking, driving, and jump height updates. The local server's taxi smoke test
 also checks that a mission cab follows its driver and remains at the exit
-point. The compact iPhone 13 mini simulator displayed the menu. A signed
+point. Native fist combat uses the HIT touch button or the controller right
+trigger. In an isolated two-player test, an iPhone simulator hit dealt 8 server
+damage, incoming hits changed the native health display, and defeat and respawn
+restored the server's player health to 100. A separate app restart and server
+switching test returned to the same guest account without adding another player.
+The compact iPhone 13 mini simulator
+displayed the menu. A signed
 physical-iPhone build has not been verified.
 
 This remains a native gameplay work in progress. The iOS client does not yet
@@ -525,6 +534,6 @@ garage and workshop supplies, the vehicle catalog, races, police and safety,
 crews and territory, exploration, homes, private groups, cash transfers, and
 the local leaderboard. World and Social panels were opened in the iPhone 15 Pro
 simulator; individual actions there have not all been exercised end to end.
-Combat controls and a few job-specific controls remain absent. The local server is independent; signing in
+Gun controls and a few job-specific controls remain absent. The local server is independent; signing in
 to the original public site does not provide its private multiplayer backend.
 

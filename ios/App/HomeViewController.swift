@@ -1,4 +1,5 @@
 import UIKit
+import Security
 import GameController
 
 final class HomeViewController: UIViewController, UITextFieldDelegate {
@@ -163,6 +164,7 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
             status.textColor = .systemOrange
             return
         }
+        LocalGuestSession.restore(for: server)
         checking = true
         play.isEnabled = false
         status.text = "CHECKING SERVER…"
@@ -203,6 +205,9 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
                 self.finish(error: "LOCAL PLAYER LOGIN FAILED")
                 return
             }
+            if let response = response as? HTTPURLResponse {
+                LocalGuestSession.remember(response, for: server)
+            }
             DispatchQueue.main.async {
                 self.checking = false
                 self.play.isEnabled = true
@@ -223,5 +228,76 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
             self.status.text = error
             self.status.textColor = .systemOrange
         }
+    }
+}
+
+/// HTTP cookies are shared between ports and session cookies can disappear on
+/// app restart. Keep each Mac server's anonymous player token in the Keychain.
+/// An unsigned Simulator build uses app preferences when Keychain is unavailable.
+private enum LocalGuestSession {
+    private static let service = "com.zema.zgtasa.localGuest"
+    private static let cookieName = "zgta_local"
+
+    private static func account(for server: ServerAddress) -> String {
+        server.url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private static func fallbackKey(for server: ServerAddress) -> String {
+        "localGuest.\(account(for: server))"
+    }
+
+    private static func valid(_ value: String) -> Bool {
+        value.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil
+    }
+
+    static func restore(for server: ServerAddress) {
+        let storage = HTTPCookieStorage.shared
+        for cookie in storage.cookies(for: server.url) ?? [] where cookie.name == cookieName {
+            storage.deleteCookie(cookie)
+        }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account(for: server),
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let lookup = SecItemCopyMatching(query as CFDictionary, &item)
+        let saved = lookup == errSecSuccess ? (item as? Data).flatMap {
+            String(data: $0, encoding: .ascii)
+        } : UserDefaults.standard.string(forKey: fallbackKey(for: server))
+        guard let token = saved, valid(token),
+              let host = server.url.host,
+              let cookie = HTTPCookie(properties: [
+                .name: cookieName, .value: token, .domain: host, .path: "/",
+                .expires: Date().addingTimeInterval(365 * 24 * 60 * 60)
+              ]) else { return }
+        storage.setCookie(cookie)
+    }
+
+    static func remember(_ response: HTTPURLResponse, for server: ServerAddress) {
+        guard let header = response.value(forHTTPHeaderField: "Set-Cookie"),
+              let first = header.split(separator: ";", maxSplits: 1).first,
+              first.hasPrefix("\(cookieName)="),
+              let token = first.split(separator: "=", maxSplits: 1).last.map(String.init),
+              valid(token) else { return }
+        let key: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account(for: server)
+        ]
+        let data = Data(token.utf8)
+        let updated = SecItemUpdate(key as CFDictionary,
+                                    [kSecValueData as String: data] as CFDictionary)
+        var saved = updated == errSecSuccess
+        if updated == errSecItemNotFound {
+            var entry = key
+            entry[kSecValueData as String] = data
+            entry[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            saved = SecItemAdd(entry as CFDictionary, nil) == errSecSuccess
+        }
+        if saved { UserDefaults.standard.removeObject(forKey: fallbackKey(for: server)) }
+        else { UserDefaults.standard.set(token, forKey: fallbackKey(for: server)) }
     }
 }

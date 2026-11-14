@@ -162,6 +162,7 @@ let discordConfig = {};
 try { discordConfig = JSON.parse(fs.readFileSync(DISCORD_CONFIG_FILE, 'utf8')); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
 const COOKIE = 'zgta_local';
+const COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
 const JOIN_CODE = process.env.ZGTA_JOIN_CODE || (process.env.ZGTA_JOIN_CODE_FILE
   ? fs.readFileSync(process.env.ZGTA_JOIN_CODE_FILE, 'utf8').trim() : '');
 if (JOIN_CODE && JOIN_CODE.length < 12) throw new Error('ZGTA_JOIN_CODE must be at least 12 characters.');
@@ -471,10 +472,11 @@ class LocalGame {
         supplies: savedSupplies(),
         cars: [], garage: [], homes: [], job: null,
         discord: null, settings: {}});
-      const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
-      if (res) res.setHeader('Set-Cookie', `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax${secure}`);
       this.save();
     }
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+    if (res) res.setHeader('Set-Cookie',
+      `${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}${secure}`);
     return {id, player: this.players.get(id)};
   }
 
@@ -2287,9 +2289,10 @@ class LocalGame {
     for (const old of this.peers) if (old.player === player) old.close();
     const accept = crypto.createHash('sha1').update(req.headers['sec-websocket-key'] +
       '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+    const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n' +
       `Sec-WebSocket-Accept: ${accept}\r\n` +
-      (cookieId(req) ? '' : `Set-Cookie: ${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax\r\n`) + '\r\n');
+      `Set-Cookie: ${COOKIE}=${id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${COOKIE_MAX_AGE}${secure}\r\n` + '\r\n');
     const peer = new Peer(socket, player, this);
     this.peers.add(peer);
     socket.on('data', bytes => peer.receive(bytes));

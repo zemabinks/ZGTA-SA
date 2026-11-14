@@ -11,6 +11,8 @@ final class NativeGameViewController: UIViewController {
     private let players = UILabel()
     private let objective = UILabel()
     private let vehicleButton = UIButton(type: .system)
+    private let attackButton = UIButton(type: .system)
+    private let vitals = UILabel()
     private let stick = VirtualStick()
     private weak var gameplayPanel: NativeGameplayPanel?
     private var currentVehicle: RemoteVehicle?
@@ -24,6 +26,8 @@ final class NativeGameViewController: UIViewController {
     private var turn: Float = 0
     private var run = false
     private var lastJumpButton = false
+    private var lastAttackButton = false
+    private var lastAttackTime: CFTimeInterval = 0
 
     init(server: ServerAddress) {
         self.server = server
@@ -74,8 +78,13 @@ final class NativeGameViewController: UIViewController {
             self.status.text = "DRIVING \(vehicle.name.uppercased())"
         }
         network.onTeleport = { [weak self] point in self?.renderer?.teleport(x: point.x, y: point.y, z: point.z) }
+        network.onVitals = { [weak self] health, armour in
+            self?.vitals.text = "HEALTH \(health)  ·  ARMOUR \(armour)"
+            self?.attackButton.setTitle(health == 0 ? "RESPAWN" : "HIT", for: .normal)
+        }
         gameplay.onState = { [weak self] state in
             guard let self else { return }
+            self.network.syncVitals(from: state)
             self.gameplayPanel?.update(state)
             self.showObjective(state)
             self.maybeAdvanceCheckpoint(state)
@@ -123,6 +132,12 @@ final class NativeGameViewController: UIViewController {
         players.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         players.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(players)
+        vitals.text = "HEALTH 100  ·  ARMOUR 0"
+        vitals.textColor = .white
+        vitals.font = .systemFont(ofSize: 12, weight: .semibold)
+        vitals.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        vitals.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(vitals)
         objective.textColor = .white
         objective.font = .systemFont(ofSize: 13, weight: .bold, width: .condensed)
         objective.numberOfLines = 2
@@ -148,6 +163,13 @@ final class NativeGameViewController: UIViewController {
         let jumpButton = button("JUMP", action: #selector(jump))
         jumpButton.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         view.addSubview(jumpButton)
+        attackButton.setTitle("HIT", for: .normal)
+        attackButton.setTitleColor(.white, for: .normal)
+        attackButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
+        attackButton.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        attackButton.translatesAutoresizingMaskIntoConstraints = false
+        attackButton.addTarget(self, action: #selector(attack), for: .touchUpInside)
+        view.addSubview(attackButton)
         vehicleButton.setTitle("ENTER CAR", for: .normal)
         vehicleButton.setTitleColor(.white, for: .normal)
         vehicleButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
@@ -174,8 +196,10 @@ final class NativeGameViewController: UIViewController {
             status.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 8),
             players.leadingAnchor.constraint(equalTo: status.leadingAnchor),
             players.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 4),
+            vitals.leadingAnchor.constraint(equalTo: players.leadingAnchor),
+            vitals.topAnchor.constraint(equalTo: players.bottomAnchor, constant: 4),
             objective.leadingAnchor.constraint(equalTo: status.leadingAnchor),
-            objective.topAnchor.constraint(equalTo: players.bottomAnchor, constant: 5),
+            objective.topAnchor.constraint(equalTo: vitals.bottomAnchor, constant: 5),
             objective.widthAnchor.constraint(lessThanOrEqualToConstant: 390),
             stick.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 30),
             stick.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
@@ -191,6 +215,10 @@ final class NativeGameViewController: UIViewController {
             runButton.bottomAnchor.constraint(equalTo: look.centerYAnchor, constant: -5),
             jumpButton.trailingAnchor.constraint(equalTo: look.leadingAnchor, constant: -14),
             jumpButton.topAnchor.constraint(equalTo: look.centerYAnchor, constant: 5)
+            ,attackButton.trailingAnchor.constraint(equalTo: runButton.leadingAnchor, constant: -12),
+            attackButton.centerYAnchor.constraint(equalTo: runButton.centerYAnchor),
+            attackButton.widthAnchor.constraint(equalToConstant: 72),
+            attackButton.heightAnchor.constraint(equalToConstant: 42)
             ,vehicleButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -30),
             vehicleButton.bottomAnchor.constraint(equalTo: look.topAnchor, constant: -12),
             vehicleButton.heightAnchor.constraint(equalToConstant: 35),
@@ -221,6 +249,38 @@ final class NativeGameViewController: UIViewController {
     @objc private func controllerChanged() { status.text = GCController.controllers().isEmpty ? "TOUCH CONTROLS ACTIVE" : "CONTROLLER CONNECTED" }
     @objc private func toggleRun() { run.toggle() }
     @objc private func jump() { renderer?.jump() }
+
+    @objc private func attack() {
+        guard let renderer else { return }
+        if network.health == 0 {
+            network.respawn()
+            if currentVehicle != nil {
+                currentVehicle = nil
+                renderer.exitVehicle()
+                vehicleButton.setTitle("ENTER CAR", for: .normal)
+            }
+            renderer.teleport(x: 1480, y: -1738, z: 13)
+            status.text = "RESPAWNED AT THE CITY CENTRE"
+            return
+        }
+        guard currentVehicle == nil else { status.text = "EXIT THE VEHICLE TO FIGHT"; return }
+        guard !network.passive else { status.text = "TURN OFF PASSIVE MODE TO FIGHT"; return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastAttackTime >= 0.35 else { return }
+        lastAttackTime = now
+        let origin = renderer.position
+        let facing = SIMD2<Float>(sin(renderer.direction), cos(renderer.direction))
+        let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
+            let offset = player.position - origin
+            let distance = hypot(offset.x, offset.y)
+            guard distance > 0.1, distance <= 3.5, abs(offset.z) <= 2.5,
+                  simd_dot(SIMD2(offset.x, offset.y) / distance, facing) >= 0.25 else { return nil }
+            return (player, distance)
+        }.min { $0.1 < $1.1 }
+        guard let target else { status.text = "NO PLAYER IN MELEE REACH"; return }
+        network.sendMeleeHit(to: target.0.id)
+        status.text = "FIST ATTACK ON \(target.0.name.uppercased())"
+    }
 
     @objc private func openGameplay() {
         let panel = NativeGameplayPanel()
@@ -325,6 +385,7 @@ final class NativeGameViewController: UIViewController {
         var steering = turn
         var gamepadRunning = false
         var gamepadJumping = false
+        var gamepadAttacking = false
         if let pad = GCController.controllers().compactMap(\.extendedGamepad).first {
             let lx = pad.leftThumbstick.xAxis.value, ly = pad.leftThumbstick.yAxis.value
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
@@ -332,6 +393,7 @@ final class NativeGameViewController: UIViewController {
             if abs(rx) > 0.05 { steering = rx }
             gamepadRunning = pad.buttonA.isPressed
             gamepadJumping = pad.buttonB.isPressed
+            gamepadAttacking = pad.rightTrigger.isPressed
             if pad.buttonX.isPressed && !lastVehicleButton { toggleVehicle() }
             if pad.buttonY.isPressed && !lastJobsButton && presentedViewController == nil { openGameplay() }
             lastVehicleButton = pad.buttonX.isPressed
@@ -339,6 +401,8 @@ final class NativeGameViewController: UIViewController {
         }
         if gamepadJumping && !lastJumpButton { renderer?.jump() }
         lastJumpButton = gamepadJumping
+        if gamepadAttacking && !lastAttackButton { attack() }
+        lastAttackButton = gamepadAttacking
         let walking = abs(forward) + abs(sideways) > 0.05
         let speed: Float = (run || gamepadRunning) ? 2 : 1
         if currentVehicle != nil { steering = max(-1, min(1, steering + sideways)) }
