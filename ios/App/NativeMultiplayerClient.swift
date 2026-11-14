@@ -5,6 +5,29 @@ struct RemotePlayer {
     let id: String
     let name: String
     let position: SIMD3<Float>
+    let code: String
+    let heading: Float
+}
+
+struct RemoteVehicle {
+    let id: String
+    let name: String
+    let code: String
+    var position: SIMD3<Float>
+    var heading: Float
+
+    init?(row: [Any]) {
+        guard row.count >= 7, let id = row[0] as? String,
+              let name = row[1] as? String, let code = row[2] as? String,
+              let x = (row[3] as? NSNumber)?.floatValue,
+              let y = (row[4] as? NSNumber)?.floatValue,
+              let z = (row[5] as? NSNumber)?.floatValue else { return nil }
+        self.id = id
+        self.name = name
+        self.code = code
+        position = SIMD3(x, y, z)
+        heading = (row[6] as? NSNumber)?.floatValue ?? 0
+    }
 }
 
 /// Speaks the existing local server's WebSocket protocol without Discord.
@@ -12,12 +35,16 @@ final class NativeMultiplayerClient {
     private let server: ServerAddress
     private var socket: URLSessionWebSocketTask?
     private(set) var players: [String: RemotePlayer] = [:]
+    private(set) var vehicles: [String: RemoteVehicle] = [:]
     private(set) var localName = "LOCAL PLAYER"
     private(set) var cash = 0
     private var positionPackets = 0
     var onStatus: ((String) -> Void)?
     var onPlayers: (([RemotePlayer]) -> Void)?
     var onPresence: ((Int, [String]) -> Void)?
+    var onVehicles: (([RemoteVehicle]) -> Void)?
+    var onEnter: ((String, Bool) -> Void)?
+    var onTeleport: ((SIMD3<Float>) -> Void)?
 
     init(server: ServerAddress) { self.server = server }
 
@@ -37,13 +64,38 @@ final class NativeMultiplayerClient {
         socket = nil
     }
 
-    func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool) {
+    func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool,
+                      vehicle: RemoteVehicle? = nil, speed: Float = 0,
+                      airborne: Bool = false) {
+        if let vehicle {
+            send(["t": "me", "driving": true, "car": vehicle.code,
+                  "vehicle": vehicle.id, "skin": 7,
+                  "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
+                  "heading": Double(heading), "speed": Double(speed), "steer": 0,
+                  "health": 1000, "life": 100, "armour": 0])
+            return
+        }
         send(["t": "me", "walking": true, "skin": 7,
               "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
               "heading": Double(heading), "health": 100, "armour": 0,
-              "anim": moving ? "ped/walk/l/1" : "ped/idle/l/1"])
+              "air": airborne,
+              "anim": airborne ? "ped/jump_launch/l/1" :
+                  moving ? "ped/walk/l/1" : "ped/idle/l/1"])
         positionPackets += 1
         if positionPackets % 10 == 0 { send(["t": "board"]) }
+    }
+
+    func requestEnter(_ vehicle: RemoteVehicle) { send(["t": "enter", "v": vehicle.id]) }
+
+    func sendExit(_ position: SIMD3<Float>, heading: Float, vehicle: RemoteVehicle) {
+        send(["t": "me", "walking": true, "skin": 7,
+              "vehicle": vehicle.id, "car": vehicle.code,
+              "x": Double(position.x + cos(heading) * 2.5),
+              "y": Double(position.y - sin(heading) * 2.5), "z": Double(position.z),
+              "heading": Double(heading), "health": 100, "armour": 0,
+              "parked": ["x": Double(position.x), "y": Double(position.y),
+                         "z": Double(position.z), "heading": Double(heading),
+                         "pitch": 0, "roll": 0, "health": 1000]])
     }
 
     private func send(_ object: [String: Any]) {
@@ -84,6 +136,10 @@ final class NativeMultiplayerClient {
             localName = (message["you"] as? String) ?? localName
             cash = (message["cash"] as? Int) ?? cash
             updateRows(message["cars"])
+            if let rows = message["vehicles"] as? [[Any]] {
+                vehicles = Dictionary(uniqueKeysWithValues: rows.compactMap(RemoteVehicle.init(row:)).map { ($0.id, $0) })
+                onVehicles?(Array(vehicles.values))
+            }
             onStatus?("ONLINE AS \(localName.uppercased())")
         case "cars": updateRows(message["c"])
         case "board":
@@ -95,6 +151,24 @@ final class NativeMultiplayerClient {
             onPresence?((message["players"] as? Int) ?? rows.count, names)
         case "note":
             if let note = message["text"] as? String { onStatus?(note.uppercased()) }
+        case "spawned":
+            if let row = message["v"] as? [Any], let vehicle = RemoteVehicle(row: row) {
+                vehicles[vehicle.id] = vehicle
+                onVehicles?(Array(vehicles.values))
+            }
+        case "vgone":
+            if let id = message["id"] as? String {
+                vehicles.removeValue(forKey: id)
+                onVehicles?(Array(vehicles.values))
+            }
+        case "enter":
+            if let id = message["v"] as? String { onEnter?(id, message["ok"] as? Bool == true) }
+        case "tp":
+            if let x = (message["x"] as? NSNumber)?.floatValue,
+               let y = (message["y"] as? NSNumber)?.floatValue,
+               let z = (message["z"] as? NSNumber)?.floatValue {
+                onTeleport?(SIMD3(x, y, z))
+            }
         default: break
         }
     }
@@ -108,7 +182,9 @@ final class NativeMultiplayerClient {
                   let x = (row[3] as? NSNumber)?.floatValue,
                   let y = (row[4] as? NSNumber)?.floatValue,
                   let z = (row[5] as? NSNumber)?.floatValue else { continue }
-            updated[id] = RemotePlayer(id: id, name: name, position: SIMD3(x, y, z))
+            updated[id] = RemotePlayer(id: id, name: name, position: SIMD3(x, y, z),
+                                       code: row[2] as? String ?? "s7",
+                                       heading: row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0)
         }
         players = updated
         onPlayers?(Array(updated.values))

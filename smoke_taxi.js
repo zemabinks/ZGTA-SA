@@ -37,6 +37,13 @@ try {
     return cab;
   };
   let cab = start();
+  game.onMessage(peer, {t: 'me', driving: true, vehicle: cab.id,
+    car: cab.row[2], x: 1486, y: -1735, z: 14.1, heading: 0.6, health: 1000});
+  assert.equal(cab.row[3], 1486, 'the mission cab follows its native driver');
+  game.onMessage(peer, {t: 'me', walking: true, skin: 7,
+    vehicle: cab.id, car: cab.row[2], x: 1488, y: -1735, z: 13,
+    parked: {x: 1486, y: -1735, z: 14.1, heading: 0.6, health: 1000}});
+  assert.equal(cab.row[3], 1486, 'the cab remains parked where the native driver exits');
   assert.equal(peer.player.cash, 0, 'guest fare needs no car or starting cash');
   const pickup = game.gameplayState(peer.player).job.target;
   place(pickup);

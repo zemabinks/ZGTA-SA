@@ -1158,6 +1158,29 @@ class LocalGame {
     }
   }
 
+  updateMissionVehicle(peer, message) {
+    if (typeof message.vehicle !== 'string') return;
+    const vehicle = this.vehicles.get(message.vehicle);
+    if (!vehicle || vehicle.missionOwner !== peer.player ||
+        message.car !== vehicle.row[2]) return;
+    const parked = message.walking === true && message.parked &&
+      typeof message.parked === 'object' ? message.parked : null;
+    const report = parked || (message.driving === true ? message : null);
+    if (!report || ![report.x, report.y, report.z].every(Number.isFinite) ||
+        Math.abs(report.x) > 6000 || Math.abs(report.y) > 6000 ||
+        report.z < -200 || report.z > 1000) return;
+    vehicle.row[3] = rounded(report.x);
+    vehicle.row[4] = rounded(report.y);
+    vehicle.row[5] = rounded(report.z);
+    vehicle.row[6] = rounded(report.heading);
+    vehicle.row[7] = rounded(report.pitch);
+    vehicle.row[8] = rounded(report.roll);
+    if (Number.isFinite(report.health))
+      vehicle.row[9] = Math.max(0, Math.min(1000, Math.round(report.health)));
+    if (parked) for (const other of this.peers)
+      if (other.ready) other.send({t: 'spawned', v: vehicle.row});
+  }
+
   spawnOwnedCar(player, slot) {
     const pos = this.position(player);
     if (!pos) throw new Error('Enter the game before spawning a car.');
@@ -2372,6 +2395,7 @@ class LocalGame {
         }
       }
       this.updateOwnedVehicle(peer, message);
+      this.updateMissionVehicle(peer, message);
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
     }

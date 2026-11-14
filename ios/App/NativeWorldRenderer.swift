@@ -24,11 +24,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let depth: MTLDepthStencilState
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
+    private var actorMeshes: [String: Mesh] = [:]
+    private var actorLoading: Set<String> = []
+    private var vehicleModels: [String: String] = [:]
+    private var pedModels: [String: String] = [:]
     private var loading: Set<String> = []
     private var retryAfter: [String: Date] = [:]
     private var activeDetail = "c59"
-    private var camera = SIMD3<Float>(1480, -1738, 18)
+    private var camera = SIMD3<Float>(1480, -1738, 13)
     private var heading: Float = 0
+    private var collision: WorldCollision?
+    private(set) var drivingSpeed: Float = 0
+    private var verticalSpeed: Float = 0
+    var driving = false
+    var remotePlayers: [RemotePlayer] = []
+    var remoteVehicles: [RemoteVehicle] = []
+    var currentVehicleID: String?
     var onStatus: ((String) -> Void)?
     var onFrame: (() -> Void)?
 
@@ -72,12 +83,73 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     var position: SIMD3<Float> { camera }
     var direction: Float { heading }
+    var isAirborne: Bool { verticalSpeed != 0 }
 
     func move(forward: Float, sideways: Float, turn: Float, delta: Float) {
-        heading += turn * delta * 1.8
-        let scale = delta * 5.0
-        camera.x += (sin(heading) * forward + cos(heading) * sideways) * scale
-        camera.y += (cos(heading) * forward - sin(heading) * sideways) * scale
+        let start = camera
+        var next = camera
+        if driving {
+            heading += turn * delta * max(0.45, min(1.8, abs(drivingSpeed) / 7))
+            let desired = max(-8, min(24, forward * 24))
+            drivingSpeed += (desired - drivingSpeed) * min(1, delta * (forward == 0 ? 2.2 : 1.3))
+            next.x += sin(heading) * drivingSpeed * delta
+            next.y += cos(heading) * drivingSpeed * delta
+        } else {
+            heading += turn * delta * 1.8
+            let scale = delta * 5.0
+            next.x += (sin(heading) * forward + cos(heading) * sideways) * scale
+            next.y += (cos(heading) * forward - sin(heading) * sideways) * scale
+        }
+        let radius: Float = driving ? 0.9 : 0.32
+        let height: Float = driving ? 1.4 : 1.8
+        if collision?.canMove(from: start, to: next, radius: radius, bodyHeight: height) == false {
+            if driving { drivingSpeed = 0 }
+            next = start
+        }
+        camera = next
+        if !driving && verticalSpeed != 0 {
+            verticalSpeed -= 9.8 * delta
+            camera.z += verticalSpeed * delta
+            if let floor = collision?.height(x: camera.x, y: camera.y,
+                                             near: camera.z, maxDrop: 8),
+               camera.z <= floor {
+                camera.z = floor
+                verticalSpeed = 0
+            }
+        } else if let z = collision?.height(x: camera.x, y: camera.y,
+                                            near: camera.z - (driving ? 1.1 : 0)) {
+            camera.z = z + (driving ? 1.1 : 0)
+        }
+        loadNearby()
+    }
+
+    func jump() {
+        guard !driving, verticalSpeed == 0 else { return }
+        verticalSpeed = 5.5
+    }
+
+    func enter(_ vehicle: RemoteVehicle) {
+        camera = vehicle.position
+        heading = vehicle.heading
+        drivingSpeed = 0
+        verticalSpeed = 0
+        driving = true
+        currentVehicleID = vehicle.id
+        loadNearby()
+    }
+
+    func exitVehicle() {
+        driving = false
+        currentVehicleID = nil
+        drivingSpeed = 0
+        camera.x += cos(heading) * 2.5
+        camera.y -= sin(heading) * 2.5
+        camera.z = collision?.height(x: camera.x, y: camera.y, near: camera.z - 1.1) ?? camera.z - 1.1
+    }
+
+    func teleport(x: Float, y: Float, z: Float) {
+        camera = SIMD3(x, y, z)
+        verticalSpeed = 0
         loadNearby()
     }
 
@@ -111,6 +183,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let group = DispatchGroup()
         var bin: Data?
         var png: Data?
+        var col: Data?
         var fetchError: Error?
         let lock = NSLock()
         group.enter()
@@ -129,6 +202,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             lock.unlock()
             group.leave()
         }.resume()
+        if name.hasPrefix("c") {
+            group.enter()
+            URLSession.shared.dataTask(with: server.path("game/world/\(name).col.bin")) { data, response, _ in
+                lock.lock()
+                if (response as? HTTPURLResponse)?.statusCode == 200 { col = data }
+                lock.unlock()
+                group.leave()
+            }.resume()
+        }
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.loading.remove(name)
@@ -141,8 +223,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             do {
                 let world = try WorldBinary(data: bin)
                 let atlas = try self.textureLoader.newTexture(data: png, options: [.SRGB: false])
+                let cellSize = name.hasPrefix("c") ? 128 : 64
+                let columns = atlas.width / cellSize
                 guard atlas.width == 2048,
-                      atlas.height >= ((world.layers + 31) / 32) * 64,
+                      atlas.height >= ((world.layers + columns - 1) / columns) * cellSize,
                       let vertices = self.device.makeBuffer(bytes: world.vertices,
                                                             length: world.vertices.count * MemoryLayout<NativeVertex>.stride),
                       let indices = self.device.makeBuffer(bytes: world.indices,
@@ -153,6 +237,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
                 self.meshes[name] = Mesh(vertices: vertices, indices: indices,
                                          indexCount: world.indices.count, atlas: atlas)
+                if name == self.activeDetail, let col {
+                    self.collision = try? WorldCollision(data: col)
+                }
                 self.onStatus?("CITY READY: \(name.uppercased())")
             } catch {
                 self.retryAfter[name] = Date().addingTimeInterval(5)
@@ -163,6 +250,61 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     var server: ServerAddress?
 
+    func loadModelIndex() {
+        guard let server else { return }
+        URLSession.shared.dataTask(with: server.path("game/native/models/index.json")) { [weak self] data, _, _ in
+            guard let self, let data,
+                  let index = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
+            DispatchQueue.main.async {
+                self.vehicleModels = index["vehicles"] ?? [:]
+                self.pedModels = index["peds"] ?? [:]
+                self.loadActor(self.pedModels["7"] ?? "bmori")
+            }
+        }.resume()
+    }
+
+    private func actorName(code: String) -> String? {
+        if code.hasPrefix("s") { return pedModels[String(code.dropFirst())] }
+        return vehicleModels[String(code.split(separator: ".").first ?? "")]
+    }
+
+    private func loadActor(_ name: String) {
+        guard !name.isEmpty, actorMeshes[name] == nil, !actorLoading.contains(name),
+              let server else { return }
+        actorLoading.insert(name)
+        let group = DispatchGroup()
+        let lock = NSLock()
+        var binary: Data?
+        var image: Data?
+        group.enter()
+        URLSession.shared.dataTask(with: server.path("game/native/models/\(name).bin")) { data, response, _ in
+            lock.lock()
+            if (response as? HTTPURLResponse)?.statusCode == 200 { binary = data }
+            lock.unlock()
+            group.leave()
+        }.resume()
+        group.enter()
+        URLSession.shared.dataTask(with: server.path("game/native/models/\(name).png")) { data, response, _ in
+            lock.lock()
+            if (response as? HTTPURLResponse)?.statusCode == 200 { image = data }
+            lock.unlock()
+            group.leave()
+        }.resume()
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            self.actorLoading.remove(name)
+            guard let binary, let image,
+                  let world = try? WorldBinary(data: binary),
+                  let atlas = try? self.textureLoader.newTexture(data: image, options: [.SRGB: false]),
+                  let vertices = self.device.makeBuffer(bytes: world.vertices,
+                                                       length: world.vertices.count * MemoryLayout<NativeVertex>.stride),
+                  let indices = self.device.makeBuffer(bytes: world.indices,
+                                                      length: world.indices.count * MemoryLayout<UInt32>.stride) else { return }
+            self.actorMeshes[name] = Mesh(vertices: vertices, indices: indices,
+                                          indexCount: world.indices.count, atlas: atlas)
+        }
+    }
+
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
@@ -171,15 +313,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               let command = queue.makeCommandBuffer(),
               let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return }
         let aspect = max(0.1, Float(view.drawableSize.width / max(1, view.drawableSize.height)))
-        let eye = camera + SIMD3<Float>(-sin(heading) * 180, -cos(heading) * 180, 220)
-        let target = camera + SIMD3<Float>(sin(heading) * 70, cos(heading) * 70, -8)
+        let distance: Float = driving ? 11 : 6
+        let eye = camera + SIMD3<Float>(-sin(heading) * distance, -cos(heading) * distance,
+                                        driving ? 4.5 : 2.8)
+        let target = camera + SIMD3<Float>(sin(heading) * 4, cos(heading) * 4,
+                                           driving ? 1.1 : 1.2)
         let matrix = Self.perspective(aspect: aspect) * Self.lookAt(eye: eye, target: target)
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depth)
         encoder.setCullMode(.none)
-        for mesh in meshes.values {
+        let farX = max(0, min(3, Int(floor((camera.x + 3000) / 1500))))
+        let farY = max(0, min(3, Int(floor((camera.y + 3000) / 1500))))
+        let currentFar = "t\(farY * 4 + farX)"
+        for (name, mesh) in meshes where name != currentFar || meshes[activeDetail] == nil {
             var uniforms = Uniforms(viewProjection: matrix,
-                                    settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), 0, 0))
+                                    settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height),
+                                                    0, name.hasPrefix("c") ? 128 : 64))
             encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
@@ -187,10 +336,50 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
                                           indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: 0)
         }
+        drawActors(encoder: encoder, matrix: matrix)
         encoder.endEncoding()
         command.present(drawable)
         command.commit()
         onFrame?()
+    }
+
+    private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
+        var modelInstances: [(String, SIMD3<Float>, Float)] = []
+        if driving {
+            let code = remoteVehicles.first(where: { $0.id == currentVehicleID })?.code ?? "420.6.1.0."
+            if let name = actorName(code: code) {
+                modelInstances.append((name, camera, heading))
+            }
+        } else if let name = pedModels["7"] {
+            modelInstances.append((name, camera, heading))
+        }
+        for player in remotePlayers where simd_distance(player.position, camera) < 130 {
+            if let name = actorName(code: player.code) {
+                modelInstances.append((name, player.position, player.heading))
+            }
+        }
+        for vehicle in remoteVehicles where vehicle.id != currentVehicleID &&
+            simd_distance(vehicle.position, camera) < 130 {
+            if let name = actorName(code: vehicle.code) {
+                modelInstances.append((name, vehicle.position, vehicle.heading))
+            }
+        }
+        for (name, position, angle) in modelInstances {
+            guard let mesh = actorMeshes[name] else { loadActor(name); continue }
+            let c = cos(angle), s = sin(angle)
+            let transform = simd_float4x4(columns: (
+                SIMD4(c, -s, 0, 0), SIMD4(s, c, 0, 0),
+                SIMD4(0, 0, 1, 0), SIMD4(position.x, position.y, position.z, 1)))
+            var uniforms = Uniforms(viewProjection: matrix * transform,
+                                    settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), 0, 128))
+            encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentTexture(mesh.atlas, index: 0)
+            encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
+                                          indexType: .uint32, indexBuffer: mesh.indices,
+                                          indexBufferOffset: 0)
+        }
     }
 
     private static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>) -> simd_float4x4 {

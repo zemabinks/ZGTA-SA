@@ -476,13 +476,23 @@ or game data are intended for publication in this repository.
 The ios/ Xcode project is a native Swift, UIKit, Metal, and GameController
 client. It does not embed a web view or any archived game files. Its menu uses
 the newer ZGTA V Native layout language with original San Andreas themed art.
-It fetches WRL2 world meshes and locally converted texture atlases from your
-Mac, renders them with Metal, and sends position updates to the same local
-multiplayer server used by the browser game. Discord is not needed.
+It fetches WRL2 world meshes, SCL2 collision meshes, and locally converted
+texture atlases from your Mac. It also loads locally converted San Andreas DFF
+character and vehicle geometry with TXD textures. Metal renders the scene;
+the iPhone sends movement and vehicle state to the same independent local
+multiplayer server used by the self-hosted browser game. Discord is not needed.
 
-On this Mac, prepare the ignored local texture files once:
+On this Mac, prepare the ignored local game files once:
 
     python3 prepare_native_assets.py --all-details
+    python3 archive_public_models.py
+    python3 prepare_native_models.py --all
+
+The model archive command fetches public DFF and TXD files that are missing
+from `local-only/site/game/`. It currently fills all 212 listed vehicle model
+and texture pairs. The converter prepares 212 vehicle and 265 pedestrian meshes
+under `local-only/site/game/native/models/`. These binaries and textures are
+excluded from GitHub by `.gitignore`.
 
 Start the server with zsh launch_share.sh lan for iPhone access on the same
 Wi-Fi. In the iOS app, enter the LAN address and join code printed by that
@@ -491,12 +501,18 @@ http://127.0.0.1:8766 also works. To regenerate the Xcode project, run
 cd ios && xcodegen generate --spec project.yml, then open
 ios/ZGTASA.xcodeproj.
 
-The iPhone 15 Pro simulator loaded the local city, connected without Discord,
-listed a player connected in Chrome, and sent touch movement that a second
-multiplayer client received. The compact iPhone 13 mini simulator displayed the
-menu. A signed physical-iPhone build has not been verified. This is a native
-world and multiplayer preview: character rendering, terrain collision,
-vehicles, missions, and the browser game's full interaction systems are still
-missing from the iOS client. The browser game and self-hosted server remain
-separate and can continue to run on the Mac.
+The iPhone 15 Pro simulator loaded the textured city, drew an archived
+pedestrian and taxi model, walked across the road using the archived collision
+mesh, entered and drove a marked taxi, and started and advanced a courier
+mission from the native Jobs panel. A second multiplayer client observed native
+walking, driving, and jump height updates. The local server's taxi smoke test
+also checks that a mission cab follows its driver and remains at the exit
+point. The compact iPhone 13 mini simulator displayed the menu. A signed
+physical-iPhone build has not been verified.
+
+This remains a native gameplay work in progress. The iOS client does not yet
+decode the archived pedestrian animation data, reproduce the browser vehicle
+physics, or expose all browser interactions (combat, homes, groups, shops,
+races, and every mission control). The local server is independent; signing in
+to the original public site does not provide its private multiplayer backend.
 
