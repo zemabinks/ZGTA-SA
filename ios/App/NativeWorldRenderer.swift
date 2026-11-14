@@ -37,6 +37,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var activeFar: Set<String> = []
     private var camera = SIMD3<Float>(1480, -1738, 13)
     private var heading: Float = 0
+    private var actorHeading: Float = 0
+    private var cameraPitch: Float = 0
     private var collision: WorldCollision?
     private(set) var drivingSpeed: Float = 0
     private var verticalSpeed: Float = 0
@@ -95,18 +97,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var position: SIMD3<Float> { camera }
-    var direction: Float { heading }
+    var direction: Float { driving ? heading : actorHeading }
+    var cameraDirection: Float { heading }
     var isAirborne: Bool { verticalSpeed != 0 }
     var isFiring: Bool { actionTimeRemaining > 0 && actionClip == "colt45_fire" }
 
-    func move(forward: Float, sideways: Float, turn: Float, delta: Float) {
+    func move(forward: Float, sideways: Float, turn: Float, delta: Float,
+              running: Bool = false, lookVertical: Float = 0) {
+        cameraPitch = max(-0.4, min(0.5, cameraPitch + lookVertical * delta * 1.2))
         actionTimeRemaining = max(0, actionTimeRemaining - delta)
+        let inputLength = min(1, hypot(forward, sideways))
         let clip = !driving && actionTimeRemaining > 0 ? actionClip :
             !driving && verticalSpeed != 0 ? "jump_launch" :
-            abs(forward) + abs(sideways) < 0.05 ? (equippedWeapon == 22 ? "gun_stand" : "idle_stance") :
-            max(abs(forward), abs(sideways)) > 1.5 ? "run_player" : "walk_player"
+            inputLength < 0.05 ? (equippedWeapon == 22 ? "gun_stand" : "idle_stance") :
+            running ? "run_player" : "walk_player"
         if clip != ownClip { ownClip = clip; ownClipTime = 0 }
-        else { ownClipTime += Double(delta) }
+        else { ownClipTime += Double(delta * (inputLength < 0.05 ? 1 : inputLength)) }
         let start = camera
         var next = camera
         if driving {
@@ -117,9 +123,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             next.y += cos(heading) * drivingSpeed * delta
         } else {
             heading += turn * delta * 1.8
-            let scale = delta * 5.0
-            next.x += (sin(heading) * forward + cos(heading) * sideways) * scale
-            next.y += (cos(heading) * forward - sin(heading) * sideways) * scale
+            if inputLength >= 0.05 {
+                let worldX = sin(heading) * forward + cos(heading) * sideways
+                let worldY = cos(heading) * forward - sin(heading) * sideways
+                let desired = atan2(worldX, worldY)
+                if actionTimeRemaining == 0 {
+                    let difference = atan2(sin(desired - actorHeading),
+                                           cos(desired - actorHeading))
+                    actorHeading += max(-delta * 8, min(delta * 8, difference))
+                }
+                // The archived clips sweep a foot roughly 1.1 m in 1.2 s
+                // walking and 1.5 m in 0.73 s running. Match world travel to
+                // those cycles so the feet do not slide across the pavement.
+                let distance = delta * (running ? 4.1 : 1.6) * inputLength
+                let length = max(0.0001, hypot(worldX, worldY))
+                next.x += worldX / length * distance
+                next.y += worldY / length * distance
+            }
         }
         let radius: Float = driving ? 0.9 : 0.32
         let height: Float = driving ? 1.4 : 1.8
@@ -150,11 +170,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func performFistAttack() {
+        actorHeading = heading
         actionClip = "fighta_1"
         actionTimeRemaining = 0.43
     }
 
     func firePistol() {
+        actorHeading = heading
         actionClip = "colt45_fire"
         actionTimeRemaining = 0.73
     }
@@ -170,6 +192,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func enter(_ vehicle: RemoteVehicle) {
         camera = vehicle.position
         heading = vehicle.heading
+        actorHeading = heading
         drivingSpeed = 0
         verticalSpeed = 0
         driving = true
@@ -184,6 +207,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         camera.x += cos(heading) * 2.5
         camera.y -= sin(heading) * 2.5
         camera.z = collision?.height(x: camera.x, y: camera.y, near: camera.z - 1.1) ?? camera.z - 1.1
+        actorHeading = heading
     }
 
     func teleport(x: Float, y: Float, z: Float) {
@@ -383,11 +407,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               let command = queue.makeCommandBuffer(),
               let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { return }
         let aspect = max(0.1, Float(view.drawableSize.width / max(1, view.drawableSize.height)))
-        let distance: Float = driving ? 11 : 6
+        let distance: Float = driving ? 11 : 4.5
         let eye = camera + SIMD3<Float>(-sin(heading) * distance, -cos(heading) * distance,
-                                        driving ? 4.5 : 2.8)
+                                        driving ? 4.5 : 2.4)
         let target = camera + SIMD3<Float>(sin(heading) * 4, cos(heading) * 4,
-                                           driving ? 1.1 : 1.2)
+                                           (driving ? 1.1 : 1.2) + tan(cameraPitch) * 4)
         let matrix = Self.perspective(aspect: aspect) * Self.lookAt(eye: eye, target: target)
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(depth)
@@ -431,7 +455,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 modelInstances.append((name, camera, heading, "", 0, 0))
             }
         } else if let name = pedModels["7"] {
-            modelInstances.append((name, camera, heading, ownClip, ownClipTime, equippedWeapon))
+            modelInstances.append((name, camera, actorHeading, ownClip, ownClipTime, equippedWeapon))
         }
         for player in remotePlayers where simd_distance(player.position, camera) < 130 {
             if let name = actorName(code: player.code) {
@@ -448,15 +472,21 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         for (name, position, angle, clip, elapsed, weapon) in modelInstances {
             guard let mesh = actorMeshes[name] else { loadActor(name); continue }
-            let c = cos(angle), s = sin(angle)
+            // Archived pedestrian DFFs face local -Y after the RenderWare axis
+            // conversion, while the world protocol defines heading zero as +Y.
+            let modelAngle = angle + (pedModels.values.contains(name) ? Float.pi : 0)
+            let c = cos(modelAngle), s = sin(modelAngle)
             let transform = simd_float4x4(columns: (
                 SIMD4(c, -s, 0, 0), SIMD4(s, c, 0, 0),
                 SIMD4(0, 0, 1, 0), SIMD4(position.x, position.y, position.z, 1)))
             var uniforms = Uniforms(viewProjection: matrix * transform,
                                     settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), 0, 128))
-            if let frame = actorAnimations[name]?.frame(clip: clip, elapsed: elapsed) {
+            if let frames = actorAnimations[name]?.sample(clip: clip, elapsed: elapsed) {
                 encoder.setRenderPipelineState(animatedPipeline)
-                encoder.setVertexBuffer(frame, offset: 0, index: 2)
+                encoder.setVertexBuffer(frames.0, offset: 0, index: 2)
+                encoder.setVertexBuffer(frames.1, offset: 0, index: 3)
+                var blend = frames.2
+                encoder.setVertexBytes(&blend, length: MemoryLayout<Float>.stride, index: 4)
             } else {
                 encoder.setRenderPipelineState(pipeline)
             }

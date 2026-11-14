@@ -538,6 +538,13 @@ archived gun pose. In another isolated two-player test, firing at a player sent
 the local multiplayer server a Colt .45 shot and delivered 18 damage. Shots use
 the local collision mesh to reject targets behind visible walls. Ammunition is
 currently client-side and resets when the game view is reopened.
+The on-foot camera and pedestrian now have separate headings: the character
+faces the direction of travel instead of staying pointed at the viewer, while
+the right LOOK stick or controller right thumbstick moves the camera. The
+RenderWare pedestrian meshes are turned to match the world's heading axis.
+Walk and run travel are scaled to the archived animation cycles, and Metal
+blends adjacent baked frames. These movement changes were checked visually in
+the iPhone 15 Pro simulator in forward, sideways, and camera-orbit views.
 The compact iPhone 13 mini simulator
 displayed the menu. A signed
 physical-iPhone build has not been verified; the generic device target compiles

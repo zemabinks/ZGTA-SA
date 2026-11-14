@@ -17,6 +17,7 @@ final class NativeGameViewController: UIViewController {
     private let ammoLabel = UILabel()
     private let vitals = UILabel()
     private let stick = VirtualStick()
+    private let lookStick = VirtualStick()
     private weak var gameplayPanel: NativeGameplayPanel?
     private var currentVehicle: RemoteVehicle?
     private var displayLink: CADisplayLink?
@@ -26,7 +27,6 @@ final class NativeGameViewController: UIViewController {
     private var lastVehicleButton = false
     private var lastJobsButton = false
     private var lastAutomaticCheckpoint: [String: Date] = [:]
-    private var turn: Float = 0
     private var run = false
     private var lastJumpButton = false
     private var lastAttackButton = false
@@ -160,13 +160,8 @@ final class NativeGameViewController: UIViewController {
         view.addSubview(objective)
         stick.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stick)
-        let look = UIView()
-        look.backgroundColor = UIColor.black.withAlphaComponent(0.22)
-        look.layer.cornerRadius = 52
-        look.layer.borderWidth = 1
-        look.layer.borderColor = UIColor.white.withAlphaComponent(0.35).cgColor
+        let look = lookStick
         look.translatesAutoresizingMaskIntoConstraints = false
-        look.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(lookPan(_:))))
         view.addSubview(look)
         let lookText = label("LOOK", size: 14, bold: true)
         lookText.textAlignment = .center
@@ -408,7 +403,7 @@ final class NativeGameViewController: UIViewController {
             let y = (target["y"] as? NSNumber)?.floatValue ?? 0
             let position = renderer?.position ?? SIMD3<Float>(1480, -1738, 13)
             let angle = atan2(x - position.x, y - position.y)
-            var turn = angle - (renderer?.direction ?? 0)
+            var turn = angle - (renderer?.cameraDirection ?? 0)
             while turn > .pi { turn -= 2 * .pi }
             while turn < -.pi { turn += 2 * .pi }
             let arrow = turn < -.pi / 5 ? "◀" : turn > .pi / 5 ? "▶" : "▲"
@@ -456,17 +451,13 @@ final class NativeGameViewController: UIViewController {
         gameplay.perform(action)
     }
 
-    @objc private func lookPan(_ gesture: UIPanGestureRecognizer) {
-        if gesture.state == .ended || gesture.state == .cancelled { turn = 0; return }
-        turn = Float(max(-1, min(1, gesture.velocity(in: gesture.view).x / 400)))
-    }
-
     @objc private func tick(_ link: CADisplayLink) {
         let delta = lastTime == 0 ? Float(1.0 / 60) : Float(min(0.05, link.timestamp - lastTime))
         lastTime = link.timestamp
         var forward = Float(-stick.value.y)
         var sideways = Float(stick.value.x)
-        var steering = turn
+        var steering = Float(lookStick.value.x)
+        var lookVertical = Float(-lookStick.value.y)
         var gamepadRunning = false
         var gamepadJumping = false
         var gamepadAttacking = false
@@ -477,6 +468,8 @@ final class NativeGameViewController: UIViewController {
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
             let rx = pad.rightThumbstick.xAxis.value
             if abs(rx) > 0.05 { steering = rx }
+            let ry = pad.rightThumbstick.yAxis.value
+            if abs(ry) > 0.05 { lookVertical = ry }
             gamepadRunning = pad.buttonA.isPressed
             gamepadJumping = pad.buttonB.isPressed
             gamepadAttacking = pad.rightTrigger.isPressed
@@ -496,14 +489,15 @@ final class NativeGameViewController: UIViewController {
         if gamepadReload && !lastReloadButton { reload() }
         lastReloadButton = gamepadReload
         let walking = abs(forward) + abs(sideways) > 0.05
-        let speed: Float = (run || gamepadRunning) ? 2 : 1
+        let running = run || gamepadRunning
         if currentVehicle != nil { steering = max(-1, min(1, steering + sideways)) }
-        renderer?.move(forward: forward * speed, sideways: currentVehicle == nil ? sideways * speed : 0,
-                       turn: steering, delta: delta)
+        renderer?.move(forward: forward, sideways: currentVehicle == nil ? sideways : 0,
+                       turn: steering, delta: delta, running: running,
+                       lookVertical: lookVertical)
         if link.timestamp - lastNetwork > 0.2, let renderer {
             lastNetwork = link.timestamp
             network.sendPosition(renderer.position, heading: renderer.direction, moving: walking,
-                                 running: speed > 1,
+                                 running: running,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
                                  airborne: renderer.isAirborne, weapon: usingPistol ? 22 : 0,
                                  firing: renderer.isFiring)
@@ -526,7 +520,7 @@ private final class VirtualStick: UIView {
         layer.borderColor = UIColor.white.withAlphaComponent(0.45).cgColor
         layer.borderWidth = 2
         knob.backgroundColor = UIColor.white.withAlphaComponent(0.8)
-        knob.frame = CGRect(x: 41, y: 41, width: 40, height: 40)
+        knob.frame = CGRect(x: 0, y: 0, width: 40, height: 40)
         knob.layer.cornerRadius = 20
         knob.isUserInteractionEnabled = false
         addSubview(knob)
@@ -534,6 +528,14 @@ private final class VirtualStick: UIView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = min(bounds.width, bounds.height) / 2
+        let radius = min(bounds.width, bounds.height) * 0.34
+        knob.center = CGPoint(x: bounds.midX + value.x * radius,
+                              y: bounds.midY + value.y * radius)
+    }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) { update(touches.first?.location(in: self)) }
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) { update(touches.first?.location(in: self)) }
@@ -544,9 +546,10 @@ private final class VirtualStick: UIView {
         if let point {
             let dx = point.x - bounds.midX, dy = point.y - bounds.midY
             let length = max(1, hypot(dx, dy))
-            let scale = min(1, 42 / length)
-            value = CGPoint(x: dx * scale / 42, y: dy * scale / 42)
+            let radius = max(1, min(bounds.width, bounds.height) * 0.34)
+            let scale = min(1, radius / length)
+            value = CGPoint(x: dx * scale / radius, y: dy * scale / radius)
         } else { value = .zero }
-        knob.center = CGPoint(x: bounds.midX + value.x * 42, y: bounds.midY + value.y * 42)
+        setNeedsLayout()
     }
 }

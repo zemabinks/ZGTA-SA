@@ -50,11 +50,14 @@ struct NativeActorAnimation {
         framesPerSecond = fps
     }
 
-    func frame(clip: String, elapsed: Double) -> MTLBuffer? {
+    func sample(clip: String, elapsed: Double) -> (MTLBuffer, MTLBuffer, Float)? {
         guard let options = frames[clip], !options.isEmpty else { return nil }
-        let step = max(0, Int(elapsed * Double(framesPerSecond)))
-        let index = clip == "jump_launch" ? min(options.count - 1, step) : step % options.count
-        return options[index]
+        let phase = max(0, elapsed * Double(framesPerSecond))
+        let step = min(Int(phase), 1_000_000_000)
+        let last = options.count - 1
+        let index = clip == "jump_launch" ? min(last, step) : step % options.count
+        let next = clip == "jump_launch" ? min(last, index + 1) : (index + 1) % options.count
+        return (options[index], options[next], Float(phase - floor(phase)))
     }
 }
 
