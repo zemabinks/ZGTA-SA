@@ -316,6 +316,7 @@ function savedJob(value) {
       ...(value.id === 'medic' ? {station: value.station, vehicleId: value.vehicleId} : {drop: value.drop}),
       ...(value.id === 'taxi' ? {station: value.station, vehicleId: value.vehicleId,
         model: taxiCab(value.model)?.model || 420,
+        shiftFares: Math.max(0, Math.min(999, Math.floor(finite(value.shiftFares)))),
         pickedUpAt: value.stage === 'delivery' && Number.isFinite(value.pickedUpAt) ?
           Math.max(value.started, value.pickedUpAt) : null,
         minHealth: Math.max(0, Math.min(1000, finite(value.minHealth, 1000))),
@@ -914,11 +915,14 @@ class LocalGame {
         capacity: 2} : null,
       job: active ? {id: active.id, name: JOBS.find(job => job.id === active.id)?.name,
         vehicleId: active.vehicleId || null,
+        inMarkedVehicle: !!(active.vehicleId && pos?.peer.state.driving === true &&
+          pos.peer.state.vehicle === active.vehicleId),
         ...(objective || {goal: active.goal, progress: Math.floor(active.progress),
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
         ...(active.id === 'taxi' ? {fare: {base: 300,
           cab: taxiCab(active.model)?.name || 'Taxi',
           cabPremium: taxiCab(active.model)?.premium || 0,
+          shiftFares: active.shiftFares || 0,
           cleanBonus: TAXI_CLEAN_BONUS, quickBonus: TAXI_QUICK_BONUS,
           quickSeconds: Math.ceil(taxiQuickWindow(active) / 1000),
           rideSeconds: active.pickedUpAt ? Math.max(0,
@@ -1585,6 +1589,7 @@ class LocalGame {
             station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)],
             vehicleId: missionId(), pickedUpAt: null,
             minHealth: 1000, reportedHealth: false,
+            shiftFares: 0,
             stage: 'pickup', started: Date.now()};
           this.addMissionVehicle(player);
           message = `Taxi fare started. Take the nearby marked cab to ${nearest.name} for pickup.`;
@@ -2018,16 +2023,35 @@ class LocalGame {
       player.xp = money(player.xp + Math.round(job.pay / 5) +
         (convoyBonus + pilotBonus + heistBonus + taxiBonus) / 5);
       player.jobsDone++;
-      this.removeMissionVehicle(player);
-      player.job = null;
+      let nextTaxiPickup = null;
+      if (job.id === 'taxi') {
+        nextTaxiPickup = nearestHome(pos, 90, [player.job.drop]);
+        const nextDrop = nextTaxiPickup && nearestHome(
+          {x: nextTaxiPickup.out[0], y: nextTaxiPickup.out[1]}, 150,
+          [nextTaxiPickup.id]);
+        if (nextDrop) {
+          player.job = {...player.job, pickupHome: nextTaxiPickup.id,
+            drop: nextDrop.id, stage: 'pickup', started: Date.now(),
+            pickedUpAt: null, minHealth: 1000, reportedHealth: false,
+            shiftFares: Math.min(999, (player.job.shiftFares || 0) + 1)};
+        } else nextTaxiPickup = null;
+      }
+      if (!nextTaxiPickup) {
+        this.removeMissionVehicle(player);
+        player.job = null;
+      }
       message = `${job.name} complete: +$${job.pay}${convoyBonus ?
         ` and $${convoyBonus} convoy bonus` : ''}${pilotBonus ?
         ` and $${pilotBonus} pilot bonus (${pilotExtras.join(', ')})` : ''}${heistBonus ?
         ` and $${heistBonus} crew bonus` : ''}${taxiBonus ?
-        ` and $${taxiBonus} taxi bonus (${taxiExtras.join(', ')})` : ''}. Balance: $${player.cash}.`;
+        ` and $${taxiBonus} taxi bonus (${taxiExtras.join(', ')})` : ''}. Balance: $${player.cash}.${nextTaxiPickup ?
+        ` Next passenger near ${nextTaxiPickup.name}; keep driving the same cab, or cancel to end the shift.` : ''}`;
       this.updatePlayer(player);
     } else if (action === 'job.cancel') {
       if (!player.job) throw new Error('No active job.');
+      if (player.job.id === 'taxi' && pos?.peer.state.driving === true &&
+          pos.peer.state.vehicle === player.job.vehicleId)
+        throw new Error('Get out of the marked cab before ending the shift.');
       if (player.job.id === 'pilot') player.pilotStreak = 0;
       if (player.job.id === 'taxi') player.taxiStreak = 0;
       this.removeMissionVehicle(player);
