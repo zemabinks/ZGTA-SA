@@ -15,6 +15,15 @@ const SUPPLIES = Object.freeze([
   {id: 'paint_can', name: 'Paint can', price: 100, capacity: 5},
 ]);
 const MISSION_RADIUS = 12;
+const TAXI_STREAK_WINDOW_MS = 600000;
+const TAXI_CLEAN_BONUS = 75;
+const TAXI_QUICK_BONUS = 50;
+const TAXI_STREAK_BONUS = 50;
+const TAXI_CABS = Object.freeze([
+  {model: 420, name: 'Taxi', level: 1, premium: 0, car: '420.6.1.0.'},
+  {model: 438, name: 'Cabbie', level: 8, premium: 75, car: '438.6.1.0.'},
+  {model: 409, name: 'Limousine', level: 20, premium: 200, car: '409.1.1.0.'},
+]);
 const MECHANIC_STAGES = Object.freeze(['engine', 'tyres', 'bodywork']);
 const MECHANIC_STAGE_MS = 3000;
 const TIME_TRIAL_MS = 180000;
@@ -102,6 +111,8 @@ const PILOT_AIRCRAFT = Object.freeze([
 ]);
 function pilotAircraft(model) { return PILOT_AIRCRAFT.find(item => item.model === model); }
 function pilotLevel(player) { return Math.min(50, 1 + Math.floor((player.pilotFlights || 0) / 3)); }
+function taxiCab(model) { return TAXI_CABS.find(item => item.model === model); }
+function taxiLevel(player) { return Math.min(50, 1 + Math.floor((player.taxiFares || 0) / 3)); }
 const HOME_CATALOG = Object.freeze([
   {id: 'starter', name: 'Starter apartment', price: 1500, source: 'starter'},
   {id: 'loft', name: 'City loft', price: 5000, source: 'starter'},
@@ -200,6 +211,12 @@ function savedSupplies(value) {
     Math.max(0, Math.min(item.capacity, Math.floor(finite(value?.[item.id]))))]));
 }
 function homeAt(id) { return HOME_CATALOG.find(home => home.id === id && home.out); }
+function taxiQuickWindow(job) {
+  const pickup = homeAt(job?.pickupHome), drop = homeAt(job?.drop);
+  return pickup && drop ? Math.max(60000, Math.min(240000,
+    Math.round(Math.hypot(pickup.out[0] - drop.out[0],
+      pickup.out[1] - drop.out[1]) / 12) * 1000)) : 60000;
+}
 function fireSpot(job) {
   const home = homeAt(job?.incidentHome);
   const offset = FIRE_OFFSETS[job?.index];
@@ -287,6 +304,8 @@ function savedJob(value) {
         (value.id !== 'medic' && !homeAt(value.drop)) ||
         (value.id === 'medic' && (!Array.isArray(value.station) || value.station.length !== 3 ||
           !value.station.every(Number.isFinite) || !validMissionId(value.vehicleId))) ||
+        (value.id === 'taxi' && (!Array.isArray(value.station) || value.station.length !== 3 ||
+          !value.station.every(Number.isFinite) || !validMissionId(value.vehicleId))) ||
         (value.id === 'carthief' && !validMissionId(value.vehicleId)) ||
         (value.id === 'trucker' && (!validMissionId(value.vehicleId) ||
           !Array.isArray(value.station) || value.station.length !== 3 ||
@@ -295,6 +314,12 @@ function savedJob(value) {
     return {id: value.id, mode: 'route',
       ...(value.id === 'courier' ? {pickup: value.pickup} : {pickupHome: value.pickupHome}),
       ...(value.id === 'medic' ? {station: value.station, vehicleId: value.vehicleId} : {drop: value.drop}),
+      ...(value.id === 'taxi' ? {station: value.station, vehicleId: value.vehicleId,
+        model: taxiCab(value.model)?.model || 420,
+        pickedUpAt: value.stage === 'delivery' && Number.isFinite(value.pickedUpAt) ?
+          Math.max(value.started, value.pickedUpAt) : null,
+        minHealth: Math.max(0, Math.min(1000, finite(value.minHealth, 1000))),
+        reportedHealth: value.reportedHealth === true} : {}),
       ...(value.id === 'carthief' ? {vehicleId: value.vehicleId} : {}),
       ...(value.id === 'trucker' ? {vehicleId: value.vehicleId, station: value.station,
         bonusAwarded: value.bonusAwarded === true} : {}),
@@ -358,6 +383,8 @@ class LocalGame {
           cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
           pilotFlights: money(value.pilotFlights), pilotStreak:
             value.job?.id === 'pilot' && !savedJob(value.job) ? 0 : money(value.pilotStreak),
+          taxiFares: money(value.taxiFares), taxiStreak: money(value.taxiStreak),
+          taxiLastFareAt: Math.max(0, finite(value.taxiLastFareAt)),
           heistCooldownUntil: Math.max(0, finite(value.heistCooldownUntil)),
           racesFinished: money(value.racesFinished), racesWon: money(value.racesWon),
           health: Math.max(1, Math.min(100, Math.round(finite(value.health, 100)))),
@@ -408,6 +435,8 @@ class LocalGame {
     const players = Object.fromEntries([...this.players].map(([id, p]) =>
       [id, {name: p.name, cash: p.cash, xp: p.xp, jobsDone: p.jobsDone,
         pilotFlights: p.pilotFlights, pilotStreak: p.pilotStreak,
+        taxiFares: p.taxiFares, taxiStreak: p.taxiStreak,
+        taxiLastFareAt: p.taxiLastFareAt,
         heistCooldownUntil: p.heistCooldownUntil,
         racesFinished: p.racesFinished, racesWon: p.racesWon,
         health: p.health, armour: p.armour, wanted: p.wanted,
@@ -431,6 +460,7 @@ class LocalGame {
       id = crypto.randomBytes(16).toString('hex');
       this.players.set(id, {number: this.nextNumber++, name: `Local ${this.nextNumber - 1}`,
         cash: 0, xp: 0, jobsDone: 0, pilotFlights: 0, pilotStreak: 0,
+        taxiFares: 0, taxiStreak: 0, taxiLastFareAt: 0,
         heistCooldownUntil: 0,
         racesFinished: 0, racesWon: 0,
         health: 100, armour: 0, wanted: 0, wantedUntil: 0, passive: false,
@@ -840,6 +870,12 @@ class LocalGame {
           unlocked: pilotLevel(player) >= item.level})),
         smoothBonus: PILOT_SMOOTH_BONUS, earlyBonus: PILOT_EARLY_BONUS,
         fifthBonus: PILOT_STREAK_BONUS},
+      taxi: {fares: player.taxiFares || 0, streak: player.taxiStreak || 0,
+        level: taxiLevel(player), cabs: TAXI_CABS.map(item => ({model: item.model,
+          name: item.name, level: item.level, premium: item.premium,
+          unlocked: taxiLevel(player) >= item.level})),
+        cleanBonus: TAXI_CLEAN_BONUS, quickBonus: TAXI_QUICK_BONUS,
+        streakBonus: TAXI_STREAK_BONUS},
       heistCooldown: Math.max(0, Math.ceil(((player.heistCooldownUntil || 0) -
         Date.now()) / 1000)),
       racesFinished: player.racesFinished || 0, racesWon: player.racesWon || 0,
@@ -880,6 +916,19 @@ class LocalGame {
         vehicleId: active.vehicleId || null,
         ...(objective || {goal: active.goal, progress: Math.floor(active.progress),
           remaining: Math.max(0, Math.ceil(active.goal - active.progress))}),
+        ...(active.id === 'taxi' ? {fare: {base: 300,
+          cab: taxiCab(active.model)?.name || 'Taxi',
+          cabPremium: taxiCab(active.model)?.premium || 0,
+          cleanBonus: TAXI_CLEAN_BONUS, quickBonus: TAXI_QUICK_BONUS,
+          quickSeconds: Math.ceil(taxiQuickWindow(active) / 1000),
+          rideSeconds: active.pickedUpAt ? Math.max(0,
+            Math.ceil((Date.now() - active.pickedUpAt) / 1000)) : 0,
+          cleanEligible: active.reportedHealth === true &&
+            active.minHealth >= 950 && player.wanted === 0,
+          streak: player.taxiStreak || 0,
+          streakBonus: player.taxiStreak > 0 &&
+            Date.now() - player.taxiLastFareAt <= TAXI_STREAK_WINDOW_MS ?
+              Math.min(5, player.taxiStreak) * TAXI_STREAK_BONUS : 0}} : {}),
         ...(active.id === 'trucker' ? {convoyBonusAwarded: active.bonusAwarded === true,
           convoyBonus: CONVOY_BONUS} : {}),
         started: active.started} : null,
@@ -953,6 +1002,7 @@ class LocalGame {
     const job = player.job;
     if (!job?.vehicleId) return;
     const mechanic = job.id === 'mechanic';
+    const taxi = job.id === 'taxi';
     const thief = job.id === 'carthief';
     const trucker = job.id === 'trucker';
     const pilot = job.id === 'pilot';
@@ -968,6 +1018,7 @@ class LocalGame {
     const id = job.vehicleId;
     const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
       mechanic ? '410.52.39.0.' : thief ? '560.52.39.0.' :
+        taxi ? taxiCab(job.model)?.car || '420.6.1.0.' :
         patrol ? '596.0.1.0.' : pizza ? '448.1.1.0.' :
           trucker ? '414.25.1.0.' : pilot ? pilotCode :
             fire ? '407.3.1.0.' : heist ? '560.52.39.0.' : '416.1.1.0.',
@@ -1514,8 +1565,6 @@ class LocalGame {
       if (this.race && ['lobby', 'running'].includes(this.race.stage) &&
           this.race.members.has(player)) throw new Error('Leave or finish your race first.');
       if (job.id === 'courier' || job.id === 'taxi') {
-        if (job.id === 'taxi' && player.cars.length === 0)
-          throw new Error('Own a car before starting taxi fares.');
         const nearest = nearestHome(pos);
         if (!nearest) throw new Error('Job destinations are unavailable.');
         if (job.id === 'courier') {
@@ -1523,11 +1572,22 @@ class LocalGame {
             drop: nearest.id, stage: 'pickup', started: Date.now()};
           message = 'Courier started. Collect the package here, then follow the objective box to the delivery address.';
         } else {
+          const cab = taxiCab(input.model === undefined ? 420 : Number(input.model));
+          if (!cab) throw new Error('Unknown taxi cab.');
+          if (taxiLevel(player) < cab.level)
+            throw new Error(`${cab.name} unlocks at taxi level ${cab.level}.`);
           const drop = nearestHome({x: nearest.out[0], y: nearest.out[1]}, 150, [nearest.id]);
           if (!drop) throw new Error('Taxi drop-off locations are unavailable.');
+          if (Date.now() - player.taxiLastFareAt > TAXI_STREAK_WINDOW_MS)
+            player.taxiStreak = 0;
           player.job = {id: job.id, mode: 'route', pickupHome: nearest.id,
-            drop: drop.id, stage: 'pickup', started: Date.now()};
-          message = `Taxi fare started. Drive to ${nearest.name} for pickup.`;
+            drop: drop.id, model: cab.model,
+            station: [rounded(pos.x), rounded(pos.y), rounded(pos.z)],
+            vehicleId: missionId(), pickedUpAt: null,
+            minHealth: 1000, reportedHealth: false,
+            stage: 'pickup', started: Date.now()};
+          this.addMissionVehicle(player);
+          message = `Taxi fare started. Take the nearby marked cab to ${nearest.name} for pickup.`;
         }
       } else if (job.id === 'trucker') {
         const pickup = nearestHome(pos);
@@ -1696,6 +1756,10 @@ class LocalGame {
         throw new Error('Travel to the pickup point.');
       if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
         throw new Error('Drive the mission vehicle to the pickup point.');
+      if (player.job.id === 'taxi' &&
+          (pos.peer.state.vehicle !== player.job.vehicleId ||
+            pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+        throw new Error('Drive the marked cab to the passenger.');
       if (player.job.id === 'medic' &&
           (pos.peer.state.vehicle !== player.job.vehicleId ||
             pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
@@ -1718,6 +1782,7 @@ class LocalGame {
         this.setWanted(player, Math.max(2, player.wanted));
       }
       player.job.stage = 'delivery';
+      if (player.job.id === 'taxi') player.job.pickedUpAt = Date.now();
       const home = homeAt(player.job.drop);
       message = player.job.id === 'courier' ? `Package collected. Deliver it to ${home.name}.` :
         player.job.id === 'taxi' ? `Passenger aboard. Drive to ${home.name}.` :
@@ -1779,6 +1844,10 @@ class LocalGame {
           throw new Error('Travel to the delivery destination.');
         if (player.job.id !== 'courier' && pos.peer.state.driving !== true)
           throw new Error('Finish the fare or medical call while driving.');
+        if (player.job.id === 'taxi' &&
+            (pos.peer.state.vehicle !== player.job.vehicleId ||
+              pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
+          throw new Error('Drop off the passenger in the marked cab.');
         if (player.job.id === 'medic' &&
             (pos.peer.state.vehicle !== player.job.vehicleId ||
               pos.peer.state.car !== this.vehicles.get(player.job.vehicleId)?.row[2]))
@@ -1917,20 +1986,50 @@ class LocalGame {
           }
         }
       }
-      player.cash = money(player.cash + job.pay + convoyBonus + pilotBonus + heistBonus);
+      let taxiBonus = 0;
+      const taxiExtras = [];
+      if (job.id === 'taxi') {
+        const cab = taxiCab(player.job.model) || TAXI_CABS[0];
+        if (cab.premium) {
+          taxiBonus += cab.premium;
+          taxiExtras.push(`${cab.name} fare`);
+        }
+        const previousStreak = Date.now() - player.taxiLastFareAt <= TAXI_STREAK_WINDOW_MS ?
+          player.taxiStreak : 0;
+        if (player.job.reportedHealth && player.job.minHealth >= 950 && !player.wanted) {
+          taxiBonus += TAXI_CLEAN_BONUS;
+          taxiExtras.push('clean ride');
+        }
+        if (player.job.reportedHealth && player.job.pickedUpAt && !player.wanted &&
+            Date.now() - player.job.pickedUpAt <= taxiQuickWindow(player.job)) {
+          taxiBonus += TAXI_QUICK_BONUS;
+          taxiExtras.push('quick ride');
+        }
+        if (previousStreak) {
+          const streakPay = Math.min(5, previousStreak) * TAXI_STREAK_BONUS;
+          taxiBonus += streakPay;
+          taxiExtras.push(`${previousStreak + 1} fares in a row`);
+        }
+        player.taxiFares = money(player.taxiFares + 1);
+        player.taxiStreak = Math.min(999, previousStreak + 1);
+        player.taxiLastFareAt = Date.now();
+      }
+      player.cash = money(player.cash + job.pay + convoyBonus + pilotBonus + heistBonus + taxiBonus);
       player.xp = money(player.xp + Math.round(job.pay / 5) +
-        (convoyBonus + pilotBonus + heistBonus) / 5);
+        (convoyBonus + pilotBonus + heistBonus + taxiBonus) / 5);
       player.jobsDone++;
       this.removeMissionVehicle(player);
       player.job = null;
       message = `${job.name} complete: +$${job.pay}${convoyBonus ?
         ` and $${convoyBonus} convoy bonus` : ''}${pilotBonus ?
         ` and $${pilotBonus} pilot bonus (${pilotExtras.join(', ')})` : ''}${heistBonus ?
-        ` and $${heistBonus} crew bonus` : ''}. Balance: $${player.cash}.`;
+        ` and $${heistBonus} crew bonus` : ''}${taxiBonus ?
+        ` and $${taxiBonus} taxi bonus (${taxiExtras.join(', ')})` : ''}. Balance: $${player.cash}.`;
       this.updatePlayer(player);
     } else if (action === 'job.cancel') {
       if (!player.job) throw new Error('No active job.');
       if (player.job.id === 'pilot') player.pilotStreak = 0;
+      if (player.job.id === 'taxi') player.taxiStreak = 0;
       this.removeMissionVehicle(player);
       player.job = null;
       message = 'Job cancelled.';
@@ -2218,6 +2317,17 @@ class LocalGame {
           if (stopped) flight.landingSince ||= Date.now();
           else flight.landingSince = null;
         }
+      }
+      const fare = peer.player.job;
+      if (fare?.id === 'taxi' && fare.mode === 'route' &&
+          message.driving === true && message.vehicle === fare.vehicleId &&
+          message.car === this.vehicles.get(fare.vehicleId)?.row[2] &&
+          Number.isFinite(message.health) && message.health >= 0 &&
+          message.health <= 1000) {
+        fare.reportedHealth = true;
+        const health = Math.round(message.health);
+        if (health < fare.minHealth) fare.minHealth = health;
+        this.save();
       }
       const reportedHealth = message.walking === true ? message.health :
         message.driving === true ? message.life : null;
