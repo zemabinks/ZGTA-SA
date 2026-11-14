@@ -471,3 +471,32 @@ This is an unofficial local archive. Grand Theft Auto: San Andreas and its
 assets remain the property of their respective owners. No copied site files
 or game data are intended for publication in this repository.
 
+### Native iPhone preview
+
+The ios/ Xcode project is a native Swift, UIKit, Metal, and GameController
+client. It does not embed a web view or any archived game files. Its menu uses
+the newer ZGTA V Native layout language with original San Andreas themed art.
+It fetches WRL2 world meshes and locally converted texture atlases from your
+Mac, renders them with Metal, and sends position updates to the same local
+multiplayer server used by the browser game. Discord is not needed.
+
+On this Mac, prepare the ignored local texture files once:
+
+    python3 prepare_native_assets.py --all-details
+
+Start the server with zsh launch_share.sh lan for iPhone access on the same
+Wi-Fi. In the iOS app, enter the LAN address and join code printed by that
+launcher. For an iOS Simulator on this Mac, a loopback self-hosted server at
+http://127.0.0.1:8766 also works. To regenerate the Xcode project, run
+cd ios && xcodegen generate --spec project.yml, then open
+ios/ZGTASA.xcodeproj.
+
+The iPhone 15 Pro simulator loaded the local city, connected without Discord,
+listed a player connected in Chrome, and sent touch movement that a second
+multiplayer client received. The compact iPhone 13 mini simulator displayed the
+menu. A signed physical-iPhone build has not been verified. This is a native
+world and multiplayer preview: character rendering, terrain collision,
+vehicles, missions, and the browser game's full interaction systems are still
+missing from the iOS client. The browser game and self-hosted server remain
+separate and can continue to run on the Mac.
+

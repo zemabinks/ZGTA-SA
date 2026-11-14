@@ -1,5 +1,8 @@
 # Keep all copied website code, art, world data, and game files on this Mac.
 /local-only/
+/ios/build/
+/ios/DerivedData/
+*.xcuserstate
 *.iso
 *.img
 *.dff
