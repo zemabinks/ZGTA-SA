@@ -40,14 +40,18 @@ try {
   assert(begun.state.job.secondsLeft > 0 && begun.state.job.secondsLeft <= 600);
   const planeId = player.job.vehicleId;
   assert.equal(game.vehicles.get(planeId).row[2], '593.1.1.0.');
-  assert(sent.some(packet => packet.t === 'tp' && packet.x === airport('ls').stand[0]));
+  const spawn = game.vehicles.get(planeId).row;
+  assert(sent.some(packet => packet.t === 'tp' &&
+    Math.hypot(packet.x - spawn[3], packet.y - spawn[4]) <= 8));
+  assert(Math.abs(spawn[6] - Math.PI / 2) < 0.01,
+    'the loaner faces the Los Santos runway');
   assert(sent.some(packet => packet.t === 'spawned' && packet.v[0] === planeId));
   assert(otherSent.some(packet => packet.t === 'spawned' && packet.v[0] === planeId));
   game.onMessage(otherPeer, {t: 'enter', v: planeId});
   assert(otherSent.some(packet => packet.t === 'enter' && packet.v === planeId && !packet.ok));
   player.job.started = Date.now() - 3100;
   assert.throws(() => game.action(player, 'job.complete', {}), /Take off/);
-  const from = airport('ls').stand;
+  const from = [spawn[3], spawn[4], spawn[5] - 1.1];
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: 'wrong',
     x: from[0], y: from[1], z: from[2] + 45, speed: 20});
   assert.equal(player.job.stage, 'takeoff', 'another aircraft cannot count as takeoff');
@@ -58,6 +62,7 @@ try {
   assert.equal(player.job.minHealth, 1000);
   assert(sent.some(packet => packet.t === 'note' && /Airborne/.test(packet.text)));
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(local, 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   const resumed = game.players.get(id);
@@ -72,7 +77,7 @@ try {
     send: packet => sent.push(packet)};
   game.peers.add(peer);
   assert.throws(() => game.action(resumed, 'job.complete', {}), /destination apron/);
-  const to = airport('sf').stand;
+  const to = [begun.state.job.target.x, begun.state.job.target.y, airport('sf').stand[2]];
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: planeId,
     x: to[0], y: to[1], z: to[2] + 2, speed: 0});
   assert(resumed.job.landingSince);
@@ -96,8 +101,10 @@ try {
 
   game.action(resumed, 'job.start', {job: 'pilot'});
   const damagedId = resumed.job.vehicleId;
-  const nextFrom = airport(resumed.job.from).stand;
-  const nextTo = airport(resumed.job.to).stand;
+  const nextSpawn = game.vehicles.get(damagedId).row;
+  const nextFrom = [nextSpawn[3], nextSpawn[4], nextSpawn[5] - 1.1];
+  const nextTarget = game.gameplayState(resumed).job.target;
+  const nextTo = [nextTarget.x, nextTarget.y, airport(resumed.job.to).stand[2]];
   resumed.job.started = Date.now() - 540000;
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: damagedId,
     x: nextFrom[0], y: nextFrom[1], z: nextFrom[2] + 40, speed: 20, health: 700});
@@ -123,6 +130,7 @@ try {
   resumed.pilotStreak = 2;
   resumed.job.started = Date.now() - 601000;
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(local, 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   assert.equal(game.players.get(id).job, null);
@@ -143,8 +151,10 @@ try {
   const beagleCode = game.vehicles.get(beagleId).row[2];
   assert.equal(beagleCode.split('.')[0], '511');
   unlocked.job.started = Date.now() - 3100;
-  const beagleFrom = airport(unlocked.job.from).stand;
-  const beagleTo = airport(unlocked.job.to).stand;
+  const beagleSpawn = game.vehicles.get(beagleId).row;
+  const beagleFrom = [beagleSpawn[3], beagleSpawn[4], beagleSpawn[5] - 1.1];
+  const beagleTarget = game.gameplayState(unlocked).job.target;
+  const beagleTo = [beagleTarget.x, beagleTarget.y, airport(unlocked.job.to).stand[2]];
   game.onMessage(airportPeer, {t: 'me', driving: true, car: beagleCode,
     vehicle: beagleId, x: beagleFrom[0], y: beagleFrom[1],
     z: beagleFrom[2] + 40, speed: 20, health: 1000});

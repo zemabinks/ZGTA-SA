@@ -7,6 +7,7 @@ struct RemotePlayer {
     let position: SIMD3<Float>
     let code: String
     let heading: Float
+    let pitch: Float
     let animation: String
     let weapon: Int
     let vehicleID: String?
@@ -77,12 +78,14 @@ final class NativeMultiplayerClient {
 
     func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool, running: Bool,
                       vehicle: RemoteVehicle? = nil, speed: Float = 0,
+                      steer: Float = 0, pitch: Float = 0,
                       airborne: Bool = false, weapon: Int = 0, firing: Bool = false) {
         if let vehicle {
             var packet: [String: Any] = ["t": "me", "driving": true, "car": vehicle.code,
                   "vehicle": vehicle.id, "skin": 7,
                   "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
-                  "heading": Double(heading), "speed": Double(speed), "steer": 0,
+                  "heading": Double(heading), "pitch": Double(pitch),
+                  "speed": Double(speed), "steer": Double(steer),
                   "health": 1000, "life": health, "armour": armour]
             addPendingChat(to: &packet)
             send(packet)
@@ -302,6 +305,7 @@ final class NativeMultiplayerClient {
             updated[id] = RemotePlayer(id: id, name: name, position: SIMD3(x, y, z),
                                        code: code,
                                        heading: row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0,
+                                       pitch: row.count > 7 ? (row[7] as? NSNumber)?.floatValue ?? 0 : 0,
                                        animation: animation,
                                        weapon: row.count > 27 ? (row[27] as? NSNumber)?.intValue ?? 0 : 0,
                                        vehicleID: vehicleID)

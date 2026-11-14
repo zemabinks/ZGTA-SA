@@ -102,10 +102,13 @@ final class NativeGameViewController: UIViewController {
                 return
             }
             self.currentVehicle = vehicle
-            self.renderer?.enter(vehicle)
+            let kind = self.vehicleModelType(vehicle)
+            self.renderer?.enter(vehicle, kind: kind)
             self.vehicleButton.setTitle("EXIT CAR", for: .normal)
             let modelName = self.vehicleModelName(vehicle)
-            self.status.text = "DRIVING \(modelName.uppercased())"
+            self.status.text = kind == "plane" ? "PILOTING \(modelName.uppercased()) · RIGHT STICK UP TO CLIMB" :
+                kind == "helicopter" ? "PILOTING \(modelName.uppercased()) · GAS TO RISE" :
+                "DRIVING \(modelName.uppercased())"
             self.gameHUD.updateVehicle(name: modelName, speed: 0)
             self.setDrivingControls(true)
             self.radio.resume()
@@ -513,6 +516,13 @@ final class NativeGameViewController: UIViewController {
         jumpButton.isHidden = driving
         gasButton.isHidden = !driving
         brakeButton.isHidden = !driving
+        let helicopter = driving && renderer?.vehicleKind == "helicopter"
+        styleControl(gasButton, icon: helicopter ? nil : "Touch_gas",
+                     fallback: helicopter ? "arrow.up" : "pedal.accelerator.fill",
+                     accessibility: helicopter ? "Climb" : "Accelerate")
+        styleControl(brakeButton, icon: nil,
+                     fallback: helicopter ? "arrow.down" : "minus.circle.fill",
+                     accessibility: helicopter ? "Descend" : "Brake or reverse")
         weaponButton.isHidden = driving
         attackButton.isHidden = driving
         reloadButton.isHidden = driving || !usingPistol || magazine >= 17 || reserve == 0
@@ -520,12 +530,26 @@ final class NativeGameViewController: UIViewController {
     }
 
     private func vehicleModelName(_ vehicle: RemoteVehicle) -> String {
-        guard let model = Int(vehicle.code.split(separator: ".").first ?? ""),
+        let key = String(vehicle.code.split(separator: ".").first ?? "")
+        if let name = renderer?.vehicleName(model: key) { return name }
+        guard let model = Int(key),
+              let catalog = gameplay.state["catalog"] as? [String: Any],
+              let cars = catalog["cars"] as? [[String: Any]],
+              let entry = cars.first(where: { ($0["model"] as? NSNumber)?.intValue == model }) else {
+            return "VEHICLE \(key)"
+        }
+        return entry["name"] as? String ?? "VEHICLE \(key)"
+    }
+
+    private func vehicleModelType(_ vehicle: RemoteVehicle) -> String {
+        let key = String(vehicle.code.split(separator: ".").first ?? "")
+        if let kind = renderer?.vehicleType(model: key) { return kind }
+        guard let model = Int(key),
               let catalog = gameplay.state["catalog"] as? [String: Any],
               let cars = catalog["cars"] as? [[String: Any]],
               let entry = cars.first(where: { ($0["model"] as? NSNumber)?.intValue == model }),
-              let name = entry["name"] as? String else { return "VEHICLE" }
-        return name
+              let type = entry["type"] as? String else { return "car" }
+        return type
     }
 
     @objc private func toggleWeapon() {
@@ -720,6 +744,8 @@ final class NativeGameViewController: UIViewController {
         var sideways = Float(stick.value.x)
         var steering = Float(lookStick.value.x)
         var lookVertical = Float(-lookStick.value.y)
+        var lift: Float = 0
+        let helicopter = currentVehicle != nil && renderer?.vehicleKind == "helicopter"
         var gamepadRunning = false
         var gamepadJumping = false
         var gamepadAttacking = false
@@ -735,11 +761,15 @@ final class NativeGameViewController: UIViewController {
             gamepadRunning = pad.buttonA.isPressed
             gamepadJumping = pad.buttonB.isPressed
             if currentVehicle != nil {
-                steering = abs(lx) > 0.05 ? lx : steering
-                sideways = 0
                 let throttle = pad.rightTrigger.value
                 let braking = pad.leftTrigger.value
-                if throttle > 0.05 || braking > 0.05 { forward = throttle - braking }
+                if helicopter {
+                    if throttle > 0.05 || braking > 0.05 { lift = throttle - braking }
+                } else {
+                    steering = abs(lx) > 0.05 ? lx : steering
+                    sideways = 0
+                    if throttle > 0.05 || braking > 0.05 { forward = throttle - braking }
+                }
             } else {
                 gamepadAttacking = pad.rightTrigger.isPressed
             }
@@ -759,15 +789,20 @@ final class NativeGameViewController: UIViewController {
         if gamepadReload && !lastReloadButton { reload() }
         lastReloadButton = gamepadReload
         if currentVehicle != nil {
-            if gasPressed { forward = 1 }
-            if brakePressed { forward = -1 }
+            if helicopter {
+                if gasPressed { lift = 1 }
+                if brakePressed { lift = -1 }
+            } else {
+                if gasPressed { forward = 1 }
+                if brakePressed { forward = -1 }
+            }
         }
         let walking = abs(forward) + abs(sideways) > 0.05
         let running = run || gamepadRunning
-        if currentVehicle != nil { steering = max(-1, min(1, steering + sideways)) }
-        renderer?.move(forward: forward, sideways: currentVehicle == nil ? sideways : 0,
+        if currentVehicle != nil && !helicopter { steering = max(-1, min(1, steering + sideways)) }
+        renderer?.move(forward: forward, sideways: currentVehicle == nil || helicopter ? sideways : 0,
                        turn: steering, delta: delta, running: running,
-                       lookVertical: lookVertical)
+                       lookVertical: lookVertical, lift: lift)
         if link.timestamp - lastHUD > 0.1, let renderer {
             lastHUD = link.timestamp
             status.expireIfNeeded()
@@ -788,6 +823,7 @@ final class NativeGameViewController: UIViewController {
             network.sendPosition(renderer.position, heading: renderer.direction, moving: walking,
                                  running: running,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
+                                 steer: renderer.steeringInput, pitch: renderer.vehicleNose,
                                  airborne: renderer.isAirborne, weapon: usingPistol ? 22 : 0,
                                  firing: renderer.isFiring)
         }

@@ -504,6 +504,13 @@ from `local-only/site/game/`. It currently fills all 212 listed vehicle model
 and texture pairs. The converter prepares 212 vehicle and 265 pedestrian meshes
 under `local-only/site/game/native/models/`. These binaries and textures are
 excluded from GitHub by `.gitignore`.
+`extract_client_catalog.py` also recovers the archived client's 212 per-model
+handling rows and writes them to the ignored
+`local-only/site/game/native/handling.json`. The native client fetches that
+table from the Mac and uses each model's acceleration, braking, steering,
+traction, drag, and speed inputs. Cars, motorcycles, bicycles, boats, planes,
+and helicopters have separate movement rules. These rules are still an
+approximation of the browser physics rather than the full original solver.
 The animation converter bakes idle, walk, run, jump, pistol standing and firing,
 and fist attack frames from the archived ANP3 clips and each DFF skin rig. It
 also writes right-hand attachment transforms so the Colt .45 DFF/TXD model
@@ -584,6 +591,13 @@ and exit, and a held gas press moved the cab about 30 m. Exiting restored the
 on-foot buttons, then the test mission was ended. Simulator and generic iPhone
 builds passed after the controls changed. Radio playback with a real track and
 the native app on a physical iPhone still need testing.
+The simulator also started a local pilot flight, entered a converted Dodo, and
+climbed enough for the server to advance from takeoff to landing. The first
+flight stopped at airport structures; after adjusting takeoff assist and
+runway placement, a second simulator flight climbed above the port at about
+160 km/h. A complete native flight and landing have not been verified. Large
+airport ground triangles are now included in the native collision index so
+aircraft remain on the visible runway surface.
 In another simulator check, a native chat message appeared in the server echo
 and the in-game feed. A courier pickup drew the Metal objective marker, and its
 contextual touch button collected the package without reopening Jobs. The
@@ -595,8 +609,8 @@ The isolated multiplayer wire test passes; a second-device visual drive is
 still needed to verify this rendering path end to end.
 
 This remains a native gameplay work in progress. The iOS client does not yet
-reproduce the browser vehicle
-physics, or expose every browser interaction. Its native panels now show jobs,
+reproduce the browser vehicle physics exactly or expose every browser
+interaction. Its native panels now show jobs,
 garage and workshop supplies, the vehicle catalog, races, police and safety,
 crews and territory, exploration, homes, private groups, cash transfers, and
 the local leaderboard. World and Social panels were opened in the iPhone 15 Pro

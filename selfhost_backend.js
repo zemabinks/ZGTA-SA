@@ -123,11 +123,20 @@ const HOME_CATALOG = Object.freeze([
       city: String(item.city || '').slice(0, 8), tier: String(item.tier || '').slice(0, 20),
       out: item.out, source: 'archived'})),
 ]);
+// Local pilot routes begin on the visible runways, rather than at dealership
+// doors. These points were checked against the archived map and SCL2 ground.
+const PILOT_RUNWAYS = Object.freeze({
+  ls: [1570, -2460, 12.55, Math.PI / 2],
+  sf: [-1700, -200, 13.15, 0.69],
+  lv: [1492, 1250, 9.82, 0],
+  vm: [320, 2512, 15.56, 3 * Math.PI / 2],
+});
 const AIRPORTS = Object.freeze((clientCatalog.dealers || [])
   .filter(item => typeof item.key === 'string' && typeof item.air === 'string' &&
     Array.isArray(item.stand) && item.stand.length === 3 && item.stand.every(Number.isFinite))
   .map(item => ({id: item.air, dealer: item.key,
-    name: String(item.name).slice(0, 80), stand: item.stand})));
+    name: String(item.name).slice(0, 80), stand: item.stand,
+    runway: PILOT_RUNWAYS[item.air] || [...item.stand, 0]})));
 const GROUND_DEALERS = Object.freeze((clientCatalog.dealers || [])
   .filter(item => typeof item.key === 'string' && !item.air &&
     Array.isArray(item.stand) && item.stand.length === 3 && item.stand.every(Number.isFinite))
@@ -756,9 +765,9 @@ class LocalGame {
       const aircraft = pilotAircraft(active.model || 593);
       if (from && to) objective = {mode: 'flight', stage: active.stage,
         from: from.name, plane: aircraft?.name || 'Dodo', model: aircraft?.model || 593,
-        target: {x: rounded(to.stand[0]), y: rounded(to.stand[1]), name: to.name},
-        remaining: pos ? Math.ceil(Math.hypot(pos.x - to.stand[0], pos.y - to.stand[1])) : null,
-        altitude: pos ? Math.max(0, Math.round(pos.z - from.stand[2])) : null,
+        target: {x: rounded(to.runway[0]), y: rounded(to.runway[1]), name: to.name},
+        remaining: pos ? Math.ceil(Math.hypot(pos.x - to.runway[0], pos.y - to.runway[1])) : null,
+        altitude: pos ? Math.max(0, Math.round(pos.z - from.runway[2])) : null,
         takeoffAltitude: 35, radius: aircraft?.radius || 70,
         smoothEligible: active.reportedHealth && active.minHealth >= 950,
         earlyEligible: PILOT_MS - (Date.now() - active.started) >= 120000,
@@ -1019,7 +1028,7 @@ class LocalGame {
     const patrol = job.id === 'patrol';
     const pizza = job.id === 'pizza';
     const point = mechanic ? homeAt(job.targetHome)?.out :
-      thief ? homeAt(job.pickupHome)?.out : pilot ? airportAt(job.from)?.stand : job.station;
+      thief ? homeAt(job.pickupHome)?.out : pilot ? airportAt(job.from)?.runway : job.station;
     if (!point) return;
     const id = job.vehicleId;
     const row = [id, mechanic ? 'Roadside call' : thief ? 'Getaway car' : player.name,
@@ -1028,8 +1037,9 @@ class LocalGame {
         patrol ? '596.0.1.0.' : pizza ? '448.1.1.0.' :
           trucker ? '414.25.1.0.' : pilot ? pilotCode :
             fire ? '407.3.1.0.' : heist ? '560.52.39.0.' : '416.1.1.0.',
-      rounded(point[0] + 4), rounded(point[1] + 3), rounded(point[2] + 1.1),
-      0, 0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
+      rounded(point[0] + (pilot ? 0 : 4)), rounded(point[1] + (pilot ? 0 : 3)),
+      rounded(point[2] + 1.1), pilot ? rounded(point[3]) : 0,
+      0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
   }
@@ -1647,9 +1657,10 @@ class LocalGame {
           minHealth: 1000, reportedHealth: false,
           started: Date.now()};
         this.addMissionVehicle(player);
-        pos.peer.send({t: 'tp', x: from.stand[0], y: from.stand[1],
-          z: from.stand[2] + 1, h: 0, g: 1});
-        message = `Pilot flight started at ${from.name}. Board the marked ${aircraft.name}, climb 35 m above the airport, then land at ${to.name} within ten minutes.`;
+        pos.peer.send({t: 'tp', x: rounded(from.runway[0] - Math.sin(from.runway[3]) * 7),
+          y: rounded(from.runway[1] - Math.cos(from.runway[3]) * 7),
+          z: from.runway[2] + 1, h: from.runway[3], g: 1});
+        message = `Pilot flight started on the ${from.name} runway. Board the marked ${aircraft.name}, climb 35 m, then land at ${to.name} within ten minutes.`;
       } else if (job.id === 'fire') {
         const home = nearestHome(pos, 180);
         if (!home) throw new Error('Fire call locations are unavailable.');
@@ -1900,8 +1911,8 @@ class LocalGame {
             pos.peer.state.vehicle !== player.job.vehicleId ||
             pos.peer.state.car !== plane.row[2])
           throw new Error(`Land in the marked ${aircraft?.name || 'aircraft'}.`);
-        if (Math.hypot(pos.x - to.stand[0], pos.y - to.stand[1]) > (aircraft?.radius || 70) ||
-            Math.abs(pos.z - to.stand[2]) > 16 ||
+        if (Math.hypot(pos.x - to.runway[0], pos.y - to.runway[1]) > (aircraft?.radius || 70) ||
+            Math.abs(pos.z - to.runway[2]) > 16 ||
             Math.abs(finite(pos.peer.state.speed)) > 1.5)
           throw new Error('Stop the plane on the destination apron.');
         if (!player.job.landingSince || Date.now() - player.job.landingSince < 2000)
@@ -2353,16 +2364,16 @@ class LocalGame {
           if (firstReport || damaged) this.save();
         }
         if (aboard && from && to && Number.isFinite(message.z) &&
-            flight.stage === 'takeoff' && message.z >= from.stand[2] + 35) {
+            flight.stage === 'takeoff' && message.z >= from.runway[2] + 35) {
           flight.stage = 'landing';
           this.save();
           this.note(peer.player, `Airborne. Land the marked ${pilotAircraft(flight.model || 593)?.name || 'aircraft'} at ${to.name}.`);
         }
         if (flight.stage === 'landing') {
           const stopped = aboard && to && [message.x, message.y, message.z].every(Number.isFinite) &&
-            Math.hypot(message.x - to.stand[0], message.y - to.stand[1]) <=
+            Math.hypot(message.x - to.runway[0], message.y - to.runway[1]) <=
               (pilotAircraft(flight.model || 593)?.radius || 70) &&
-            Math.abs(message.z - to.stand[2]) <= 16 &&
+            Math.abs(message.z - to.runway[2]) <= 16 &&
             Math.abs(finite(message.speed)) <= 1.5;
           if (stopped) flight.landingSince ||= Date.now();
           else flight.landingSince = null;

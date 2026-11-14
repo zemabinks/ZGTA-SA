@@ -55,7 +55,9 @@ final class WorldCollision {
             let hiX = Int(floor((max(a.x, b.x, c.x) - minX) / cellSize))
             let loY = Int(floor((min(a.y, b.y, c.y) - minY) / cellSize))
             let hiY = Int(floor((max(a.y, b.y, c.y) - minY) / cellSize))
-            guard hiX - loX <= 15, hiY - loY <= 15 else { continue }
+            // Airport aprons and long road surfaces use triangles wider than
+            // 150 m. Dropping them left aircraft with no floor to land on.
+            guard hiX - loX <= 64, hiY - loY <= 64 else { continue }
             let number = built.count
             built.append(Triangle(a: a, b: b, c: c, normal: normal))
             for y in loY...hiY { for x in loX...hiX { lookup[y * width + x, default: []].append(number) } }

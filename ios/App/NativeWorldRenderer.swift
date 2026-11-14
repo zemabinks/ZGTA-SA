@@ -17,6 +17,53 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let atlas: MTLTexture
     }
 
+    private struct VehicleHandling {
+        let maxVelocity: Float
+        let acceleration: Float
+        let brakes: Float
+        let lock: Float
+        let traction: Float
+        let drag: Float
+        let flags: Int
+
+        init?(row: [Any]) {
+            guard row.count > 23,
+                  let maxVelocity = (row[0] as? NSNumber)?.floatValue,
+                  let acceleration = (row[1] as? NSNumber)?.floatValue,
+                  let brakes = (row[2] as? NSNumber)?.floatValue,
+                  let lock = (row[3] as? NSNumber)?.floatValue,
+                  let traction = (row[4] as? NSNumber)?.floatValue,
+                  let drag = (row[8] as? NSNumber)?.floatValue,
+                  let flags = (row[23] as? NSNumber)?.intValue else { return nil }
+            self.maxVelocity = maxVelocity
+            self.acceleration = acceleration
+            self.brakes = brakes
+            self.lock = lock
+            self.traction = traction
+            self.drag = drag
+            self.flags = flags
+        }
+
+        // The archived client's 23895 module derives its wheel-speed limit
+        // from these handling rows. Convert its normalized limit to m/s.
+        var roadTopSpeed: Float {
+            let drive = 0.00016 * acceleration
+            let threshold = drive / 6
+            var speed = maxVelocity * 0.00555556
+            while speed > 0 {
+                speed -= 0.01
+                if drag >= 0.01 {
+                    if speed * speed * (drag / 2) / 1000 <= threshold { break }
+                } else if -(1 / (speed * speed * drag + 1) - 1) * speed <= threshold {
+                    break
+                }
+            }
+            let limit = max(0, speed)
+            let normalized = flags & 0x1000000 != 0 ? limit : limit * 1.2
+            return max(5, normalized * 50)
+        }
+    }
+
     let view: MTKView
     private let device: MTLDevice
     private let queue: MTLCommandQueue
@@ -44,6 +91,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var collision: WorldCollision?
     private(set) var drivingSpeed: Float = 0
     private var verticalSpeed: Float = 0
+    private var vehicleHandling: [String: VehicleHandling] = [:]
+    private var vehicleInfo: [String: [String: String]] = [:]
+    private var activeVehicleModel = ""
+    private var activeHandling: VehicleHandling?
+    private(set) var vehicleKind = "car"
+    private var vehiclePitch: Float = 0
+    private var flightVerticalSpeed: Float = 0
+    private var flightStartHeight: Float = 0
+    private var waterHeight: Float = 0
+    private(set) var steeringInput: Float = 0
     private var ownClip = "idle_stance"
     private var ownClipTime: Double = 0
     private var actionTimeRemaining: Float = 0
@@ -107,11 +164,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var direction: Float { driving ? heading : actorHeading }
     var cameraDirection: Float { heading }
     var isAirborne: Bool { verticalSpeed != 0 }
+    var vehicleNose: Float { driving ? vehiclePitch : 0 }
+    func vehicleName(model: String) -> String? { vehicleInfo[model]?["name"] }
+    func vehicleType(model: String) -> String? { vehicleInfo[model]?["type"] }
     var isFiring: Bool { actionTimeRemaining > 0 && actionClip == "colt45_fire" }
 
     func move(forward: Float, sideways: Float, turn: Float, delta: Float,
-              running: Bool = false, lookVertical: Float = 0) {
-        cameraPitch = max(-0.4, min(0.5, cameraPitch + lookVertical * delta * 0.45))
+              running: Bool = false, lookVertical: Float = 0, lift: Float = 0) {
+        if !driving || (vehicleKind != "plane" && vehicleKind != "helicopter") {
+            cameraPitch = max(-0.4, min(0.5, cameraPitch + lookVertical * delta * 0.45))
+        }
         actionTimeRemaining = max(0, actionTimeRemaining - delta)
         let inputLength = min(1, hypot(forward, sideways))
         let clip = !driving && actionTimeRemaining > 0 ? actionClip :
@@ -123,11 +185,68 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let start = camera
         var next = camera
         if driving {
-            heading += turn * delta * max(0.45, min(1.8, abs(drivingSpeed) / 7))
-            let desired = max(-8, min(24, forward * 24))
-            drivingSpeed += (desired - drivingSpeed) * min(1, delta * (forward == 0 ? 2.2 : 1.3))
-            next.x += sin(heading) * drivingSpeed * delta
-            next.y += cos(heading) * drivingSpeed * delta
+            steeringInput = max(-1, min(1, turn))
+            let table = activeHandling
+            let speedLimit = table?.roadTopSpeed ?? 32
+            let acceleration = max(1.5, (table?.acceleration ?? 20) * 0.24)
+            let braking = max(3, (table?.brakes ?? 7) * 1.2)
+            let lock = max(10, min(50, table?.lock ?? 35)) * .pi / 180
+            let grip = max(0.35, min(1.8, table?.traction ?? 0.8))
+            if vehicleKind == "helicopter" {
+                heading += steeringInput * delta * 0.95
+                drivingSpeed += (forward * 24 - drivingSpeed) * min(1, delta * 1.6)
+                next.x += (sin(heading) * drivingSpeed + cos(heading) * sideways * 15) * delta
+                next.y += (cos(heading) * drivingSpeed - sin(heading) * sideways * 15) * delta
+                flightVerticalSpeed += (lift * 8 - flightVerticalSpeed) * min(1, delta * 1.8)
+                next.z += flightVerticalSpeed * delta
+                vehiclePitch += (forward * 0.16 - vehiclePitch) * min(1, delta * 2)
+            } else if vehicleKind == "plane" && activeVehicleModel != "539" {
+                let top = max(35, min(95, (table?.maxVelocity ?? 200) / 3.6))
+                let target = max(0, min(top, forward > 0 ? top * forward : 0))
+                let rate = forward < 0 ? max(3, braking) : forward > 0 ? max(3, acceleration) : 1.2
+                drivingSpeed += max(-rate * delta, min(rate * delta, target - drivingSpeed))
+                // Keep a touch-only takeoff climbing above the airport's
+                // terminal and container roofs. A right-stick input overrides
+                // the assist, so a pilot can level or descend at any time.
+                let autoRotate = drivingSpeed > 15 && forward > 0.05 &&
+                    camera.z < flightStartHeight + 120
+                let requestedPitch = abs(lookVertical) > 0.05 ? lookVertical * 0.35 :
+                    autoRotate ? 0.22 : 0
+                let desiredPitch = max(-0.35, min(0.35, requestedPitch))
+                vehiclePitch += (desiredPitch - vehiclePitch) * min(1, delta * 1.5)
+                heading += steeringInput * delta * (0.2 + min(0.6, drivingSpeed / 90))
+                next.x += sin(heading) * drivingSpeed * delta
+                next.y += cos(heading) * drivingSpeed * delta
+                let liftSpeed = drivingSpeed > 18 ? drivingSpeed * sin(vehiclePitch) : -3.5
+                flightVerticalSpeed += (liftSpeed - flightVerticalSpeed) * min(1, delta * 2.5)
+                next.z += flightVerticalSpeed * delta
+            } else {
+                let reverseLimit: Float = vehicleKind == "bicycle" ? 0 :
+                    vehicleKind == "bike" ? 3 : vehicleKind == "train" ? 8 : 9
+                let top = vehicleKind == "boat" ? min(speedLimit, 35) :
+                    vehicleKind == "bicycle" ? min(speedLimit, 15) : speedLimit
+                let input = max(-1, min(1, forward))
+                if input > 0.05 {
+                    drivingSpeed = min(top, drivingSpeed +
+                        (drivingSpeed < 0 ? braking : acceleration) * input * delta)
+                } else if input < -0.05 {
+                    drivingSpeed = max(-reverseLimit, drivingSpeed -
+                        (drivingSpeed > 0 ? braking : acceleration * 0.6) * -input * delta)
+                } else {
+                    let coast = max(0.8, min(3, (table?.drag ?? 2) * 0.7)) * delta
+                    drivingSpeed = abs(drivingSpeed) <= coast ? 0 :
+                        drivingSpeed - (drivingSpeed > 0 ? coast : -coast)
+                }
+                let wheelbase: Float = vehicleKind == "bike" || vehicleKind == "bicycle" ? 1.5 : 2.6
+                let steeringAngle = steeringInput * lock / (1 + abs(drivingSpeed) * 0.08)
+                let yawRate = drivingSpeed * tan(steeringAngle) / wheelbase
+                let yawLimit: Float = vehicleKind == "train" || vehicleKind == "trailer" ? 0 :
+                    vehicleKind == "bike" || vehicleKind == "bicycle" ? 2.2 : 1.5
+                heading += max(-yawLimit, min(yawLimit, yawRate * grip)) * delta
+                next.x += sin(heading) * drivingSpeed * delta
+                next.y += cos(heading) * drivingSpeed * delta
+                if vehicleKind == "boat" || activeVehicleModel == "539" { next.z = waterHeight }
+            }
         } else {
             heading += turn * delta * 1.8
             if inputLength >= 0.05 {
@@ -148,14 +267,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 next.y += worldY / length * distance
             }
         }
-        let radius: Float = driving ? 0.9 : 0.32
-        let height: Float = driving ? 1.4 : 1.8
+        let radius: Float = driving ? (vehicleKind == "bike" || vehicleKind == "bicycle" ? 0.48 : 0.9) : 0.32
+        let height: Float = driving ? (vehicleKind == "plane" ? 2.5 : 1.4) : 1.8
         if collision?.canMove(from: start, to: next, radius: radius, bodyHeight: height) == false {
-            if driving { drivingSpeed = 0 }
+            if driving { drivingSpeed = 0; flightVerticalSpeed = 0 }
             next = start
         }
         camera = next
-        if !driving && verticalSpeed != 0 {
+        if driving && (vehicleKind == "plane" || vehicleKind == "helicopter") &&
+            activeVehicleModel != "539" {
+            if let floor = collision?.height(x: camera.x, y: camera.y,
+                                             near: camera.z - 1.1, maxDrop: 20),
+               camera.z < floor + 1.1 {
+                camera.z = floor + 1.1
+                flightVerticalSpeed = max(0, flightVerticalSpeed)
+            }
+        } else if driving && (vehicleKind == "boat" || activeVehicleModel == "539") {
+            camera.z = waterHeight
+        } else if !driving && verticalSpeed != 0 {
             verticalSpeed -= 9.8 * delta
             camera.z += verticalSpeed * delta
             if let floor = collision?.height(x: camera.x, y: camera.y,
@@ -196,24 +325,42 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return collision?.lineOfSight(from: start, to: finish) ?? true
     }
 
-    func enter(_ vehicle: RemoteVehicle) {
+    func enter(_ vehicle: RemoteVehicle, kind: String) {
         camera = vehicle.position
         heading = vehicle.heading
         actorHeading = heading
         drivingSpeed = 0
         verticalSpeed = 0
+        flightVerticalSpeed = 0
+        flightStartHeight = vehicle.position.z
+        vehiclePitch = 0
+        steeringInput = 0
+        activeVehicleModel = String(vehicle.code.split(separator: ".").first ?? "")
+        activeHandling = vehicleHandling[activeVehicleModel]
+        vehicleKind = kind
+        waterHeight = vehicle.position.z
         driving = true
         currentVehicleID = vehicle.id
         loadNearby()
     }
 
     func exitVehicle() {
+        let floor = collision?.height(x: camera.x, y: camera.y,
+                                      near: camera.z, maxDrop: 1000)
+        let falling = floor.map { camera.z > $0 + 3 } ?? false
         driving = false
         currentVehicleID = nil
         drivingSpeed = 0
+        flightVerticalSpeed = 0
+        vehiclePitch = 0
+        activeVehicleModel = ""
+        activeHandling = nil
+        vehicleKind = "car"
         camera.x += cos(heading) * 2.5
         camera.y -= sin(heading) * 2.5
-        camera.z = collision?.height(x: camera.x, y: camera.y, near: camera.z - 1.1) ?? camera.z - 1.1
+        if falling { verticalSpeed = -1 }
+        else { camera.z = collision?.height(x: camera.x, y: camera.y,
+                                           near: camera.z - 1.1) ?? camera.z - 1.1 }
         actorHeading = heading
     }
 
@@ -334,6 +481,18 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.pedModels = index["peds"] ?? [:]
                 self.loadActor(self.pedModels["7"] ?? "bmori")
                 self.loadActor("colt45")
+            }
+        }.resume()
+        URLSession.shared.dataTask(with: server.path("game/native/handling.json")) { [weak self] data, _, _ in
+            guard let self, let data,
+                  let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let rows = document["rows"] as? [String: [Any]] else { return }
+            let handling = rows.compactMapValues { VehicleHandling(row: $0) }
+            let info = document["vehicles"] as? [String: [String: String]] ?? [:]
+            DispatchQueue.main.async {
+                self.vehicleHandling = handling
+                self.vehicleInfo = info
+                self.activeHandling = handling[self.activeVehicleModel]
             }
         }.resume()
     }
@@ -521,18 +680,18 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
-        var modelInstances: [(String, SIMD3<Float>, Float, String, Double, Int)] = []
+        var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int)] = []
         if driving {
             let code = remoteVehicles.first(where: { $0.id == currentVehicleID })?.code ?? "420.6.1.0."
             if let name = actorName(code: code) {
-                modelInstances.append((name, camera, heading, "", 0, 0))
+                modelInstances.append((name, camera, heading, vehiclePitch, "", 0, 0))
             }
         } else if let name = pedModels["7"] {
-            modelInstances.append((name, camera, actorHeading, ownClip, ownClipTime, equippedWeapon))
+            modelInstances.append((name, camera, actorHeading, 0, ownClip, ownClipTime, equippedWeapon))
         }
         for player in remotePlayers where simd_distance(player.position, camera) < 130 {
             if let name = actorName(code: player.code) {
-                modelInstances.append((name, player.position, player.heading,
+                modelInstances.append((name, player.position, player.heading, player.pitch,
                                        player.animation, ProcessInfo.processInfo.systemUptime,
                                        player.weapon))
             }
@@ -542,18 +701,20 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             !drivenVehicleIDs.contains(vehicle.id) &&
             simd_distance(vehicle.position, camera) < 130 {
             if let name = actorName(code: vehicle.code) {
-                modelInstances.append((name, vehicle.position, vehicle.heading, "", 0, 0))
+                modelInstances.append((name, vehicle.position, vehicle.heading, 0, "", 0, 0))
             }
         }
-        for (name, position, angle, clip, elapsed, weapon) in modelInstances {
+        for (name, position, angle, pitch, clip, elapsed, weapon) in modelInstances {
             guard let mesh = actorMeshes[name] else { loadActor(name); continue }
             // Archived pedestrian DFFs face local -Y after the RenderWare axis
             // conversion, while the world protocol defines heading zero as +Y.
             let modelAngle = angle + (pedModels.values.contains(name) ? Float.pi : 0)
             let c = cos(modelAngle), s = sin(modelAngle)
+            let cp = cos(pitch), sp = sin(pitch)
             let transform = simd_float4x4(columns: (
-                SIMD4(c, -s, 0, 0), SIMD4(s, c, 0, 0),
-                SIMD4(0, 0, 1, 0), SIMD4(position.x, position.y, position.z, 1)))
+                SIMD4(c, -s, 0, 0), SIMD4(s * cp, c * cp, sp, 0),
+                SIMD4(-s * sp, -c * sp, cp, 0),
+                SIMD4(position.x, position.y, position.z, 1)))
             var uniforms = Uniforms(viewProjection: matrix * transform,
                                     settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), 0, 128))
             if let frames = actorAnimations[name]?.sample(clip: clip, elapsed: elapsed) {
