@@ -56,6 +56,7 @@ try {
   a.player.job.started = Date.now() - 3100;
   assert.throws(() => game.action(a.player, 'job.complete', {}), /Lose the police/);
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   const leader = game.players.get(a.id), mate = game.players.get(b.id);
@@ -130,6 +131,7 @@ try {
   const expiredCar = leader.job.vehicleId;
   leader.job.started = Date.now() - 601000;
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   assert.equal(game.players.get(a.id).job, null);

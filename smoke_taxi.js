@@ -55,6 +55,7 @@ try {
   assert.equal(game.gameplayState(peer.player).job.stage, 'delivery');
   const drop = game.gameplayState(peer.player).job.target;
   game.flushSync();
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   clearInterval(game.tick);
@@ -94,6 +95,7 @@ try {
   assert.equal(game.gameplayState(peer.player).job.fare.shiftFares, 2);
   assert(game.vehicles.has(cab.id));
   game.flushSync();
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   clearInterval(game.tick);
@@ -129,6 +131,7 @@ try {
   game.action(peer.player, 'job.pickup', {});
   const limoDrop = game.gameplayState(peer.player).job.target;
   game.flushSync();
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   clearInterval(game.tick);

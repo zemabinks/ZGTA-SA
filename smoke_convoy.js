@@ -53,6 +53,7 @@ try {
   assert.equal(outsider.player.cash, 0, 'a nearby outsider gets no convoy bonus');
 
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   const restored = game.players.get(b.id);

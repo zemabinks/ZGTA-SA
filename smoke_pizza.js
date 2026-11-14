@@ -53,6 +53,7 @@ try {
   assert.equal(player.job.index, 1);
   game.flushSync();
   clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   const resumed = game.players.get(id);
@@ -90,6 +91,7 @@ try {
   resumed.job.started = Date.now() - 361000;
   game.flushSync();
   clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   assert.equal(game.players.get(id).job, null, 'expired pizza work is discarded on restart');

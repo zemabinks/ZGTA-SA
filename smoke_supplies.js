@@ -89,6 +89,7 @@ try {
   assert.equal(first.player.supplies.paint_can, 0);
   assert.equal(second.player.supplies.paint_can, 1);
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   assert.equal(game.players.get(first.id).cash, 675);

@@ -46,6 +46,7 @@ try {
   player.job.started = Date.now() - 20000;
   assert.throws(() => game.action(player, 'job.complete', {}), /engine, tyres, and bodywork/);
   game.flushSync();
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   clearInterval(game.tick);

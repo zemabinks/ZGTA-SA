@@ -52,6 +52,7 @@ try {
   assert.throws(() => game.action(player, 'car.spawn', {slot: 0}), /airport hangar/);
   assert(game.vehicles.has(plane.id), 'failed recall leaves the aircraft in world');
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   const resumed = game.players.get(id);

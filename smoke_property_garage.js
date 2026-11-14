@@ -34,6 +34,7 @@ try {
   assert.throws(() => game.action(player, 'car.parkhome', {slot: 2}), /two parked vehicles/);
   assert.equal(player.garage[2].active, true, 'failed parking leaves car outside');
   game.flushSync(); clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   game = require(backend);
   const resumed = game.players.get(id);

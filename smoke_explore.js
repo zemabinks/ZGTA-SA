@@ -48,6 +48,7 @@ try {
   assert(Object.values(saved.players).some(entry => entry.discoveries?.length === 12 &&
     entry.cash === 1400 && entry.xp === 340));
   clearInterval(game.tick);
+  fs.unlinkSync(path.join(temporary, 'local-only', 'selfhost', 'players.json.lock'));
   delete require.cache[require.resolve(backend)];
   const restored = require(backend);
   assert([...restored.players.values()].some(entry => entry.discoveries.length === 12));
