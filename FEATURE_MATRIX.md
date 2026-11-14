@@ -1,6 +1,6 @@
 # ZGTA:SA feature and evidence matrix
 
-Updated 13 November 2026. This tracks the independent server in this repository.
+Updated 14 November 2026. This tracks the independent server in this repository.
 The archived browser client is under ignored `local-only/` on the host Mac.
 The publisher's private server implementation and database are unavailable.
 Client files can show a screen or a message format; they cannot establish the
@@ -17,8 +17,8 @@ complete rules or data held by that private server.
 | Workshop supplies | Repair kits and paint cans bought on foot at ground dealerships, used on nearby owned cars, or given to an on-foot player within 8 m; five of each per account | An isolated test covers dealership and cash gates, capacity, actual vehicle repair and paint code change, wrong-distance and full-recipient transfer rejection, and restart persistence for both accounts. Chrome showed the F6 stock and purchase controls. A live browser purchase and player-to-player handoff have not been performed. These are local inventory items, not publisher shop rules. |
 | Courier | Package pickup and delivery to an archived property entrance | Wrong-location actions fail; payout and unfinished-route persistence pass isolated tests. |
 | Taxi | Own a car, drive to a pickup, then drive to a different drop-off | Walking pickup/drop-off fails; driving completion and payout pass isolated tests. There is no visible passenger character or fare meter yet. |
-| Mechanic | Damaged roadside mission car at a property entrance; approach and repair on foot | Browser objective and isolated location, on-foot, payout, cleanup, and restart tests pass. A second test client sees the car but cannot take it. No towing, repair animation, or general vehicle damage system yet. |
-| Medic | Mission ambulance, patient pickup point, and return to starting aid station | Browser showed the ambulance and patient objective; isolated driving, pickup, payout, and cleanup tests pass. No visible patient, hospital system, or healing yet. |
+| Mechanic | Damaged roadside mission car at a property entrance; hold beside it on foot for engine, tyre and bodywork repairs, three seconds each. Moving away resets the current stage. Completed stages persist and payout is automatic. | The archived English help names the three repair parts; timing and payout remain local rules. Chrome showed the stage 1 objective and route map, then cancelled the call; it has not shown progression while standing beside the car. Isolated tests cover interruption, stage order, restart, payout and cleanup. A second test client sees the car but cannot take it. No tow truck, towing, repair animation, shared crew repair or general vehicle damage system yet. |
+| Medic | Reserved ambulance, patient pickup point, and return to starting aid station in that same ambulance | Chrome showed the ambulance and patient objective. The integrated wire test checks wrong-vehicle denial at pickup and return, payout, and cleanup. No visible patient, CPR, hospital system, or healing yet. |
 | Street time trial | Three world checkpoints in an owned car within three minutes; local browser requests automatic checkpoint passage on arrival | Order, driving requirement, timer, and payout pass isolated tests. The browser-side auto-action gate is tested with simulated state; a complete trial has not been driven in Chrome. No 3D checkpoint markers or leaderboard yet. |
 | Police patrol | Volunteer duty unlocks a four-minute route with a marked loaner police car, three checkpoints, $400 and 80 XP; local browser requests automatic checkpoint passage on arrival | Chrome started and cancelled a patrol, showed its 3D police car and live objective, then restored duty off. Isolated tests cover duty gate, wrong-car rejection, ordered checkpoints, payout, loaner cleanup, and restart recovery. A browser-script test rejects automatic actions in the wrong marked vehicle. A full route has not yet been driven in Chrome; there are no 3D checkpoint rings or police NPCs. |
 | Pizza delivery | A six-minute, three-address route on a reserved Pizzaboy scooter; $400 and 80 XP on completion; local browser requests automatic checkpoint passage on arrival | The archived client lists a pizza job and Pizzaboy model. Chrome started a local delivery and showed the new in-world waypoint over the 3D scooter scene; the test route was cancelled. An isolated mission test covers the scooter's owner restriction, wrong vehicle, ordered deliveries, payout, cancellation, expiry, and restart recovery. A browser-script test covers auto-action selection and vehicle/distance gates. The full route has not been driven in Chrome, and no publisher pizza rules are claimed. |
@@ -61,6 +61,10 @@ fire trucks, suppression, rescue, later call types, and crews. These are
 client-facing instructions rather than the private server implementation.
 `jobHelp_heist_1` through `jobHelp_heist_8` describe a getaway car, robbery,
 police escape, drop-off, crew participation, and failed escapes.
+`jobHelp_mechanic_3` names the engine, tyres, and bodywork as ordered on-foot
+repairs. Its later help also describes towing and shared crew repairs, which
+the local server does not yet implement. `jobHelp_medic_2` and
+`jobHelp_medic_5` describe ambulance dispatch and a hospital return.
 Static REA analysis of the archived chunk directory recorded parent evidence
 `ev_e676b08c9c7dc2182b28bc549d8833c514ab2acc2c74472547dee4655cf4855a`
 for SHA-256 `f5c275ced14ae2abf38e1eb0e7bf58fbc4fe6488561691888dbe4cebdce04e15`.
