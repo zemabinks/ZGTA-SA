@@ -210,7 +210,7 @@
           (trucker ? 'Deliver cargo in the marked Mule' : thief ? 'Deliver the marked car' : taxi ? 'Drop off the passenger' : medic ? 'Return the patient' : 'Deliver the package');
         panel.append(element('p', `${task} at ${state.job.target.name} (${state.job.target.x}, ${state.job.target.y}). ${state.job.remaining ?? '?'} m away. Get within ${state.job.radius} m.${taxi || medic || thief || trucker ? ' You must be driving.' : ''}${thief || trucker ? ` ${state.job.secondsLeft} s left.` : ''}`, 'zgta-muted'));
         if (taxi) panel.append(element('p',
-          `Use the marked ${state.job.fare.cab}. Fare $${state.job.fare.base}${state.job.fare.cabPremium ? ` · cab +$${state.job.fare.cabPremium}` : ''} · clean +$${state.job.fare.cleanBonus} when condition stays at 95% or better · quick +$${state.job.fare.quickBonus} within ${state.job.fare.quickSeconds} s from pickup · streak bonus now $${state.job.fare.streakBonus}. ${state.job.stage === 'delivery' ? `Ride ${state.job.fare.rideSeconds} s · clean ${state.job.fare.cleanEligible ? 'eligible' : 'not yet verified'}.` : ''}`,
+          `Use the marked ${state.job.fare.cab}. ${state.job.fare.shiftFares} fares finished this shift. Fare $${state.job.fare.base}${state.job.fare.cabPremium ? ` · cab +$${state.job.fare.cabPremium}` : ''} · clean +$${state.job.fare.cleanBonus} when condition stays at 95% or better · quick +$${state.job.fare.quickBonus} within ${state.job.fare.quickSeconds} s from pickup · streak bonus now $${state.job.fare.streakBonus}. ${state.job.stage === 'delivery' ? `Ride ${state.job.fare.rideSeconds} s · clean ${state.job.fare.cleanEligible ? 'eligible' : 'not yet verified'}.` : ''}`,
           'zgta-muted'));
         if (trucker) panel.append(element('p', state.job.convoyBonusAwarded ?
           `Your $${state.job.convoyBonus} group convoy bonus was paid.` :
@@ -276,7 +276,11 @@
         panel.append(element('p', `${state.job.name}: travel ${state.job.remaining} m more (${state.job.progress}/${state.job.goal} m).`, 'zgta-muted'));
         row('Route completed?', 'job.complete', {}, 'Complete', !state.connected || state.job.remaining > 0);
       }
-      row('End this task', 'job.cancel', {}, 'Cancel');
+      if (state.job.id === 'taxi' && state.job.inMarkedVehicle)
+        panel.append(element('p', 'Get out of the cab before ending the shift.', 'zgta-muted'));
+      row(state.job.id === 'taxi' ? 'End taxi shift' : 'End this task',
+        'job.cancel', {}, state.job.id === 'taxi' ? 'End shift' : 'Cancel',
+        state.job.id === 'taxi' && state.job.inMarkedVehicle);
     } else {
       for (const job of state.catalog.jobs)
         row(`${job.name} · earn $${job.pay}${job.id === 'trial' ? ' · needs a car' : ''}${job.id === 'taxi' ? ' · loaner cab · fare bonuses' : ''}${job.id === 'carthief' ? ' · five-minute mission' : ''}${job.id === 'patrol' ? ' · police duty · loaner car' : ''}${job.id === 'pizza' ? ' · six-minute route · loaner scooter' : ''}${job.id === 'trucker' ? ' · seven-minute route · loaner Mule' : ''}${job.id === 'pilot' ? ' · ten-minute flight · loaner Dodo' : ''}${job.id === 'fire' ? ' · eight-minute call · loaner fire truck' : ''}${job.id === 'heist' ? ` · ten-minute route · loaner Sultan${state.heistCooldown ? ` · ${state.heistCooldown} s cooldown` : ''}` : ''}`,
@@ -691,7 +695,7 @@
       return;
     }
     if (job.id === 'taxi' && job.mode === 'route') {
-      objective.textContent = `Taxi: ${job.stage === 'pickup' ? 'collect the passenger' : 'drive to drop-off'} · $${job.fare.base} base${job.fare.streakBonus ? ` + $${job.fare.streakBonus} streak` : ''}\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nUse the marked cab · press F6 for fare details`;
+      objective.textContent = `Taxi fare ${(job.fare.shiftFares || 0) + 1}: ${job.stage === 'pickup' ? 'collect the passenger' : 'drive to drop-off'} · $${job.fare.base} base${job.fare.cabPremium ? ` + $${job.fare.cabPremium} cab` : ''}${job.fare.streakBonus ? ` + $${job.fare.streakBonus} streak` : ''}\n${job.target.name} · ${job.remaining ?? '?'} m${direction}\nUse the marked ${job.fare.cab} · press F6 for details`;
       objective.style.whiteSpace = 'pre-line';
       return;
     }
