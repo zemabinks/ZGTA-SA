@@ -27,6 +27,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var meshes: [String: Mesh] = [:]
     private var actorMeshes: [String: Mesh] = [:]
     private var actorAnimations: [String: NativeActorAnimation] = [:]
+    private var actorAttachments: [String: NativeActorAttachment] = [:]
     private var actorLoading: Set<String> = []
     private var vehicleModels: [String: String] = [:]
     private var pedModels: [String: String] = [:]
@@ -41,6 +42,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var verticalSpeed: Float = 0
     private var ownClip = "idle_stance"
     private var ownClipTime: Double = 0
+    private var actionTimeRemaining: Float = 0
+    private var actionClip = ""
+    var equippedWeapon = 0
     var driving = false
     var remotePlayers: [RemotePlayer] = []
     var remoteVehicles: [RemoteVehicle] = []
@@ -93,10 +97,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var position: SIMD3<Float> { camera }
     var direction: Float { heading }
     var isAirborne: Bool { verticalSpeed != 0 }
+    var isFiring: Bool { actionTimeRemaining > 0 && actionClip == "colt45_fire" }
 
     func move(forward: Float, sideways: Float, turn: Float, delta: Float) {
-        let clip = !driving && verticalSpeed != 0 ? "jump_launch" :
-            abs(forward) + abs(sideways) < 0.05 ? "idle_stance" :
+        actionTimeRemaining = max(0, actionTimeRemaining - delta)
+        let clip = !driving && actionTimeRemaining > 0 ? actionClip :
+            !driving && verticalSpeed != 0 ? "jump_launch" :
+            abs(forward) + abs(sideways) < 0.05 ? (equippedWeapon == 22 ? "gun_stand" : "idle_stance") :
             max(abs(forward), abs(sideways)) > 1.5 ? "run_player" : "walk_player"
         if clip != ownClip { ownClip = clip; ownClipTime = 0 }
         else { ownClipTime += Double(delta) }
@@ -140,6 +147,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func jump() {
         guard !driving, verticalSpeed == 0 else { return }
         verticalSpeed = 5.5
+    }
+
+    func performFistAttack() {
+        actionClip = "fighta_1"
+        actionTimeRemaining = 0.43
+    }
+
+    func firePistol() {
+        actionClip = "colt45_fire"
+        actionTimeRemaining = 0.73
+    }
+
+    func clearAction() { actionTimeRemaining = 0 }
+
+    func hasClearShot(to target: SIMD3<Float>) -> Bool {
+        let start = camera + SIMD3<Float>(0, 0, 1.35)
+        let finish = target + SIMD3<Float>(0, 0, 1.15)
+        return collision?.lineOfSight(from: start, to: finish) ?? true
     }
 
     func enter(_ vehicle: RemoteVehicle) {
@@ -277,6 +302,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
                 self.loadActor(self.pedModels["7"] ?? "bmori")
+                self.loadActor("colt45")
             }
         }.resume()
     }
@@ -295,6 +321,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var binary: Data?
         var image: Data?
         var animation: Data?
+        var attachment: Data?
         group.enter()
         URLSession.shared.dataTask(with: server.path("game/native/models/\(name).bin")) { data, response, _ in
             lock.lock()
@@ -317,6 +344,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 lock.unlock()
                 group.leave()
             }.resume()
+            group.enter()
+            URLSession.shared.dataTask(with: server.path("game/native/models/\(name).hand.bin")) { data, response, _ in
+                lock.lock()
+                if (response as? HTTPURLResponse)?.statusCode == 200 { attachment = data }
+                lock.unlock()
+                group.leave()
+            }.resume()
         }
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
@@ -334,6 +368,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                let frames = NativeActorAnimation(data: animation, vertexCount: world.vertices.count,
                                                  device: self.device) {
                 self.actorAnimations[name] = frames
+            }
+            if let attachment, let hand = NativeActorAttachment(data: attachment) {
+                self.actorAttachments[name] = hand
             }
         }
     }
@@ -387,28 +424,29 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
-        var modelInstances: [(String, SIMD3<Float>, Float, String, Double)] = []
+        var modelInstances: [(String, SIMD3<Float>, Float, String, Double, Int)] = []
         if driving {
             let code = remoteVehicles.first(where: { $0.id == currentVehicleID })?.code ?? "420.6.1.0."
             if let name = actorName(code: code) {
-                modelInstances.append((name, camera, heading, "", 0))
+                modelInstances.append((name, camera, heading, "", 0, 0))
             }
         } else if let name = pedModels["7"] {
-            modelInstances.append((name, camera, heading, ownClip, ownClipTime))
+            modelInstances.append((name, camera, heading, ownClip, ownClipTime, equippedWeapon))
         }
         for player in remotePlayers where simd_distance(player.position, camera) < 130 {
             if let name = actorName(code: player.code) {
                 modelInstances.append((name, player.position, player.heading,
-                                       player.animation, ProcessInfo.processInfo.systemUptime))
+                                       player.animation, ProcessInfo.processInfo.systemUptime,
+                                       player.weapon))
             }
         }
         for vehicle in remoteVehicles where vehicle.id != currentVehicleID &&
             simd_distance(vehicle.position, camera) < 130 {
             if let name = actorName(code: vehicle.code) {
-                modelInstances.append((name, vehicle.position, vehicle.heading, "", 0))
+                modelInstances.append((name, vehicle.position, vehicle.heading, "", 0, 0))
             }
         }
-        for (name, position, angle, clip, elapsed) in modelInstances {
+        for (name, position, angle, clip, elapsed, weapon) in modelInstances {
             guard let mesh = actorMeshes[name] else { loadActor(name); continue }
             let c = cos(angle), s = sin(angle)
             let transform = simd_float4x4(columns: (
@@ -429,6 +467,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
                                           indexType: .uint32, indexBuffer: mesh.indices,
                                           indexBufferOffset: 0)
+            if weapon == 22,
+               let pistol = actorMeshes["colt45"],
+               let hand = actorAttachments[name]?.frame(clip: clip, elapsed: elapsed) {
+                encoder.setRenderPipelineState(pipeline)
+                draw(mesh: pistol, cellSize: 128, matrix: matrix * transform * hand,
+                     encoder: encoder)
+            }
         }
     }
 

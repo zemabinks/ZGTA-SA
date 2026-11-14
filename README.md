@@ -503,12 +503,14 @@ from `local-only/site/game/`. It currently fills all 212 listed vehicle model
 and texture pairs. The converter prepares 212 vehicle and 265 pedestrian meshes
 under `local-only/site/game/native/models/`. These binaries and textures are
 excluded from GitHub by `.gitignore`.
-The animation converter bakes idle, walk, run, and jump frames from the archived
-ANP3 pedestrian clips and each DFF skin rig. All 265 available pedestrian
-models were baked on this Mac. The native Metal renderer selects the matching
-frames while moving; remote clients can show the same clips when their local
-pedestrian model has been prepared. Generated animation files are also ignored
-local game data.
+The animation converter bakes idle, walk, run, jump, pistol standing and firing,
+and fist attack frames from the archived ANP3 clips and each DFF skin rig. It
+also writes right-hand attachment transforms so the Colt .45 DFF/TXD model
+follows the hand. All 265 available pedestrian models were rebaked on this Mac.
+The native Metal renderer selects the matching frames while moving or fighting;
+remote clients can show the same clips when their local pedestrian model has
+been prepared. Generated animation and attachment files stay ignored local game
+data. Regenerate them with `python3 prepare_native_animations.py --all --force`.
 
 Start the server with zsh launch_share.sh lan for iPhone access on the same
 Wi-Fi. In the iOS app, enter the LAN address and join code printed by that
@@ -529,9 +531,17 @@ trigger. In an isolated two-player test, an iPhone simulator hit dealt 8 server
 damage, incoming hits changed the native health display, and defeat and respawn
 restored the server's player health to 100. A separate app restart and server
 switching test returned to the same guest account without adding another player.
+The PISTOL/FISTS and RELOAD touch controls equip a locally archived Colt .45,
+show magazine and reserve rounds, and fire using the controller right trigger;
+the controller shoulders switch weapons and reload. The simulator showed the
+archived gun pose. In another isolated two-player test, firing at a player sent
+the local multiplayer server a Colt .45 shot and delivered 18 damage. Shots use
+the local collision mesh to reject targets behind visible walls. Ammunition is
+currently client-side and resets when the game view is reopened.
 The compact iPhone 13 mini simulator
 displayed the menu. A signed
-physical-iPhone build has not been verified.
+physical-iPhone build has not been verified; the generic device target compiles
+unsigned.
 
 This remains a native gameplay work in progress. The iOS client does not yet
 reproduce the browser vehicle
@@ -540,6 +550,6 @@ garage and workshop supplies, the vehicle catalog, races, police and safety,
 crews and territory, exploration, homes, private groups, cash transfers, and
 the local leaderboard. World and Social panels were opened in the iPhone 15 Pro
 simulator; individual actions there have not all been exercised end to end.
-Gun controls and a few job-specific controls remain absent. The local server is independent; signing in
+Other weapons and some job-specific controls remain absent. The local server is independent; signing in
 to the original public site does not provide its private multiplayer backend.
 

@@ -13,9 +13,11 @@ from pathlib import Path
 
 from prepare_native_models import GAME, OUTPUT, chunks, children, first, frame_list, geometry, transform
 
-CLIPS = ('idle_stance', 'walk_player', 'run_player', 'jump_launch')
+CLIPS = ('idle_stance', 'walk_player', 'run_player', 'jump_launch',
+         'gun_stand', 'colt45_fire', 'fighta_1')
 KINDS = {1: 20, 2: 32, 3: 10, 4: 16}
 WORKER_CLIPS = None
+FORCE = False
 
 
 def mat(values, padded=False):
@@ -56,7 +58,7 @@ def quat_mat(q, translation):
             0, 0, 0, 1)
 
 
-def clips_from_anp3(path):
+def clips_from_anp3(path, wanted=CLIPS):
     data = path.read_bytes()
     if data[:4] != b'ANP3' or len(data) < 36:
         raise ValueError('Expected ANP3 pedestrian animations')
@@ -69,7 +71,7 @@ def clips_from_anp3(path):
         name = data[at:at+24].split(b'\0')[0].decode('ascii').lower()
         track_count = struct.unpack_from('<I', data, at+24)[0]
         at += 36
-        keep = name in CLIPS
+        keep = name in wanted
         tracks = {}
         duration = 0.0
         for _ in range(track_count):
@@ -96,8 +98,8 @@ def clips_from_anp3(path):
             at += size * frames
         if keep:
             result[name] = (duration, tracks)
-    if set(result) != set(CLIPS):
-        raise ValueError('Missing native pedestrian clips')
+    if set(result) != set(wanted):
+        raise ValueError(f'Missing native pedestrian clips: {set(wanted) - set(result)}')
     return result
 
 
@@ -207,13 +209,19 @@ def bake(path, destination, clips, fps=30):
     if static_error > 0.01:
         raise ValueError(f'Skin bind pose differs by {static_error:.3f} m')
     result = bytearray(struct.pack('<4sIII', b'ANM1', len(order), len(CLIPS), fps))
+    hands = bytearray(struct.pack('<4sIII', b'HND1', len(CLIPS), fps, 0))
+    axis_transform = (1., 0., 0., 0., 0., 0., -1., 0., 0., 1., 0., -floor, 0., 0., 0., 1.)
     for name in CLIPS:
         duration, tracks = clips[name]
         frame_count = max(1, math.ceil(duration * fps))
         result.extend(struct.pack('<16sI', name.encode('ascii'), frame_count))
+        hands.extend(struct.pack('<16sI', name.encode('ascii'), frame_count))
         for frame in range(frame_count):
             globals_ = global_matrices(frames, bone_frames, tracks, frame / fps)
             palette = pose(globals_, bone_frames, bone_nodes, inv, correction)
+            hand = multiply(axis_transform, multiply(correction, globals_[bone_frames[26]]))
+            hands.extend(struct.pack('<16f', *(hand[row * 4 + col]
+                                                  for col in range(4) for row in range(4))))
             for vertex in order:
                 point = points[vertex]
                 skinned = [0.0, 0.0, 0.0]
@@ -226,17 +234,26 @@ def bake(path, destination, clips, fps=30):
                 result.extend(struct.pack('<3f', skinned[0], -skinned[2], skinned[1] - floor))
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(result)
+    destination.with_name(path.stem + '.hand.bin').write_bytes(hands)
     return len(order), len(result), static_error
 
 
-def init_worker():
-    global WORKER_CLIPS
-    WORKER_CLIPS = clips_from_anp3(GAME / 'world' / 'pedanims.bin')
+def init_worker(force=False):
+    global WORKER_CLIPS, FORCE
+    FORCE = force
+    base = clips_from_anp3(GAME / 'world' / 'pedanims.bin',
+                           ('idle_stance', 'walk_player', 'run_player', 'jump_launch',
+                            'gun_stand', 'fighta_1'))
+    firing = clips_from_anp3(GAME / 'world' / 'anim.colt45.bin', ('colt45_fire',))
+    duration, tracks = firing['colt45_fire']
+    base['colt45_fire'] = (duration, {**base['gun_stand'][1], **tracks})
+    base['fighta_1'] = (base['fighta_1'][0], {**base['idle_stance'][1], **base['fighta_1'][1]})
+    WORKER_CLIPS = base
 
 
 def prepare_one(name):
     destination = OUTPUT / f'{name}.anim.bin'
-    if destination.is_file():
+    if destination.is_file() and destination.with_name(name + '.hand.bin').is_file() and not FORCE:
         return f'{name}: already baked'
     try:
         count, size, error = bake(GAME / f'{name}.dff', destination, WORKER_CLIPS)
@@ -248,6 +265,7 @@ def prepare_one(name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--all', action='store_true', help='Bake every locally converted pedestrian')
+    parser.add_argument('--force', action='store_true', help='Rebake existing local files')
     parser.add_argument('models', nargs='*', help='DFF names, e.g. bmori')
     args = parser.parse_args()
     import json
@@ -257,11 +275,12 @@ def main():
     selected = sorted(names & pedestrians)
     workers = min(8, os.cpu_count() or 4) if args.all else 1
     if workers == 1:
-        init_worker()
+        init_worker(args.force)
         for name in selected:
             print(prepare_one(name), flush=True)
     else:
-        with ProcessPoolExecutor(max_workers=workers, initializer=init_worker) as pool:
+        with ProcessPoolExecutor(max_workers=workers, initializer=init_worker,
+                                 initargs=(args.force,)) as pool:
             for result in pool.map(prepare_one, selected):
                 print(result, flush=True)
 

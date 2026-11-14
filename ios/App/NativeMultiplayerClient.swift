@@ -8,6 +8,7 @@ struct RemotePlayer {
     let code: String
     let heading: Float
     let animation: String
+    let weapon: Int
 }
 
 struct RemoteVehicle {
@@ -71,7 +72,7 @@ final class NativeMultiplayerClient {
 
     func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool, running: Bool,
                       vehicle: RemoteVehicle? = nil, speed: Float = 0,
-                      airborne: Bool = false) {
+                      airborne: Bool = false, weapon: Int = 0, firing: Bool = false) {
         if let vehicle {
             send(["t": "me", "driving": true, "car": vehicle.code,
                   "vehicle": vehicle.id, "skin": 7,
@@ -83,10 +84,12 @@ final class NativeMultiplayerClient {
         send(["t": "me", "walking": true, "skin": 7,
               "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
               "heading": Double(heading), "health": health, "armour": armour,
-              "weapon": 0,
+              "weapon": weapon,
               "air": airborne,
-              "anim": airborne ? "ped/jump_launch/l/1" :
-                  moving ? (running ? "ped/run/l/1" : "ped/walk/l/1") : "ped/idle/l/1"])
+              "anim": firing ? "colt45/colt45_fire/l/1" :
+                  airborne ? "ped/jump_launch/l/1" :
+                  moving ? (running ? "ped/run/l/1" : "ped/walk/l/1") :
+                  weapon == 22 ? "ped/gun_stand/l/1" : "ped/idle/l/1"])
         positionPackets += 1
         if positionPackets % 10 == 0 { send(["t": "board"]) }
     }
@@ -96,6 +99,20 @@ final class NativeMultiplayerClient {
     func sendMeleeHit(to player: String) {
         guard health > 0, !passive else { return }
         send(["t": "hit", "to": player])
+    }
+
+    func sendPistolShot(from origin: SIMD3<Float>, to hit: SIMD3<Float>,
+                        player: String?) {
+        guard health > 0, !passive else { return }
+        let shot: [String: Any] = ["t": "shot", "w": 22,
+                                   "o": [Double(origin.x), Double(origin.y), Double(origin.z)],
+                                   "h": [Double(hit.x), Double(hit.y), Double(hit.z)]]
+        guard let data = try? JSONSerialization.data(withJSONObject: shot),
+              let text = String(data: data, encoding: .utf8) else { return }
+        socket?.send(.string(text)) { [weak self] error in
+            guard error == nil, let player else { return }
+            self?.send(["t": "hit", "to": player])
+        }
     }
 
     func respawn() {
@@ -227,13 +244,17 @@ final class NativeMultiplayerClient {
                   let y = (row[4] as? NSNumber)?.floatValue,
                   let z = (row[5] as? NSNumber)?.floatValue else { continue }
             let wireAnimation = row.count > 41 ? row[41] as? String ?? "" : ""
-            let animation = wireAnimation.contains("jump") ? "jump_launch" :
+            let animation = wireAnimation.contains("colt45_fire") ? "colt45_fire" :
+                wireAnimation.contains("gun_stand") ? "gun_stand" :
+                wireAnimation.contains("jump") ? "jump_launch" :
                 wireAnimation.contains("run") ? "run_player" :
-                wireAnimation.contains("walk") ? "walk_player" : "idle_stance"
+                wireAnimation.contains("walk") ? "walk_player" :
+                (row.count > 27 && (row[27] as? NSNumber)?.intValue == 22) ? "gun_stand" : "idle_stance"
             updated[id] = RemotePlayer(id: id, name: name, position: SIMD3(x, y, z),
                                        code: row[2] as? String ?? "s7",
                                        heading: row.count > 6 ? (row[6] as? NSNumber)?.floatValue ?? 0 : 0,
-                                       animation: animation)
+                                       animation: animation,
+                                       weapon: row.count > 27 ? (row[27] as? NSNumber)?.intValue ?? 0 : 0)
         }
         players = updated
         onPlayers?(Array(updated.values))

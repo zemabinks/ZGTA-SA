@@ -12,6 +12,9 @@ final class NativeGameViewController: UIViewController {
     private let objective = UILabel()
     private let vehicleButton = UIButton(type: .system)
     private let attackButton = UIButton(type: .system)
+    private let weaponButton = UIButton(type: .system)
+    private let reloadButton = UIButton(type: .system)
+    private let ammoLabel = UILabel()
     private let vitals = UILabel()
     private let stick = VirtualStick()
     private weak var gameplayPanel: NativeGameplayPanel?
@@ -27,7 +30,12 @@ final class NativeGameViewController: UIViewController {
     private var run = false
     private var lastJumpButton = false
     private var lastAttackButton = false
+    private var lastWeaponButton = false
+    private var lastReloadButton = false
     private var lastAttackTime: CFTimeInterval = 0
+    private var usingPistol = false
+    private var magazine = 17
+    private var reserve = 68
 
     init(server: ServerAddress) {
         self.server = server
@@ -80,7 +88,8 @@ final class NativeGameViewController: UIViewController {
         network.onTeleport = { [weak self] point in self?.renderer?.teleport(x: point.x, y: point.y, z: point.z) }
         network.onVitals = { [weak self] health, armour in
             self?.vitals.text = "HEALTH \(health)  ·  ARMOUR \(armour)"
-            self?.attackButton.setTitle(health == 0 ? "RESPAWN" : "HIT", for: .normal)
+            self?.attackButton.setTitle(health == 0 ? "RESPAWN" :
+                                          (self?.usingPistol == true ? "FIRE" : "HIT"), for: .normal)
         }
         gameplay.onState = { [weak self] state in
             guard let self else { return }
@@ -138,6 +147,11 @@ final class NativeGameViewController: UIViewController {
         vitals.backgroundColor = UIColor.black.withAlphaComponent(0.7)
         vitals.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(vitals)
+        ammoLabel.textColor = .white
+        ammoLabel.font = .systemFont(ofSize: 12, weight: .bold)
+        ammoLabel.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        ammoLabel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(ammoLabel)
         objective.textColor = .white
         objective.font = .systemFont(ofSize: 13, weight: .bold, width: .condensed)
         objective.numberOfLines = 2
@@ -170,6 +184,17 @@ final class NativeGameViewController: UIViewController {
         attackButton.translatesAutoresizingMaskIntoConstraints = false
         attackButton.addTarget(self, action: #selector(attack), for: .touchUpInside)
         view.addSubview(attackButton)
+        for (control, title, action) in [(weaponButton, "PISTOL", #selector(toggleWeapon)),
+                                         (reloadButton, "RELOAD", #selector(reload))] {
+            control.setTitle(title, for: .normal)
+            control.setTitleColor(.white, for: .normal)
+            control.titleLabel?.font = .systemFont(ofSize: 15, weight: .black, width: .condensed)
+            control.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+            control.translatesAutoresizingMaskIntoConstraints = false
+            control.addTarget(self, action: action, for: .touchUpInside)
+            view.addSubview(control)
+        }
+        updateWeaponHUD()
         vehicleButton.setTitle("ENTER CAR", for: .normal)
         vehicleButton.setTitleColor(.white, for: .normal)
         vehicleButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
@@ -198,8 +223,10 @@ final class NativeGameViewController: UIViewController {
             players.topAnchor.constraint(equalTo: status.bottomAnchor, constant: 4),
             vitals.leadingAnchor.constraint(equalTo: players.leadingAnchor),
             vitals.topAnchor.constraint(equalTo: players.bottomAnchor, constant: 4),
+            ammoLabel.leadingAnchor.constraint(equalTo: vitals.leadingAnchor),
+            ammoLabel.topAnchor.constraint(equalTo: vitals.bottomAnchor, constant: 4),
             objective.leadingAnchor.constraint(equalTo: status.leadingAnchor),
-            objective.topAnchor.constraint(equalTo: vitals.bottomAnchor, constant: 5),
+            objective.topAnchor.constraint(equalTo: ammoLabel.bottomAnchor, constant: 5),
             objective.widthAnchor.constraint(lessThanOrEqualToConstant: 390),
             stick.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 30),
             stick.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
@@ -219,6 +246,14 @@ final class NativeGameViewController: UIViewController {
             attackButton.centerYAnchor.constraint(equalTo: runButton.centerYAnchor),
             attackButton.widthAnchor.constraint(equalToConstant: 72),
             attackButton.heightAnchor.constraint(equalToConstant: 42)
+            ,weaponButton.trailingAnchor.constraint(equalTo: attackButton.trailingAnchor),
+            weaponButton.bottomAnchor.constraint(equalTo: attackButton.topAnchor, constant: -7),
+            weaponButton.widthAnchor.constraint(equalToConstant: 72),
+            weaponButton.heightAnchor.constraint(equalToConstant: 35),
+            reloadButton.trailingAnchor.constraint(equalTo: weaponButton.leadingAnchor, constant: -7),
+            reloadButton.centerYAnchor.constraint(equalTo: weaponButton.centerYAnchor),
+            reloadButton.widthAnchor.constraint(equalToConstant: 72),
+            reloadButton.heightAnchor.constraint(equalToConstant: 35)
             ,vehicleButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -30),
             vehicleButton.bottomAnchor.constraint(equalTo: look.topAnchor, constant: -12),
             vehicleButton.heightAnchor.constraint(equalToConstant: 35),
@@ -250,6 +285,32 @@ final class NativeGameViewController: UIViewController {
     @objc private func toggleRun() { run.toggle() }
     @objc private func jump() { renderer?.jump() }
 
+    private func updateWeaponHUD() {
+        weaponButton.setTitle(usingPistol ? "FISTS" : "PISTOL", for: .normal)
+        reloadButton.isHidden = !usingPistol
+        ammoLabel.text = usingPistol ? "COLT .45  ·  \(magazine) / \(reserve)" : "FISTS EQUIPPED"
+        attackButton.setTitle(network.health == 0 ? "RESPAWN" :
+                              (usingPistol ? "FIRE" : "HIT"), for: .normal)
+    }
+
+    @objc private func toggleWeapon() {
+        guard currentVehicle == nil else { status.text = "EXIT THE VEHICLE TO EQUIP"; return }
+        usingPistol.toggle()
+        renderer?.equippedWeapon = usingPistol ? 22 : 0
+        renderer?.clearAction()
+        updateWeaponHUD()
+        status.text = usingPistol ? "COLT .45 EQUIPPED" : "FISTS EQUIPPED"
+    }
+
+    @objc private func reload() {
+        guard usingPistol, magazine < 17, reserve > 0 else { return }
+        let count = min(17 - magazine, reserve)
+        magazine += count
+        reserve -= count
+        updateWeaponHUD()
+        status.text = "COLT .45 RELOADED"
+    }
+
     @objc private func attack() {
         guard let renderer else { return }
         if network.health == 0 {
@@ -268,6 +329,29 @@ final class NativeGameViewController: UIViewController {
         let now = ProcessInfo.processInfo.systemUptime
         guard now - lastAttackTime >= 0.35 else { return }
         lastAttackTime = now
+        if usingPistol {
+            guard magazine > 0 else { status.text = "EMPTY MAGAZINE — RELOAD"; return }
+            magazine -= 1
+            updateWeaponHUD()
+            renderer.firePistol()
+            let origin = renderer.position + SIMD3<Float>(0, 0, 1.35)
+            let facing = SIMD2<Float>(sin(renderer.direction), cos(renderer.direction))
+            let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
+                let offset = player.position - renderer.position
+                let distance = hypot(offset.x, offset.y)
+                guard distance > 0.5, distance <= 60, abs(offset.z) <= 6,
+                      simd_dot(SIMD2(offset.x, offset.y) / distance, facing) >= 0.86,
+                      renderer.hasClearShot(to: player.position) else { return nil }
+                return (player, distance)
+            }.min { $0.1 < $1.1 }
+            let hit = target.map { $0.0.position + SIMD3<Float>(0, 0, 1.15) } ??
+                origin + SIMD3<Float>(facing.x * 60, facing.y * 60, 0)
+            network.sendPistolShot(from: origin, to: hit, player: target?.0.id)
+            status.text = target.map { "COLT .45 FIRED AT \($0.0.name.uppercased())" } ??
+                "COLT .45 FIRED"
+            return
+        }
+        renderer.performFistAttack()
         let origin = renderer.position
         let facing = SIMD2<Float>(sin(renderer.direction), cos(renderer.direction))
         let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
@@ -386,6 +470,8 @@ final class NativeGameViewController: UIViewController {
         var gamepadRunning = false
         var gamepadJumping = false
         var gamepadAttacking = false
+        var gamepadWeapon = false
+        var gamepadReload = false
         if let pad = GCController.controllers().compactMap(\.extendedGamepad).first {
             let lx = pad.leftThumbstick.xAxis.value, ly = pad.leftThumbstick.yAxis.value
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
@@ -394,6 +480,8 @@ final class NativeGameViewController: UIViewController {
             gamepadRunning = pad.buttonA.isPressed
             gamepadJumping = pad.buttonB.isPressed
             gamepadAttacking = pad.rightTrigger.isPressed
+            gamepadWeapon = pad.leftShoulder.isPressed
+            gamepadReload = pad.rightShoulder.isPressed
             if pad.buttonX.isPressed && !lastVehicleButton { toggleVehicle() }
             if pad.buttonY.isPressed && !lastJobsButton && presentedViewController == nil { openGameplay() }
             lastVehicleButton = pad.buttonX.isPressed
@@ -403,6 +491,10 @@ final class NativeGameViewController: UIViewController {
         lastJumpButton = gamepadJumping
         if gamepadAttacking && !lastAttackButton { attack() }
         lastAttackButton = gamepadAttacking
+        if gamepadWeapon && !lastWeaponButton { toggleWeapon() }
+        lastWeaponButton = gamepadWeapon
+        if gamepadReload && !lastReloadButton { reload() }
+        lastReloadButton = gamepadReload
         let walking = abs(forward) + abs(sideways) > 0.05
         let speed: Float = (run || gamepadRunning) ? 2 : 1
         if currentVehicle != nil { steering = max(-1, min(1, steering + sideways)) }
@@ -413,7 +505,8 @@ final class NativeGameViewController: UIViewController {
             network.sendPosition(renderer.position, heading: renderer.direction, moving: walking,
                                  running: speed > 1,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
-                                 airborne: renderer.isAirborne)
+                                 airborne: renderer.isAirborne, weapon: usingPistol ? 22 : 0,
+                                 firing: renderer.isFiring)
         }
         if link.timestamp - lastGameplay > 1.5 {
             lastGameplay = link.timestamp

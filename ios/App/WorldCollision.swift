@@ -117,6 +117,19 @@ final class WorldCollision {
         return true
     }
 
+    func lineOfSight(from start: SIMD3<Float>, to finish: SIMD3<Float>) -> Bool {
+        let distance = simd_distance(start, finish)
+        let steps = max(1, Int(ceil(distance / 5)))
+        var ids: Set<Int> = []
+        for step in 0...steps {
+            let point = start + (finish - start) * (Float(step) / Float(steps))
+            ids.formUnion(candidates(point.x, point.y))
+        }
+        for id in ids where Self.intersects(start: start, finish: finish,
+                                             triangle: triangles[id]) { return false }
+        return true
+    }
+
     private static func intersects(start: SIMD3<Float>, finish: SIMD3<Float>,
                                    triangle: Triangle) -> Bool {
         let direction = finish - start
