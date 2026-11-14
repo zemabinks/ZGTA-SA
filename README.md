@@ -512,7 +512,11 @@ physical-iPhone build has not been verified.
 
 This remains a native gameplay work in progress. The iOS client does not yet
 decode the archived pedestrian animation data, reproduce the browser vehicle
-physics, or expose all browser interactions (combat, homes, groups, shops,
-races, and every mission control). The local server is independent; signing in
+physics, or expose every browser interaction. Its native panels now show jobs,
+garage and workshop supplies, the vehicle catalog, races, police and safety,
+crews and territory, exploration, homes, private groups, cash transfers, and
+the local leaderboard. World and Social panels were opened in the iPhone 15 Pro
+simulator; individual actions there have not all been exercised end to end.
+Combat controls and a few job-specific controls remain absent. The local server is independent; signing in
 to the original public site does not provide its private multiplayer backend.
 

@@ -250,10 +250,16 @@ final class NativeGameViewController: UIViewController {
     }
 
     private func showObjective(_ state: [String: Any]) {
-        guard let job = state["job"] as? [String: Any] else { objective.text = ""; return }
-        let name = (job["name"] as? String ?? "MISSION").uppercased()
-        let stage = (job["stage"] as? String ?? "").uppercased()
-        if let target = job["target"] as? [String: Any] {
+        let race = state["race"] as? [String: Any]
+        let activeRace = race?["stage"] as? String == "running" && race?["joined"] as? Bool == true
+        let job = state["job"] as? [String: Any]
+        let exploration = state["exploration"] as? [String: Any]
+        let target = activeRace ? race?["target"] as? [String: Any] :
+            job?["target"] as? [String: Any] ?? exploration?["tracked"] as? [String: Any]
+        let name = activeRace ? "MULTIPLAYER RACE" :
+            (job?["name"] as? String ?? (target == nil ? "" : "EXPLORATION")).uppercased()
+        let stage = activeRace ? "CHECKPOINT" : (job?["stage"] as? String ?? "").uppercased()
+        if let target {
             let x = (target["x"] as? NSNumber)?.floatValue ?? 0
             let y = (target["y"] as? NSNumber)?.floatValue ?? 0
             let position = renderer?.position ?? SIMD3<Float>(1480, -1738, 13)
@@ -264,13 +270,30 @@ final class NativeGameViewController: UIViewController {
             let arrow = turn < -.pi / 5 ? "◀" : turn > .pi / 5 ? "▶" : "▲"
             let distance = Int(hypot(x - position.x, y - position.y))
             objective.text = "\(name)  ·  \(stage)\n\(arrow) \(target["name"] as? String ?? "OBJECTIVE")  ·  \(distance) M"
-        } else {
+        } else if job != nil {
             objective.text = "\(name)  ·  \(stage)\nOPEN JOBS FOR OBJECTIVE"
-        }
+        } else { objective.text = "" }
     }
 
     private func maybeAdvanceCheckpoint(_ state: [String: Any]) {
-        guard state["driving"] as? Bool == true,
+        guard state["driving"] as? Bool == true else { return }
+        if let race = state["race"] as? [String: Any],
+           race["stage"] as? String == "running", race["joined"] as? Bool == true,
+           let index = (race["index"] as? NSNumber)?.intValue,
+           let total = (race["total"] as? NSNumber)?.intValue,
+           let remaining = (race["remaining"] as? NSNumber)?.doubleValue,
+           let radius = (race["radius"] as? NSNumber)?.doubleValue,
+           remaining <= radius {
+            let action = index == total ? "race.finish" : "race.checkpoint"
+            let key = "race:\(race["started"] ?? ""): \(index):\(action)"
+            let now = Date()
+            if now.timeIntervalSince(lastAutomaticCheckpoint[key] ?? .distantPast) >= 5 {
+                lastAutomaticCheckpoint[key] = now
+                gameplay.perform(action)
+            }
+            return
+        }
+        guard
               let job = state["job"] as? [String: Any],
               job["mode"] as? String == "checkpoints",
               let index = (job["index"] as? NSNumber)?.intValue,
