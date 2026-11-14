@@ -13,6 +13,7 @@
 		36C5754DD98547AC06A81754 /* NativeGameplayPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23A47E76CCEE38AC4EC0FE1F /* NativeGameplayPanel.swift */; };
 		37A8D93437783ADD0FEC8E7E /* NativeGameHUD.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0260B8C458933E996D829557 /* NativeGameHUD.swift */; };
 		4A9F4549E076D75780C75E9F /* NativeGameplayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */; };
+		5447F93CFED6627A34254193 /* NativeChatPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D317C08D8555DB9A863B986F /* NativeChatPanel.swift */; };
 		544DC345322237E7096945DD /* NativeWorldRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8839C5FCEC16A960B012E3C8 /* NativeWorldRenderer.swift */; };
 		54DDE12A75BD4B81259536BD /* NativeActorAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A2987F67DA4F5463FEFF776 /* NativeActorAnimation.swift */; };
 		73A8066A6D45F55EB19FCAFA /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = E404FF2979C061CFF21192D9 /* App.swift */; };
@@ -44,6 +45,7 @@
 		8839C5FCEC16A960B012E3C8 /* NativeWorldRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldRenderer.swift; sourceTree = "<group>"; };
 		8A2987F67DA4F5463FEFF776 /* NativeActorAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeActorAnimation.swift; sourceTree = "<group>"; };
 		8B6E1BEA395F88AFB175F6CE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		D317C08D8555DB9A863B986F /* NativeChatPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeChatPanel.swift; sourceTree = "<group>"; };
 		DAF3FFE41D4B8C5B0F20E99A /* MainMenuViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainMenuViewController.swift; sourceTree = "<group>"; };
 		E2639B413A31863964ECFEC9 /* WorldBinary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldBinary.swift; sourceTree = "<group>"; };
 		E404FF2979C061CFF21192D9 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
@@ -60,6 +62,7 @@
 				8B6E1BEA395F88AFB175F6CE /* Info.plist */,
 				DAF3FFE41D4B8C5B0F20E99A /* MainMenuViewController.swift */,
 				8A2987F67DA4F5463FEFF776 /* NativeActorAnimation.swift */,
+				D317C08D8555DB9A863B986F /* NativeChatPanel.swift */,
 				4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */,
 				0260B8C458933E996D829557 /* NativeGameHUD.swift */,
 				770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */,
@@ -168,6 +171,7 @@
 				EE609E92C2D112EE11CB59E4 /* HomeViewController.swift in Sources */,
 				A04EB9A2AA84E43AE0417110 /* MainMenuViewController.swift in Sources */,
 				54DDE12A75BD4B81259536BD /* NativeActorAnimation.swift in Sources */,
+				5447F93CFED6627A34254193 /* NativeChatPanel.swift in Sources */,
 				9A6319D331B41445AF5F6B4E /* NativeCityMapViewController.swift in Sources */,
 				37A8D93437783ADD0FEC8E7E /* NativeGameHUD.swift in Sources */,
 				ACD126EF6D1B8AB684EC440E /* NativeGameViewController.swift in Sources */,

@@ -520,6 +520,12 @@ style touch buttons float over the world without a top navigation bar. On foot,
 only movement, jump, sprint, combat, weapon, and nearby vehicle actions appear;
 driving swaps those for enter/exit, radio, accelerator, and brake actions.
 Controller triggers accelerate and brake while driving, and fire on foot.
+The floating chat icon opens a native message composer. Messages and commands
+use the local multiplayer WebSocket, and the newest confirmed lines appear in
+the game view. Nearby mission targets have a translucent Metal checkpoint.
+A contextual touch action appears only when the local server reports a usable
+pickup, delivery, fire, heist, flight, or completed distance objective; the
+server still validates each action.
 
 Radio station selection is implemented natively. To play audio you provide
 tracks on your Mac under `local-only/site/game/radio/custom/` as `CH.mp3`,
@@ -578,6 +584,10 @@ and exit, and a held gas press moved the cab about 30 m. Exiting restored the
 on-foot buttons, then the test mission was ended. Simulator and generic iPhone
 builds passed after the controls changed. Radio playback with a real track and
 the native app on a physical iPhone still need testing.
+In another simulator check, a native chat message appeared in the server echo
+and the in-game feed. A courier pickup drew the Metal objective marker, and its
+contextual touch button collected the package without reopening Jobs. The
+objective changed to delivery; the test mission was then cancelled.
 
 This remains a native gameplay work in progress. The iOS client does not yet
 reproduce the browser vehicle

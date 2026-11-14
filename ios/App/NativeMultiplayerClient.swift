@@ -44,6 +44,9 @@ final class NativeMultiplayerClient {
     private(set) var armour = 0
     private(set) var passive = false
     private var positionPackets = 0
+    private var pendingSays: [String] = []
+    private var lastChatSequence = 0
+    private(set) var chatMessages: [String] = []
     var onStatus: ((String) -> Void)?
     var onPlayers: (([RemotePlayer]) -> Void)?
     var onPresence: ((Int, [String]) -> Void)?
@@ -51,6 +54,7 @@ final class NativeMultiplayerClient {
     var onEnter: ((String, Bool) -> Void)?
     var onTeleport: ((SIMD3<Float>) -> Void)?
     var onVitals: ((Int, Int) -> Void)?
+    var onChat: (([String]) -> Void)?
 
     init(server: ServerAddress) { self.server = server }
 
@@ -74,14 +78,16 @@ final class NativeMultiplayerClient {
                       vehicle: RemoteVehicle? = nil, speed: Float = 0,
                       airborne: Bool = false, weapon: Int = 0, firing: Bool = false) {
         if let vehicle {
-            send(["t": "me", "driving": true, "car": vehicle.code,
+            var packet: [String: Any] = ["t": "me", "driving": true, "car": vehicle.code,
                   "vehicle": vehicle.id, "skin": 7,
                   "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
                   "heading": Double(heading), "speed": Double(speed), "steer": 0,
-                  "health": 1000, "life": health, "armour": armour])
+                  "health": 1000, "life": health, "armour": armour]
+            addPendingChat(to: &packet)
+            send(packet)
             return
         }
-        send(["t": "me", "walking": true, "skin": 7,
+        var packet: [String: Any] = ["t": "me", "walking": true, "skin": 7,
               "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
               "heading": Double(heading), "health": health, "armour": armour,
               "weapon": weapon,
@@ -89,9 +95,38 @@ final class NativeMultiplayerClient {
               "anim": firing ? "colt45/colt45_fire/l/1" :
                   airborne ? "ped/jump_launch/l/1" :
                   moving ? (running ? "ped/run/l/1" : "ped/walk/l/1") :
-                  weapon == 22 ? "ped/gun_stand/l/1" : "ped/idle/l/1"])
+                  weapon == 22 ? "ped/gun_stand/l/1" : "ped/idle/l/1"]
+        addPendingChat(to: &packet)
+        send(packet)
         positionPackets += 1
         if positionPackets % 10 == 0 { send(["t": "board"]) }
+    }
+
+    func sendChat(_ line: String) {
+        let trimmed = String(line.trimmingCharacters(in: .whitespacesAndNewlines).prefix(240))
+        guard !trimmed.isEmpty else { return }
+        pendingSays.append(trimmed)
+    }
+
+    private func addPendingChat(to packet: inout [String: Any]) {
+        if !pendingSays.isEmpty { packet["say"] = pendingSays.removeFirst() }
+    }
+
+    private func receiveChat(_ rows: [[Any]]) {
+        var changed = false
+        for row in rows {
+            guard row.count >= 3,
+                  let sequence = row[0] as? Int, sequence > lastChatSequence,
+                  let name = row[1] as? String,
+                  let line = row[2] as? String else { continue }
+            lastChatSequence = sequence
+            chatMessages.append("\(name): \(line)")
+            changed = true
+        }
+        if changed {
+            chatMessages = Array(chatMessages.suffix(50))
+            onChat?(chatMessages)
+        }
     }
 
     func requestEnter(_ vehicle: RemoteVehicle) { send(["t": "enter", "v": vehicle.id]) }
@@ -186,6 +221,7 @@ final class NativeMultiplayerClient {
         case "all":
             localName = (message["you"] as? String) ?? localName
             cash = (message["cash"] as? Int) ?? cash
+            if let rows = message["chat"] as? [[Any]] { receiveChat(rows) }
             updateRows(message["cars"])
             if let rows = message["vehicles"] as? [[Any]] {
                 vehicles = Dictionary(uniqueKeysWithValues: rows.compactMap(RemoteVehicle.init(row:)).map { ($0.id, $0) })
@@ -193,6 +229,8 @@ final class NativeMultiplayerClient {
             }
             onStatus?("ONLINE AS \(localName.uppercased())")
         case "cars": updateRows(message["c"])
+        case "chat":
+            if let rows = message["lines"] as? [[Any]] { receiveChat(rows) }
         case "board":
             let rows = (message["rows"] as? [[Any]]) ?? []
             let names = rows.compactMap { row -> String? in
@@ -201,7 +239,14 @@ final class NativeMultiplayerClient {
             }
             onPresence?((message["players"] as? Int) ?? rows.count, names)
         case "note":
-            if let note = message["text"] as? String { onStatus?(note.uppercased()) }
+            if let note = message["text"] as? String {
+                onStatus?(note.uppercased())
+                if note.hasPrefix("[Group]") {
+                    chatMessages.append(note)
+                    chatMessages = Array(chatMessages.suffix(50))
+                    onChat?(chatMessages)
+                }
+            }
         case "passive":
             passive = message["on"] as? Bool == true
         case "hit":

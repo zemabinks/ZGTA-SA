@@ -8,13 +8,15 @@ final class NativeGameViewController: UIViewController {
     private let gameplay: NativeGameplayClient
     private let radio: NativeVehicleRadio
     private let renderer: NativeWorldRenderer?
-    private let status = UILabel()
+    private let status = NativeTransientStatusLabel()
     private let players = UILabel()
     private let objective = UILabel()
+    private let chatFeed = UILabel()
     private let gameHUD = NativeGameHUD()
     private let mapButton = UIButton(type: .custom)
     private let vehicleButton = NativeIconButton()
     private let radioButton = NativeIconButton()
+    private let missionButton = NativeIconButton()
     private let attackButton = NativeIconButton()
     private let weaponButton = NativeIconButton()
     private let reloadButton = NativeIconButton()
@@ -27,7 +29,9 @@ final class NativeGameViewController: UIViewController {
     private let stick = VirtualStick()
     private let lookStick = VirtualStick()
     private weak var gameplayPanel: NativeGameplayPanel?
+    private weak var chatPanel: NativeChatPanel?
     private var currentVehicle: RemoteVehicle?
+    private var nearbyMissionAction: String?
     private var displayLink: CADisplayLink?
     private var lastTime: CFTimeInterval = 0
     private var lastNetwork: CFTimeInterval = 0
@@ -85,6 +89,11 @@ final class NativeGameViewController: UIViewController {
                 (names.count > 1 ? "  ·  " + names.joined(separator: ", ") : "")
         }
         network.onPlayers = { [weak self] players in self?.renderer?.remotePlayers = players }
+        network.onChat = { [weak self] lines in
+            self?.chatFeed.text = lines.suffix(3).joined(separator: "\n")
+            self?.chatFeed.isHidden = lines.isEmpty
+            self?.chatPanel?.update(lines)
+        }
         network.onVehicles = { [weak self] vehicles in self?.renderer?.remoteVehicles = vehicles }
         network.onEnter = { [weak self] id, okay in
             guard let self else { return }
@@ -116,6 +125,7 @@ final class NativeGameViewController: UIViewController {
             self.gameplayPanel?.update(state)
             self.showObjective(state)
             self.updateRadarTarget(state)
+            self.updateNearbyMissionAction(state)
             self.maybeAdvanceCheckpoint(state)
         }
         gameplay.onResult = { [weak self] result in self?.status.text = result.uppercased() }
@@ -146,6 +156,9 @@ final class NativeGameViewController: UIViewController {
         let missions = button("JOBS / GARAGE", action: #selector(openGameplay))
         styleControl(missions, icon: nil, fallback: "briefcase.fill", accessibility: "Jobs and garage")
         view.addSubview(missions)
+        let chat = button("CHAT", action: #selector(openChat))
+        styleControl(chat, icon: nil, fallback: "bubble.left.and.bubble.right.fill", accessibility: "Open multiplayer chat")
+        view.addSubview(chat)
         status.text = "LOADING LOCAL CITY"
         status.textColor = .white
         status.font = .systemFont(ofSize: 12, weight: .bold, width: .condensed)
@@ -164,6 +177,14 @@ final class NativeGameViewController: UIViewController {
         objective.backgroundColor = UIColor.black.withAlphaComponent(0.38)
         objective.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(objective)
+        chatFeed.textColor = .white
+        chatFeed.font = .systemFont(ofSize: 11, weight: .semibold, width: .condensed)
+        chatFeed.numberOfLines = 3
+        chatFeed.lineBreakMode = .byTruncatingTail
+        chatFeed.backgroundColor = UIColor.black.withAlphaComponent(0.3)
+        chatFeed.translatesAutoresizingMaskIntoConstraints = false
+        chatFeed.isHidden = true
+        view.addSubview(chatFeed)
         gameHUD.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(gameHUD)
         mapButton.translatesAutoresizingMaskIntoConstraints = false
@@ -240,6 +261,13 @@ final class NativeGameViewController: UIViewController {
         radioButton.isHidden = true
         radioButton.addTarget(self, action: #selector(nextRadioStation), for: .touchUpInside)
         view.addSubview(radioButton)
+        missionButton.setTitle("OBJECTIVE", for: .normal)
+        missionButton.translatesAutoresizingMaskIntoConstraints = false
+        styleControl(missionButton, icon: nil, fallback: "hand.point.up.left.fill",
+                     accessibility: "Use nearby mission objective")
+        missionButton.addTarget(self, action: #selector(performNearbyMissionAction), for: .touchUpInside)
+        missionButton.isHidden = true
+        view.addSubview(missionButton)
         NSLayoutConstraint.activate([
             menu.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             menu.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
@@ -249,6 +277,10 @@ final class NativeGameViewController: UIViewController {
             missions.centerYAnchor.constraint(equalTo: menu.centerYAnchor),
             missions.widthAnchor.constraint(equalToConstant: 42),
             missions.heightAnchor.constraint(equalTo: missions.widthAnchor),
+            chat.trailingAnchor.constraint(equalTo: missions.leadingAnchor, constant: -8),
+            chat.centerYAnchor.constraint(equalTo: menu.centerYAnchor),
+            chat.widthAnchor.constraint(equalToConstant: 42),
+            chat.heightAnchor.constraint(equalTo: chat.widthAnchor),
             status.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             status.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 9),
             players.leadingAnchor.constraint(equalTo: status.leadingAnchor),
@@ -256,6 +288,9 @@ final class NativeGameViewController: UIViewController {
             objective.leadingAnchor.constraint(equalTo: status.leadingAnchor),
             objective.topAnchor.constraint(equalTo: players.bottomAnchor, constant: 5),
             objective.widthAnchor.constraint(lessThanOrEqualToConstant: 390),
+            chatFeed.leadingAnchor.constraint(equalTo: status.leadingAnchor),
+            chatFeed.topAnchor.constraint(equalTo: objective.bottomAnchor, constant: 5),
+            chatFeed.widthAnchor.constraint(lessThanOrEqualToConstant: 390),
             gameHUD.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 12),
             gameHUD.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -12),
             gameHUD.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 60),
@@ -307,7 +342,11 @@ final class NativeGameViewController: UIViewController {
             radioButton.trailingAnchor.constraint(equalTo: vehicleButton.leadingAnchor, constant: -8),
             radioButton.centerYAnchor.constraint(equalTo: vehicleButton.centerYAnchor),
             radioButton.heightAnchor.constraint(equalToConstant: 48),
-            radioButton.widthAnchor.constraint(equalTo: radioButton.heightAnchor)
+            radioButton.widthAnchor.constraint(equalTo: radioButton.heightAnchor),
+            missionButton.trailingAnchor.constraint(equalTo: vehicleButton.leadingAnchor, constant: -8),
+            missionButton.bottomAnchor.constraint(equalTo: vehicleButton.topAnchor, constant: -8),
+            missionButton.widthAnchor.constraint(equalToConstant: 48),
+            missionButton.heightAnchor.constraint(equalTo: missionButton.widthAnchor)
         ])
     }
 
@@ -356,6 +395,15 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func close() { dismiss(animated: true) }
+    @objc private func openChat() {
+        guard presentedViewController == nil else { return }
+        let panel = NativeChatPanel()
+        panel.modalPresentationStyle = .overFullScreen
+        panel.onSend = { [weak self] line in self?.network.sendChat(line) }
+        panel.update(network.chatMessages)
+        chatPanel = panel
+        present(panel, animated: true)
+    }
     @objc private func openMap() {
         guard presentedViewController == nil else { return }
         let map = NativeCityMapViewController(image: gameHUD.radar.mapImage,
@@ -382,6 +430,67 @@ final class NativeGameViewController: UIViewController {
         guard currentVehicle != nil else { return }
         radio.next()
         radioButton.setTitle(radio.stationName, for: .normal)
+    }
+    @objc private func performNearbyMissionAction() {
+        guard let nearbyMissionAction else { return }
+        missionButton.isHidden = true
+        gameplay.perform(nearbyMissionAction)
+    }
+
+    private func updateNearbyMissionAction(_ state: [String: Any]) {
+        nearbyMissionAction = nil
+        guard let job = state["job"] as? [String: Any],
+              let remaining = (job["remaining"] as? NSNumber)?.doubleValue,
+              remaining <= ((job["radius"] as? NSNumber)?.doubleValue ?? 0) else {
+            missionButton.isHidden = true
+            return
+        }
+        let mode = job["mode"] as? String ?? "distance"
+        let onFoot = state["onFoot"] as? Bool == true
+        let driving = state["driving"] as? Bool == true
+        let marked = (job["vehicleId"] as? String) == (state["drivingVehicle"] as? String)
+        let stage = job["stage"] as? String ?? ""
+        let id = job["id"] as? String ?? ""
+        var label: String?
+        switch mode {
+        case "route":
+            let ready = id == "courier" ? onFoot || stage == "delivery" : driving && marked
+            if ready {
+                nearbyMissionAction = stage == "pickup" ? "job.pickup" : "job.complete"
+                label = stage == "pickup" ? "Collect or load mission item" : "Deliver mission item"
+            }
+        case "fire":
+            if stage == "respond", driving && marked {
+                nearbyMissionAction = "job.respond"
+                label = "Arrive at fire call"
+            } else if stage == "extinguish" {
+                nearbyMissionAction = "job.extinguish"
+                label = "Extinguish fire"
+            } else if stage == "rescue", onFoot {
+                nearbyMissionAction = "job.complete"
+                label = "Rescue person"
+            }
+        case "heist":
+            if stage == "plan", onFoot {
+                nearbyMissionAction = "heist.rob"
+                label = "Collect heist bag"
+            } else if stage == "escape", driving && marked,
+                      (state["wanted"] as? NSNumber)?.intValue == 0 {
+                nearbyMissionAction = "job.complete"
+                label = "Deliver heist bag"
+            }
+        case "flight":
+            if stage == "landing", driving && marked, job["landingReady"] as? Bool == true {
+                nearbyMissionAction = "job.complete"
+                label = "Finish flight"
+            }
+        case "distance":
+            nearbyMissionAction = "job.complete"
+            label = "Complete mission"
+        default: break
+        }
+        missionButton.accessibilityLabel = label
+        missionButton.isHidden = nearbyMissionAction == nil
     }
 
     private func updateWeaponHUD() {
@@ -560,7 +669,11 @@ final class NativeGameViewController: UIViewController {
         if let x = (target?["x"] as? NSNumber)?.floatValue,
            let y = (target?["y"] as? NSNumber)?.floatValue {
             gameHUD.radar.target = SIMD2(x, y)
-        } else { gameHUD.radar.target = nil }
+            renderer?.objective = SIMD2(x, y)
+        } else {
+            gameHUD.radar.target = nil
+            renderer?.objective = nil
+        }
     }
 
     private func maybeAdvanceCheckpoint(_ state: [String: Any]) {
@@ -657,6 +770,7 @@ final class NativeGameViewController: UIViewController {
                        lookVertical: lookVertical)
         if link.timestamp - lastHUD > 0.1, let renderer {
             lastHUD = link.timestamp
+            status.expireIfNeeded()
             gameHUD.radar.position = SIMD2(renderer.position.x, renderer.position.y)
             gameHUD.radar.heading = renderer.direction
             gameHUD.radar.players = network.players.values.map { SIMD2($0.position.x, $0.position.y) }
@@ -681,6 +795,22 @@ final class NativeGameViewController: UIViewController {
             lastGameplay = link.timestamp
             gameplay.refresh()
         }
+    }
+}
+
+private final class NativeTransientStatusLabel: UILabel {
+    private var expiresAt: CFTimeInterval = 0
+
+    override var text: String? {
+        didSet {
+            guard text != oldValue else { return }
+            alpha = 1
+            expiresAt = ProcessInfo.processInfo.systemUptime + 6
+        }
+    }
+
+    func expireIfNeeded() {
+        if ProcessInfo.processInfo.systemUptime >= expiresAt { alpha = 0 }
     }
 }
 

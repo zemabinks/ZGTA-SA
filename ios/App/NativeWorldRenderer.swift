@@ -23,12 +23,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let pipeline: MTLRenderPipelineState
     private let animatedPipeline: MTLRenderPipelineState
     private let depth: MTLDepthStencilState
+    private let markerDepth: MTLDepthStencilState
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
     private var actorMeshes: [String: Mesh] = [:]
     private var actorAnimations: [String: NativeActorAnimation] = [:]
     private var actorAttachments: [String: NativeActorAttachment] = [:]
     private var actorLoading: Set<String> = []
+    private var objectiveMarker: Mesh?
     private var vehicleModels: [String: String] = [:]
     private var pedModels: [String: String] = [:]
     private var loading: Set<String> = []
@@ -51,6 +53,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var remotePlayers: [RemotePlayer] = []
     var remoteVehicles: [RemoteVehicle] = []
     var currentVehicleID: String?
+    var objective: SIMD2<Float>?
     var onStatus: ((String) -> Void)?
     var onFrame: (() -> Void)?
 
@@ -85,14 +88,18 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         depthDescriptor.depthCompareFunction = .less
         depthDescriptor.isDepthWriteEnabled = true
         guard let depth = device.makeDepthStencilState(descriptor: depthDescriptor) else { return nil }
+        depthDescriptor.isDepthWriteEnabled = false
+        guard let markerDepth = device.makeDepthStencilState(descriptor: depthDescriptor) else { return nil }
         self.view = view
         self.device = device
         self.queue = queue
         self.pipeline = pipeline
         self.animatedPipeline = animatedPipeline
         self.depth = depth
+        self.markerDepth = markerDepth
         textureLoader = MTKTextureLoader(device: device)
         super.init()
+        objectiveMarker = makeObjectiveMarker()
         view.delegate = self
     }
 
@@ -435,10 +442,69 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             draw(mesh: mesh, cellSize: 128, matrix: matrix, encoder: encoder)
         }
         drawActors(encoder: encoder, matrix: matrix)
+        drawObjective(encoder: encoder, matrix: matrix)
         encoder.endEncoding()
         command.present(drawable)
         command.commit()
         onFrame?()
+    }
+
+    private func makeObjectiveMarker() -> Mesh? {
+        let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .rgba8Unorm, width: 1, height: 1, mipmapped: false)
+        guard let atlas = device.makeTexture(descriptor: textureDescriptor) else { return nil }
+        let white: [UInt8] = [255, 255, 255, 255]
+        white.withUnsafeBytes { bytes in
+            atlas.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0,
+                          withBytes: bytes.baseAddress!, bytesPerRow: 4)
+        }
+        var vertices: [NativeVertex] = []
+        var indices: [UInt32] = []
+        func vertex(_ x: Float, _ y: Float, _ z: Float, alpha: Float) {
+            let tint = SIMD4<Float>(1, 0.64, 0.06, alpha)
+            vertices.append(NativeVertex(position: SIMD4(x, y, z, 1),
+                                         uvLayer: SIMD4(0.5, 0.5, 0, 0),
+                                         tint: tint, dusk: tint))
+        }
+        let sections = 40
+        for n in 0..<sections {
+            let a = Float(n) * 2 * .pi / Float(sections)
+            let b = Float(n + 1) * 2 * .pi / Float(sections)
+            let base = UInt32(vertices.count)
+            vertex(cos(a) * 1.0, sin(a) * 1.0, 0.12, alpha: 0.62)
+            vertex(cos(a) * 1.18, sin(a) * 1.18, 0.12, alpha: 0.62)
+            vertex(cos(b) * 1.0, sin(b) * 1.0, 0.12, alpha: 0.62)
+            vertex(cos(b) * 1.18, sin(b) * 1.18, 0.12, alpha: 0.62)
+            indices += [base, base + 1, base + 2, base + 1, base + 3, base + 2]
+            let wall = UInt32(vertices.count)
+            vertex(cos(a) * 1.0, sin(a) * 1.0, 0.15, alpha: 0.06)
+            vertex(cos(b) * 1.0, sin(b) * 1.0, 0.15, alpha: 0.06)
+            vertex(cos(a) * 1.0, sin(a) * 1.0, 2.2, alpha: 0.14)
+            vertex(cos(b) * 1.0, sin(b) * 1.0, 2.2, alpha: 0.14)
+            indices += [wall, wall + 1, wall + 2, wall + 1, wall + 3, wall + 2]
+        }
+        guard let vertexBuffer = device.makeBuffer(bytes: vertices,
+                                                   length: vertices.count * MemoryLayout<NativeVertex>.stride),
+              let indexBuffer = device.makeBuffer(bytes: indices,
+                                                  length: indices.count * MemoryLayout<UInt32>.stride)
+        else { return nil }
+        return Mesh(vertices: vertexBuffer, indices: indexBuffer,
+                    indexCount: indices.count, atlas: atlas)
+    }
+
+    private func drawObjective(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
+        guard let objective, let objectiveMarker,
+              simd_distance(objective, SIMD2(camera.x, camera.y)) <= 180 else { return }
+        let floor = collision?.height(x: objective.x, y: objective.y,
+                                      near: camera.z, maxDrop: 25) ?? camera.z
+        let pulse = 1 + 0.08 * sin(Float(ProcessInfo.processInfo.systemUptime) * 3)
+        let transform = simd_float4x4(columns: (
+            SIMD4(pulse, 0, 0, 0), SIMD4(0, pulse, 0, 0),
+            SIMD4(0, 0, 1, 0), SIMD4(objective.x, objective.y, floor, 1)))
+        encoder.setRenderPipelineState(pipeline)
+        encoder.setDepthStencilState(markerDepth)
+        draw(mesh: objectiveMarker, cellSize: 1, matrix: matrix * transform, encoder: encoder)
+        encoder.setDepthStencilState(depth)
     }
 
     private func draw(mesh: Mesh, cellSize: Float, matrix: simd_float4x4,
