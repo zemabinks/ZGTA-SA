@@ -40,12 +40,14 @@ assert.equal(player.inventory.revision, 1, 'rejected shot must not change revisi
 assert.equal(player.inventory.weapons['22'].clip, 17);
 assert.equal(store.acceptShot(player, 22, now).ok, true);
 assert.equal(player.inventory.revision, 2, 'accepted shot increments revision');
-assert.equal(store.acceptShot(player, 22, now+10).ok, false);
-assert.equal(player.inventory.weapons['22'].clip, 16);
-assert.equal(player.inventory.revision, 2, 'fire interval rejection leaves revision unchanged');
+assert.equal(store.acceptShot(player, 22, now+10).ok, true, 'Fresh two-event transport credit was unavailable');
+assert.equal(player.inventory.weapons['22'].clip, 15);
+assert.equal(player.inventory.revision, 3);
+assert.equal(store.acceptShot(player, 22, now+10).ok, false, 'Transport burst exceeded two events');
+assert.equal(player.inventory.revision, 3, 'fire interval rejection leaves revision unchanged');
 const gap = Math.max(80, (catalog.items.find(item => item.id === 22).stats.loop[1] -
   catalog.items.find(item => item.id === 22).stats.loop[0])/30*1000);
-for (let index = 0; index < 16; index++) {
+for (let index = 0; index < 15; index++) {
   now += gap+1;
   assert.equal(store.acceptShot(player, 22, now).ok, true);
 }

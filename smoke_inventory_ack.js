@@ -38,7 +38,9 @@ async function main(){
  assert.match(connection,/^[\w-]{24}$/);assert.notEqual(connection,b.inventoryConnection);
  assert.deepEqual(inventory(a).state.ack,{connection,processedShot:0});
  assert.equal(a.packets.find(m=>m.t==='hello').inventoryAck,1);
- a.player.inventory={selected:22,weapons:{22:{clip:17,rest:30}}};game.sendInventory(a);
+ // This rejection/replay scenario resumes one elapsed interval after a saved
+ // shot. Fresh full transport bursts are exercised by smoke_weapon_transport.
+ a.player.inventory={selected:22,weapons:{22:{clip:17,rest:30}},lastShotAt:now-300};game.sendInventory(a);
  const shot=(s,extra={})=>{
   a.lastSeen=b.lastSeen=now;
   const count=a.packets.filter(m=>m.t==='inventory').length;

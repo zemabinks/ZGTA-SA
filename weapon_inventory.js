@@ -33,7 +33,10 @@ function create(catalog = {}, options = {}) {
     if (!loops.length) continue;
     const stream=row.use==='stream'||row.continuous===true;
     const intervalMs=stream&&row.continuous===true ? 20:Math.max(20,Math.min(...loops)*1000/(row.twin===true?2:1));
-    timings.set(row.id,{intervalMs,capacity:stream?4:2,use:row.use,twin:row.twin===true,source:'animation'});
+    // A continuous native step emits at most four events. One extra 20ms
+    // stream token absorbs bounded receive jitter between grouped frames.
+    // This is transport credit, not a faster animation or sustained fire rate.
+    timings.set(row.id,{intervalMs,capacity:stream?5:2,use:row.use,twin:row.twin===true,source:'animation'});
   }
   const rates = new WeakMap();
   const sequences = new WeakMap();
@@ -235,7 +238,10 @@ function create(catalog = {}, options = {}) {
     const timing=cadence(id),interval=timing.intervalMs;
     let rate=rates.get(player);
     if (!rate) {
-      rate={at:now,interval,credit:inventory.lastShotAt ? Math.min(timing.capacity,Math.max(0,now-inventory.lastShotAt)/interval):1};
+      // Fresh traffic may already contain grouped animation events. Starting
+      // partly empty rejects valid first-cycle fire solely from arrival jitter.
+      // A persisted last shot still preserves its elapsed-time cooldown.
+      rate={at:now,interval,credit:inventory.lastShotAt ? Math.min(timing.capacity,Math.max(0,now-inventory.lastShotAt)/interval):timing.capacity};
       rates.set(player,rate);
     }
     const scope=context.sequenceScope && typeof context.sequenceScope==='object' ? context.sequenceScope:player;

@@ -14,10 +14,12 @@ assert.equal(store.cadence(28).intervalMs,document.weapons.find(row=>row.id===28
 for(const id of [37,41,42]) {
   assert.equal(store.cadence(id).intervalMs,20);
   const p=player(id);
-  for(let frame=0;frame<101;frame++)assert.equal(store.acceptShot(p,id,start+frame*20,{sequence:frame}).ok,true,'20ms stream emission');
-  assert.equal(p.inventory.weapons[id].clip,399);
-  assert.equal(store.acceptShot(p,id,start+2000,{sequence:100}).ok,false,'Duplicate sequence accepted');
-  assert.equal(store.acceptShot(p,id,start+2000,{sequence:101}).ok,false,'No time credit remained');
+  const capacity=store.cadence(id).capacity;assert.equal(capacity,5);
+  for(let n=0;n<capacity;n++)assert.equal(store.acceptShot(p,id,start,{sequence:n}).ok,true,'Initial bounded stream credit');
+  for(let frame=1;frame<101;frame++)assert.equal(store.acceptShot(p,id,start+frame*20,{sequence:capacity+frame-1}).ok,true,'20ms stream emission');
+  assert.equal(p.inventory.weapons[id].clip,500-capacity-100);
+  assert.equal(store.acceptShot(p,id,start+2000,{sequence:capacity+99}).ok,false,'Duplicate sequence accepted');
+  assert.equal(store.acceptShot(p,id,start+2000,{sequence:capacity+100}).ok,false,'No time credit remained');
 }
 {
   const p=player(22),half=store.cadence(22).intervalMs;
@@ -27,7 +29,7 @@ for(const id of [37,41,42]) {
   assert(!store.acceptShot(p,22,start+half,{sequence:2}).ok);
   assert.equal(p.inventory.weapons[22].clip,498);
 }
-for(const [id,capacity]of[[28,2],[41,4]]) {
+for(const [id,capacity]of[[28,2],[41,5]]) {
   const p=player(id),gap=store.cadence(id).intervalMs;
   assert(store.acceptShot(p,id,start,{sequence:1}).ok);
   for(let n=0;n<capacity;n++)assert(store.acceptShot(p,id,start+gap*10,{sequence:n+2}).ok,'Bounded catch-up rejected');
@@ -67,7 +69,9 @@ try {
     const peer={player,ready:true,inventoryEnabled:true,lastSeen:now,state:{walking:true,x:1570,y:-2460,z:13.6},send:p=>packets.push(p)};
     game.peers.add(peer);return peer;}
   const a=peer(),b=peer();b.state.x+=4;b.player.health=1000;
-  a.player.inventory={selected:28,weapons:{28:{clip:50,rest:0}}};
+  // Preserve the saved-shot cooldown path here; fresh bursts have their own
+  // actual-backend and transport-boundary checks.
+  a.player.inventory={selected:28,weapons:{28:{clip:50,rest:0}},lastShotAt:now-document.weapons.find(row=>row.id===28).loop.every*1000};
   const shot=s=>({t:'shot',w:28,s,o:[1570,-2460,14.95],h:[1574,-2460,14.75]});
   const hit=s=>({t:'hit',w:28,s,to:String(b.player.number)});
   game.handleShot(a,shot(1));game.handleHit(a,hit(1));const health=b.player.health;
@@ -85,8 +89,11 @@ try {
   const armedHealth=b.player.health;
   game.handleHit(a,{t:'hit',w:0,to:String(b.player.number)});
   assert.equal(b.player.health,armedHealth,'Gun holder spoofed an unselected fist attack');
+  const fresh=peer();fresh.player.inventory={selected:28,weapons:{28:{clip:50,rest:0}}};
+  game.handleShot(fresh,shot(1));game.handleShot(fresh,shot(2));game.handleShot(fresh,shot(3));
+  assert.equal(fresh.player.inventory.weapons[28].clip,48,'Actual backend did not enforce the fresh two-event burst');
   game.flushSync();
-  console.log('PASS: canonical fast-gun/twin/20ms stream timing, bounded2/4 catch-up, replay/empty/reload/switch guards, actual server one-hit-per-accepted-sequence');
+  console.log('PASS: canonical fast-gun/twin/20ms stream timing, bounded2/5 transport credit, saved cooldown/replay/empty/reload/switch guards, actual server one-hit-per-accepted-sequence');
 } finally {
   Date.now=originalNow;
   if(game){clearInterval(game.tick);clearInterval(game.projectileTimer);game.flushSync();}

@@ -28,7 +28,7 @@ boundary only. It does not establish complete retail GTA SA behavior.
   rejects a selected weapon whose catalog has not arrived.
 - Inventory-authorized server shots use optional extracted animation timing,
   including continuous20ms and twin half-cycle emissions. Server-time credit
-  permits at most2 ordinary or4 stream catch-up rounds; switching weapons does
+  permits at most2 ordinary or5 stream transport-credit rounds; switching weapons does
   not create new credit. Native sequence numbers are scoped to each socket,
   preventing replay while allowing a new client to reconnect with a new counter.
   An accepted gun shot authorizes one hit only. Legacy non-inventory traffic
@@ -71,7 +71,7 @@ Validated on2026-11-15:
 | --- | --- |
 | `zsh smoke_core_physics_transitions.sh` | PASS: collider attachment,30–144Hz and uneven cadence, occupied handoff, six-category teleport reset/damage identity, invalid input and collision-stream pause |
 | compiled `smoke_native_weapon_state.swift` | PASS: twin/catch-up inventory events, empty/switch/reload/catalog guards, stale revisions, fallback cadence |
-| `node smoke_weapon_cadence.js` | PASS: canonical timings, bounded2/4 credit, replay and reconnect, actual server hit binding |
+| `node smoke_weapon_cadence.js` | PASS: canonical timings, bounded2/5 transport credit, replay and reconnect, actual server hit binding |
 | `node smoke_weapon_inventory.js` | PASS: existing purchase/refill/slot/ammo/reload/armour/persistence rules |
 | `node smoke_native_server.js` | PASS: existing inventory/projectile/home separation and unattended vehicle persistence |
 | `node smoke_weapon_streams.js` | PASS: actual backend with synthetic peers and SCL2 geometry, wall/clear/missing-cell validation, area cylinder/cadence/replay/ammo/state guards, extinguisher suppression and no pedestrian damage |

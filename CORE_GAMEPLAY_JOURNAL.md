@@ -759,3 +759,33 @@ cadence issue. A separate receive-jitter reproduction is in progress; the
 frozen candidate's existing rate limits have not been relaxed without evidence.
 No original-game runtime, physical controller, device FPS or 1:1 gameplay claim
 is made by this batch. All screenshots and fixture assets remain local-only.
+
+### Core87 — reject false receive-time firing failures
+
+The held-fire warning found during Core86 acceptance was reproduced separately
+using the real native animator and local CLP. Under the tested frame grouping
+and 0–20 ms receive jitter, the old rate bucket rejected 568 of 69,060 events in 106
+of 140 cases. It began with only one token, leaving no credit for ordinary
+startup grouping or small arrival variation. Continuous 15 Hz traffic also
+exceeded the old four-token reservoir under the tested jitter.
+
+The independent server now starts with its full bounded transport allowance:
+two ordinary events and five continuous-stream events. The latter adds one
+20 ms stream token for arrival variation. The sustained refill interval and all
+native animations remain unchanged. Source-driven tests accept every event in
+the stated 140 cases; synthetic pressure tests enforce the 2/5 limits and the
+same sustained rate, including reconnect, switch and persisted cooldown.
+See `CORE_FIRE_ARRIVAL.md` for the precise envelope and evidence limits.
+
+Core87 has no App source, physics library or original asset changes. Core86's
+native Release builds and 72-gate result remain their own frozen acceptance
+record. The expanded aggregate runner is for subsequent full prepared-engine
+runs; it has not been presented as a newly completed full Core87 run.
+
+Focused Core87 acceptance passed 14/14 gates: 11 server/inventory/health/melee/
+vehicle Node gates, the native real-animation arrival gate, native ammo
+reconciliation and atomic shot delivery. All 132 App files still match the
+Core86 frozen source. The first HTTP melee-assets attempt hit the sandbox's
+loopback-listen restriction; its authorized isolated rerun passed. No production
+listener or saves were changed. This is not a newly run 75-gate aggregate, new
+Simulator playtest, device measurement or original retail comparison.
