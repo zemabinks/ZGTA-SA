@@ -13,3 +13,32 @@
 .DS_Store
 __pycache__/
 
+# Host credentials, identities and generated build products.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+*.cer
+*.crt
+*.log
+*.ipa
+*.app/
+*.a
+*.o
+*.dylib
+*.xcarchive/
+*.xcresult/
+node_modules/
+.venv/
+.pytest_cache/
+xcuserdata/
+players.json
+discord-oauth.json
+join-code.txt
+client-catalog.json
+owner.json
+

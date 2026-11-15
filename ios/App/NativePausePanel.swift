@@ -46,6 +46,11 @@ final class NativePausePanel: UIViewController {
             stack.addArrangedSubview(result);return result
         }
         _ = button("RESUME") { [weak self] in self?.dismiss(animated:true) }
+        _ = button("PROJECT SOURCE · AGPL") {
+            if let url = URL(string:"https://github.com/zemabinks/ZGTA-SA") {
+                UIApplication.shared.open(url)
+            }
+        }
         cameraButton = button("CAMERA: \(cameraName?().uppercased() ?? "MIDDLE")") { [weak self] in
             guard let self else { return };self.onCamera?()
             self.cameraButton?.setTitle("CAMERA: \(self.cameraName?().uppercased() ?? "MIDDLE")",for:.normal)

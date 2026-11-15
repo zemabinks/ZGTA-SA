@@ -25,6 +25,9 @@ const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
 const UPSTREAM = 'play.samp.directory';
 const PUBLIC_ORIGIN = CONNECTED ? `https://${UPSTREAM}` : `http://127.0.0.1:${PORT}`;
 const COMMUNITY_DISCORD = 'https://discord.gg/Cg39cguVUa';
+const SOURCE_URL = new URL(process.env.ZGTA_SOURCE_URL || 'https://github.com/zemabinks/ZGTA-SA');
+if (!['https:', 'http:'].includes(SOURCE_URL.protocol) || SOURCE_URL.username || SOURCE_URL.password)
+  throw new Error('ZGTA_SOURCE_URL must be an HTTP(S) source-code URL without credentials.');
 const pendingAssets = new Map();
 const unavailableAssets = new Set();
 let manifestWrite = Promise.resolve();
@@ -108,7 +111,9 @@ const COMMUNITY_SCRIPT = `<script>
   addCommunityLink();
 })();
 </script>`;
-const GAMEPLAY_SCRIPT = SELFHOST ? '<script defer src="/local-gameplay.js"></script>' : '';
+const GAMEPLAY_SCRIPT = SELFHOST ? '<script>globalThis.ZGTA_SOURCE_URL=' +
+  JSON.stringify(SOURCE_URL.href).replace(/</g, '\\u003c') +
+  ';</script><script defer src="/local-gameplay.js"></script>' : '';
 const SELFHOST_TIPS_SCRIPT = SELFHOST ? `<script>
 try {
   const key = 'world-tune';

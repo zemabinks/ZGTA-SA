@@ -189,6 +189,11 @@
     community.target = '_blank';
     community.rel = 'noopener noreferrer';
     panel.append(community);
+    const source = element('a', 'Server source code · AGPL');
+    source.href = globalThis.ZGTA_SOURCE_URL || 'https://github.com/zemabinks/ZGTA-SA';
+    source.target = '_blank';
+    source.rel = 'noopener noreferrer';
+    panel.append(element('p', ''), source);
     panel.append(element('p', `Health ${state.health}/100 · Armour ${state.armour}/100 · Wanted ${state.wanted}/6 · ${state.kills} kills · ${state.deaths} deaths`, 'zgta-muted'));
     if (state.discord?.available && !state.discord.linked) {
       const link = element('button', `Link Discord · one-time $${state.discord.bonus} bonus`);

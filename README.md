@@ -1,6 +1,14 @@
 # ZGTA:SA
 
-A local-only preservation workspace for the public browser game at
+Community self-hosting source and a native Swift/Metal iOS client, with guest
+play and optional Discord linking. Start with **[HOSTING.md](HOSTING.md)** for
+macOS/Linux setup, LAN play, HTTPS hosting and native asset preparation.
+Project contributions use **AGPL-3.0-only**; see [LICENSE](LICENSE) and
+[NOTICE.md](NOTICE.md). Game assets and original website bundles stay local.
+This is an in-progress port; [FEATURE_MATRIX.md](FEATURE_MATRIX.md) records
+verified systems and remaining gaps.
+
+The project also maintains a local preservation workspace for the browser game at
 [play.samp.directory](https://play.samp.directory/), following the separation
 of code and local game content used by ZGTAIV.
 
