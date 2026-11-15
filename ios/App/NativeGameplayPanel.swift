@@ -4,6 +4,7 @@ import UIKit
 /// mission checks remain authoritative on the Mac.
 final class NativeGameplayPanel: UIViewController {
     var onAction: ((String, [String: Any]) -> Void)?
+    var onAnimations: (() -> Void)?
     private let stack = UIStackView()
     private var state: [String: Any] = [:]
     private var page = 0
@@ -301,7 +302,12 @@ final class NativeGameplayPanel: UIViewController {
         }
 
         addText("HOMES", size: 20, bold: true)
-        let owned = Set((state["homes"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String })
+        if let interior = state["insideHome"] as? [String: Any] {
+            addText("INSIDE \((interior["name"] as? String ?? "HOME").uppercased())")
+            addAction("EXIT HOME", "home.exit", enabled: connected && onFoot)
+        }
+        let ownedHomes = state["homes"] as? [[String: Any]] ?? []
+        let owned = Set(ownedHomes.compactMap { $0["id"] as? String })
         for home in ((state["catalog"] as? [String: Any])?["homes"] as? [[String: Any]]) ?? [] {
             guard let id = home["id"] as? String,
                   let price = (home["price"] as? NSNumber)?.intValue else { continue }
@@ -309,10 +315,24 @@ final class NativeGameplayPanel: UIViewController {
             addAction("\(name)  ·  \(owned.contains(id) ? "OWNED" : "$\(price)")",
                       owned.contains(id) ? "home.visit" : "home.buy",
                       payload: ["home": id], enabled: owned.contains(id) ? connected : cash >= price)
+            if let details = ownedHomes.first(where: { $0["id"] as? String == id }),
+               details["kind"] as? String != nil, let exterior = details["out"] as? [NSNumber], exterior.count >= 2 {
+                let position = state["position"] as? [String: Any]
+                let x = (position?["x"] as? NSNumber)?.doubleValue
+                let y = (position?["y"] as? NSNumber)?.doubleValue
+                let distance = x.flatMap { x in y.map { hypot(x-exterior[0].doubleValue, $0-exterior[1].doubleValue) } } ?? .infinity
+                addAction("ENTER \(name)", "home.enter", payload: ["home": id],
+                          enabled: connected && onFoot && distance <= 8 && !(state["insideHome"] is [String: Any]))
+            }
         }
     }
 
     private func renderSocial() {
+        if onAnimations != nil {
+            let animations = makeButton("ANIMATIONS", light: true)
+            animations.addAction(UIAction { [weak self] _ in self?.onAnimations?() }, for: .touchUpInside)
+            stack.addArrangedSubview(animations)
+        }
         let party = state["party"] as? [String: Any] ?? [:]
         addText("PRIVATE GROUP", size: 20, bold: true)
         if let invite = party["invite"] as? [String: Any] {
@@ -394,7 +414,9 @@ final class NativeGameplayPanel: UIViewController {
     }
 
     private func addText(_ text: String, size: CGFloat = 15, bold: Bool = false) {
-        let label = UILabel()
+        let label = NativeHUDTextLabel()
+        label.menuFont = bold
+        label.heavy = bold
         label.text = text
         label.textColor = .white
         label.numberOfLines = 0
@@ -411,7 +433,7 @@ final class NativeGameplayPanel: UIViewController {
     }
 
     private func makeButton(_ title: String, light: Bool) -> UIButton {
-        let button = UIButton(type: .system)
+        let button = NativeHUDButton(type: .system)
         var configuration = UIButton.Configuration.plain()
         configuration.title = title
         configuration.baseForegroundColor = light ? .black : .white

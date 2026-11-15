@@ -136,10 +136,11 @@ def discover(url, data):
             for section in ("detail", "inside"):
                 for cell in index.get(section, {}).get("cells", []):
                     n = cell["cell"]
+                    prefix = 'i' if section == 'inside' else 'c'
                     for extension in ("bin", "webp", "col.bin", "brk.bin"):
-                        found.add(urljoin(BASE, "/game/world/c%d.%s" % (n, extension)))
+                        found.add(urljoin(BASE, "/game/world/%s%d.%s" % (prefix, n, extension)))
                     if cell.get("sharp"):
-                        found.add(urljoin(BASE, "/game/world/c%d.hd.webp" % n))
+                        found.add(urljoin(BASE, "/game/world/%s%d.hd.webp" % (prefix, n)))
         except (ValueError, KeyError, TypeError):
             pass
     if path == "/game/world/peds.json":

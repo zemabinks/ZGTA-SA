@@ -19,7 +19,9 @@ final class NativeChatPanel: UIViewController, UITextFieldDelegate {
         card.layer.borderColor = UIColor.white.withAlphaComponent(0.28).cgColor
         view.addSubview(card)
 
-        let title = UILabel()
+        let title = NativeHUDTextLabel()
+        title.menuFont = true
+        title.heavy = true
         title.text = "LOCAL CHAT"
         title.textColor = .white
         title.font = .systemFont(ofSize: 17, weight: .black, width: .condensed)

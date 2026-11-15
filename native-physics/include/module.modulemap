@@ -1,0 +1,4 @@
+module ZGTARapier {
+    header "ZGTARapier.h"
+    export *
+}

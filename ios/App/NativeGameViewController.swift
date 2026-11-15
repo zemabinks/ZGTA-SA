@@ -7,11 +7,13 @@ final class NativeGameViewController: UIViewController {
     private let network: NativeMultiplayerClient
     private let gameplay: NativeGameplayClient
     private let radio: NativeVehicleRadio
+    private let weapons: NativeWeaponState
+    private let audio: NativeGameAudio
     private let renderer: NativeWorldRenderer?
     private let status = NativeTransientStatusLabel()
-    private let players = UILabel()
-    private let objective = UILabel()
-    private let chatFeed = UILabel()
+    private let players = NativeHUDTextLabel()
+    private let objective = NativeHUDTextLabel()
+    private let chatFeed = NativeHUDTextLabel()
     private let gameHUD = NativeGameHUD()
     private let mapButton = UIButton(type: .custom)
     private let vehicleButton = NativeIconButton()
@@ -20,6 +22,8 @@ final class NativeGameViewController: UIViewController {
     private let attackButton = NativeIconButton()
     private let weaponButton = NativeIconButton()
     private let reloadButton = NativeIconButton()
+    private let aimButton = NativeIconButton()
+    private let crouchButton = NativeIconButton()
     private let runButton = NativeIconButton()
     private let jumpButton = NativeIconButton()
     private let gasButton = NativeIconButton()
@@ -30,8 +34,10 @@ final class NativeGameViewController: UIViewController {
     private let lookStick = VirtualStick()
     private weak var gameplayPanel: NativeGameplayPanel?
     private weak var chatPanel: NativeChatPanel?
+    private weak var weaponPanel: NativeWeaponShopPanel?
     private var currentVehicle: RemoteVehicle?
     private var nearbyMissionAction: String?
+    private var nearbyMissionPayload: [String:Any] = [:]
     private var displayLink: CADisplayLink?
     private var lastTime: CFTimeInterval = 0
     private var lastNetwork: CFTimeInterval = 0
@@ -43,20 +49,68 @@ final class NativeGameViewController: UIViewController {
     private var run = false
     private var gasPressed = false
     private var brakePressed = false
+    private var handbrakePressed = false
+    private var hornPressed = false
+    private var nozzleUpPressed = false
+    private var nozzleDownPressed = false
+    private var lastGearButton = false
+    private var lastLightsButton = false
     private var lastJumpButton = false
     private var lastAttackButton = false
     private var lastWeaponButton = false
     private var lastReloadButton = false
     private var lastAttackTime: CFTimeInterval = 0
-    private var usingPistol = false
-    private var magazine = 17
-    private var reserve = 68
+    private var usingPistol: Bool { weapons.current.isGun }
+    private var magazine: Int { weapons.rounds }
+    private var reserve: Int { weapons.reserve }
+    private var aiming = false
+    private var firePressed = false
+    private var lastCrouchButton = false
+    private var lastGamepadAim = false
+    private var lastCameraButton = false
+    private var previousAudioPosition: SIMD3<Float>?
+    private var heldKeys: Set<UIKeyboardHIDUsage> = []
+    override var canBecomeFirstResponder: Bool { true }
+
+    override func viewDidAppear(_ animated: Bool) { super.viewDidAppear(animated); becomeFirstResponder() }
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses {
+            guard let code = press.key?.keyCode else { continue }
+            let first = heldKeys.insert(code).inserted
+            guard first else { continue }
+            switch code {
+            case .keyboardSpacebar: jump()
+            case .keyboardC: toggleCrouch()
+            case .keyboardE: toggleVehicle()
+            case .keyboardR: if currentVehicle != nil { toggleGear() } else { reload() }
+            case .keyboardTab: toggleWeapon()
+            case .keyboardQ: toggleAim()
+            case .keyboardT: openChat()
+            case .keyboardM: openMap()
+            case .keyboardF: openGameplay()
+            case .keyboardG: openAnimations()
+            case .keyboardV: renderer?.cycleCameraView()
+            case .keyboardL: if currentVehicle != nil { renderer?.vehicleLights.toggle() }
+            default: break
+            }
+        }
+        super.pressesBegan(presses, with: event)
+    }
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        for press in presses { if let code = press.key?.keyCode { heldKeys.remove(code) } }
+        super.pressesEnded(presses, with: event)
+    }
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        heldKeys.removeAll(); super.pressesCancelled(presses, with: event)
+    }
 
     init(server: ServerAddress) {
         self.server = server
         self.network = NativeMultiplayerClient(server: server)
         self.gameplay = NativeGameplayClient(server: server)
         self.radio = NativeVehicleRadio(server: server)
+        self.weapons = NativeWeaponState(server: server)
+        self.audio = NativeGameAudio(server: server)
         self.renderer = NativeWorldRenderer()
         super.init(nibName: nil, bundle: nil)
     }
@@ -83,6 +137,27 @@ final class NativeGameViewController: UIViewController {
             status.text = "METAL IS UNAVAILABLE ON THIS DEVICE"
         }
         installHUD()
+        audio.prepare()
+        renderer?.weatherAudio = audio.weather
+        renderer?.onCollision = { [weak self] speed in self?.audio.collision(severity: speed) }
+        renderer?.onLand = { [weak self] in self?.audio.land() }
+        renderer?.onSplash = { [weak self] in self?.audio.land(water:true) }
+        renderer?.onVehicleExplosion = { [weak self] _ in self?.audio.explosion(weapon:51) }
+        weapons.onChange = { [weak self] in
+            guard let self else { return }
+            self.renderer?.equippedWeapon = self.weapons.selected
+            self.updateWeaponHUD()
+        }
+        weapons.onNeedsRefresh = { [weak self] in self?.gameplay.refresh() }
+        network.onInventory = { [weak self] state in self?.weapons.apply(state) }
+        network.onProjectiles = { [weak self] rows in self?.renderer?.synchronizeProjectiles(rows) }
+        network.onBlast = { [weak self] weapon, position in
+            self?.renderer?.showBlast(weapon:weapon,position:position)
+            let distance = self?.renderer.map { simd_distance($0.position,position) } ?? 0
+            self?.audio.explosion(weapon:weapon,distance:distance)
+        }
+        network.onWeaponSound = { [weak self] weapon in self?.audio.shot(weapon:weapon) }
+        renderer?.equippedWeapon = weapons.selected
         network.onStatus = { [weak self] text in self?.status.text = text }
         network.onPresence = { [weak self] count, names in
             self?.players.text = "\(count) PLAYER\(count == 1 ? "" : "S") ONLINE" +
@@ -113,8 +188,16 @@ final class NativeGameViewController: UIViewController {
             self.setDrivingControls(true)
             self.radio.resume()
         }
-        network.onTeleport = { [weak self] point in self?.renderer?.teleport(x: point.x, y: point.y, z: point.z) }
+        network.onTeleport = { [weak self] point, heading in
+            self?.renderer?.teleport(x: point.x, y: point.y, z: point.z, direction: heading)
+        }
+        network.onEnvironment = { [weak self] weather, shift, hold in
+            if let weather { self?.renderer?.setWeather(weather) }
+            if let shift { self?.renderer?.dayShift = shift }
+            self?.renderer?.dayHold = hold
+        }
         network.onVitals = { [weak self] health, armour in
+            self?.renderer?.health = health
             self?.vitals.text = "HEALTH \(health)  ·  ARMOUR \(armour)"
             self?.gameHUD.updateVitals(health: health, armour: armour)
             self?.attackButton.setTitle(health == 0 ? "RESPAWN" :
@@ -123,6 +206,12 @@ final class NativeGameViewController: UIViewController {
         gameplay.onState = { [weak self] state in
             guard let self else { return }
             self.network.syncVitals(from: state)
+            if let inventory = state["weaponInventory"] as? [String: Any] {
+                self.weapons.apply(inventory)
+                self.weaponPanel?.update(inventory, cash: (state["cash"] as? NSNumber)?.intValue ?? 0,
+                                         onFoot: self.currentVehicle == nil)
+            }
+            self.gameHUD.updateWorld(state: state)
             if let amount = state["cash"] as? NSNumber { self.gameHUD.updateCash(amount.intValue) }
             if let wanted = state["wanted"] as? NSNumber { self.gameHUD.updateWanted(wanted.intValue) }
             self.gameplayPanel?.update(state)
@@ -150,11 +239,13 @@ final class NativeGameViewController: UIViewController {
         displayLink?.invalidate()
         network.disconnect()
         radio.stop()
+        audio.stop()
+        heldKeys.removeAll()
     }
 
     private func installHUD() {
-        let menu = button("MENU", action: #selector(close))
-        styleControl(menu, icon: "Touch_pause", fallback: "pause.fill", accessibility: "Pause and return to menu")
+        let menu = button("MENU", action: #selector(openPause))
+        styleControl(menu, icon: "Touch_pause", fallback: "pause.fill", accessibility: "Open game menu")
         view.addSubview(menu)
         let missions = button("JOBS / GARAGE", action: #selector(openGameplay))
         styleControl(missions, icon: nil, fallback: "briefcase.fill", accessibility: "Jobs and garage")
@@ -207,6 +298,8 @@ final class NativeGameViewController: UIViewController {
         jumpButton.setTitle("JUMP", for: .normal)
         jumpButton.translatesAutoresizingMaskIntoConstraints = false
         jumpButton.addTarget(self, action: #selector(jump), for: .touchUpInside)
+        jumpButton.addTarget(self, action: #selector(pressHandbrake), for: .touchDown)
+        jumpButton.addTarget(self, action: #selector(releaseHandbrake), for: [.touchUpInside,.touchUpOutside,.touchCancel])
         styleControl(jumpButton, icon: "Touch_jump", fallback: "figure.run", accessibility: "Jump")
         view.addSubview(jumpButton)
         gasButton.setTitle("GAS", for: .normal)
@@ -233,7 +326,17 @@ final class NativeGameViewController: UIViewController {
         styleControl(attackButton, icon: nil, fallback: "hand.raised.fingers.spread.fill", accessibility: "Hit")
         attackButton.translatesAutoresizingMaskIntoConstraints = false
         attackButton.addTarget(self, action: #selector(attack), for: .touchUpInside)
+        attackButton.addTarget(self, action: #selector(pressFire), for: .touchDown)
+        attackButton.addTarget(self, action: #selector(releaseFire), for: [.touchUpInside, .touchUpOutside, .touchCancel])
         view.addSubview(attackButton)
+        aimButton.translatesAutoresizingMaskIntoConstraints = false
+        styleControl(aimButton, icon: nil, fallback: "viewfinder", accessibility: "Toggle aim")
+        aimButton.addTarget(self, action: #selector(toggleAim), for: .touchUpInside)
+        view.addSubview(aimButton)
+        crouchButton.translatesAutoresizingMaskIntoConstraints = false
+        styleControl(crouchButton, icon: nil, fallback: "arrow.down.to.line", accessibility: "Toggle crouch")
+        crouchButton.addTarget(self, action: #selector(toggleCrouch), for: .touchUpInside)
+        view.addSubview(crouchButton)
         for (control, title, action) in [(weaponButton, "PISTOL", #selector(toggleWeapon)),
                                          (reloadButton, "RELOAD", #selector(reload))] {
             control.setTitle(title, for: .normal)
@@ -244,6 +347,8 @@ final class NativeGameViewController: UIViewController {
                          accessibility: title)
             control.translatesAutoresizingMaskIntoConstraints = false
             control.addTarget(self, action: action, for: .touchUpInside)
+            control.addTarget(self, action: control === weaponButton ? #selector(pressNozzleUp) : #selector(pressNozzleDown), for: .touchDown)
+            control.addTarget(self, action: #selector(releaseNozzle), for: [.touchUpInside,.touchUpOutside,.touchCancel])
             view.addSubview(control)
         }
         updateWeaponHUD()
@@ -338,6 +443,14 @@ final class NativeGameViewController: UIViewController {
             reloadButton.centerYAnchor.constraint(equalTo: weaponButton.centerYAnchor),
             reloadButton.widthAnchor.constraint(equalToConstant: 48),
             reloadButton.heightAnchor.constraint(equalTo: reloadButton.widthAnchor)
+            ,aimButton.trailingAnchor.constraint(equalTo: attackButton.leadingAnchor, constant: -10),
+            aimButton.centerYAnchor.constraint(equalTo: attackButton.centerYAnchor),
+            aimButton.widthAnchor.constraint(equalToConstant: 44),
+            aimButton.heightAnchor.constraint(equalTo: aimButton.widthAnchor)
+            ,crouchButton.centerXAnchor.constraint(equalTo: attackButton.centerXAnchor),
+            crouchButton.centerYAnchor.constraint(equalTo: jumpButton.centerYAnchor),
+            crouchButton.widthAnchor.constraint(equalToConstant: 44),
+            crouchButton.heightAnchor.constraint(equalTo: crouchButton.widthAnchor)
             ,vehicleButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14),
             vehicleButton.bottomAnchor.constraint(equalTo: look.topAnchor, constant: 46),
             vehicleButton.heightAnchor.constraint(equalToConstant: 48),
@@ -398,8 +511,24 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func close() { dismiss(animated: true) }
+    @objc private func openPause() {
+        guard presentedViewController == nil else { return }
+        heldKeys.removeAll();firePressed = false;handbrakePressed = false
+        let panel = NativePausePanel();panel.driving = currentVehicle != nil
+        panel.cameraName = { [weak self] in self?.renderer?.cameraViewName ?? "middle" }
+        panel.onCamera = { [weak self] in self?.renderer?.cycleCameraView() }
+        panel.onAnimations = { [weak self] in self?.openAnimations() }
+        panel.onRadio = { [weak self] in self?.nextRadioStation() }
+        panel.weatherName = { [weak self] in self?.renderer?.weatherAuto == true ? "REGIONAL AUTO" : "SERVER" }
+        panel.onWeather = { [weak self] in
+            guard let renderer = self?.renderer else { return };renderer.weatherAuto.toggle()
+        }
+        panel.onLeave = { [weak self] in self?.close() }
+        panel.modalPresentationStyle = .overFullScreen;present(panel,animated:true)
+    }
     @objc private func openChat() {
         guard presentedViewController == nil else { return }
+        heldKeys.removeAll();firePressed=false
         let panel = NativeChatPanel()
         panel.modalPresentationStyle = .overFullScreen
         panel.onSend = { [weak self] line in self?.network.sendChat(line) }
@@ -409,11 +538,16 @@ final class NativeGameViewController: UIViewController {
     }
     @objc private func openMap() {
         guard presentedViewController == nil else { return }
+        heldKeys.removeAll();firePressed=false
         let map = NativeCityMapViewController(image: gameHUD.radar.mapImage,
                                               position: gameHUD.radar.position,
                                               players: gameHUD.radar.players,
                                               vehicles: gameHUD.radar.vehicles,
-                                              target: gameHUD.radar.target)
+                                              target: gameHUD.radar.target,
+                                              markers: gameHUD.radar.markers,
+                                              heading: gameHUD.radar.heading,
+                                              waypoint: gameHUD.radar.waypoint,
+                                              onWaypoint: { [weak self] point in self?.gameHUD.radar.waypoint = point })
         map.modalPresentationStyle = .overFullScreen
         present(map, animated: true)
     }
@@ -427,6 +561,8 @@ final class NativeGameViewController: UIViewController {
     @objc private func jump() { renderer?.jump() }
     @objc private func pressGas() { gasPressed = true }
     @objc private func releaseGas() { gasPressed = false }
+    @objc private func pressHandbrake() { handbrakePressed = currentVehicle != nil }
+    @objc private func releaseHandbrake() { handbrakePressed = false }
     @objc private func pressBrake() { brakePressed = true }
     @objc private func releaseBrake() { brakePressed = false }
     @objc private func nextRadioStation() {
@@ -437,15 +573,17 @@ final class NativeGameViewController: UIViewController {
     @objc private func performNearbyMissionAction() {
         guard let nearbyMissionAction else { return }
         missionButton.isHidden = true
-        gameplay.perform(nearbyMissionAction)
+        if nearbyMissionAction == "native.weapons" { toggleWeapon() }
+        else { gameplay.perform(nearbyMissionAction,payload:nearbyMissionPayload) }
     }
 
     private func updateNearbyMissionAction(_ state: [String: Any]) {
         nearbyMissionAction = nil
+        nearbyMissionPayload = [:]
         guard let job = state["job"] as? [String: Any],
               let remaining = (job["remaining"] as? NSNumber)?.doubleValue,
               remaining <= ((job["radius"] as? NSNumber)?.doubleValue ?? 0) else {
-            missionButton.isHidden = true
+            updatePropertyAction(state)
             return
         }
         let mode = job["mode"] as? String ?? "distance"
@@ -496,12 +634,38 @@ final class NativeGameViewController: UIViewController {
         missionButton.isHidden = nearbyMissionAction == nil
     }
 
+    private func updatePropertyAction(_ state: [String:Any]) {
+        missionButton.isHidden = true
+        guard currentVehicle == nil, network.health > 0 else { return }
+        if state["insideHome"] is [String:Any] {
+            nearbyMissionAction = "home.exit"; missionButton.accessibilityLabel = "Exit home"
+        } else if let renderer, let homes = state["homes"] as? [[String:Any]],
+                  let home = homes.first(where: { value in
+                      guard let out = value["out"] as? [NSNumber],out.count>=3 else { return false }
+                      return simd_distance(renderer.position,SIMD3(out[0].floatValue,out[1].floatValue,out[2].floatValue)) <= 8
+                  }), let id = home["id"] as? String {
+            nearbyMissionAction = "home.enter";nearbyMissionPayload = ["home":id]
+            missionButton.accessibilityLabel = "Enter \(home["name"] as? String ?? "home")"
+        } else if let inventory = state["weaponInventory"] as? [String:Any],
+                  let shop = inventory["nearestShop"] as? [String:Any],shop["within"] as? Bool == true {
+            nearbyMissionAction = "native.weapons";missionButton.accessibilityLabel = "Open Ammu-Nation"
+        }
+        missionButton.isHidden = nearbyMissionAction == nil
+    }
+
     private func updateWeaponHUD() {
-        weaponButton.setTitle(usingPistol ? "FISTS" : "PISTOL", for: .normal)
-        reloadButton.isHidden = currentVehicle != nil || !usingPistol || magazine >= 17 || reserve == 0
-        ammoLabel.text = usingPistol ? "COLT .45  ·  \(magazine) / \(reserve)" : "FISTS EQUIPPED"
-        gameHUD.updateWeapon(pistol: usingPistol, magazine: magazine, reserve: reserve)
-        gameHUD.loadWeaponIcon(server: server, weapon: usingPistol ? 22 : 0)
+        guard currentVehicle == nil else { return }
+        weaponButton.setTitle(weapons.current.name.uppercased(), for: .normal)
+        weaponButton.accessibilityLabel = "Choose weapon. \(weapons.current.name) equipped"
+        reloadButton.isHidden = currentVehicle != nil || !usingPistol ||
+            (weapons.selected != 39 && (magazine >= weapons.current.capacity || reserve == 0))
+        reloadButton.accessibilityLabel = weapons.selected == 39 ? "Detonate planted satchels" : "Reload"
+        aimButton.isHidden = currentVehicle != nil || !usingPistol
+        ammoLabel.text = weapons.reloading ? "RELOADING" : "\(weapons.current.name.uppercased()) · \(magazine) / \(reserve)"
+        gameHUD.updateWeapon(id: weapons.selected, name: weapons.current.name, magazine: magazine, reserve: reserve)
+        gameHUD.loadWeaponIcon(server: server, weapon: weapons.selected)
+        styleControl(weaponButton,icon:"Touch_weapons",fallback:"circle.grid.2x2.fill",accessibility:"Choose weapon")
+        styleControl(reloadButton,icon:"Touch_reload",fallback:"arrow.clockwise",accessibility:weapons.selected == 39 ? "Detonate planted satchels" : "Reload")
         attackButton.setTitle(network.health == 0 ? "RESPAWN" :
                               (usingPistol ? "FIRE" : "HIT"), for: .normal)
         styleControl(attackButton, icon: usingPistol ? "Touch_fire" : nil,
@@ -513,7 +677,11 @@ final class NativeGameViewController: UIViewController {
         vehicleButton.isHidden = false
         radioButton.isHidden = !driving
         runButton.isHidden = driving
-        jumpButton.isHidden = driving
+        let roadVehicle = driving && !["plane","helicopter","boat","train"].contains(renderer?.vehicleKind ?? "car")
+        jumpButton.isHidden = driving && !roadVehicle
+        styleControl(jumpButton, icon: driving ? nil : "Touch_jump",
+                     fallback: driving ? "p.circle.fill" : "figure.run",
+                     accessibility: driving ? "Hold handbrake" : "Jump")
         gasButton.isHidden = !driving
         brakeButton.isHidden = !driving
         let helicopter = driving && renderer?.vehicleKind == "helicopter"
@@ -523,10 +691,25 @@ final class NativeGameViewController: UIViewController {
         styleControl(brakeButton, icon: nil,
                      fallback: helicopter ? "arrow.down" : "minus.circle.fill",
                      accessibility: helicopter ? "Descend" : "Brake or reverse")
-        weaponButton.isHidden = driving
-        attackButton.isHidden = driving
-        reloadButton.isHidden = driving || !usingPistol || magazine >= 17 || reserve == 0
-        if !driving { gasPressed = false; brakePressed = false }
+        let nozzle = driving && renderer?.hasJetNozzle == true
+        weaponButton.isHidden = driving && !nozzle
+        attackButton.isHidden = driving && renderer?.hasVehicleHorn != true
+        reloadButton.isHidden = driving ? !nozzle : !usingPistol ||
+            (weapons.selected != 39 && (magazine >= weapons.current.capacity || reserve == 0))
+        aimButton.isHidden = driving ? renderer?.vehicleKind == "bicycle" : !usingPistol
+        crouchButton.isHidden = driving && renderer?.hasLandingGear != true
+        styleControl(crouchButton,icon:nil,fallback:driving ? "airplane.circle" : "arrow.down.to.line",accessibility:driving ? "Toggle landing gear" : "Toggle crouch")
+        styleControl(aimButton,icon:nil,fallback:driving ? "light.max" : "viewfinder",accessibility:driving ? "Toggle vehicle lights" : "Toggle aim")
+        if driving {
+            styleControl(attackButton,icon:nil,fallback:"speaker.wave.2.fill",accessibility:"Hold horn")
+            if nozzle {
+                styleControl(weaponButton,icon:nil,fallback:"arrow.up.right",accessibility:"Hold to rotate jets forward")
+                styleControl(reloadButton,icon:nil,fallback:"arrow.down",accessibility:"Hold to rotate jets downward")
+            }
+        } else { updateWeaponHUD() }
+        if driving { setAiming(false); firePressed = false }
+        if !driving { gasPressed = false; brakePressed = false; handbrakePressed = false }
+        hornPressed = false;nozzleUpPressed = false;nozzleDownPressed = false
     }
 
     private func vehicleModelName(_ vehicle: RemoteVehicle) -> String {
@@ -553,25 +736,62 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func toggleWeapon() {
+        if currentVehicle != nil && renderer?.hasJetNozzle == true { return }
         guard currentVehicle == nil else { status.text = "EXIT THE VEHICLE TO EQUIP"; return }
-        usingPistol.toggle()
-        renderer?.equippedWeapon = usingPistol ? 22 : 0
-        renderer?.clearAction()
-        updateWeaponHUD()
-        status.text = usingPistol ? "COLT .45 EQUIPPED" : "FISTS EQUIPPED"
+        guard presentedViewController == nil else { return }
+        heldKeys.removeAll(); firePressed = false; setAiming(false)
+        let panel = NativeWeaponShopPanel()
+        panel.modalPresentationStyle = .overFullScreen
+        panel.onAction = { [weak self] action, payload in self?.gameplay.perform(action, payload: payload) }
+        panel.onNavigate = { [weak self] point in self?.gameHUD.radar.waypoint = point }
+        panel.update(gameplay.state["weaponInventory"] as? [String: Any] ?? [:],
+                     cash: (gameplay.state["cash"] as? NSNumber)?.intValue ?? 0, onFoot: true)
+        weaponPanel = panel
+        present(panel, animated: true)
     }
 
+    @objc private func toggleAim() {
+        if currentVehicle != nil { renderer?.vehicleLights.toggle();return }
+        setAiming(!aiming)
+    }
+    @objc private func toggleGear() { if renderer?.hasLandingGear == true { renderer?.toggleLandingGear() } }
+    @objc private func pressNozzleUp() { if currentVehicle != nil && renderer?.hasJetNozzle == true { nozzleUpPressed = true } }
+    @objc private func pressNozzleDown() { if currentVehicle != nil && renderer?.hasJetNozzle == true { nozzleDownPressed = true } }
+    @objc private func releaseNozzle() { nozzleUpPressed = false;nozzleDownPressed = false }
+    @objc private func toggleCrouch() {
+        if currentVehicle != nil { toggleGear();return }
+        guard currentVehicle == nil, let renderer, network.health > 0 else { return }
+        renderer.toggleCrouch()
+        crouchButton.backgroundColor = UIColor.black.withAlphaComponent(renderer.crouching ? 0.7 : 0.3)
+    }
+    private func setAiming(_ value: Bool) {
+        aiming = value && usingPistol && currentVehicle == nil
+        renderer?.aiming = aiming
+        gameHUD.setAiming(aiming, scoped: weapons.selected == 34)
+        aimButton.backgroundColor = UIColor.black.withAlphaComponent(aiming ? 0.7 : 0.3)
+    }
+    @objc private func pressFire() {
+        if currentVehicle != nil { hornPressed = true;return }
+        firePressed = true;attack()
+    }
+    @objc private func releaseFire() { firePressed = false;hornPressed = false }
+
     @objc private func reload() {
-        guard usingPistol, magazine < 17, reserve > 0 else { return }
-        let count = min(17 - magazine, reserve)
-        magazine += count
-        reserve -= count
+        guard currentVehicle == nil else { return }
+        if weapons.selected == 39 { network.detonateSatchels(); return }
+        guard usingPistol else { return }
+        guard !weapons.reloading, magazine < weapons.current.capacity, reserve > 0 else { return }
+        gameplay.perform("weapon.reload")
+        let clips = NativeWeaponAnimation.forWeapon(weapons.selected)
+        renderer?.fireWeapon(clip: renderer?.crouching == true ? clips.crouchReload : clips.reload, duration: 1.8)
+        audio.reload(weapon: weapons.selected)
         updateWeaponHUD()
-        status.text = "COLT .45 RELOADED"
+        status.text = "RELOADING \(weapons.current.name.uppercased())"
     }
 
     @objc private func attack() {
         guard let renderer else { return }
+        if currentVehicle != nil && network.health > 0 { return }
         if network.health == 0 {
             network.respawn()
             if currentVehicle != nil {
@@ -588,31 +808,36 @@ final class NativeGameViewController: UIViewController {
         guard currentVehicle == nil else { status.text = "EXIT THE VEHICLE TO FIGHT"; return }
         guard !network.passive else { status.text = "TURN OFF PASSIVE MODE TO FIGHT"; return }
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastAttackTime >= 0.35 else { return }
+        guard now - lastAttackTime >= weapons.current.interval, weapons.fire() else { return }
         lastAttackTime = now
         if usingPistol {
-            guard magazine > 0 else { status.text = "EMPTY MAGAZINE — RELOAD"; return }
-            magazine -= 1
             updateWeaponHUD()
-            renderer.firePistol()
+            if weapons.current.fireKind == "PROJECTILE" {
+                renderer.fireWeapon(clip:"grenade/weapon_throw/n/1",duration:0.8)
+                let origin = renderer.position+SIMD3<Float>(0,0,1.35)
+                network.sendWeaponShot(weapon:weapons.selected,from:origin,to:origin+renderer.aimDirection*max(5,min(100,weapons.current.range)),player:nil)
+                return
+            }
+            let clips = NativeWeaponAnimation.forWeapon(weapons.selected)
+            renderer.fireWeapon(clip: renderer.crouching ? clips.crouchFire : clips.fire, duration: Float(weapons.current.interval))
+            audio.shot(weapon: weapons.selected)
             let origin = renderer.position + SIMD3<Float>(0, 0, 1.35)
-            let facing = SIMD2<Float>(sin(renderer.direction), cos(renderer.direction))
+            let facing = renderer.aimDirection
             let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
                 let offset = player.position - renderer.position
-                let distance = hypot(offset.x, offset.y)
-                guard distance > 0.5, distance <= 60, abs(offset.z) <= 6,
-                      simd_dot(SIMD2(offset.x, offset.y) / distance, facing) >= 0.86,
+                let distance = simd_length(offset)
+                guard distance > 0.5, distance <= weapons.current.range,
+                      simd_dot(simd_normalize(offset), facing) >= (aiming ? 0.994 : 0.95),
                       renderer.hasClearShot(to: player.position) else { return nil }
                 return (player, distance)
             }.min { $0.1 < $1.1 }
             let hit = target.map { $0.0.position + SIMD3<Float>(0, 0, 1.15) } ??
-                origin + SIMD3<Float>(facing.x * 60, facing.y * 60, 0)
-            network.sendPistolShot(from: origin, to: hit, player: target?.0.id)
-            status.text = target.map { "COLT .45 FIRED AT \($0.0.name.uppercased())" } ??
-                "COLT .45 FIRED"
+                origin + facing * weapons.current.range
+            network.sendWeaponShot(weapon: weapons.selected, from: origin, to: hit, player: target?.0.id)
             return
         }
         renderer.performFistAttack()
+        audio.swing()
         let origin = renderer.position
         let facing = SIMD2<Float>(sin(renderer.direction), cos(renderer.direction))
         let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
@@ -624,27 +849,46 @@ final class NativeGameViewController: UIViewController {
         }.min { $0.1 < $1.1 }
         guard let target else { status.text = "NO PLAYER IN MELEE REACH"; return }
         network.sendMeleeHit(to: target.0.id)
+        audio.meleeHit()
         status.text = "FIST ATTACK ON \(target.0.name.uppercased())"
     }
 
     @objc private func openGameplay() {
+        guard presentedViewController == nil else { return }
+        heldKeys.removeAll();firePressed=false
         let panel = NativeGameplayPanel()
         panel.modalPresentationStyle = .overFullScreen
         panel.onAction = { [weak self] action, payload in self?.gameplay.perform(action, payload: payload) }
+        panel.onAnimations = { [weak self, weak panel] in
+            panel?.dismiss(animated: true) { self?.openAnimations() }
+        }
         panel.update(gameplay.state)
         gameplayPanel = panel
+        present(panel, animated: true)
+    }
+
+    @objc private func openAnimations() {
+        guard presentedViewController == nil, let renderer else { return }
+        heldKeys.removeAll(); firePressed = false
+        let panel = NativeAnimationPanel(clips: renderer.animationClips)
+        panel.onPlay = { [weak renderer] name, loop in renderer?.playAnimation(name, looping: loop) }
+        panel.onStop = { [weak renderer] in renderer?.clearAction() }
+        panel.modalPresentationStyle = .overFullScreen
         present(panel, animated: true)
     }
 
     @objc private func toggleVehicle() {
         guard let renderer else { return }
         if currentVehicle != nil {
+            let parked = renderer.vehicleWirePosition, heading = renderer.direction
+            let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
+            let damage = renderer.vehicleDamage
+            renderer.exitVehicle()
             if let currentVehicle {
-                network.sendExit(renderer.position, heading: renderer.direction,
-                                 vehicle: currentVehicle, vehicleHealth: renderer.vehicleHealth)
+                network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
+                                 vehicle: currentVehicle, vehicleHealth: renderer.vehicleHealth,vehicleDamage:damage)
             }
             currentVehicle = nil
-            renderer.exitVehicle()
             vehicleButton.setTitle("ENTER CAR", for: .normal)
             gameHUD.updateVehicle(name: nil, speed: 0)
             setDrivingControls(false)
@@ -743,41 +987,77 @@ final class NativeGameViewController: UIViewController {
     @objc private func tick(_ link: CADisplayLink) {
         let delta = lastTime == 0 ? Float(1.0 / 60) : Float(min(0.05, link.timestamp - lastTime))
         lastTime = link.timestamp
+        weapons.tick()
+        let acceptsInput = presentedViewController == nil
+        if acceptsInput && firePressed { attack() }
         var forward = Float(-stick.value.y)
         var sideways = Float(stick.value.x)
         var steering = Float(lookStick.value.x)
         var lookVertical = Float(-lookStick.value.y)
+        var cameraLookX: Float = currentVehicle != nil ? steering : 0
+        var cameraLookY: Float = currentVehicle != nil ? lookVertical : 0
+        if currentVehicle != nil {
+            steering = sideways;lookVertical = forward;forward = 0
+        }
         var lift: Float = 0
+        var horn = currentVehicle != nil && (hornPressed || heldKeys.contains(.keyboardH) || heldKeys.contains(.keyboardCapsLock))
+        var jets: Float = (nozzleUpPressed ? 1:0)-(nozzleDownPressed ? 1:0)
+        if heldKeys.contains(.keyboardW) { forward = 1 }
+        if heldKeys.contains(.keyboardS) { forward = -1 }
+        if heldKeys.contains(.keyboardA) { sideways = -1 }
+        if heldKeys.contains(.keyboardD) { sideways = 1 }
+        if currentVehicle != nil && (heldKeys.contains(.keyboardA) || heldKeys.contains(.keyboardD)) { steering = sideways }
+        if heldKeys.contains(.keyboardLeftArrow) { if currentVehicle != nil { cameraLookX = -1 } else { steering = -1 } }
+        if heldKeys.contains(.keyboardRightArrow) { if currentVehicle != nil { cameraLookX = 1 } else { steering = 1 } }
+        if heldKeys.contains(.keyboardUpArrow) { if currentVehicle != nil { cameraLookY = 1 } else { lookVertical = 1 } }
+        if heldKeys.contains(.keyboardDownArrow) { if currentVehicle != nil { cameraLookY = -1 } else { lookVertical = -1 } }
         let helicopter = currentVehicle != nil && renderer?.vehicleKind == "helicopter"
         var gamepadRunning = false
         var gamepadJumping = false
         var gamepadAttacking = false
         var gamepadWeapon = false
         var gamepadReload = false
-        if let pad = GCController.controllers().compactMap(\.extendedGamepad).first {
+        if acceptsInput,let pad = GCController.controllers().compactMap(\.extendedGamepad).first {
+            let crouch = pad.leftThumbstickButton?.isPressed == true
+            if currentVehicle == nil && crouch && !lastCrouchButton { toggleCrouch() }
+            lastCrouchButton = crouch
             let lx = pad.leftThumbstick.xAxis.value, ly = pad.leftThumbstick.yAxis.value
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
             let rx = pad.rightThumbstick.xAxis.value
-            if abs(rx) > 0.05 { steering = rx }
+            if abs(rx) > 0.05 { if currentVehicle != nil { cameraLookX = rx } else { steering = rx } }
             let ry = pad.rightThumbstick.yAxis.value
-            if abs(ry) > 0.05 { lookVertical = ry }
+            if abs(ry) > 0.05 { if currentVehicle != nil { cameraLookY = ry } else { lookVertical = ry } }
             gamepadRunning = pad.buttonA.isPressed
             gamepadJumping = pad.buttonB.isPressed
             if currentVehicle != nil {
+                lookVertical = ly;steering = lx
+                sideways = (pad.rightShoulder.isPressed ? 1 : 0)-(pad.leftShoulder.isPressed ? 1 : 0)
+                renderer?.cameraLookDirection = pad.rightThumbstickButton?.isPressed == true ? "behind" : nil
+                let cameraButton = pad.buttonOptions?.isPressed == true
+                if cameraButton && !lastCameraButton { renderer?.cycleCameraView() }
+                lastCameraButton = cameraButton
+                horn = horn || pad.leftThumbstickButton?.isPressed == true
+                let gear = pad.dpad.up.isPressed,lights = pad.dpad.right.isPressed
+                if gear && !lastGearButton { toggleGear() }
+                if lights && !lastLightsButton { renderer?.vehicleLights.toggle() }
+                lastGearButton = gear;lastLightsButton = lights
+                if renderer?.hasJetNozzle == true { jets = (pad.dpad.left.isPressed ? 1:0)-(pad.dpad.down.isPressed ? 1:0) }
                 let throttle = pad.rightTrigger.value
                 let braking = pad.leftTrigger.value
                 if helicopter {
                     if throttle > 0.05 || braking > 0.05 { lift = throttle - braking }
                 } else {
-                    steering = abs(lx) > 0.05 ? lx : steering
-                    sideways = 0
                     if throttle > 0.05 || braking > 0.05 { forward = throttle - braking }
+                    else { forward = 0 }
                 }
             } else {
                 gamepadAttacking = pad.rightTrigger.isPressed
+                let aim = pad.leftTrigger.isPressed
+                if usingPistol && aim != lastGamepadAim { setAiming(aim) }
+                lastGamepadAim = aim
             }
-            gamepadWeapon = pad.leftShoulder.isPressed
-            gamepadReload = pad.rightShoulder.isPressed
+            gamepadWeapon = currentVehicle == nil && pad.leftShoulder.isPressed
+            gamepadReload = currentVehicle == nil && pad.rightShoulder.isPressed
             if pad.buttonX.isPressed && !lastVehicleButton { toggleVehicle() }
             if pad.buttonY.isPressed && !lastJobsButton && presentedViewController == nil { openGameplay() }
             lastVehicleButton = pad.buttonX.isPressed
@@ -785,7 +1065,9 @@ final class NativeGameViewController: UIViewController {
         }
         if gamepadJumping && !lastJumpButton { renderer?.jump() }
         lastJumpButton = gamepadJumping
-        if gamepadAttacking && !lastAttackButton { attack() }
+        renderer?.vehicleHorn = acceptsInput && horn && renderer?.hasVehicleHorn == true
+        renderer?.vehicleJetControl = acceptsInput ? jets:0
+        if gamepadAttacking { attack() }
         lastAttackButton = gamepadAttacking
         if gamepadWeapon && !lastWeaponButton { toggleWeapon() }
         lastWeaponButton = gamepadWeapon
@@ -800,12 +1082,37 @@ final class NativeGameViewController: UIViewController {
                 if brakePressed { forward = -1 }
             }
         }
+        if !acceptsInput {
+            forward = 0;sideways = 0;steering = 0;lookVertical = 0;lift = 0;cameraLookX = 0;cameraLookY = 0
+        }
         let walking = abs(forward) + abs(sideways) > 0.05
-        let running = run || gamepadRunning
-        if currentVehicle != nil && !helicopter { steering = max(-1, min(1, steering + sideways)) }
-        renderer?.move(forward: forward, sideways: currentVehicle == nil || helicopter ? sideways : 0,
+        let running = acceptsInput && (run || gamepadRunning || heldKeys.contains(.keyboardLeftShift))
+        if currentVehicle != nil { renderer?.lookCamera(x:cameraLookX,y:cameraLookY,delta:delta) }
+        renderer?.vehicleHandbrake = acceptsInput && currentVehicle != nil &&
+            (handbrakePressed || gamepadJumping || heldKeys.contains(.keyboardSpacebar))
+        renderer?.vehicleControllerInput = GCController.controllers().contains { $0.extendedGamepad != nil }
+        renderer?.weaponTriggerHeld = acceptsInput && (firePressed || gamepadAttacking)
+        renderer?.weaponReloading = weapons.reloading
+        renderer?.weaponReady = !weapons.reloading && (weapons.selected == 0 || magazine > 0)
+        renderer?.move(forward: forward, sideways: sideways,
                        turn: steering, delta: delta, running: running,
                        lookVertical: lookVertical, lift: lift)
+        if let renderer {
+            renderer.streamWeapon((firePressed || gamepadAttacking) && weapons.current.fireKind == "AREA_EFFECT" && magazine > 0 ? weapons.selected : nil, delta: delta)
+            let distance = previousAudioPosition.map { simd_distance($0, renderer.position) } ?? 0
+            audio.footsteps(distance: currentVehicle == nil && distance < 3 ? distance : 0,
+                           running: running, crouching: renderer.crouching,
+                           swimming: renderer.swimming, grounded: !renderer.isAirborne,
+                           material:renderer.groundMaterial)
+            let streaming = (firePressed || gamepadAttacking) && weapons.current.fireKind == "AREA_EFFECT" && magazine > 0
+            for weapon in [37,38,41,42] { audio.stream(weapon:weapon,active:streaming && weapon == weapons.selected) }
+            audio.fire(active:renderer.hasNearbyFire)
+            audio.updateVehicle(model: currentVehicle.flatMap { Int($0.code.split(separator: ".").first ?? "") },
+                                kind: renderer.vehicleKind, speed: renderer.drivingSpeed,
+                                throttle: forward, health: renderer.vehicleHealth, delta: delta)
+            audio.horn(model:currentVehicle.flatMap {Int($0.code.split(separator:".").first ?? "")},active:renderer.vehicleHorn)
+            previousAudioPosition = renderer.position
+        }
         if link.timestamp - lastHUD > 0.1, let renderer {
             lastHUD = link.timestamp
             status.expireIfNeeded()
@@ -814,7 +1121,8 @@ final class NativeGameViewController: UIViewController {
             gameHUD.radar.players = network.players.values.map { SIMD2($0.position.x, $0.position.y) }
             gameHUD.radar.vehicles = network.vehicles.values.map { SIMD2($0.position.x, $0.position.y) }
             gameHUD.updateVehicle(name: currentVehicle.map(vehicleModelName), speed: renderer.drivingSpeed)
-            gameHUD.updateClock()
+            gameHUD.updateClock(hour: renderer.gameHour)
+            gameHUD.updateBreath(renderer.swimmingBreath)
             if currentVehicle == nil {
                 vehicleButton.isHidden = !network.vehicles.values.contains {
                     simd_distance($0.position, renderer.position) <= 8
@@ -823,13 +1131,16 @@ final class NativeGameViewController: UIViewController {
         }
         if link.timestamp - lastNetwork > 0.2, let renderer {
             lastNetwork = link.timestamp
-            network.sendPosition(renderer.position, heading: renderer.direction, moving: walking,
+            network.sendPosition(currentVehicle == nil ? renderer.position : renderer.vehicleWirePosition, heading: renderer.direction, moving: walking,
                                  running: running,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
-                                 steer: renderer.steeringInput, pitch: renderer.vehicleNose,
+                                 steer: renderer.steeringInput, pitch: renderer.vehicleNose, roll: renderer.vehicleRoll,
                                  vehicleHealth: renderer.vehicleHealth,
-                                 airborne: renderer.isAirborne, weapon: usingPistol ? 22 : 0,
-                                 firing: renderer.isFiring)
+                                 vehicleDamage:renderer.vehicleDamage,lights:renderer.vehicleLights,horn:renderer.vehicleHorn,
+                                 airborne: renderer.isAirborne, weapon: weapons.selected,
+                                 firing: renderer.isFiring, animation: renderer.animationName,
+                                 crouching: renderer.crouching,swimState: renderer.swimmingState,
+                                 swimPitch: renderer.swimmingPitch,swimRatio: renderer.swimmingRatio)
         }
         if link.timestamp - lastGameplay > 1.5 {
             lastGameplay = link.timestamp

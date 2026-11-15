@@ -496,8 +496,21 @@ On this Mac, prepare the ignored local game files once:
     python3 prepare_native_assets.py --all-details
     python3 archive_public_models.py
     python3 prepare_native_models.py --all
-    python3 prepare_native_animations.py --all
+    python3 prepare_native_skeletons.py --all --archive-all-blocks
+    python3 archive_public_audio.py
+    python3 archive_public_interiors.py
+    python3 prepare_native_assets.py --all-details
     python3 prepare_native_hud.py
+    python3 prepare_native_audio.py
+    python3 prepare_native_environment.py
+    python3 prepare_native_atmosphere.py
+    python3 prepare_native_water_waves.py
+    python3 prepare_native_weapons.py
+    python3 prepare_native_effects.py
+    node prepare_native_physics.js
+    python3 prepare_native_seating.py
+    node prepare_native_foot_animation.js
+    zsh native-physics/build.sh all
 
 The model archive command fetches public DFF and TXD files that are missing
 from `local-only/site/game/`. It currently fills all 212 listed vehicle model
@@ -507,10 +520,12 @@ excluded from GitHub by `.gitignore`.
 `extract_client_catalog.py` also recovers the archived client's 212 per-model
 handling rows and writes them to the ignored
 `local-only/site/game/native/handling.json`. The native client fetches that
-table from the Mac and uses each model's acceleration, braking, steering,
-traction, drag, and speed inputs. Cars, motorcycles, bicycles, boats, planes,
-and helicopters have separate movement rules. These rules are still an
-approximation of the browser physics rather than the full original solver.
+table from the Mac. Ground cars/trailers now use a literal translation of the
+original custom solver and a native Rust Rapier bridge built from the engine
+commit behind the archived WASM. Metadata extraction executes the original DFF
+parser, wheel stance, handling and chassis builder for all 212 models, including
+159 ground-car/trailer chassis. Unsupported vehicle categories retain the
+earlier movement path until their separate solver comparisons pass.
 Hard impacts against the archived collision mesh now reduce native vehicle
 health; the updated value is reported to the local multiplayer server and
 saved for owned vehicles. A vehicle at zero health cannot accelerate until it
@@ -519,14 +534,22 @@ is repaired. In the simulator a taxi hit a downtown wall, the HUD reported
 queries now include the front or rear bumper so the vehicle stops before its
 centre reaches a wall; a second simulator impact showed the taxi stopping at
 the wall with its rear still on the sidewalk.
-The animation converter bakes idle, walk, run, jump, pistol standing and firing,
-and fist attack frames from the archived ANP3 clips and each DFF skin rig. It
-also writes right-hand attachment transforms so the Colt .45 DFF/TXD model
-follows the hand. All 265 available pedestrian models were rebaked on this Mac.
-The native Metal renderer selects the matching frames while moving or fighting;
-remote clients can show the same clips when their local pedestrian model has
-been prepared. Generated animation and attachment files stay ignored local game
-data. Regenerate them with `python3 prepare_native_animations.py --all --force`.
+The active animation path is runtime skeletal animation. The compact converter
+prepares 265 DFF skin rigs and a shared library containing all 1,871 clips in
+all 134 blocks listed by the archived animation index. Native Swift samples
+ANP3 quaternion and translation tracks, composes the bone hierarchy, and sends
+bone matrices to a Metal skinning vertex shader. Upper-body actions can be
+layered over a separate walking or running cycle. Hand attachments use the same
+runtime pose. These rigs and tracks stay under ignored local game data.
+The optional `prepare_native_animations.py` frame baker remains as a reference
+and fallback; the active app fetches a compact rig first. It no longer needs a
+large per-model frame bake for normal use. The native verifier checks all 265
+rigs and all 1,871 raw poses; 147,138 sampled CPU and GPU vertex comparisons
+against 61 reference clips differed by at most 0.0000013741 m. This verifies
+sampling and skinning, not every original animation state transition or IK rule.
+Native crouch, swim, underwater, death, jump/landing, vehicle entry/exit, and gun
+actions use recovered clips. The Social panel has a searchable animation picker
+for the complete runtime library. Movement cancels a manually selected animation.
 The HUD converter derives San Andreas font atlases and glyph metrics from the
 archived font on this Mac. The derivative images remain under `local-only/`.
 The native HUD loads those glyphs, the archived radar map, and weapon icons at
@@ -574,8 +597,15 @@ show magazine and reserve rounds, and fire using the controller right trigger;
 the controller shoulders switch weapons and reload. The simulator showed the
 archived gun pose. In another isolated two-player test, firing at a player sent
 the local multiplayer server a Colt .45 shot and delivered 18 damage. Shots use
-the local collision mesh to reject targets behind visible walls. Ammunition is
-currently client-side and resets when the game view is reopened.
+the local collision mesh to reject targets behind visible walls. The native client now uses the Mac server's saved weapon inventory, with
+archived shop offers, ammunition packs, slots, capacities and refill prices.
+Fresh accounts start unarmed. Buy weapons or armour within eight metres of one
+of the eleven archived Ammu-Nation entrances or an interior counter, then equip
+them in the weapon panel. The server accepts shots only when the native account
+owns the selected weapon, has ammunition and is not reloading. Native shots
+report revisions so stale HTTP state cannot restore spent ammunition. Legacy
+browser protocol clients retain their existing combat path; full browser
+inventory synchronization is not yet implemented.
 The on-foot camera and pedestrian now have separate headings: the character
 faces the direction of travel instead of staying pointed at the viewer, while
 the right LOOK stick or controller right thumbstick moves the camera. The
@@ -626,3 +656,103 @@ simulator; individual actions there have not all been exercised end to end.
 Other weapons and some job-specific controls remain absent. The local server is independent; signing in
 to the original public site does not provide its private multiplayer backend.
 
+
+### Additional native systems and verification, 14 November 2026
+
+The native renderer now uses the archived 23-weather/eight-time-bin colour
+interpolation for sky, fog and water, including altitude smog rules, plus the
+browser's 24-minute day cycle. The shared server supplies weather and clock
+settings. A 672-case executable comparison against the archived JavaScript
+passed with maximum colour error below 0.00000042. Water surfaces use the 307
+archived polygons; native swimming and diving use those heights, and the server
+checks breath and drowning against the same data. The twenty-second breath
+window and drowning damage rate are local server policies.
+
+The model converter follows the archived default damaged/LOD/extra visibility
+filter and clones stock right-front wheel geometry into the actual wheel hubs.
+Native wheels use original suspension offsets, steering and accumulated axle
+rotation. Full chassis orientation and DFF origin offsets pass through to
+vehicle meshes and seat transforms. Driver clips are selected from the original
+per-model boarding groups (cars, low cars, trucks, karts, boats and all astride
+families), using the sampled pelvis to align the original seat anchor. Remote
+drivers use their transmitted skin and seated pose.
+
+The HUD uses the archived glyph advances and bold glyph mapping, original radar
+sprites, map POIs, weapon icons, health, armour, breath, wanted and ammunition.
+The city map supports pan, zoom, POI selection and waypoints. Native gameplay
+labels and buttons use the extracted bitmap fonts; editable text stays native.
+The simulator showed crouching, an AK-47, ammunition use/reload, changing evening
+light and map waypoints before the compact skeletal path was integrated. The
+newer combined build still needs its final visual acceptance pass; the computer
+UI connection began timing out during subsequent menu testing.
+
+All 481 native sound samples are now local, including the archived sandstorm stream decoded to PCM.
+Native playback includes material-specific footsteps, gunfire, reloads, impacts,
+landing, splashes, engine banks, flame/spray/foam loops and the archived layered
+explosion mix. Fifty-four explosion-mix plans matched the original JavaScript.
+Vehicle engine speed/throttle mixing is still approximate; original radio music
+is not available from the captured station endpoint.
+
+All 56 listed interior meshes and atlases are prepared. Fifty-five collision
+cells are available; `i148.col.bin` returns HTTP 404. Owned homes can be entered
+on foot near their archived exterior and exited to the saved exterior point.
+Native indoor streaming selects the `i` cell set at the high-altitude property
+interiors. House permission radius, exit distance and instance policy remain
+local server rules, and low-altitude/interior-ID routing still needs expansion.
+
+Grenades and satchels use the archived projectile equations, with the Mac owning
+launch validation, ammunition, simulation, collision and blast damage. Native
+clients reconcile projectile snapshots and draw the archived projectile models
+and effect sprites. Rockets, homing and area-effect helpers exist, but they need
+further end-to-end checks and acquisition paths beyond the currently extracted
+shop offers. Particle composition is not a verified pixel match. The server
+rejects blast hits through missing geometry and walls. No arbitrary client
+explosion request is exposed.
+
+`node smoke_native_server.js` verifies the native inventory handshake, purchase,
+throw, empty-magazine denial, shared blast damage through real clear geometry,
+and saved ammunition. `node smoke_weapon_inventory.js`,
+`node smoke_local_projectiles.js`, `node smoke_world_collision.js`,
+`node smoke_water.js`, `node smoke_interiors.js`,
+`python3 smoke_native_environment.py`, and
+`python3 smoke_native_weapon_effects.py` cover their named subsystems.
+`smoke_native_skeletons.swift` verifies the runtime rig and GPU skinning path.
+Hardware keyboard controls include WASD movement, arrows for look/pitch,
+Space jump, C crouch, E vehicle, R reload/detonate, Q aim, T chat, M map,
+F jobs and G animations. Keyboard/controller mappings still need physical-device
+acceptance across all activities.
+
+This remains an incomplete reconstruction. All vehicle categories, the full
+pedestrian state machine and IK, traffic and ambient NPCs, all dynamic mission
+actors/props, breakable world objects, every interior interaction, all weapon
+and pickup behavior, and the private publisher server's rules are not yet
+verified as a 1:1 native port. A successful build or helper test does not certify
+those remaining systems.
+
+Ground-car force replay passes 8,160 original frames across 17 handling scenarios
+with maximum numerical error below 0.00000000000003. The integrated native engine
+comparison covers 1,860 baseline frames: maximum position difference is 4.291 mm
+in a suspension drop and the largest final difference is 1.439 mm. This is
+behavioral verification with measured floating-point differences, not binary
+identity. The native bridge and source pin/build instructions are documented in
+`native-physics/README.md`; generated toolchains, libraries and reference captures
+remain ignored under `local-only/`.
+
+The public on-foot motor is translated separately from visual animation. Its
+capsule contact handling, slope/step logic, jump/gravity, ceiling collisions,
+vehicle pushing constraints and stair easing pass 2,100 original frames and
+89,734 comparisons. `node smoke_character_motor.js` creates measurements using
+the actual archived JS/WASM; `smoke_character_motor.swift` replays them through
+the Swift motor. Native integration tests exercise the disabled probe capsule,
+KCC, shape/contact/project queries and holding position while collision cells
+load. The complete locomotion/combat/swim/climb animation state machine remains
+a separate port.
+
+Sky and weather helpers execute the original sun/moon/star/cloud/rain/fog,
+wind and lightning formulas. Water uses the original near-net shoreline builder,
+wave formulas and repeated `waterclear256` texture. Native helper, spatial-index,
+shader and GPU tests are in `smoke_native_atmosphere.py`,
+`smoke_native_weather_particles.py`, `smoke_native_water_waves.py`,
+`smoke_native_world_water.py` and `smoke_native_atmosphere_metal.py`.
+The wave GPU test compares 7,200 vertices against actual browser results; the
+maximum measured height difference is 0.0000119 m.

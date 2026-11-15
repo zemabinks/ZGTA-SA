@@ -24,6 +24,7 @@ def wanted():
     vehicles = catalog.json_literal(js, "e.exports=JSON.parse('", "')")
     peds = json.loads((GAME / 'world' / 'peds.json').read_text())['peds']
     names = set()
+    names.update({('missile','dff'),('missile','txd')})
     for vehicle in vehicles:
         names.add((vehicle['model'].lower(), 'dff'))
         names.add((vehicle['txd'].lower(), 'txd'))
@@ -31,6 +32,11 @@ def wanted():
         if ped[0].lower() != 'null':
             names.add((ped[0].lower(), 'dff'))
             names.add((ped[1].lower(), 'txd'))
+    _, weapon_js = catalog.bundle_with('"WEAPON_COLT45"')
+    for weapon in catalog.json_literal(weapon_js, "e.exports=JSON.parse('", "')"):
+        if weapon.get('modelName'):
+            names.add((weapon['modelName'].lower(), 'dff'))
+            names.add((weapon['modelName'].lower(), 'txd'))
     return sorted(names)
 
 

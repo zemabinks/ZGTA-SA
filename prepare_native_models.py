@@ -9,6 +9,7 @@ separate work.
 import argparse
 import json
 import math
+import re
 import struct
 from pathlib import Path
 from PIL import Image
@@ -67,6 +68,40 @@ def transform(point, frames, frame_number):
                  matrix[2] * x + matrix[5] * y + matrix[8] * z + matrix[11])
         frame_number = parent
     return point
+
+
+def frame_names(data, chunk):
+    return [next((data[a:b].split(b'\0')[0].decode('ascii', 'ignore').lower()
+                  for kind, a, b in children(data, item) if kind == 0x253f2fe), '')
+            for item in children(data, chunk) if item[0] == 3]
+
+
+def ancestor(frame, target, frames, names):
+    for _ in range(len(frames)):
+        if frame < 0 or frame >= len(frames):
+            return None
+        if names[frame] == target:
+            return frame
+        parent = frames[frame][1]
+        if parent == frame:
+            break
+        frame = parent
+    return None
+
+
+def inverse_transform(point, frames, frame_number):
+    # Invert the composed affine transform, including scaled DFF wheel frames.
+    origin = transform((0, 0, 0), frames, frame_number)
+    axes = [tuple(v - o for v, o in zip(transform(axis, frames, frame_number), origin))
+            for axis in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]]
+    a, b, c = axes
+    cross = lambda x, y: (x[1]*y[2]-x[2]*y[1], x[2]*y[0]-x[0]*y[2], x[0]*y[1]-x[1]*y[0])
+    dot = lambda x, y: sum(u*v for u, v in zip(x, y))
+    determinant = dot(a, cross(b, c))
+    if abs(determinant) < 1e-9:
+        raise ValueError('Singular model frame')
+    delta = tuple(v-o for v, o in zip(point, origin))
+    return tuple(dot(delta, axis)/determinant for axis in [cross(b, c), cross(c, a), cross(a, b)])
 
 
 def materials(data, chunk):
@@ -193,6 +228,8 @@ def convert(source, destination, pedestrian=False):
     if not frame_chunk or not geometry_chunk:
         raise ValueError('DFF has no frames or geometry')
     frames = frame_list(data, frame_chunk)
+    names = frame_names(data, frame_chunk)
+    names += [''] * (len(frames) - len(names))
     geometries = [geometry(data, part) for part in children(data, geometry_chunk) if part[0] == 0x0f]
     if not geometries:
         raise ValueError('DFF has no drawable geometry')
@@ -204,6 +241,12 @@ def convert(source, destination, pedestrian=False):
         if info:
             frame_number, geometry_number = struct.unpack_from('<II', data, info[1])
             if geometry_number < len(geometries) and frame_number < len(frames):
+                # Match the archived browser's default visibility filter.
+                # Damage/LOD meshes overlap intact panels when all are drawn.
+                if re.search(r'(_dam|_vlo|_lo|_l[1-9])$|^moving_rotor|^gunflash', names[frame_number], re.I):
+                    continue
+                if any(ancestor(frame_number, f'extra{n}', frames, names) is not None for n in range(1, 7)):
+                    continue
                 atomics.append((frame_number, geometry_number))
     if not atomics:
         atomics = [(0, number) for number in range(len(geometries))]
@@ -217,8 +260,22 @@ def convert(source, destination, pedestrian=False):
     texture_slots = {name: number + 1 for number, name in enumerate(texture_names)}
     vertices = []
     indices = []
-    for frame_number, geometry_number in atomics:
+    draw_parts = []
+    instances = [(frame, geom, None) for frame, geom in atomics]
+    # The stock DFF stores a single right-front wheel. The browser clones it
+    # into the other dummy hubs, mirroring left wheels.
+    for frame, geom in atomics:
+        hub = ancestor(frame, 'wheel_rf_dummy', frames, names)
+        if hub is None:
+            continue
+        for target in ['wheel_lf_dummy', 'wheel_lb_dummy', 'wheel_rb_dummy', 'wheel_lm_dummy', 'wheel_rm_dummy']:
+            if target in names:
+                instances.append((frame, geom, names.index(target)))
+    for frame_number, geometry_number, clone_hub in instances:
         points, faces, palette, prelit, uvs = geometries[geometry_number]
+        start_index = len(indices)
+        original_hub = ancestor(frame_number, 'wheel_rf_dummy', frames, names)
+        hub = clone_hub if clone_hub is not None else original_hub
         # DFF materials belong to faces, so duplicate a vertex when two faces
         # use different material colors.
         cache = {}
@@ -228,6 +285,11 @@ def convert(source, destination, pedestrian=False):
                 key = (index, material)
                 if key not in cache:
                     point = transform(points[index], frames, frame_number)
+                    if clone_hub is not None:
+                        local = inverse_transform(point, frames, original_hub)
+                        if names[clone_hub].startswith('wheel_l'):
+                            local = (-local[0], local[1], local[2])
+                        point = transform(local, frames, clone_hub)
                     if not all(math.isfinite(value) and abs(value) < 1000 for value in point):
                         raise ValueError('Invalid model coordinates')
                     if prelit:
@@ -238,6 +300,11 @@ def convert(source, destination, pedestrian=False):
                     cache[key] = len(vertices)
                     vertices.append((point, tint, uvs[index], texture_slots.get(texture_name, 0)))
                 indices.append(cache[key])
+        part_name = names[clone_hub] if clone_hub is not None else names[frame_number]
+        draw_parts.append({'name': part_name, 'start': start_index,
+                           'count': len(indices) - start_index,
+                           'wheel': names[hub] if hub is not None else None,
+                           'pivot': transform((0, 0, 0), frames, hub if hub is not None else frame_number)})
     if not vertices or len(vertices) > 1_000_000:
         raise ValueError('Empty or oversized DFF model')
     if pedestrian:
@@ -264,6 +331,13 @@ def convert(source, destination, pedestrian=False):
     result.extend(struct.pack('<H', 0) * (len(texture_names) + 1))
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_bytes(result)
+    metadata = {'parts': draw_parts}
+    if not pedestrian and 'ped_frontseat' in names:
+        seat = transform((0, 0, 0), frames, names.index('ped_frontseat'))
+        metadata['driverSeat'] = [-abs(seat[0]), seat[1], seat[2]]
+    if not pedestrian and 'door_lf_dummy' in names:
+        metadata['driverDoor'] = transform((0,0,0), frames, names.index('door_lf_dummy'))
+    destination.with_suffix('.parts.json').write_text(json.dumps(metadata, separators=(',', ':')))
     columns = 8
     cell = 128
     atlas = Image.new('RGBA', (columns * cell, math.ceil((len(texture_names) + 1) / columns) * cell), (255, 255, 255, 255))
@@ -283,11 +357,14 @@ def main():
     import extract_client_catalog as catalog
     _, js = catalog.bundle_with('"name":"Manana"')
     vehicles = catalog.json_literal(js, "e.exports=JSON.parse('", "')")
+    _, weapon_js = catalog.bundle_with('"WEAPON_COLT45"')
+    weapons = catalog.json_literal(weapon_js, "e.exports=JSON.parse('", "')")
     peds = json.loads((GAME / 'world' / 'peds.json').read_text())['peds']
     ped_names = {item[0].lower() for item in peds}
     if args.all:
         selected.update(item['model'].lower() for item in vehicles)
         selected.update(item[0].lower() for item in peds)
+        selected.update(item['modelName'].lower() for item in weapons if item.get('modelName'))
     if not selected:
         selected = {'taxi', 'sultan', 'bmori'}
     written = 0
@@ -308,6 +385,8 @@ def main():
                      if item['model'].lower() in available},
         'peds': {str(number): item[0].lower() for number, item in enumerate(peds)
                  if item[0].lower() in available},
+        'weapons': {str(item['id']): item['modelName'].lower() for item in weapons
+                    if item.get('modelName') and item['modelName'].lower() in available},
     }
     (OUTPUT / 'index.json').write_text(json.dumps(model_index, separators=(',', ':')))
     print(f'Converted {written} local models in {OUTPUT}')

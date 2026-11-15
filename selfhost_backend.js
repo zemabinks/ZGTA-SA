@@ -4,6 +4,9 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const OptionalDiscord = require('./optional_discord');
+const weaponInventory = require('./weapon_inventory');
+const worldCollision = require('./world_collision');
+const LocalProjectiles = require('./local_projectiles');
 
 const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
@@ -84,6 +87,36 @@ const CATALOG_FILE = path.join(__dirname, 'local-only', 'selfhost', 'client-cata
 let clientCatalog = {vehicles: [], homes: []};
 try { clientCatalog = JSON.parse(fs.readFileSync(CATALOG_FILE, 'utf8')); }
 catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local client catalog:', error.message); }
+let waterPolygons = [];
+try { waterPolygons = JSON.parse(fs.readFileSync(path.join(__dirname, 'local-only/site/game/world/index.json'), 'utf8')).water || []; }
+catch (error) { if (error.code !== 'ENOENT') console.error('Could not load water geometry:', error.message); }
+function waterHeight(x, y, z) {
+  if (Math.abs(x) > 3000 || Math.abs(y) > 3000) return 0;
+  let highest = null;
+  for (const row of waterPolygons) {
+    if (!Array.isArray(row) || ![9, 12].includes(row.length)) continue;
+    const points = Array.from({length: row.length / 3}, (_, n) => row.slice(n * 3, n * 3 + 3));
+    const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    if (x < minX || x > maxX || y < minY || y > maxY) continue;
+    let surface;
+    if (points.length === 4) {
+      const u = (x-points[0][0])/(points[1][0]-points[0][0]);
+      const v = (y-points[0][1])/(points[2][1]-points[0][1]);
+      surface = (points[0][2]*(1-u)+points[1][2]*u)*(1-v)+(points[2][2]*(1-u)+points[3][2]*u)*v;
+    } else {
+      const [a,b,c] = points;
+      const den = (b[1]-c[1])*(a[0]-c[0])+(c[0]-b[0])*(a[1]-c[1]);
+      const u = ((b[1]-c[1])*(x-c[0])+(c[0]-b[0])*(y-c[1]))/den;
+      const v = ((c[1]-a[1])*(x-c[0])+(a[0]-c[0])*(y-c[1]))/den;
+      if (u < 0 || v < 0 || u+v > 1) continue;
+      surface = u*a[2]+v*b[2]+(1-u-v)*c[2];
+    }
+    const shallow = Math.min(...points.map(p => p[2])) > 1 && maxX-minX <= 40 && maxY-minY <= 40;
+    if (Number.isFinite(surface) && surface-z <= (shallow ? 6 : 200) && (highest === null || surface > highest)) highest = surface;
+  }
+  return highest;
+}
 const STARTER_CARS = [
   {model: 410, name: 'Manana', price: 500, car: '410.52.39.0.', source: 'starter'},
   {model: 400, name: 'Landstalker', price: 900, car: '400.52.39.0.', source: 'starter'},
@@ -121,6 +154,7 @@ const HOME_CATALOG = Object.freeze([
       Array.isArray(item.out) && item.out.length === 4 && item.out.every(Number.isFinite))
     .map(item => ({id: item.key, name: String(item.name).slice(0, 80), price: item.price,
       city: String(item.city || '').slice(0, 8), tier: String(item.tier || '').slice(0, 20),
+      kind: String(item.kind || '').slice(0, 24),
       out: item.out, source: 'archived'})),
 ]);
 // Local pilot routes begin on the visible runways, rather than at dealership
@@ -382,6 +416,30 @@ class LocalGame {
     this.lastTurfTick = 0;
     this.territories = Object.fromEntries(TURFS.map(id => [id, null]));
     this.turfCaptures = new Map();
+    this.projectiles = LocalProjectiles.create({
+      trace: (origin, direction, distance) => worldCollision.trace(origin, direction, distance),
+      ground: (x,y,z) => worldCollision.height(x,y,z,8),
+      complete: () => worldCollision.lastQueryComplete,
+      players: () => [...this.peers].filter(p => p.ready && this.position(p.player)).map(p => ({
+        id: String(p.player.number), position: [p.state.x,p.state.y,p.state.z], health: p.player.health,
+        passive: p.player.passive, dimension: p.player.insideHome || null})),
+      onHit: (target, damage, event) => this.applyBlastHit(target, damage, event),
+      onEvent: event => { for (const p of this.peers)
+        if (p.ready && (p.player.insideHome || null) === (event.dimension || null))
+          p.send({t:'projectile', event}); },
+    });
+    let lastPhysics = Date.now(), lastBroadcast = 0, lastCount = 0;
+    this.projectileTimer = setInterval(() => {
+      const now = Date.now();
+      this.projectiles.tick(Math.min(1,Math.max(0.001,(now-lastPhysics)/1000))); lastPhysics = now;
+      if (now-lastBroadcast >= 100 && (this.projectiles.size || lastCount)) {
+        const rows = this.projectiles.snapshot(); lastCount = rows.length; lastBroadcast = now;
+        for (const p of this.peers) if (p.ready && p.inventoryEnabled)
+          p.send({t:'projectiles',rows: rows.filter(row =>
+            (row.dimension || null) === (p.player.insideHome || null))});
+      }
+    },20);
+    this.projectileTimer.unref();
     try {
       const data = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'));
       for (const id of TURFS) if (GANGS.some(gang => gang.id === data.territories?.[id]))
@@ -391,7 +449,7 @@ class LocalGame {
         const cars = Array.isArray(value.cars) ? value.cars.filter(car =>
           CAR_CATALOG.some(item => item.model === car)).slice(0, 12) : [];
         this.players.set(id, {number: this.nextNumber++, name: safeName(value.name) || 'Local player',
-          cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone),
+          cash: money(value.cash), xp: money(value.xp), jobsDone: money(value.jobsDone), inventory: value.inventory,
           pilotFlights: money(value.pilotFlights), pilotStreak:
             value.job?.id === 'pilot' && !savedJob(value.job) ? 0 : money(value.pilotStreak),
           taxiFares: money(value.taxiFares), taxiStreak: money(value.taxiStreak),
@@ -458,7 +516,7 @@ class LocalGame {
         discoveries: p.discoveries, trackedDiscovery: p.trackedDiscovery,
         supplies: p.supplies,
         cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
-        discord: p.discord, settings: p.settings}]));
+        discord: p.discord, settings: p.settings, inventory: p.inventory}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
     fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1,
       territories: this.territories, players}, null, 2) + '\n', {mode: 0o600});
@@ -688,15 +746,27 @@ class LocalGame {
         message.h[2] - message.o[2]) > 200) return;
     const now = Date.now();
     if (now - (peer.lastShotAt || 0) < 70) return;
+    if (peer.inventoryEnabled) {
+      const accepted = weaponInventory.acceptShot(peer.player, message.w, now);
+      peer.send({t: 'inventory', state: weaponInventory.state(peer.player, position)});
+      if (!accepted.ok) { this.note(peer.player, accepted.reason); return; }
+      this.save();
+    }
     peer.lastShotAt = now;
     peer.lastWeapon = message.w;
     peer.lastShotHit = message.h;
+    if (peer.inventoryEnabled && [16,17,18,19,20,35,36,39].includes(message.w)) {
+      const direction = message.h.map((n,i) => n-message.o[i]);
+      const result = this.projectiles.launch(String(peer.player.number),message.w,message.o,direction);
+      if (!result.ok) this.note(peer.player,result.reason);
+    }
     const shot = {t: 'shot', from: String(peer.player.number), w: message.w,
       o: message.o, h: message.h, ht: Number.isInteger(message.ht) ?
         Math.max(0, Math.min(10, message.ht)) : 0};
     if (typeof message.id === 'string' && message.id.length <= 64) shot.id = message.id;
     if (Number.isInteger(message.bp)) shot.bp = message.bp;
-    for (const other of this.peers) if (other !== peer && other.ready) other.send(shot);
+    for (const other of this.peers) if (other !== peer && other.ready &&
+      (other.player.insideHome || null) === (peer.player.insideHome || null)) other.send(shot);
   }
 
   handleHit(peer, message) {
@@ -705,14 +775,19 @@ class LocalGame {
     const from = this.position(peer.player);
     const to = target && this.position(target.player);
     if (!from || !to || !target || target === peer ||
-        peer.player.passive || target.player.passive || target.player.health <= 0) return;
-    const weapon = Date.now() - (peer.lastShotAt || 0) <= 2000 ? peer.lastWeapon :
+        peer.player.passive || target.player.passive || target.player.health <= 0 ||
+        (peer.player.insideHome || null) !== (target.player.insideHome || null)) return;
+    const weapon = peer.inventoryEnabled && Number.isInteger(message.w) ? message.w : Date.now() - (peer.lastShotAt || 0) <= 2000 ? peer.lastWeapon :
       Number.isInteger(peer.state?.weapon) ? peer.state.weapon : 0;
     const damage = WEAPON_DAMAGE[weapon];
     if (!damage) return;
+    if (peer.inventoryEnabled && weapon !== 0 && peer.lastWeapon !== weapon) return;
     const distance = Math.hypot(from.x - to.x, from.y - to.y);
     const gun = weapon >= 22;
-    if (distance > (gun ? 90 : 4) ||
+    if (gun && peer.inventoryEnabled && !worldCollision.lineOfSight([from.x,from.y,from.z+1.35],[to.x,to.y,to.z+1.15])) return;
+    const range = peer.inventoryEnabled && gun ?
+      Math.min(200,weaponInventory.catalog.items.find(item => item.id === weapon)?.stats?.range || 90) : gun ? 90 : 4;
+    if (distance > range ||
         (gun && (Date.now() - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon ||
           !peer.lastShotHit || Math.hypot(peer.lastShotHit[0] - to.x,
             peer.lastShotHit[1] - to.y, peer.lastShotHit[2] - to.z) > 8))) return;
@@ -735,6 +810,28 @@ class LocalGame {
         v: String(peer.player.number), w: weapon};
       for (const other of this.peers) if (other.ready) other.send(feed);
       this.note(victim, 'You were defeated. Respawn to rejoin the world.');
+    }
+    this.save();
+  }
+
+  applyBlastHit(target, damage, event) {
+    const peer = [...this.peers].find(p => p.ready && String(p.player.number) === String(target.id));
+    if (!peer || peer.player.health <= 0 || peer.player.passive) return;
+    const centre = [peer.state.x,peer.state.y,peer.state.z+0.9];
+    const offset = centre.map((n,i) => n-event.position[i]), length = Math.hypot(...offset);
+    const origin = event.position.map((n,i) => n+offset[i]/Math.max(0.001,length)*0.05);
+    if (!worldCollision.lineOfSight(origin,centre)) return;
+    const victim = peer.player, amount = Math.max(0,Math.ceil(damage));
+    const absorbed = Math.min(victim.armour,amount);
+    victim.armour -= absorbed; victim.health = Math.max(0,victim.health-(amount-absorbed));
+    peer.send({t:'vitals',health:victim.health,armour:victim.armour});
+    const owner = [...this.peers].find(p => String(p.player.number) === event.owner)?.player;
+    if (owner && owner !== victim) this.setWanted(owner,Math.max(1,owner.wanted+1));
+    if (victim.health === 0) {
+      victim.deaths = money(victim.deaths+1); victim.lastDeath = Date.now(); victim.policeDuty = false;
+      this.abortHeist(victim,'you were defeated');
+      if (owner && owner !== victim) owner.kills = money(owner.kills+1);
+      for (const p of this.peers) if (p.ready) p.send({t:'kill',vn:victim.name,kn:owner?.name || victim.name,v:event.owner,w:event.weapon});
     }
     this.save();
   }
@@ -876,6 +973,7 @@ class LocalGame {
       .sort((a, b) => Math.hypot(pos.x - a.out[0], pos.y - a.out[1]) -
         Math.hypot(pos.x - b.out[0], pos.y - b.out[1]))[0] : null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
+      weaponInventory: weaponInventory.state(player, pos),
       pilot: {flights: player.pilotFlights || 0, streak: player.pilotStreak || 0,
         level: pilotLevel(player),
         aircraft: PILOT_AIRCRAFT.map(item => ({...item,
@@ -907,6 +1005,8 @@ class LocalGame {
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
+      breath: pos?.peer.inventoryEnabled ? Math.ceil(100*(pos.peer.nativeOxygen ?? 1150)/1150) :
+        pos?.peer.submergedSince ? Math.max(0, Math.round(100-(Date.now()-pos.peer.submergedSince)/200)) : 100,
       hangar: nearHangar ? {
         id: nearHangar.id, name: nearHangar.name,
         distance: Math.ceil(Math.hypot(pos.x - nearHangar.stand[0],
@@ -966,6 +1066,7 @@ class LocalGame {
         pos.peer.state.vehicle : null,
       race: this.raceView(player, pos),
       homes: player.homes.map(id => HOME_CATALOG.find(home => home.id === id)).filter(Boolean),
+      insideHome: player.insideHome ? {id: player.insideHome, name: homeAt(player.insideHome)?.name} : null,
       catalog: {jobs: JOBS,
         supplies: SUPPLIES,
         cars: CAR_CATALOG.map(car => ({model: car.model, name: car.name,
@@ -1188,7 +1289,9 @@ class LocalGame {
     vehicle.row[7] = rounded(report.pitch);
     vehicle.row[8] = rounded(report.roll);
     if (Number.isFinite(report.health))
-      vehicle.row[9] = Math.max(0, Math.min(1000, Math.round(report.health)));
+      vehicle.row[9] = Math.min(vehicle.row[9],Math.max(0, Math.min(1000, Math.round(report.health))));
+    if (typeof report.damage === 'string' && report.damage)
+      vehicle.row[10] = report.damage.slice(0,512);
     if (parked) for (const other of this.peers)
       if (other.ready) other.send({t: 'spawned', v: vehicle.row});
   }
@@ -2171,6 +2274,11 @@ class LocalGame {
         message = `${car.name} resprayed for $${RESPRAY_COST}.`;
         this.updatePlayer(player);
       }
+    } else if (typeof action === 'string' && action.startsWith('weapon.')) {
+      const result = weaponInventory.action(player, action, input, pos);
+      message = result.message;
+      this.save(); this.updatePlayer(player);
+      pos?.peer.send({t: 'inventory', state: result.inventory});
     } else if (action === 'home.buy') {
       const home = HOME_CATALOG.find(item => item.id === input.home);
       if (!home) throw new Error('Unknown home.');
@@ -2180,13 +2288,35 @@ class LocalGame {
       player.homes.push(home.id);
       message = `${home.name} bought for $${home.price}.`;
       this.updatePlayer(player);
+    } else if (action === 'home.enter') {
+      const home = homeAt(input.home);
+      if (!home || !player.homes.includes(home.id)) throw new Error('You do not own this home.');
+      if (!pos || pos.peer.state.walking !== true) throw new Error('Enter the house on foot.');
+      if (player.insideHome) throw new Error('Leave your current house first.');
+      if (Math.hypot(pos.x - home.out[0], pos.y - home.out[1], pos.z - home.out[2]) > 8)
+        throw new Error('Stand within 8 m of your home entrance.');
+      const entry = clientCatalog.interior_spawns?.[home.kind];
+      if (!Array.isArray(entry) || entry.length !== 4) throw new Error('This interior is unavailable.');
+      player.insideHome = home.id;
+      pos.peer.send({t: 'tp', x: entry[0], y: entry[1], z: entry[2], h: entry[3] * Math.PI / 180, g: 1});
+      message = `Entered ${home.name}. Use Exit Home to return outside.`;
+    } else if (action === 'home.exit') {
+      const home = homeAt(player.insideHome);
+      if (!home || !pos) throw new Error('You are not inside a home.');
+      const entry = clientCatalog.interior_spawns?.[home.kind];
+      if (!entry || Math.hypot(pos.x-entry[0], pos.y-entry[1], pos.z-entry[2]) > 80)
+        throw new Error('Return to your home interior before leaving.');
+      player.insideHome = null;
+      pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2], h: home.out[3] * Math.PI / 180, g: 1});
+      message = `Left ${home.name}.`;
     } else if (action === 'home.visit') {
       const home = HOME_CATALOG.find(item => item.id === input.home);
       if (!home || !player.homes.includes(home.id)) throw new Error('You do not own this home.');
       if (!home.out) throw new Error('This starter home has no world entrance.');
       if (!pos) throw new Error('Enter the game before visiting your home.');
+      player.insideHome = null;
       pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2],
-        h: home.out[3], g: 1});
+        h: home.out[3]*Math.PI/180, g: 1});
       message = `Travelling to ${home.name}.`;
     } else throw new Error('Unknown action.');
     this.note(player, message);
@@ -2314,7 +2444,12 @@ class LocalGame {
 
   onMessage(peer, message) {
     if (!message || typeof message !== 'object') return;
+    if (message.t === 'detonate' && peer.ready && peer.inventoryEnabled) {
+      this.projectiles.detonate(String(peer.player.number)); return;
+    }
     if (message.t === 'hi') {
+      peer.player.insideHome = null;
+      peer.inventoryEnabled = message.nativeInventory === true;
       peer.ready = true;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
@@ -2322,6 +2457,7 @@ class LocalGame {
         life: [peer.player.health, peer.player.armour], out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0});
       peer.send(this.fullState(peer));
+      if (peer.inventoryEnabled) peer.send({t: 'inventory', state: weaponInventory.state(peer.player)});
       peer.send(this.owned(peer.player));
       peer.send(this.homeStatus(peer.player));
       peer.send({t: 'passive', on: peer.player.passive,
@@ -2348,6 +2484,48 @@ class LocalGame {
       }
       peer.state = message;
       peer.lastSeen = Date.now();
+      const surface = [message.x,message.y,message.z].every(Number.isFinite) ? waterHeight(message.x,message.y,message.z) : null;
+      if (peer.inventoryEnabled) {
+        // The native public-client swim states use a 1,150-unit oxygen pool:
+        // under consumes 100/s, glide 50/s, recovery 100/s, drowning 49.5/s.
+        // Run the same fixed ticks; bound elapsed catch-up as a local policy.
+        const now = Date.now(), elapsed = Math.min(0.5,Math.max(0,(now-(peer.nativeOxygenAt ?? now))/1000));
+        peer.nativeOxygenAt = now;peer.nativeOxygen ??= 1150;
+        peer.nativeOxygenTime = (peer.nativeOxygenTime || 0)+elapsed;
+        const action = Number.isInteger(message.act) ? message.act & 63 : 0;
+        const under = message.walking === true && surface !== null && message.z < surface-0.6 &&
+          (action === 14 || action === 15) && peer.player.health > 0;
+        let hurt = peer.nativeDrownFraction || 0;
+        while (peer.nativeOxygenTime+1e-10 >= 1/60) {
+          peer.nativeOxygenTime -= 1/60;
+          if (under) {
+            peer.nativeOxygen = Math.max(0,peer.nativeOxygen-(action === 14 ? 100 : 50)/60);
+            if (peer.nativeOxygen <= 0) hurt += 49.5/60;
+          } else peer.nativeOxygen = Math.min(1150,peer.nativeOxygen+100/60);
+        }
+        const damage = Math.floor(hurt+1e-9);peer.nativeDrownFraction = hurt-damage;
+        if (damage > 0 && peer.player.health > 0) {
+          peer.player.health = Math.max(0,peer.player.health-damage);
+          if (peer.player.health === 0) {
+            peer.player.deaths = money(peer.player.deaths+1);peer.player.lastDeath = now;
+            this.abortHeist(peer.player,'you drowned');
+          }
+          peer.send({t:'vitals',health:peer.player.health,armour:peer.player.armour});this.save();
+        }
+      } else if (message.walking === true && surface !== null && message.z < surface-1.2 && peer.player.health > 0) {
+        peer.submergedSince ||= Date.now();
+        if (Date.now()-peer.submergedSince > 20000 && Date.now()-(peer.lastDrownDamageAt || 0) >= 1000) {
+          peer.lastDrownDamageAt = Date.now();
+          peer.player.health = Math.max(0, peer.player.health-5);
+          if (peer.player.health === 0) {
+            peer.player.deaths = money(peer.player.deaths+1);
+            peer.player.lastDeath = Date.now();
+            this.abortHeist(peer.player, 'you drowned');
+          }
+          peer.send({t: 'vitals', health: peer.player.health, armour: peer.player.armour});
+          this.save();
+        }
+      } else { peer.submergedSince = null; peer.lastDrownDamageAt = 0; }
       const flight = peer.player.job;
       if (flight?.mode === 'flight') {
         const plane = this.vehicles.get(flight.vehicleId);
@@ -2405,6 +2583,7 @@ class LocalGame {
         } else if (peer.player.health === 0 && health > 0 &&
             Date.now() - (peer.player.lastDeath || 0) > 2000) {
           peer.player.health = health;
+          peer.nativeOxygen = 1150;peer.nativeDrownFraction = 0;peer.nativeOxygenTime = 0;
           this.save();
         }
       }
@@ -2434,7 +2613,8 @@ class LocalGame {
         ok: !!vehicle && (!vehicle.missionOwner || vehicle.missionOwner === peer.player)});
     }
     if (message.t === 'who' && Array.isArray(message.ids))
-      return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer && message.ids.includes(String(p.player.number)))
+      return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer &&
+        (p.player.insideHome || null) === (peer.player.insideHome || null) && message.ids.includes(String(p.player.number)))
         .map(p => this.row(p)).filter(Boolean)});
     if (message.t === 'board') return peer.send(this.board(peer));
     if (message.t === 'home') return peer.send(this.homeStatus(peer.player));
@@ -2473,7 +2653,11 @@ class LocalGame {
     if (text === '/home' || text === '/home doors')
       return peer.send(this.homeStatus(peer.player));
     if (text.startsWith('/home ')) {
-      peer.send({t: 'note', text: 'Property interiors and house actions are not available on this local server yet.'});
+      const [, command, home] = text.split(/\s+/, 3);
+      try {
+        if (!['enter', 'exit'].includes(command)) throw new Error('Use /home enter KEY or /home exit.');
+        this.action(peer.player, `home.${command}`, {home});
+      } catch (error) { peer.send({t: 'note', text: error.message}); }
       return;
     }
     if (text === '/balance' || text === '/money')
@@ -2627,7 +2811,8 @@ class LocalGame {
   fullState(peer) {
     return {t: 'all', protocol: 38, number: peer.player.number, world: 1,
       id: String(peer.player.number), you: peer.player.name, out: [1480, -1738],
-      time: Date.now(), cash: peer.player.cash, cars: [...this.peers].filter(p => p !== peer).map(p => this.row(p)).filter(Boolean),
+      time: Date.now(), cash: peer.player.cash, cars: [...this.peers].filter(p => p !== peer &&
+        (p.player.insideHome || null) === (peer.player.insideHome || null)).map(p => this.row(p)).filter(Boolean),
       chat: this.chat.slice(-50), vehicles: [...this.vehicles.values()].map(vehicle => vehicle.row),
       objects: [], boomboxes: [], dots: [], vdots: [], orders: []};
   }
@@ -2678,8 +2863,9 @@ class LocalGame {
     this.mechanicTick();
     for (const p of this.peers) {
       if (!p.ready) continue;
-      const rows = [...this.peers].filter(other => other !== p).map(other => this.row(other)).filter(Boolean);
-      if (rows.length) p.send({t: 'cars', c: rows});
+      const rows = [...this.peers].filter(other => other !== p &&
+        (other.player.insideHome || null) === (p.player.insideHome || null)).map(other => this.row(other)).filter(Boolean);
+      p.send({t: 'cars', c: rows});
     }
   }
 

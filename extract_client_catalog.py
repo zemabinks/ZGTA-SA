@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent
 CHUNKS = ROOT / 'local-only' / 'site' / '_next' / 'static' / 'chunks'
 OUTPUT = ROOT / 'local-only' / 'selfhost' / 'client-catalog.json'
 HANDLING_OUTPUT = ROOT / 'local-only' / 'site' / 'game' / 'native' / 'handling.json'
+WEAPON_OUTPUT = HANDLING_OUTPUT.with_name('weapons.json')
 
 
 def bundle_with(marker):
@@ -34,6 +35,10 @@ def main():
     vehicle_data = json_literal(vehicles_js, "e.exports=JSON.parse('", "')")
     handling_path, handling_js = bundle_with('94736:P=>{P.exports=JSON.parse(')
     handling_data = json_literal(handling_js, "94736:P=>{P.exports=JSON.parse('", "')")
+    weapon_path, weapon_js = bundle_with('"WEAPON_COLT45"')
+    weapons = json_literal(weapon_js, "e.exports=JSON.parse('", "')")
+    stats_path, stats_js = bundle_with('"targetRange":30,"range":35')
+    stats = json_literal(stats_js, "e.exports=JSON.parse('", "')")['gc']
     game_path, game_js = bundle_with('let cZ=JSON.parse(\'{"gl"')
     dealerships = json_literal(game_js, "let cZ=JSON.parse('", "'),[c0,c1]")
     properties = json_literal(game_js, "ut=JSON.parse('", "'),ul=ut.Fb")
@@ -78,10 +83,15 @@ def main():
     HANDLING_OUTPUT.write_text(json.dumps({
         'source': {handling_path.name: hashlib.sha256(handling_js.encode()).hexdigest()},
         'rows': handling_data,
+        'models': {str(vehicle['id']): vehicle for vehicle in vehicle_data},
         'vehicles': {str(car['model']): {'name': car['name'], 'type': car['type']}
                      for car in cars},
     }, separators=(',', ':')) + '\n', encoding='utf-8')
     HANDLING_OUTPUT.chmod(0o600)
+    WEAPON_OUTPUT.write_text(json.dumps({'definitions': weapons, 'stats': stats,
+        'source': {p.name: hashlib.sha256(s.encode()).hexdigest()
+                   for p, s in [(weapon_path, weapon_js), (stats_path, stats_js)]}}, separators=(',', ':')) + '\n')
+    WEAPON_OUTPUT.chmod(0o600)
     priced = sum(car['price'] is not None for car in cars)
     print(f'Wrote {len(cars)} vehicles ({priced} priced), {len(all_dealers)} dealers/hangars, '
           f'and {len(catalog["homes"])} homes to {OUTPUT}; '

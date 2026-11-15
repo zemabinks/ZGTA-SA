@@ -92,7 +92,7 @@ async function main() {
   fs.mkdirSync(path.join(local, 'selfhost'));
   fs.copyFileSync(path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json'),
     path.join(local, 'selfhost', 'client-catalog.json'));
-  for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js'])
+  for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   let child, ws, otherWs, otherCookie;
@@ -125,7 +125,8 @@ async function main() {
     const cookie = document.headers.get('set-cookie')?.split(';')[0];
     assert(cookie);
     const first = await fetch(root + '/api/auth/me', {headers: {Cookie: cookie}});
-    assert.equal(first.headers.get('set-cookie'), null, 'document account must carry into the API');
+    assert.equal(first.headers.get('set-cookie')?.split(';')[0], cookie,
+      'renewing the persistent cookie must retain the document account');
     const api = async (url, method = 'GET', body) => {
       const response = await fetch(root + url, {method, headers: {Cookie: cookie,
         ...(body ? {'Content-Type': 'application/json'} : {})},
@@ -476,10 +477,14 @@ async function main() {
     assert.equal(visit.status, 200, JSON.stringify(visit.body));
     const teleport = await ws.wait(message => message.t === 'tp');
     assert.deepEqual([teleport.x, teleport.y, teleport.z, teleport.h],
-      [2483.4, -1999.18, 12.851, -180]);
+      [2483.4, -1999.18, 12.851, -Math.PI]);
     ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851,
       say: '/home enter willowfield'});
-    await ws.wait(message => message.t === 'note' && message.text.includes('interiors'));
+    const inside = await ws.wait(message => message.t === 'tp' && message.z > 700);
+    ws.send({t: 'me', walking: true, skin: 7, x: inside.x, y: inside.y, z: inside.z,
+      say: '/home exit'});
+    await ws.wait(message => message.t === 'tp' && message.z < 700);
+    ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851});
     assert.equal((await api('/api/local/state')).body.homeParking.id, 'willowfield');
     assert.equal((await api('/api/local/action', 'POST', {action: 'car.spawn', slot: 0})).status, 200);
     const parkedAtHome = await api('/api/local/action', 'POST', {action: 'car.parkhome', slot: 0});

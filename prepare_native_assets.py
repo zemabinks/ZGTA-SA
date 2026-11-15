@@ -19,6 +19,7 @@ def main() -> None:
     names = [entry['name'] for entry in index['tiles']]
     if '--all-details' in sys.argv:
         names.extend(f"c{entry['cell']}" for entry in index['detail']['cells'])
+        names.extend(f"i{entry['cell']}" for entry in index.get('inside', {}).get('cells', []))
     elif '--detail-spawn' in sys.argv:
         # Also prepare the cell covering the independent server's spawn.
         detail = index['detail']
