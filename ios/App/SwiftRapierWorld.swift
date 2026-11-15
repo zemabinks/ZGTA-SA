@@ -108,6 +108,18 @@ final class SwiftRapierWorld {
                               rotation: simd_quatf = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)) -> Bool {
         zgtaphys_body_next_kinematic(handle, id, pose(position: position, rotation: rotation)) != 0
     }
+    /// Original JS rbSetRotation semantics: normalize after Float conversion.
+    /// Raw setBodyState remains available for exact physics state restoration.
+    @discardableResult
+    func setBrowserRotation(_ id: BodyID, rotation: simd_quatf, wakeUp: Bool = true) -> Bool {
+        let q = rotation.vector
+        return zgtaphys_body_set_browser_rotation(handle, id, [q.x,q.y,q.z,q.w], wakeUp ? 1 : 0) != 0
+    }
+    @discardableResult
+    func setBrowserNextKinematicRotation(_ id: BodyID, rotation: simd_quatf) -> Bool {
+        let q = rotation.vector
+        return zgtaphys_body_set_browser_next_rotation(handle, id, [q.x,q.y,q.z,q.w]) != 0
+    }
     @discardableResult
     func removeBody(_ id: BodyID) -> Bool { zgtaphys_body_remove(handle, id) != 0 }
     func bodyState(_ id: BodyID) -> BodyState? {

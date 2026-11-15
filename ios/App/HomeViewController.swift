@@ -89,9 +89,19 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
         address.keyboardType = .URL
         address.textContentType = .URL
         configureField(code, placeholder: "Join code, if needed", secure: true)
-        row.addArrangedSubview(address)
-        row.addArrangedSubview(code)
-        fields.addArrangedSubview(label("SERVER ADDRESS                                   JOIN CODE", size: 12, color: UIColor.white.withAlphaComponent(0.74), bold: true))
+        let addressColumn = UIStackView(arrangedSubviews: [
+            label("SERVER ADDRESS", size: 12, color: UIColor.white.withAlphaComponent(0.74), bold: true), address
+        ])
+        let codeColumn = UIStackView(arrangedSubviews: [
+            label("JOIN CODE", size: 12, color: UIColor.white.withAlphaComponent(0.74), bold: true), code
+        ])
+        for column in [addressColumn, codeColumn] {
+            column.axis = .vertical
+            column.spacing = 6
+            row.addArrangedSubview(column)
+        }
+        address.accessibilityLabel = "Server address"
+        code.accessibilityLabel = "Join code"
         fields.addArrangedSubview(row)
         address.widthAnchor.constraint(equalTo: row.widthAnchor, multiplier: 0.6, constant: -5).isActive = true
         play.setTitle("PLAY ON THIS SERVER", for: .normal)

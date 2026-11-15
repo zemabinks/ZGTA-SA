@@ -580,6 +580,15 @@ http://127.0.0.1:8766 also works. To regenerate the Xcode project, run
 cd ios && xcodegen generate --spec project.yml, then open
 ios/ZGTASA.xcodeproj.
 
+Build optimized gameplay with `zsh build_native.sh simulator` (the default),
+`zsh build_native.sh device`, or `zsh build_native.sh all`. The generated Xcode
+scheme also runs Release by default. Use `--debug` or change the scheme's Run
+configuration to Debug for unoptimized troubleshooting. Binaries stay under
+ignored `local-only/native-build/`. Device builds from this script are unsigned;
+installing on a physical iPhone requires your Xcode signing setup. See
+[native build details](NATIVE_BUILD.md) for the measured reason to test gameplay
+with optimization enabled.
+
 The iPhone 15 Pro simulator loaded the textured city, drew an archived
 pedestrian and taxi model, displayed a baked San Andreas walk pose, walked
 across the road using the archived collision mesh, entered and drove a marked

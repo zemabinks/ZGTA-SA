@@ -38,3 +38,12 @@ targets:
     dependencies:
       - sdk: Security.framework
       - sdk: CoreFoundation.framework
+schemes:
+  ZGTASA:
+    build:
+      targets:
+        ZGTASA: all
+    run:
+      config: Release
+    profile:
+      config: Release

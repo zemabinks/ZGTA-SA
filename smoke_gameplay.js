@@ -92,7 +92,7 @@ async function main() {
   fs.mkdirSync(path.join(local, 'selfhost'));
   fs.copyFileSync(path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json'),
     path.join(local, 'selfhost', 'client-catalog.json'));
-  for (const file of ['serve_local.js', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
+  for (const file of ['serve_local.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js', 'local_gameplay.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   let child, ws, otherWs, otherCookie;
@@ -112,6 +112,13 @@ async function main() {
   try {
     child = start();
     await ready();
+    const radio = await fetch(root + '/game/radio/native/index');
+    assert.equal(radio.status,200);
+    const radioIndex=await radio.json();
+    assert.equal(radioIndex.version,1);
+    assert(Array.isArray(radioIndex.stations) && Array.isArray(radioIndex.adverts) && Array.isArray(radioIndex.songs));
+    assert.equal((await fetch(root+'/game/radio/native/track/999999999.wav')).status,404);
+    assert.equal((await fetch(root+'/game/radio/native/index',{method:'POST'})).status,405);
     const asset = await fetch(root + '/local-gameplay.js');
     assert.equal(asset.status, 200);
     assert.equal(asset.headers.get('set-cookie'), null, 'assets must not create player accounts');

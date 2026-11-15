@@ -37,6 +37,8 @@ final class NativeFootLocomotion {
     private var wholeBodyAim = false
     private var wantedHeading: Double = 0
     var heading: Double = 0
+    var requestedMovementRatio: Double { requestedRatio }
+    var reportedRatio: Double { wholeBodyAim ? min(1,simd_length(easedStrafe)) : smoothedRatio }
     func reset(heading: Double) {
         self.heading = heading; requestedRatio = 0; remainder = 0; smoothedRatio = 0
         wantedHeading = heading

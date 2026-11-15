@@ -39,6 +39,10 @@ final class NativeBikeDynamics {
     let mass: Double, turnMass: Double, centre: V
     private var steerInput = 0.0, leanInput = 0.0, desiredSteer = 0.0, steer = 0.0
     private var gas = 0.0, brake = 0.0, leanAngle = 0.0, reserve = 1.0
+    private var heardAccel=0.0,heardBrake=0.0,heardGrounded=0.0,heardClimb=0.0,heardLean=0.0
+    private var heardHandbrake=false
+    var heard:NativeVehicleDynamics.HeardSnapshot {.init(box:transmission.transmissionSnapshot,gear:transmission.transmissionGear,
+        accel:heardAccel,brake:heardBrake,handbrake:heardHandbrake,grounded:heardGrounded,spin:0,climb:heardClimb,bike:true,lean:heardLean)}
     private var states = [0,0], drops = [0.0,0.0], slipping = false, burnout = false
     private var move = V.zero, turn = V.zero, bodyCentre = V.zero
     private var right = V(1,0,0), forward = V(0,0,-1), up = V(0,1,0), stepSize = 1.0
@@ -52,6 +56,7 @@ final class NativeBikeDynamics {
     var rearSpin: Double { wheels[2].spin * 50 }
     private(set) var pedal = 0
     private(set) var crank = 0.0
+    var hop:Double {hopTime>0 ? -1:min(1,hopCharge/25)}
     private var bicycleLean = 0.0, hopCharge = 0.0, hopTime = 0.0, previouslyPedalling = false, sprintPedal = false
     private var pedalCounter = 0.0, pedalCooldown = 0.0, pedalHeld = -1.0
     var breathLeft = 1.0
@@ -303,6 +308,8 @@ final class NativeBikeDynamics {
             let target = max(abs(road),abs(transmission.transmissionMaximum)*min(1,gas))
             wheels[2].spin += (target-wheels[2].spin)*(1-pow(0.92,stepSize))
         } else { wheels[2].spin = road }
+        heardAccel=input.pedals != nil ? max(0,gas):accelerate;heardBrake=input.pedals != nil ? brake:braking
+        heardHandbrake=input.handbrake;heardGrounded=Double(rearContact);heardClimb=50*move.y;heardLean=leanAngle
         let leanRight = Self.normalized(simd_cross(forward,averageNormal))
         var desiredLean = contacts==0 ? -(0.008*(0.5*(desiredSteer/(table.lock*Double.pi/180))))*stepSize : simd_dot(move-beforeTyres,leanRight)
         let maximumLean = parameter("maxLean")*(wheels[0].tyre==1 ? 0.4 : 1)
@@ -330,6 +337,6 @@ final class NativeBikeDynamics {
         else if rearAir && !frontAir && forward.y<0 { balance(parameter("stoppieAng"),-0.15,-0.3,parameter("stoppieStab"),min(5*simd_length(move),1)) }
         return Output(linearVelocity:move*50,angularVelocity:turn*50,steering:steer,rearSteering:0,gear:transmission.transmissionGear,
             gas:gas,brake:brake,burnout:burnout,wheelSpeed:abs(wheels[2].spin)*50,
-            wheels:wheels.map { .init(index:$0.index,compression:$0.compression,offset:table.lower,counts:$0.counts,state:$0.state,spin:$0.spin*50,point:$0.point,normal:$0.normal) })
+            wheels:wheels.map { .init(index:$0.index,compression:$0.compression,offset:table.lower,counts:$0.counts,state:$0.state,spin:$0.spin*50,point:$0.point,normal:$0.normal,tyre:$0.tyre,surface:$0.surface) })
     }
 }

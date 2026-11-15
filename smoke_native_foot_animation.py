@@ -37,15 +37,17 @@ const {archivedModules}=require(path.join(process.cwd(),'smoke_vehicle_dynamics'
   method:i=>i===230?['reload']:i===245?['parry']:i>=35&&i<90||i>=130&&i<210?['fire',true]:null});
  scenarios.push({name:'weapon-switch',weapon:22,frames:430,input:i=>({ratio:.8,gun:{pitch:.5,yaw:-.3},crouch:i>260&&i<330}),control:i=>({aim:true,fire:i%120>20&&i%120<90,held:true}),method:i=>i===140?['arm',34]:i===260?['arm',0]:i===360?['arm',37]:null});
  scenarios.push({name:'swim',warmSwim:true,frames:1600,input:i=>{const state=[1,2,3,4,6,5,6,5,1,7,0][Math.floor(i/100)%11];return {swim:state?{state,rate:(Math.sin(i*.023)+1)/2,pace:1+(i%70)/200,pitch:Math.sin(i*.017)*1.1}:null}},method:i=>i===1200?['die','drown']:i===1320?['revive']:null});
+ scenarios.push({name:'flight',warmFlight:true,frames:1800,input:i=>{const state=[1,2,3,4,5,6,7,8,9,10,0,11,12,13,12,13,0,0][Math.floor(i/100)%18];return {fly:state?{state,pitch:Math.sin(i*.019),roll:Math.cos(i*.017)*.8}:null}}});
  const cases=[];
  for(const spec of scenarios){
   const ped=await api.gp('bmori','bmori'),style=await load(66799).r({model:'bmori'},data),steps=[];
   const animator=api.R6(ped,style,data.clips,{onStep:x=>steps.push(x)});if(spec.weapon!==undefined)animator.arm(await load(60662).OP(spec.weapon));if(spec.warmSwim){animator.update(0,{swim:{state:1}});for(let i=0;i<30;i++)await Promise.resolve();}
+  if(spec.warmFlight){for(const fly of[{state:1},{state:11},null]){animator.update(0,{fly});for(let i=0;i<40;i++)await Promise.resolve();}}
   const speed={walk:animator.walkSpeed,sprint:animator.sprintSpeed,run:animator.speeds.run};
   for(let frame=0;frame<spec.frames;frame++){
    const method=spec.method?.(frame);if(method){if(method[0]==='arm')animator.arm(await load(60662).OP(method[1]));else animator[method[0]](...method.slice(1));}
    const control=spec.control?.(frame);if(control)animator.control(control);const input=spec.input(frame),delta=[1/60,1/50,1/75][frame%3];steps.length=0;
-   const forward=animator.update(delta,input),item={scenario:spec.name,weapon:spec.weapon,warmSwim:spec.warmSwim,frame,delta,input,control,method,speed,expected:{debug:animator.debug,shot:animator.shot,shotLeft:animator.shotLeft,reloading:animator.reloading,firing:animator.firing,gunUp:animator.gunUp,gunShooting:animator.gunShooting,fired:animator.fired,swing:animator.swing,travel:[animator.side,forward],sprint:animator.sprintShare,busy:animator.busy,rolling:animator.rolling,floored:animator.floored,dead:animator.dead,fallen:animator.fallen,acting:animator.acting,acted:animator.acted,stunned:animator.stunned,steps:[...steps]}};
+   const forward=animator.update(delta,input),item={scenario:spec.name,weapon:spec.weapon,warmSwim:spec.warmSwim,warmFlight:spec.warmFlight,frame,delta,input,control,method,speed,expected:{debug:animator.debug,shot:animator.shot,shotLeft:animator.shotLeft,reloading:animator.reloading,firing:animator.firing,gunUp:animator.gunUp,gunShooting:animator.gunShooting,fired:animator.fired,swing:animator.swing,travel:[animator.side,forward],sprint:animator.sprintShare,busy:animator.busy,rolling:animator.rolling,floored:animator.floored,dead:animator.dead,fallen:animator.fallen,acting:animator.acting,acted:animator.acted,stunned:animator.stunned,steps:[...steps]}};
    if(frame%9===0 || method){
     ped.group.updateMatrixWorld(true);let mesh;ped.figure.traverse(x=>{if(x.isSkinnedMesh)mesh=x});mesh.skeleton.update();
     const indices=[0,12,57,113,207,330,500,650,800,821];
@@ -83,7 +85,7 @@ var scenario="",animator:NativeFootAnimation!,comparisons=0,maxMotion:Double=0,m
 func number(_ dict:[String:Any],_ key:String,_ fallback:Double=0)->Double{(dict[key] as? NSNumber)?.doubleValue ?? fallback}
 for item in cases {
  let label=item["scenario"] as! String,frame=item["frame"] as! Int
- if label != scenario {scenario=label;animator=NativeFootAnimation(library:library,style:definitions.style(model:"bmori",library:library),random:{0.37});if let weapon=item["weapon"] as? NSNumber {animator.arm(weapons[weapon.intValue])};if item["warmSwim"] as? Bool == true {var warm=NativeFootAnimation.Input();warm.swim = .init(state:1);_ = animator.update(delta:0,input:warm)}}
+ if label != scenario {scenario=label;animator=NativeFootAnimation(library:library,style:definitions.style(model:"bmori",library:library),random:{0.37});if let weapon=item["weapon"] as? NSNumber {animator.arm(weapons[weapon.intValue])};if item["warmSwim"] as? Bool == true {var warm=NativeFootAnimation.Input();warm.swim = .init(state:1);_ = animator.update(delta:0,input:warm)};if item["warmFlight"] as? Bool == true{for state in [1,11,0]{var warm=NativeFootAnimation.Input();warm.fly=state==0 ? nil:.init(state:state);_ = animator.update(delta:0,input:warm)}}}
  if let method=item["method"] as? [Any],let name=method.first as? String {
   func side()->Double{(method[1] as! NSNumber).doubleValue}
   switch name {
@@ -106,6 +108,7 @@ for item in cases {
  let source=item["input"] as! [String:Any],expected=item["expected"] as! [String:Any]
  var input=NativeFootAnimation.Input();input.ratio=number(source,"ratio");input.sprint=source["sprint"] as? Bool ?? false;input.pace=number(source,"pace",1);input.air=source["air"] as? String;input.land=source["land"] as? String;input.crouch=source["crouch"] as? Bool ?? false;input.guarding=source["guard"] as? Bool ?? false;input.look=number(source,"look");input.block=source["block"] as? Bool ?? false;input.poise=source["poise"] as? Bool ?? false
  if let swim=source["swim"] as? [String:Any]{input.swim=NativeSwimAnimation.Input(state:(swim["state"] as! NSNumber).intValue,rate:number(swim,"rate",1),pace:number(swim,"pace",1),pitch:number(swim,"pitch"))}
+ if let fly=source["fly"] as? [String:Any]{input.fly = .init(state:(fly["state"] as! NSNumber).intValue,pitch:number(fly,"pitch"),roll:number(fly,"roll"))}
  if let gun=source["gun"] as? [String:Any]{input.gun=NativeFootAnimation.GunAim(pitch:number(gun,"pitch"),yaw:number(gun,"yaw"))}
  if let c=item["control"] as? [String:Any]{animator.control(NativeFootAnimation.GunControl(fire:c["fire"] as? Bool ?? false,aim:c["aim"] as? Bool ?? false,held:c["held"] as? Bool ?? false,pushed:c["pushed"] as? Bool ?? false,ready:c["ready"] as? Bool ?? true))}
  if let strafe=source["strafe"] as? [String:Any]{input.strafe=SIMD2(number(strafe,"x"),number(strafe,"y"))}
@@ -116,7 +119,7 @@ for item in cases {
  for (key,value) in [("busy",animator.busy),("rolling",animator.rolling),("floored",animator.floored),("dead",animator.dead),("fallen",animator.fallen),("acting",animator.acting),("acted",animator.acted),("stunned",animator.stunned),("reloading",animator.reloading),("firing",animator.firing),("gunUp",animator.gunUp),("gunShooting",animator.gunShooting),("fired",animator.fired),("shot",result.shot),("shotLeft",result.shotLeft)] { assert(value == (expected[key] as! Bool),"\(label):\(frame) \(key) native \(value) JS \(expected[key]!), state \(Array(Mirror(reflecting:animator!).children).filter{$0.label == "action"}) JS \(expected["debug"]!)");comparisons+=1 }
  assert(result.steps == expected["steps"] as! [String],"\(label):\(frame) step \(result.steps) != \(expected["steps"]!)")
  if let vertices=expected["vertices"] as? [[NSNumber]] {
-  let pose=actor.originalPose(blends:result.blends,library:library,aim:result.aim,hiddenBones:result.hiddenBones,figurePitch:result.figurePitch),points=actor.positions(pose:pose)
+  let pose=actor.originalPose(blends:result.blends,library:library,aim:result.aim,hiddenBones:result.hiddenBones,figurePitch:result.figurePitch,figureRoll:result.figureRoll,legBend:result.legBend),points=actor.positions(pose:pose)
   for row in vertices {let actual=points[row[0].intValue],reference=SIMD3(row[1].floatValue,row[2].floatValue,row[3].floatValue),error=simd_distance(actual,reference);maxPose=max(maxPose,error);assert(error<0.0003,"\(label):\(frame) vertex \(row[0]): \(actual) != \(reference); error \(error)");comparisons+=3}
  }
 }
@@ -130,7 +133,7 @@ def main():
         (work / 'order.json').write_text(json.dumps(order))
         (work / 'reference.js').write_text(JS)
         subprocess.run(['node', str(work / 'reference.js'), str(work / 'order.json'), str(work / 'reference.json')], cwd=ROOT, check=True)
-        swift = '\n'.join((ROOT / 'ios/App' / (name + '.swift')).read_text() for name in ['NativeActorAnimation','NativeSkeletalActor','NativeGunAnimation','NativeSwimAnimation','NativeFootAnimation']) + SWIFT
+        swift = '\n'.join((ROOT / 'ios/App' / (name + '.swift')).read_text() for name in ['NativeActorAnimation','NativeSkeletalActor','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativeRiderAnimation']) + SWIFT
         (work / 'verify.swift').write_text(swift)
         subprocess.run(['swift','-module-cache-path','/private/tmp/zgta-macos-swift-modules',str(work / 'verify.swift'),str(ROOT),str(work / 'reference.json')],cwd=ROOT,check=True)
 

@@ -1295,3 +1295,43 @@ pub unsafe extern "C" fn zgtaphys_cast_ball(
     }
     id
 }
+
+/// Mirrors the JS binding's explicit rbSetRotation operation, which differs
+/// from RawRotation construction and raw native state restoration.
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_body_set_browser_rotation(
+    ptr: *mut ZGTAPhysicsWorld,
+    id: Id,
+    input: *const f32,
+    wake_up: u32,
+) -> u32 {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(v) = floats(input, 4) else { return 0 };
+    let Some(h) = w.body_ids.get(&id).copied() else {
+        return 0;
+    };
+    let q = Rotation::from_xyzw(v[0], v[1], v[2], v[3]);
+    if !q.length_squared().is_finite() || q.length_squared() == 0.0 {
+        return 0;
+    }
+    w.bodies[h].set_rotation(q.normalize(), wake_up != 0);
+    1
+}
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_body_set_browser_next_rotation(
+    ptr: *mut ZGTAPhysicsWorld,
+    id: Id,
+    input: *const f32,
+) -> u32 {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(v) = floats(input, 4) else { return 0 };
+    let Some(h) = w.body_ids.get(&id).copied() else {
+        return 0;
+    };
+    let q = Rotation::from_xyzw(v[0], v[1], v[2], v[3]);
+    if !q.length_squared().is_finite() || q.length_squared() == 0.0 {
+        return 0;
+    }
+    w.bodies[h].set_next_kinematic_rotation(q.normalize());
+    1
+}

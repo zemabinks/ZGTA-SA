@@ -1,0 +1,36 @@
+#!/bin/zsh
+# Gameplay builds are optimized; --debug retains Xcode's unoptimized mode.
+set -euo pipefail
+project_dir="${0:A:h}"
+configuration=Release
+target=simulator
+derived_data="$project_dir/local-only/native-build"
+usage() {
+  print 'Usage: zsh build_native.sh [simulator|device|all] [--debug|--release] [--derived-data PATH]'
+}
+while (( $# )); do
+  case "$1" in
+    simulator|device|all) target="$1"; shift ;;
+    --debug) configuration=Debug; shift ;;
+    --release) configuration=Release; shift ;;
+    --derived-data)
+      (( $# >= 2 )) || { usage; exit 2; }
+      derived_data="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage; exit 2 ;;
+  esac
+done
+command -v xcodegen >/dev/null || { print -u2 'XcodeGen is required to regenerate the native project.'; exit 1; }
+if [[ "$target" != device && ! -f "$project_dir/local-only/native-physics/ios-simulator/libzgtasa_native_physics.a" ]] ||
+   [[ "$target" != simulator && ! -f "$project_dir/local-only/native-physics/ios-device/libzgtasa_native_physics.a" ]]; then
+  zsh "$project_dir/native-physics/build.sh" all
+fi
+(cd "$project_dir/ios" && xcodegen generate --spec project.yml)
+build_platform() {
+  local platform="$1" suffix="$2"
+  xcodebuild -project "$project_dir/ios/ZGTASA.xcodeproj" -scheme ZGTASA -configuration "$configuration" \
+    -destination "generic/platform=$platform" -derivedDataPath "$derived_data" CODE_SIGNING_ALLOWED=NO build
+  print "Native $configuration bundle: $derived_data/Build/Products/$configuration-$suffix/ZGTASA.app"
+}
+if [[ "$target" != device ]]; then build_platform 'iOS Simulator' iphonesimulator; fi
+if [[ "$target" != simulator ]]; then build_platform iOS iphoneos; fi

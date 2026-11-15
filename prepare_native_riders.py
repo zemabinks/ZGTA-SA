@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export exact original first-seat coordinates/clip roles into ignored data."""
 from pathlib import Path
-import hashlib,json,math
+import hashlib,json,math,subprocess
 import prepare_native_models as dff
 import prepare_native_seating
 ROOT=Path(__file__).resolve().parent
@@ -32,9 +32,14 @@ def main():
         models[identifier]={'model':model,'astride':config['astride'],'clips':config['clips'],
                             'driverSeat':seat,'driverSide':side,
                             'origin':row['origin'],'sha256':hashlib.sha256(raw).hexdigest()}
-    output=dff.GAME/'native/riders.json'
-    output.write_text(json.dumps({'version':1,'models':models,'withoutSeat':missing},separators=(',',':'))+'\n')
-    output.chmod(0o600)
-    print(f'Prepared{len(models): d} original rider seats/clip profiles;{len(missing): d} original models have no front-seat frame')
+    subprocess.run(['node',str(ROOT/'prepare_native_riders.js')],check=True)
+    actual=json.loads((dff.GAME/'native/riders.json').read_text())['models']
+    for identifier,expected in models.items():
+        selected=actual[identifier]
+        if selected['driverSide']!=expected['driverSide'] or any(abs(a-b)>0.00001 for a,b in zip(selected['driverSeat'],expected['driverSeat'])):
+            raise ValueError(f'Original driver seat differs from independently parsed DFF:{identifier}')
+    if set(missing)!=set(identifier for identifier,row in actual.items() if not row['seats']):
+        raise ValueError('Original no-seat models differ from independent DFF validation')
+    print(f'Validated {len(models)} original driver seats against independent DFF transforms')
 
 if __name__=='__main__':main()

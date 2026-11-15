@@ -85,6 +85,9 @@ final class NativeFootAnimation {
         var guarding = false
         var swimming = false
         var swim: NativeSwimAnimation.Input?
+        var fly: NativeFlightAnimation.Input?
+        var position=SIMD3<Double>.zero
+        var heading:Double=0
         var gun: GunAim?
         var block = false
         var poise = false
@@ -101,7 +104,9 @@ final class NativeFootAnimation {
         var shotLeft = false
         var hiddenBones: Set<Int> = []
         var figurePitch: Float = 0
-    }
+        var figureRoll: Float = 0
+        var legBend=SIMD2<Float>.zero
+        var flight:NativeFlightAnimation.Frame?    }
     private struct Action {
         var kind: String
         var clip: String
@@ -126,6 +131,7 @@ final class NativeFootAnimation {
     private struct Flinch { var clip: String; var time: Double = 0; var stun: Bool }
     private let library: NativeSkeletalAnimationLibrary
     private lazy var swimAnimation = NativeSwimAnimation(duration:{ [unowned self] in self.duration($0) })
+    private lazy var flightAnimation = NativeFlightAnimation(duration:{ [unowned self] in self.library.duration(of:$0) })
     private let baseStyle: NativeFootAnimationStyle
     private(set) var style: NativeFootAnimationStyle
     private var phase: Double
@@ -197,6 +203,8 @@ final class NativeFootAnimation {
     private var lastAim = GunAim()
     private var lastArm = false
     private var lastTwin = false
+    private var reportedGuard = false
+    private var reportedBlock = false
     var moveSpeed: Double = 1
     var onStep: ((String) -> Void)?
 
@@ -250,6 +258,10 @@ final class NativeFootAnimation {
     var aside: String? { swingAside }
     var swing: Int { swingIndex }
     var gunLoop: NativeFootWeaponAnimation.Loop? { usesGunCycle ? activeLoop : nil }
+    var reportedAction: Int {
+        if rolling { return action?.kind == "rollR" ? 27 : 26 }
+        return reportedBlock ? 28 : reportedGuard ? 36 : 0
+    }
     private var crouchedGun: Bool { crouch > 0.5 && weapon?.clip("crouchFire") != nil }
     private var fireClip: String? { crouchedGun ? weapon?.clip("crouchFire") : weaponFireClip }
     private var reloadClip: String? { crouch > 0.5 ? weapon?.clip("crouchReload") ?? weapon?.clip("reload") : weapon?.clip("reload") }
@@ -379,6 +391,8 @@ final class NativeFootAnimation {
     func loseHead() { lostHead = true }
 
     func update(delta: Double, input: Input = Input()) -> Frame {
+        reportedGuard = input.guarding && death == nil
+        reportedBlock = input.block && reportedGuard
         let dt = max(0, delta.isFinite ? delta : 0)
         let ratio = death == nil ? min(2, max(0, input.ratio)) : 0
         func fade(_ value: Double, _ on: Bool, _ rise: Double, _ fall: Double) -> Double { min(1, max(0, value + (on ? rise : -fall) * dt)) }
@@ -588,6 +602,8 @@ final class NativeFootAnimation {
         if poiseBlend > 0, let clip = weapon?.clip("poise") { add(clip, 0, poiseBlend, replace: true) }
         let swim = swimAnimation.update(delta:dt,input:death == nil ? input.swim : nil)
         for blend in swim.blends { add(blend.clip,blend.time,blend.weight,replace:true) }
+        let flight=flightAnimation.update(delta:dt,input:death == nil ? input.fly:nil,position:input.position,heading:input.heading)
+        for blend in flight.blends {add(blend.clip,blend.time,blend.weight,replace:true)}
         if var current = flinching {
             current.time += dt; let length = duration(current.clip)
             if current.time >= length { flinching = nil }
@@ -636,7 +652,7 @@ final class NativeFootAnimation {
             aim.rightArm = lastArm ? Float(gunBlend) : 0
             aim.leftArm = lastTwin ? Float(gunBlend) : 0
         }
-        return Frame(blends: blends, travel: travel, steps: steps, look: death == nil ? input.look : 0, sprintShare: sprint, crouchShare: crouch, aim: aim, shot: shot, shotLeft: gunLeft, hiddenBones: lostHead ? [5] : [],figurePitch:Float(swim.figurePitch))
+        return Frame(blends: blends, travel: travel, steps: steps, look: death == nil ? input.look : 0, sprintShare: sprint, crouchShare: crouch, aim: aim, shot: shot, shotLeft: gunLeft, hiddenBones: lostHead ? [5] : [],figurePitch:Float(flight.figureControlled ? flight.figurePitch:swim.figurePitch),figureRoll:Float(flight.figureRoll),legBend:SIMD2<Float>(flight.bend),flight:flightAnimation.showing || flight.figureControlled ? flight:nil)
     }
 
     private func duration(_ name: String) -> Double { library.duration(of: name) ?? 0 }

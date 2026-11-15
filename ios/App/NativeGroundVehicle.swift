@@ -35,6 +35,7 @@ final class NativeGroundVehicle {
         }
         let configuration: NativeVehicleDynamics.Configuration
         let bikeConfiguration: NativeBikeDynamics.Configuration?
+        let trainConfiguration: NativeTrainDynamics.Configuration?
         let flightParameters: NativeFlightDynamics.Parameters?
         let boatParameters: NativeVehicleBuoyancy.Parameters?
         let buoyancyMinimum: SIMD3<Double>
@@ -42,6 +43,8 @@ final class NativeGroundVehicle {
         let rearExtent: Double
         let collisionDamage: Double
         let damageWidth: Double
+        let width:Double,length:Double,height:Double,rigidMass:Double
+        let blastMinimum:SIMD3<Double>,blastMaximum:SIMD3<Double>
         let chassis: [Shape]
         let bounds: (maxX: Float,minY: Float,maxZ: Float,minimum: SIMD3<Float>,maximum: SIMD3<Float>)
         let eye: SIMD3<Float>?
@@ -80,6 +83,9 @@ final class NativeGroundVehicle {
                 Float((bounds["minY"] as? Double) ?? low.y),Float((bounds["maxZ"] as? Double) ?? high.z),SIMD3<Float>(low),SIMD3<Float>(high))
             rearExtent = (bounds["minY"] as? Double) ?? low.y
             damageWidth = (bounds["maxX"] as? Double) ?? max(abs(low.x),abs(high.x))
+            width=(row["width"] as? Double) ?? high.x-low.x;length=(row["length"] as? Double) ?? high.y-low.y;height=(row["height"] as? Double) ?? high.z-low.z
+            rigidMass=((row["massProperties"] as? [String:Any])?["mass"] as? Double) ?? Double(Float((values["mass"] as? Double) ?? 1000))
+            blastMinimum=low;blastMaximum=high
             collisionDamage = (values["collisionDamage"] as? Double) ?? 0.5
             eye = vector(row["driverEye"]).map { SIMD3<Float>($0) }
             let collisionBox = (row["collision"] as? [String: Any])?["box"] as? [String: Any]
@@ -89,6 +95,8 @@ final class NativeGroundVehicle {
             boatParameters = (row["boat"] as? [String: Any]).flatMap { NativeVehicleBuoyancy.Parameters($0) }
             configuration = .init(table: .init(model: id, values: values), origin: origin, wheels: wheels,
                 kind: row["kind"] as? String ?? "car")
+            trainConfiguration = configuration.kind == "train" ? .init(model:id,origin:origin,lower:configuration.table.lower,
+                minimum:low,maximum:high,carriages:row["carriages"] as? [Int] ?? []) : nil
             if configuration.kind == "bike" {
                 guard let hubs = row["hubs"] as? [String: [String: Any]],
                       let front = hubs["front"], let rear = hubs["rear"],
@@ -109,6 +117,7 @@ final class NativeGroundVehicle {
         others.synchronize(poses,excluding:excluding,near:position)
     }
     private var definitions: [String: Definition] = [:]
+    private var audioTopCache:[String:Double] = [:]
     private var cells: [String: [SwiftRapierWorld.ColliderID]] = [:]
     private var cellData: [String: Data] = [:]
     private var materialClasses: [Int] = []
@@ -125,9 +134,17 @@ final class NativeGroundVehicle {
     var waterWave: ((SIMD3<Double>) -> NativeVehicleBuoyancy.Wave)?
     private var dynamics: NativeVehicleDynamics?
     private var bikeDynamics: NativeBikeDynamics?
+    private var trainDynamics: NativeTrainDynamics?
+    private var tracks: NativeTrainTracks?
+    struct Carriage { let model:String;let transform:simd_float4x4;let position:SIMD3<Float> }
+    private(set) var carriages:[Carriage] = []
     private var accumulator = 0.0
+    private var visualWheelSpeed = 0.0
+    private(set) var forwardSpeed = 0.0
     private(set) var output: NativeVehicleDynamics.Output?
-    private(set) var wheelAngles = [Float](repeating: 0, count: 4)
+    private var wheelClocks = [Double](repeating:0,count:4)
+    var wheelAngles:[Float] {wheelClocks.map(Float.init)}
+    var wheelAnglesDouble:[Double] {wheelClocks}
     private(set) var modelPosition = SIMD3<Float>.zero
     private(set) var bodyPosition = SIMD3<Float>.zero
     private(set) var modelTransform = matrix_identity_float4x4
@@ -138,10 +155,20 @@ final class NativeGroundVehicle {
     private(set) var speed: Float = 0
     private(set) var model = ""
     var active: Bool { rigid != nil }
+    var nativeLinearVelocity:SIMD3<Float> {
+        guard let rigid,let state=world.bodyState(rigid) else{return .zero}
+        return SwiftRapierWorld.rapierToGTA(state.linearVelocity)
+    }
+    var nativeAngularVelocity:SIMD3<Float> {
+        guard let rigid,let state=world.bodyState(rigid) else{return .zero}
+        return SwiftRapierWorld.rapierToGTA(state.angularVelocity)
+    }
     var bikeLean: Float { Float(bikeDynamics?.lean ?? 0) }
     var bikeDrop: [Float] { bikeDynamics?.drop.map(Float.init) ?? [] }
     var bicyclePedal: Int { bikeDynamics?.pedal ?? 0 }
     var bicycleCrank: Float { Float(bikeDynamics?.crank ?? 0) }
+    var bicycleHop: Float { Float(bikeDynamics?.hop ?? 0) }
+    var bikeFullLean: Float { Float(definitions[model]?.bikeConfiguration?.parameters["fullAnimLean"] ?? 0) }
     var rotorTurning: Float { Float(dynamics?.flight?.turning ?? 0) }
     var aircraftNozzle: Float? {
         guard let flight=dynamics?.flight,flight.jets else { return nil }
@@ -150,12 +177,66 @@ final class NativeGroundVehicle {
     var landingGearUp: Bool { dynamics?.flight?.gearUp ?? false }
     var onWater: Bool { dynamics?.buoyancy?.onWater ?? false }
     var lostInWater: Bool { dynamics?.buoyancy?.lost ?? false }
-    func setLandingGear(_ raised: Bool) { dynamics?.flight?.setGear(raised) }
+    var heard:NativeVehicleDynamics.HeardSnapshot? {bikeDynamics?.heard ?? dynamics?.heard}
+    var drivesTop:Double {definitions[model].map{0.78*$0.configuration.table.maxVelocity/3.6} ?? 40}
+    var rotorScalar:Double {dynamics?.flight?.rotor ?? 0}
+    var flightThrottle:Double {dynamics?.flight?.throttle ?? 0}
+    struct AudioSnapshot {
+        let body:SwiftRapierWorld.BodyState;let speed:Double,top:Double,rotorTurning:Double,rotorScalar:Double,flightThrottle:Double
+        let gas:Double?
+        let heard:NativeVehicleDynamics.HeardSnapshot?;let skid:Double,surface:Int;let flat:Bool,nitro:Bool
+    }
+    func audioSnapshot()->AudioSnapshot? {
+        guard let rigid,let body=world.bodyState(rigid) else{return nil}
+        let wheels=output?.wheels ?? [],speed=abs(forwardSpeed)/50,gas=output?.gas ?? 0
+        func isRear(_ index:Int)->Bool {bikeDynamics != nil ? index>=2:index==1 || index==3}
+        let rear=wheels.contains{isRear($0.index) && $0.state==2}
+        var skid=0.0,surface=2
+        for wheel in wheels where wheel.compression<1 && wheel.state != 0 {
+            surface=wheel.surface
+            if wheel.state==1 {if abs(gas)>0.4 {skid += (abs(gas)-0.4)/0.6*0.75}}
+            else if wheel.state==2 {if rear || isRear(wheel.index) {skid += 0.75*min(1,speed)}}
+            else if speed>=0.04 {skid += 1.2*min(5*speed,1)}
+        }
+        return .init(body:body,speed:forwardSpeed,top:drivesTop,rotorTurning:dynamics?.flight?.turning ?? 0,rotorScalar:rotorScalar,flightThrottle:flightThrottle,gas:output?.gas,
+            heard:heard,skid:skid,surface:surface,flat:wheels.contains{$0.tyre==1 && $0.counts>0},nitro:dynamics?.nitroBurning ?? false)
+    }
+    struct HullAudio {let gas:Double;let afloat:Bool;let up:Double;let slam:Double}
+    func takeHullAudio()->HullAudio? {
+        guard definitions[model]?.configuration.kind=="boat",let buoyancy=dynamics?.buoyancy,let rigid,let body=world.bodyState(rigid) else{return nil}
+        let q=body.rotation;return .init(gas:buoyancy.gas,afloat:buoyancy.onWater,
+            up:1-2*(Double(q.imag.x)*Double(q.imag.x)+Double(q.imag.z)*Double(q.imag.z)),slam:buoyancy.takeSlam())
+    }
+    var aloft:Bool {dynamics?.flight != nil && (output?.wheels.allSatisfy({$0.counts<=0}) ?? true)}
+    /// Original19737.uw base vehicle kit. Special working-vehicle attachment
+    /// controllers can supply their original override before this value.
+    func wireKit(tuck:Double)->[Double]? {
+        guard let definition=definitions[model] else{return nil}
+        func round3(_ value:Double)->Double {floor(value*1000+0.5)/1000}
+        var kit:[Double]?
+        if let bike=bikeDynamics {
+            kit=[round3(bike.lean),round3(tuck)]
+            if definition.bikeConfiguration?.pedalled == true {
+                let phase=((bike.crank.truncatingRemainder(dividingBy:1))+1).truncatingRemainder(dividingBy:1)
+                kit! += [Double(bike.pedal),round3(phase),round3(bike.hop)]
+            }
+        }
+        func put(_ index:Int,_ value:Double) {if kit==nil{kit=[]};while kit!.count<=index{kit!.append(0)};kit![index]=value}
+        if let flight=dynamics?.flight,flight.jets {put(5,floor(flight.nozzle/5000*100+0.5)/100)}
+        else if definition.configuration.table.flags&64 != 0 {put(5,round3(-(output?.rearSteering ?? 0)))}
+        if landingGearUp && [476,519,577,520,553,592].contains(definition.configuration.table.model) {put(6,1)}
+        if aloft {put(7,1)}
+        return kit
+    }
+    func setLandingGear(_ raised: Bool) {
+        guard let definition=definitions[model],[476,519,577,520,553,592].contains(definition.configuration.table.model),!raised || aloft else{return}
+        dynamics?.flight?.setGear(raised)
+    }
     var cameraFrame: CameraFrame? {
         guard let rigid, let body = world.bodyState(rigid), let definition = definitions[model] else { return nil }
         return CameraFrame(position:modelPosition,forward:orientation.act(SIMD3(0,1,0)),right:orientation.act(SIMD3(1,0,0)),up:orientation.act(SIMD3(0,0,1)),
             moveSpeed:SwiftRapierWorld.rapierToGTA(body.linearVelocity)/50,turnSpeed:SwiftRapierWorld.rapierToGTA(body.angularVelocity)/50,
-            wheels:output?.wheels.filter { $0.counts > 0 }.count ?? 0,maxX:definition.bounds.maxX,minY:definition.bounds.minY,maxZ:definition.bounds.maxZ,
+            wheels:trainDynamics != nil ? 4:output?.wheels.filter { $0.counts > 0 }.count ?? 0,maxX:definition.bounds.maxX,minY:definition.bounds.minY,maxZ:definition.bounds.maxZ,
             minimum:definition.bounds.minimum,maximum:definition.bounds.maximum,heightAboveRoad:Float(definition.configuration.origin),eye:definition.eye)
     }
 
@@ -172,6 +253,7 @@ final class NativeGroundVehicle {
         guard let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rows = document["models"] as? [String: [String: Any]] else { return 0 }
         definitions = rows.compactMapValues { Definition($0) }
+        audioTopCache.removeAll()
         others.load(rows.compactMapValues { row in var value=row;value["solverSupported"]=true;return Definition(value) })
         let classes = document["materialClasses"] as? [Int] ?? []
         let parts = (document["collisionFallbackParts"] as? [String:[[String:Any]]] ?? [:]).mapValues { rows in
@@ -190,8 +272,17 @@ final class NativeGroundVehicle {
         }
         return definitions.count
     }
-    func supports(_ model: String) -> Bool { definitions[model] != nil }
+    @discardableResult func loadTracks(_ data:Data)->Bool {guard let tracks=NativeTrainTracks(data:data) else{return false};self.tracks=tracks;return true}
+    func supports(_ model: String) -> Bool { guard let definition=definitions[model] else{return false};return definition.trainConfiguration == nil || tracks != nil }
     func modelOrigin(_ model: String) -> Float? { definitions[model].map { Float($0.configuration.origin) } }
+    func modelFlags(_ model:String)->Int {definitions[model]?.configuration.table.modelFlags ?? 0}
+    func handlingFlags(_ model:String)->Int {definitions[model]?.configuration.table.flags ?? 0}
+    func remoteAudioTop(model:String)->Double? {
+        if let value=audioTopCache[model]{return value}
+        guard let definition=definitions[model] else{return nil}
+        let value=NativeVehicleDynamics.transmissionSnapshot(table:definition.configuration.table).max*50
+        audioTopCache[model]=value;return value
+    }
     func isCellLoaded(_ name: String) -> Bool { loadedCells.contains(name) }
     func installCell(_ name: String, data: Data) {
         cellData[name] = data
@@ -258,9 +349,12 @@ final class NativeGroundVehicle {
     }
     @discardableResult func enter(model: String, modelPosition: SIMD3<Float>, heading: Float, pitch: Float = 0, roll: Float = 0) -> Bool {
         guard let definition = definitions[model] else { return false }
+        let rotation = Self.rotation(heading:heading,pitch:pitch,roll:roll)
+        let position = SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0))
+        let train:NativeTrainDynamics? = definition.trainConfiguration.flatMap { configuration in tracks.flatMap { NativeTrainDynamics(configuration:configuration,tracks:$0,position:SIMD3<Double>(position),heading:-Double(heading)) } }
         let bike = definition.bikeConfiguration.flatMap { NativeBikeDynamics(configuration: $0) }
-        let dynamics = bike == nil ? NativeVehicleDynamics(configuration: definition.configuration) : nil
-        guard bike != nil || dynamics != nil else { return false }
+        let dynamics = bike == nil && train == nil ? NativeVehicleDynamics(configuration: definition.configuration) : nil
+        guard train != nil || bike != nil || dynamics != nil else { return false }
         if let dynamics {
             if let parameters = definition.flightParameters {
                 dynamics.flight = NativeFlightDynamics(parameters:parameters,kind:definition.configuration.kind,
@@ -271,11 +365,14 @@ final class NativeGroundVehicle {
             dynamics.buoyancy?.wave = { [weak self] point in self?.waterWave?(point) ?? .init(height:0,normal:SIMD3(0,1,0)) }
         }
         exit()
-        let rotation = Self.rotation(heading:heading,pitch:pitch,roll:roll)
-        let position = SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0))
-        let mass = SwiftRapierWorld.Mass(value: Float(bike?.mass ?? dynamics!.mass),
-            centre: SIMD3<Float>(bike?.centre ?? dynamics!.centre), turnMass: Float(bike?.turnMass ?? dynamics!.turnMass))
-        guard let body = world.addBody(position: position, rotation: rotation, mass: mass) else { return false }
+        let mass:SwiftRapierWorld.Mass
+        if let bike {mass = .init(value:Float(bike.mass),centre:SIMD3<Float>(bike.centre),turnMass:Float(bike.turnMass))}
+        else if let dynamics {mass = .init(value:Float(dynamics.mass),centre:SIMD3<Float>(dynamics.centre),turnMass:Float(dynamics.turnMass))}
+        else {mass = .init(value:0,turnMass:0)}
+        let initialPosition:SIMD3<Float>,initialRotation:simd_quatf,kind:SwiftRapierWorld.BodyKind
+        if let train {initialPosition=SIMD3<Float>(train.initial.position);initialRotation=simd_quatf(vector:SIMD4<Float>(train.initial.rotation.vector));kind = .kinematicVelocity}
+        else {initialPosition=position;initialRotation=rotation;kind = .dynamic}
+        guard let body=world.addBody(kind:kind,position:initialPosition,rotation:initialRotation,mass:mass) else{return false}
         for shape in definition.chassis {
             let collider: SwiftRapierWorld.ColliderID?
             if shape.kind == "sphere" { collider = world.addSphere(radius: shape.radius, body: body, position: shape.centre, friction: shape.friction, restitution: shape.restitution) }
@@ -287,39 +384,95 @@ final class NativeGroundVehicle {
             world.setContactForceEvents(collider)
             chassisColliders.insert(collider)
         }
-        rigid = body; self.dynamics = dynamics; bikeDynamics = bike; self.model = model
+        rigid = body; self.dynamics = dynamics; bikeDynamics = bike; trainDynamics = train; self.model = model
         let table = definition.configuration.table
         let damage = NativeVehicleDamageController(world:world,mass:table.mass,collisionDamage:definition.collisionDamage,
             maxX:definition.damageWidth,flags:table.modelFlags,model:table.model,origin:definition.configuration.origin,flight:dynamics?.flight != nil)
-        damage.onEvents = { [weak self] events,body in self?.onDamageEvents?(events,body) }
+        damage.onEvents = { [weak self] events,body in self?.handleDamageEvents(events,body:body) }
         damage.isOtherVehicle = { [weak self] id in self?.others.colliders.contains(id) == true }
         damage.isRhino = { [weak self] id in self?.others.rhinos.contains(id) == true }
         damageController = damage
-        // Update the broad phase once before the original solver casts wheels.
-        // The initial stationary body has gravity disabled, matching the browser.
-        world.step(); updatePose()
+        // The native query bridge refreshes body/collider transforms and its
+        // query BVH directly; creation must not advance the shared world.
+        updatePose()
         return true
     }
     func exit() {
         if let rigid { world.removeBody(rigid) }
-        rigid = nil; dynamics = nil; bikeDynamics = nil; output = nil; accumulator = 0; model = ""; speed = 0
-        wheelAngles = [Float](repeating: 0, count: 4)
+        rigid = nil; dynamics = nil; bikeDynamics = nil; trainDynamics = nil; carriages = []; output = nil; accumulator = 0; model = ""; speed = 0
+        wheelClocks = [Double](repeating:0,count:4)
+        visualWheelSpeed = 0
+        forwardSpeed = 0
         chassisColliders.removeAll()
         damageController = nil
     }
     func teleport(modelPosition: SIMD3<Float>, heading: Float) {
         guard let rigid, let definition = definitions[model] else { return }
-        let rotation = simd_quatf(angle: -heading, axis: SIMD3(0,1,0))
+        let rotation = Self.rotation(heading:heading)
         let position = SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0))
-        world.setBodyState(.init(position: position, rotation: rotation), for: rigid)
+        if let configuration=definition.trainConfiguration,let tracks,
+           let train=NativeTrainDynamics(configuration:configuration,tracks:tracks,position:SIMD3<Double>(position),heading:-Double(heading)) {
+            trainDynamics=train
+            world.setBodyState(.init(position:SIMD3<Float>(train.initial.position),rotation:simd_quatf(vector:SIMD4<Float>(train.initial.rotation.vector))),for:rigid)
+        } else {world.setBodyState(.init(position: position, rotation: rotation), for: rigid)}
         accumulator = 0; updatePose()
     }
+    func setDamageHinges(_ gta:[Int:SIMD3<Double>]) {
+        damageController?.hinges=gta.mapValues{SIMD3($0.x,$0.z,-$0.y)}
+    }
+    /// Original62540.tt: source damage/shape intersection plus the original
+    /// centre-of-mass angular impulse. Rhino432 alone reduces blast damage.
+    func applyBlast(centre:SIMD3<Float>) {
+        applyBlast(centre:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(centre)),subdued:false,
+                   scale:definitions[model]?.configuration.table.model == 432 ? 0.3:1)
+    }
+    private func applyBlast(centre:SIMD3<Double>,subdued:Bool,scale:Double = 1) {
+        guard let rigid,let definition=definitions[model],let damage=damageController,let current=world.bodyState(rigid) else{return}
+        let table=definition.configuration.table
+        guard let result=NativeVehicleDamage.explosion(body:damage.body(current),minimum:definition.blastMinimum,
+            maximum:definition.blastMaximum,mass:table.mass,centre:centre,subdued:subdued) else{return}
+        damage.state.inflict(result.damage*scale)
+        guard let force=result.force,let point=result.point else{return}
+        let q=current.rotation,rotation=simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))
+        let arm=point-rotation.act(SIMD3(table.comX,table.comZ,-table.comY))
+        let angular=SIMD3<Double>(current.angularVelocity)+simd_cross(arm,force)/table.turnMass*50
+        world.setVelocities(rigid,linear:current.linearVelocity,angular:SIMD3<Float>(angular))
+    }
+    private func handleDamageEvents(_ events:[NativeVehicleDamage.Event],body:NativeVehicleDamage.Body) {
+        if events.contains(where:{$0.type=="blow"}),let rigid,let definition=definitions[model],let damage=damageController,
+           !(definition.configuration.kind=="bike" && [481,509,510].contains(definition.configuration.table.model)),
+           let current=world.bodyState(rigid) {
+            var linear=current.linearVelocity;linear.y=Float(Double(linear.y)+6.5)
+            world.setVelocities(rigid,linear:linear,angular:current.angularVelocity)
+            let maximum=definition.blastMaximum
+            let rightScale=(damage.random()*1.5-0.75)*maximum.x
+            let frontScale=(damage.random()*1.5-0.75)*maximum.y
+            var point:SIMD3<Double>=body.position
+            point += body.right*rightScale;point += body.forward*frontScale
+            point.y -= 1.25*maximum.z;applyBlast(centre:point,subdued:true)
+        }
+        onDamageEvents?(events,body)
+    }
     func update(delta: Double, input: NativeVehicleDynamics.Input, currentCell: String) {
-        guard let rigid, dynamics != nil || bikeDynamics != nil, loadedCells.contains(currentCell) else { return }
+        guard let rigid, dynamics != nil || bikeDynamics != nil || trainDynamics != nil, loadedCells.contains(currentCell) else { return }
         accumulator += min(max(0,delta),0.2)
         let fixed = 1.0 / 60
         while accumulator + 1e-12 >= fixed {
             guard let body = world.bodyState(rigid) else { exit(); return }
+            if let trainDynamics {
+                let wrecked=damageController?.state.wrecked ?? false
+                let result=trainDynamics.step(delta:fixed,throttle:wrecked ? 0:input.throttle,handbrake:input.handbrake || wrecked)
+                world.setBodyState(.init(position:SIMD3<Float>(result.pose.position),rotation:simd_quatf(vector:SIMD4<Float>(result.pose.rotation.vector)),
+                    linearVelocity:SIMD3<Float>(result.linearVelocity),angularVelocity:SIMD3<Float>(result.angularVelocity)),for:rigid)
+                world.setBrowserRotation(rigid,rotation:simd_quatf(vector:SIMD4<Float>(result.pose.rotation.vector)))
+                if let requested=world.bodyState(rigid) {
+                    let q=requested.rotation,rotation=simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))
+                    forwardSpeed = -rotation.conjugate.act(SIMD3<Double>(requested.linearVelocity)).z
+                }
+                world.step();_ = world.drainContactForceEvents()
+                for index in wheelClocks.indices {wheelClocks[index] -= trainDynamics.speed*fixed/0.36}
+                accumulator -= fixed;continue
+            }
             let rotation = body.rotation
             let state = NativeVehicleDynamics.BodyState(position: SIMD3<Double>(body.position),
                 rotation: simd_quatd(ix: Double(rotation.imag.x),iy: Double(rotation.imag.y),iz: Double(rotation.imag.z),r: Double(rotation.real)),
@@ -332,24 +485,37 @@ final class NativeGroundVehicle {
             var controls = input
             if let damage = damageController?.state {
                 dynamics?.setTyres(damage.wheels);bikeDynamics?.setTyres(damage.wheels)
-                controls.nobody = controls.nobody || damage.wrecked
+                if damage.wrecked {controls = .init();controls.handbrake=true;controls.nobody=input.nobody}
+            }
+            if input.drive != nil {
+                if definitions[model]?.configuration.kind=="heli" {controls.drive = .init(throttle:0,steer:0,handbrake:true)}
+                else if definitions[model]?.configuration.kind=="plane" {
+                    controls.drive = .init(throttle:forwardSpeed>0.5 ? min(0,controls.throttle):0,
+                        steer:max(-1,min(1,controls.yaw+(aloft ? 0:controls.steer))),handbrake:controls.handbrake)
+                }
             }
             if let bikeDynamics { result = bikeDynamics.step(delta: fixed, input: controls, body: state, raycast: cast) }
             else { result = dynamics!.step(delta: fixed, input: controls, body: state, raycast: cast) }
             output = result
-            if bikeDynamics != nil, let specification = definitions[model]?.bikeConfiguration {
-                let forward = state.rotation.act(SIMD3(0,0,-1))
-                let front = simd_dot(state.linearVelocity,forward)
-                let rear = bikeDynamics?.rearSpin ?? front
-                wheelAngles[0] -= Float(front*fixed/specification.front.radius)
-                wheelAngles[1] = wheelAngles[0]
-                wheelAngles[2] -= Float(rear*fixed/specification.rear.radius)
-                wheelAngles[3] = wheelAngles[2]
-            } else { for front in [true,false] {
+            forwardSpeed = -state.rotation.conjugate.act(SIMD3<Double>(SIMD3<Float>(result.linearVelocity))).z
+            if definitions[model]?.configuration.kind == "car" { for front in [true,false] {
                 let axle = result.wheels.filter { ($0.index == 0 || $0.index == 2) == front }
                 let mean = axle.isEmpty ? 0 : axle.reduce(0) { $0 + $1.spin } / Double(axle.count)
-                for wheel in axle { wheelAngles[wheel.index] -= Float(mean * fixed / 0.36) }
-            } }
+                for wheel in axle { wheelClocks[wheel.index] -= mean * fixed / 0.36 }
+            } } else {
+                // Original62540 updates visual wheel clocks after reading
+                // back the newly requested Float32 body velocity. Aircraft
+                // retain/decay their previous wheel speed while airborne.
+                let speed = forwardSpeed
+                if dynamics?.flight != nil && result.wheels.allSatisfy({$0.counts<=0}) {visualWheelSpeed *= exp(-1.2*fixed)}
+                else {visualWheelSpeed=speed}
+                let frontRadius=definitions[model]?.bikeConfiguration?.front.radius ?? 0.36
+                let rearRadius=definitions[model]?.bikeConfiguration?.rear.radius ?? 0.36
+                let rear=bikeDynamics?.rearSpin ?? visualWheelSpeed
+                wheelClocks[0] -= visualWheelSpeed*fixed/frontRadius;wheelClocks[2]=wheelClocks[0]
+                if !controls.handbrake {wheelClocks[1] -= rear*fixed/rearRadius}
+                wheelClocks[3]=wheelClocks[1]
+            }
             world.setVelocities(rigid, linear: SIMD3<Float>(result.linearVelocity), angular: SIMD3<Float>(result.angularVelocity))
             world.step()
             let contacts = world.drainContactForceEvents()
@@ -364,13 +530,30 @@ final class NativeGroundVehicle {
     private func updatePose() {
         guard let rigid, let state = world.bodyState(rigid), let definition = definitions[model] else { return }
         bodyPosition = SwiftRapierWorld.rapierToGTA(state.position)
-        modelPosition = SwiftRapierWorld.rapierToGTA(state.position + state.rotation.act(SIMD3(0,Float(definition.configuration.origin),0)))
-        func rotated(_ point: SIMD3<Float>) -> SIMD3<Float> { SwiftRapierWorld.rapierToGTA(state.rotation.act(SwiftRapierWorld.gtaToRapier(point))) }
-        let x = rotated(SIMD3(1,0,0)), y = rotated(SIMD3(0,1,0)), z = rotated(SIMD3(0,0,1))
+        let q=state.rotation,rotation=simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))
+        modelTransform=Self.transform(position:SIMD3<Double>(state.position),rotation:rotation,origin:definition.configuration.origin)
+        modelPosition=SIMD3(modelTransform[3].x,modelTransform[3].y,modelTransform[3].z)
+        let x=SIMD3(modelTransform[0].x,modelTransform[0].y,modelTransform[0].z)
+        let y=SIMD3(modelTransform[1].x,modelTransform[1].y,modelTransform[1].z)
+        let z=SIMD3(modelTransform[2].x,modelTransform[2].y,modelTransform[2].z)
         let basis = simd_float3x3(columns: (x,y,z)); orientation = simd_quatf(basis)
-        modelTransform = simd_float4x4(columns: (SIMD4(x,0),SIMD4(y,0),SIMD4(z,0),SIMD4(modelPosition,1)))
         heading = atan2(y.x,y.y); pitch = asin(max(-1,min(1,y.z)))
         roll = atan2(-x.z,z.z)
         speed = simd_dot(state.linearVelocity,state.rotation.act(SIMD3(0,0,-1)))
+        if let trainDynamics {
+            let configurations=trainDynamics.configuration.carriages.compactMap{definitions[String($0)]?.trainConfiguration}
+            let poses=trainDynamics.carriages(body:.init(position:SIMD3<Double>(state.position),rotation:rotation),configurations:configurations)
+            carriages=zip(configurations,poses).map { configuration,pose in
+                let transform=Self.transform(position:pose.position,rotation:pose.rotation,origin:configuration.origin)
+                return Carriage(model:String(configuration.model),transform:transform,position:SIMD3(transform[3].x,transform[3].y,transform[3].z))
+            }
+        }
+    }
+    static func transform(position:SIMD3<Double>,rotation:simd_quatd,origin:Double)->simd_float4x4 {
+        let x=rotation.imag.x,y=rotation.imag.y,z=rotation.imag.z,w=rotation.real,x2=x+x,y2=y+y,z2=z+z
+        let xx=x*x2,xy=x*y2,xz=x*z2,yy=y*y2,yz=y*z2,zz=z*z2,wx=w*x2,wy=w*y2,wz=w*z2
+        let right=SIMD3(1-(yy+zz),xy+wz,xz-wy),up=SIMD3(xy-wz,1-(xx+zz),yz+wx),back=SIMD3(xz+wy,yz-wx,1-(xx+yy))
+        func gta(_ v:SIMD3<Double>)->SIMD3<Float>{SIMD3(Float(v.x),Float(-v.z),Float(v.y))}
+        return simd_float4x4(columns:(SIMD4(gta(right),0),SIMD4(gta(-back),0),SIMD4(gta(up),0),SIMD4(gta(position+up*origin),1)))
     }
 }

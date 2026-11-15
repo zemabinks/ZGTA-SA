@@ -26,6 +26,7 @@ zsh native-physics/test.sh
 zsh native-physics/test_character.sh
 zsh native-physics/test_vehicle.sh
 zsh native-physics/test_contacts.sh
+zsh native-physics/test_rotation.sh
 zsh native-physics/test_apple_abi.sh
 ```
 
@@ -121,7 +122,11 @@ snap default. Ray directions and quaternion components pass through unchanged
 after Float conversion, matching the original JS raw bindings. Ray/cast time of
 impact is a parameter along that supplied direction; it is a metric distance
 when the direction is unit length. The bridge validates finite nonzero inputs
-without inserting an extra normalization step.
+without inserting an extra normalization step. Explicit `setBrowserRotation`
+and `setBrowserNextKinematicRotation` are separate: they reproduce the JS
+setter's scalar Float normalization, while `setBodyState` continues to preserve
+raw recorded state. `test_rotation.sh` compares both setter results bit for bit
+against the original WASM, including a zero quaternion being ignored.
 
 `test_apple_abi.sh` links an immutable Swift bridge snapshot with the actual
 static libraries for iPhone ARM64, Simulator ARM64/Intel and Mac ARM64/Intel.

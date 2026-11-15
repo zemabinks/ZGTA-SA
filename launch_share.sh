@@ -20,16 +20,7 @@ if [[ ! -f "$local_dir/site/index.html" || ! -f "$local_dir/manifest.json" ]]; t
   print -u2 'Local archive missing. Run python3 archive_site.py first.'
   exit 1
 fi
-python3 "$project_dir/extract_client_catalog.py"
-python3 "$project_dir/prepare_native_weapons.py"
-python3 "$project_dir/prepare_native_audio.py"
-python3 "$project_dir/prepare_native_environment.py"
-python3 "$project_dir/prepare_native_atmosphere.py"
-python3 "$project_dir/prepare_native_water_waves.py"
-python3 "$project_dir/prepare_native_camera.py"
-python3 "$project_dir/prepare_native_effects.py"
-node "$project_dir/prepare_native_physics.js"
-python3 "$project_dir/prepare_native_seating.py"
+zsh "$project_dir/prepare_native_runtime.sh"
 
 mkdir -p "$local_dir/selfhost"
 if [[ ! -f "$join_file" ]]; then

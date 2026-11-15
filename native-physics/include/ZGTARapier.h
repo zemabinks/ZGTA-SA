@@ -62,6 +62,9 @@ uint32_t zgtaphys_collider_shape_info(ZGTAPhysicsWorld*,uint64_t collider,float 
 /* Collider-wide normalized query classes, separate from raw per-face metadata. */
 uint32_t zgtaphys_collider_set_query_metadata(ZGTAPhysicsWorld*,uint64_t collider,int32_t surface,int32_t material);
 uint32_t zgtaphys_collider_query_metadata(ZGTAPhysicsWorld*,uint64_t collider,int32_t *surface_material);
+/* Explicit JS rotation setters normalize Float input, unlike raw state restore. */
+uint32_t zgtaphys_body_set_browser_rotation(ZGTAPhysicsWorld*,uint64_t body,const float *xyzw,uint32_t wake_up);
+uint32_t zgtaphys_body_set_browser_next_rotation(ZGTAPhysicsWorld*,uint64_t body,const float *xyzw);
 #ifdef __cplusplus
 }
 #endif

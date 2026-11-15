@@ -78,6 +78,7 @@ final class NativeVehicleDynamics {
         var material = -1
     }
     struct Input {
+        struct Drive {var throttle=0.0,steer=0.0;var handbrake=false;var accelerate:Double?,brake:Double?;var pedals:SIMD2<Double>?}
         var throttle = 0.0, steer = 0.0, lean = 0.0
         var handbrake = false, abandoned = false, pad = false
         var riderless = false, hop = false
@@ -87,6 +88,15 @@ final class NativeVehicleDynamics {
         var wetness = 0.0
         var pitch = 0.0, roll = 0.0, yaw = 0.0, jets = 0.0
         var nobody = false
+        var drive:Drive?
+    }
+    struct TransmissionSnapshot {
+        struct Gear {let max:Double,up:Double,down:Double}
+        let gears:[Gear];let count:Int;let max:Double,reverse:Double
+    }
+    struct HeardSnapshot {
+        let box:TransmissionSnapshot;let gear:Int;let accel:Double,brake:Double;let handbrake:Bool
+        let grounded:Double,spin:Double,climb:Double;let bike:Bool;let lean:Double
     }
     struct WheelSnapshot {
         let index: Int
@@ -97,6 +107,8 @@ final class NativeVehicleDynamics {
         let spin: Double
         let point: Vector
         let normal: Vector
+        var tyre=0
+        var surface=2
     }
     struct Output {
         let linearVelocity: Vector
@@ -190,7 +202,16 @@ final class NativeVehicleDynamics {
     private let flags: Int
     private var steeringInput = 0.0, steering = 0.0, rearSteering = 0.0, gas = 0.0, braking = 0.0
     private var burnout = false, simultaneous = 0.0, engineReserve = 1.0, soundSpin = 0.0
+    private var heardAccel=0.0,heardBrake=0.0,heardGrounded=0.0,heardClimb=0.0
+    private var heardHandbrake=false
+    var transmissionSnapshot:TransmissionSnapshot {.init(gears:gearbox.gears.map{.init(max:$0.max,up:$0.up,down:$0.down)},count:gearbox.count,max:gearbox.max,reverse:gearbox.reverse)}
+    static func transmissionSnapshot(table:Table)->TransmissionSnapshot {
+        let box=Gearbox(table);return .init(gears:box.gears.map{.init(max:$0.max,up:$0.up,down:$0.down)},count:box.count,max:box.max,reverse:box.reverse)
+    }
+    var heard:HeardSnapshot {.init(box:transmissionSnapshot,gear:transmission.gear,accel:heardAccel,brake:heardBrake,handbrake:heardHandbrake,
+        grounded:heardGrounded,spin:soundSpin,climb:heardClimb,bike:false,lean:0)}
     var fun = 0
+    var nitroBurning:Bool {engineReserve<0}
     var manual: Bool {
         get { transmission.manual }
         set {
@@ -470,8 +491,13 @@ final class NativeVehicleDynamics {
         updateBurnoutReserve()
     }
 
-    func step(delta: Double, input: Input, body: BodyState,
+    func step(delta: Double, input originalInput: Input, body: BodyState,
               raycast: (Vector, Vector, Double) -> RayHit?) -> Output {
+        var input=originalInput
+        if let drive=originalInput.drive {
+            input.throttle=drive.throttle;input.steer=drive.steer;input.handbrake=drive.handbrake
+            input.accelerate=drive.accelerate;input.brake=drive.brake;input.pedals=drive.pedals
+        }
         stepSize = 50 * delta
         let orientation = body.rotation
         right = orientation.act(Vector(1,0,0)); up = orientation.act(Vector(0,1,0))
@@ -522,7 +548,7 @@ final class NativeVehicleDynamics {
         else { gas = throttle; braking = 0 }
         if configuration.kind == "plane" {
             if velocity > 0.35 { braking *= 0.5 }
-            else if input.pedals == nil, braking == 0, abs(input.throttle) < 10.0 / 255, simd_length(move) < 0.1 { braking = 0.5 }
+            else if input.pedals == nil, braking == 0, abs(originalInput.throttle) < 10.0 / 255, simd_length(move) < 0.1 { braking = 0.5 }
         }
         steering = table.lock * Double.pi / 180 * (configuration.kind == "plane" ? steeringInput * max(1 - velocity,0.1) : steeringInput * Swift.abs(steeringInput))
         if flags & 64 != 0 {
@@ -583,7 +609,7 @@ final class NativeVehicleDynamics {
         let previousGear = transmission.gear
         let driveForce = engineForce(throttle: gas, speed: forwardSpeed, contacts: drivenContacts,
                                     nitro: configuration.nitro && engineReserve < 0)
-        let traction = table.traction / 250 * 0.25 * (table.model == 539 && input.throttle == 0 ? 4 : 1)
+        let traction = table.traction / 250 * 0.25 * (table.model == 539 && originalInput.throttle == 0 ? 4 : 1)
         var steeringShare = 1.0
         if forwardSpeed > 0.01 && wheels.contains(where: { ($0.index == 0 || $0.index == 1) && $0.counts > 0 }) {
             let sideSpeed = simd_dot(move, right)
@@ -632,11 +658,15 @@ final class NativeVehicleDynamics {
         spin *= table.drive == "4" ? 0.25 : 0.5
         let spinDecay = pow(spin >= soundSpin ? 0.95 : 0.7, stepSize)
         soundSpin = soundSpin * spinDecay + (1 - spinDecay) * spin
+        heardAccel=input.pedals != nil ? max(0,gas):accelerating;heardBrake=input.pedals != nil ? braking:brakeInput
+        heardHandbrake=input.handbrake;heardGrounded=Double(drivenContacts);heardClimb=50*move.y
         if flight != nil || buoyancy != nil {
             let body = NativeVehicleForces(move:move,turn:turn,right:right,forward:forward,up:up,middle:bodyCentre,place:place,
                 quaternion:orientation,mass:mass,turnMass:turnMass,wheels:grounded)
-            flight?.step(body,input:input,step:stepSize)
-            buoyancy?.step(body,input:input,step:stepSize,wheels:grounded)
+            flight?.step(body,input:originalInput,step:stepSize)
+            var buoyancyInput=input
+            if flight != nil && buoyancy?.hasBoat == true {buoyancyInput.throttle=originalInput.throttle}
+            buoyancy?.step(body,input:buoyancyInput,step:stepSize,wheels:grounded)
             move = body.move; turn = body.turn
         }
         if input.pad && configuration.kind == "car" && flight == nil && table.model != 539 && grounded == 0 {
@@ -650,7 +680,7 @@ final class NativeVehicleDynamics {
             } else if steer != 0 && allows(forward, steer) { pushTurn(right * (steer * amount), at: bodyCentre + up) }
             if lean != 0 && allows(right, lean) { pushTurn(up * (lean * amount), at: bodyCentre + forward) }
         }
-        if gas == 0 && !(flight != nil && input.throttle != 0) && table.model != 539 && Swift.abs(move.x) < 0.0045 && Swift.abs(move.y) < 0.0045 && Swift.abs(move.z) < 0.0045 && wheels.contains(where: { $0.compression < 1 }) {
+        if gas == 0 && !(flight != nil && originalInput.throttle != 0) && table.model != 539 && Swift.abs(move.x) < 0.0045 && Swift.abs(move.y) < 0.0045 && Swift.abs(move.z) < 0.0045 && wheels.contains(where: { $0.compression < 1 }) {
             move = .zero; turn.y = 0
         }
         if wheels.count < 3 && buoyancy?.hasBoat != true && configuration.kind != "trailer" {
@@ -665,6 +695,6 @@ final class NativeVehicleDynamics {
             steering: buoyancy?.hasBoat == true ? buoyancy!.rudder : steering, rearSteering: flags & 32 != 0 ? -steering : flags & 64 != 0 ? rearSteering : 0,
             gear: transmission.gear, gas: gas, brake: braking, burnout: burnout, wheelSpeed: wheelSpeed,
             wheels: wheels.map { WheelSnapshot(index: $0.index, compression: $0.compression, offset: $0.offset,
-                counts: $0.counts, state: $0.state, spin: $0.spin * 50, point: $0.point, normal: $0.normal) })
+                counts: $0.counts, state: $0.state, spin: $0.spin * 50, point: $0.point, normal: $0.normal,tyre:$0.tyre,surface:$0.surface) })
     }
 }

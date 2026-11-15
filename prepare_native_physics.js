@@ -37,7 +37,12 @@ async function main() {
       const seatFrame = root.userData.frames.get('ped_frontseat');
       if (seatFrame) {
         const eye = new T.Pq0().setFromMatrixPosition(seatFrame);
-        raw.driverEye = [Math.abs(eye.x)<0.15?eye.x:-Math.abs(eye.x),eye.y,eye.z];
+        raw.driverEye = [kind==='boat'||kind==='bike'||Math.abs(eye.x)<0.15?eye.x:-Math.abs(eye.x),eye.y,eye.z];
+      }
+      if (kind === 'trailer') {
+        const hook = root.userData.frames.get('hookup');
+        const point = hook ? new T.Pq0().setFromMatrixPosition(hook) : new T.Pq0(0,bounds.box.max[1]+1,.5-raw.origin);
+        raw.trailerHitch=[point.x,raw.origin+point.z,-point.y];
       }
       if (kind === 'bike') {
         const frames = root.userData.frames;
@@ -85,9 +90,12 @@ async function main() {
           else if (collider.shape.type === R.ShapeType.Cuboid) raw.chassis.push({...common,kind:'box',halfExtents:vector(collider.halfExtents())});
           else throw new Error('Unexpected original chassis shape ' + collider.shape.type);
         }
+        // Rapier defers additional-mass aggregation until a step or explicit
+        // recompute. Record actual requested Float32 mass without stepping.
+        car.rigid.recomputeMassPropertiesFromColliders();
         raw.massProperties={mass:car.rigid.mass(),centre:vector(car.rigid.localCom()),
           principalInertia:vector(car.rigid.principalInertia())};
-        raw.solverSupported = ['car','trailer','bike','plane','heli','boat'].includes(raw.kind); world.free();
+        raw.solverSupported = ['car','trailer','bike','plane','heli','boat','train'].includes(raw.kind); world.free();
       } else raw.solverSupported = false;
       geometry.xd(root,null); models[id] = raw;
     } catch (error) { failures.push({id,model:definition.model,error:error.message}); }

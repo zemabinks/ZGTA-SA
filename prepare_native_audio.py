@@ -104,6 +104,11 @@ def main():
     game = game_path.read_text()
     explosion, streams = audio_effects(game, extra_path.read_text())
     footsteps = footstep_banks(game, vehicle)
+    siren_path=next(path for path in CHUNKS.glob('*.js') if re.search(r'(?:42000|42e3):.*?\{wail:"[^"]+",yelp:"[^"]+"\}',path.read_text()))
+    siren_match=re.search(r'\{wail:"([^"]+)",yelp:"([^"]+)"\}',siren_path.read_text())
+    sirens=dict(zip(['wail','yelp'],siren_match.groups()))
+    emergency_match=re.search(r'(?:42000|42e3):.*?new Set\(\[([0-9,]+)\]\)',siren_path.read_text())
+    emergency_models=[int(value) for value in emergency_match[1].split(',')]
     metadata = {f'{bank}_{index}': row for bank, rows in vehicle['e4'].items()
                 for index, row in enumerate(rows)}
     metadata.update(extra['R2'])
@@ -120,7 +125,7 @@ def main():
                              'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
     result = {
         'source': {path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-                   for path in [vehicle_path, extra_path, game_path]},
+                   for path in [vehicle_path, extra_path, game_path,siren_path]},
         'samples': samples,
         'road': vehicle['U2'], 'aircraft': vehicle['B$'],
         'boats': vehicle['eo'], 'special': vehicle['i0'], 'trains': vehicle['KX'],
@@ -128,6 +133,8 @@ def main():
         'swings': number_object(game, 'kS'), 'meleeHits': number_object(game, 'k_'),
         'explosion': explosion, 'streams': streams,
         'footsteps': footsteps,
+        'sirens':sirens,
+        'sirenModels':emergency_models,
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(json.dumps(result, separators=(',', ':')) + '\n')

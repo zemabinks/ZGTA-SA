@@ -7,6 +7,7 @@ final class NativePausePanel: UIViewController {
     var onCamera: (() -> Void)?
     var onAnimations: (() -> Void)?
     var onRadio: (() -> Void)?
+    var onFlightGear: (() -> Void)?
     var onLeave: (() -> Void)?
     var weatherName: (() -> String)?
     var onWeather: (() -> Void)?
@@ -17,12 +18,20 @@ final class NativePausePanel: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = UIColor.black.withAlphaComponent(0.78)
         let stack = UIStackView();stack.axis = .vertical;stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false;view.addSubview(stack)
-        let preferred = stack.widthAnchor.constraint(equalToConstant:520);preferred.priority = .defaultHigh
+        let scroll=UIScrollView();scroll.translatesAutoresizingMaskIntoConstraints=false;view.addSubview(scroll)
+        stack.translatesAutoresizingMaskIntoConstraints = false;scroll.addSubview(stack)
+        let preferred = scroll.widthAnchor.constraint(equalToConstant:520);preferred.priority = .defaultHigh
+        let fittingHeight=scroll.heightAnchor.constraint(equalTo:stack.heightAnchor);fittingHeight.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo:view.safeAreaLayoutGuide.centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo:view.safeAreaLayoutGuide.centerYAnchor),
-            preferred,stack.widthAnchor.constraint(lessThanOrEqualTo:view.safeAreaLayoutGuide.widthAnchor,multiplier:0.78)
+            scroll.centerXAnchor.constraint(equalTo:view.safeAreaLayoutGuide.centerXAnchor),
+            scroll.centerYAnchor.constraint(equalTo:view.safeAreaLayoutGuide.centerYAnchor),
+            preferred,scroll.widthAnchor.constraint(lessThanOrEqualTo:view.safeAreaLayoutGuide.widthAnchor,multiplier:0.78),
+            scroll.heightAnchor.constraint(lessThanOrEqualTo:view.safeAreaLayoutGuide.heightAnchor,constant:-24),fittingHeight,
+            stack.leadingAnchor.constraint(equalTo:scroll.contentLayoutGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo:scroll.contentLayoutGuide.trailingAnchor),
+            stack.topAnchor.constraint(equalTo:scroll.contentLayoutGuide.topAnchor),
+            stack.bottomAnchor.constraint(equalTo:scroll.contentLayoutGuide.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo:scroll.frameLayoutGuide.widthAnchor)
         ])
         let title = NativeHUDTextLabel();title.text = "ZGTA: SAN ANDREAS"
         title.menuFont = true;title.font = .systemFont(ofSize:26);title.textColor = .white;title.textAlignment = .center
@@ -43,6 +52,7 @@ final class NativePausePanel: UIViewController {
         }
         if driving { _ = button("NEXT RADIO STATION") { [weak self] in self?.onRadio?() } }
         else { _ = button("ANIMATIONS") { [weak self] in self?.dismiss(animated:true,completion:self?.onAnimations) } }
+        if !driving {_ = button("FLIGHT EQUIPMENT") { [weak self] in self?.dismiss(animated:true,completion:self?.onFlightGear) }}
         weatherButton = button("WEATHER: \(weatherName?().uppercased() ?? "SERVER")") { [weak self] in
             guard let self else { return };self.onWeather?()
             self.weatherButton?.setTitle("WEATHER: \(self.weatherName?().uppercased() ?? "SERVER")",for:.normal)

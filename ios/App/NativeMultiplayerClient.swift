@@ -20,6 +20,29 @@ struct RemotePlayer {
     var vehicleDamage = ""
     var lights = false
     var horn = 0
+    var movementRatio:Float = 0
+    var airborne = false
+    var crouching = false
+    var aim:Float?
+    var action = 0
+    var velocity = SIMD3<Float>.zero
+    var angularVelocity = SIMD3<Float>.zero
+    var shotCount = 0
+    var paused = false
+    var down = 0
+    var scriptAnimation:String?
+    var ridingVehicleID:String?
+    var ridingSeat = 0
+    var supportVehicleID:String?
+    var supportOffset = SIMD3<Float>.zero
+    var kit:[Float]?
+    var packetReceivedAt:Double = 0
+    var packetClockMilliseconds:Double = 0
+    var latencyMilliseconds:Float = 0
+    var life = 100
+    var armour = 0
+    var swimState:Int { let base=action&63;return (10...16).contains(base) ? base-9:0 }
+    var burning:Bool {action&64 != 0}
 }
 
 struct RemoteVehicle {
@@ -32,6 +55,7 @@ struct RemoteVehicle {
     var roll: Float = 0
     var health: Int
     var damage = ""
+    var work = 0
 
     init?(row: [Any]) {
         guard row.count >= 7, let id = row[0] as? String,
@@ -48,6 +72,7 @@ struct RemoteVehicle {
         roll = row.count > 8 ? -((row[8] as? NSNumber)?.floatValue ?? 0) : 0
         health = max(0, min(1000, (row.count > 9 ? row[9] as? NSNumber : nil)?.intValue ?? 1000))
         damage = row.count > 10 ? row[10] as? String ?? "" : ""
+        work = row.count > 16 ? (row[16] as? NSNumber)?.intValue ?? 0 : 0
     }
 }
 
@@ -66,6 +91,7 @@ final class NativeMultiplayerClient {
     private(set) var health = 100
     private(set) var armour = 0
     private(set) var passive = false
+    private(set) var serverTimeOffsetMilliseconds:Double = 0
     private var positionPackets = 0
     private var pendingSays: [String] = []
     private var lastChatSequence = 0
@@ -82,6 +108,7 @@ final class NativeMultiplayerClient {
     var onBlast: ((Int, SIMD3<Float>) -> Void)?
     var onWeaponSound: ((Int) -> Void)?
     var onVitals: ((Int, Int) -> Void)?
+    var onFlightGear: ((Bool,Bool) -> Void)?
     var onChat: (([String]) -> Void)?
 
     init(server: ServerAddress) { self.server = server }
@@ -106,18 +133,27 @@ final class NativeMultiplayerClient {
                       vehicle: RemoteVehicle? = nil, speed: Float = 0,
                       steer: Float = 0, pitch: Float = 0, roll: Float = 0,
                       vehicleHealth: Int = 1000,
-                      vehicleDamage: String = "",lights: Bool = false,horn: Bool = false,
+                      vehicleDamage: String = "",lights: Bool = false,horn: Bool = false,siren:Bool=false,
                       airborne: Bool = false, weapon: Int = 0, firing: Bool = false,
                       animation: String? = nil, crouching: Bool = false,
-                      swimState: Int = 0,swimPitch: Float = 0,swimRatio: Float = 0) {
+                      swimState: Int = 0,swimPitch: Float = 0,swimRatio: Float = 0,
+                      movement:Double? = nil,aim:Double? = nil,action:Int = 0,
+                      velocity:SIMD3<Float> = .zero,angularVelocity:SIMD3<Float> = .zero,
+                      kit:[Double]? = nil,paused:Bool = false) {
+        func rounded(_ value:Double)->Double {value.isFinite ? floor(value*100+0.5)/100:0}
+        let motion:[String:Any] = ["vx":rounded(Double(velocity.x)),"vy":rounded(Double(velocity.y)),"vz":rounded(Double(velocity.z)),
+            "wx":rounded(Double(angularVelocity.x)),"wy":rounded(Double(angularVelocity.y)),"wz":rounded(Double(angularVelocity.z)),
+            "clock":Date().timeIntervalSince1970*1000,"paused":paused]
         if let vehicle {
             var packet: [String: Any] = ["t": "me", "driving": true, "car": vehicle.code,
                   "vehicle": vehicle.id, "skin": 7,
                   "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
                   "heading": -Double(heading), "pitch": Double(pitch), "roll": -Double(roll),
-                  "speed": Double(speed), "steer": Double(steer),
+                  "speed": Double(speed), "steer": -Double(steer),
                   "health": vehicleHealth, "life": health, "armour": armour]
             packet["damage"] = vehicleDamage;packet["lights"] = lights;packet["horn"] = horn
+            if siren {packet["horn"]=(horn ? 1:0)+2}
+            packet.merge(motion){_,new in new};if let kit {packet["kit"]=kit}
             addPendingChat(to: &packet)
             send(packet)
             return
@@ -128,15 +164,22 @@ final class NativeMultiplayerClient {
               "weapon": weapon,
               "shots": shots,
               "crouch": crouching,
-              "air": airborne,
-              "anim": animation.map { NativePedestrianMotion.wireAnimation(for: $0) } ?? (firing ? "colt45/colt45_fire/l/1" :
-                  airborne ? "ped/jump_launch/l/1" :
-                  moving ? (running ? "ped/run/l/1" : "ped/walk/l/1") :
-                  weapon == 22 ? "ped/gun_stand/l/1" : "ped/idle/l/1")]
+              "air": airborne,"act":action,
+              "move":rounded(movement ?? (moving ? running ? 3:2:0)),
+              "aim":aim.map{rounded($0)} ?? NSNull(),
+              "anim":animation.flatMap{$0.isEmpty ? nil:NativePedestrianMotion.wireAnimation(for:$0)} ?? NSNull()]
+        packet.merge(motion){_,new in new}
+        if (50...62).contains(action&63),health>0 {
+            packet["pitch"]=rounded(Double(pitch));packet["roll"]=rounded(Double(roll))
+            if (50...58).contains(action&63) || (61...62).contains(action&63) {
+                packet["move"]=0;packet["air"]=false;packet["crouch"]=false
+            }
+            if (50...58).contains(action&63) {packet["aim"]=NSNull()}
+        }
         if (1...7).contains(swimState),health > 0 {
-            packet["act"] = 9+swimState;packet["move"] = Double(swimRatio)
+            packet["act"] = 9+swimState;packet["move"] = rounded(Double(swimRatio))
             packet["air"] = false;packet["crouch"] = false;packet["weapon"] = 0
-            packet["aim"] = NSNull();packet["pitch"] = Double(swimPitch)
+            packet["aim"] = NSNull();packet["pitch"] = rounded(Double(swimPitch))
         }
         addPendingChat(to: &packet)
         send(packet)
@@ -172,6 +215,12 @@ final class NativeMultiplayerClient {
     }
 
     func requestEnter(_ vehicle: RemoteVehicle) { send(["t": "enter", "v": vehicle.id]) }
+    func sendVehicleMove(_ id:String, state:[String:Any]) {
+        var packet=state
+        packet["t"]="vmove";packet["v"]=id
+        send(packet)
+    }
+    func usedParachute() {send(["t":"usedParachute"])}
     func detonateSatchels() { send(["t":"detonate"]) }
 
     func sendMeleeHit(to player: String) {
@@ -216,6 +265,10 @@ final class NativeMultiplayerClient {
         health = nextHealth
         armour = nextArmour
         onVitals?(health, armour)
+    }
+
+    func reportLocalHealth(_ value:Int) {
+        health=max(0,min(health,value));onVitals?(health,armour)
     }
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
@@ -275,6 +328,7 @@ final class NativeMultiplayerClient {
         case "inventory":
             if let state = message["state"] as? [String: Any] { onInventory?(state) }
         case "hello":
+            if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
             if let spot = message["spot"] as? [NSNumber], spot.count >= 3 {
                 onTeleport?(SIMD3(spot[0].floatValue,spot[1].floatValue,spot[2].floatValue),
                             spot.count > 3 ? -spot[3].floatValue : nil)
@@ -331,6 +385,8 @@ final class NativeMultiplayerClient {
             }
         case "passive":
             passive = message["on"] as? Bool == true
+        case "flightgear":
+            onFlightGear?(message["parachute"] as? Bool == true,message["jetpack"] as? Bool == true)
         case "vitals":
             if let value = message["health"] as? Int { health = max(0, min(100,value)) }
             if let value = message["armour"] as? Int { armour = max(0,min(100,value)) }
@@ -343,7 +399,7 @@ final class NativeMultiplayerClient {
             onVitals?(health, armour)
             onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE" :
                          "HIT — \(health) HEALTH REMAINING")
-        case "spawned":
+        case "veh", "spawned":
             if let row = message["v"] as? [Any], let vehicle = RemoteVehicle(row: row) {
                 vehicles[vehicle.id] = vehicle
                 onVehicles?(Array(vehicles.values))
@@ -404,7 +460,28 @@ final class NativeMultiplayerClient {
                                        vehicleHealth: driving && row.count > 18 ? (row[18] as? NSNumber)?.intValue ?? 1000 : 1000,
                                        vehicleDamage: driving && row.count > 19 ? row[19] as? String ?? "" : "",
                                        lights: driving && row.count > 12 && (row[12] as? NSNumber)?.boolValue == true,
-                                       horn: driving && row.count > 17 ? (row[17] as? NSNumber)?.intValue ?? 0 : 0)
+                                       horn: driving && row.count > 17 ? (row[17] as? NSNumber)?.intValue ?? 0 : 0,
+                                       movementRatio:row.count>24 ? (row[24] as? NSNumber)?.floatValue ?? 0:0,
+                                       airborne:row.count>25 && (row[25] as? NSNumber)?.boolValue == true,
+                                       crouching:row.count>26 && (row[26] as? NSNumber)?.boolValue == true,
+                                       aim:row.count>28 ? (row[28] as? NSNumber)?.floatValue:nil,
+                                       action:row.count>32 ? (row[32] as? NSNumber)?.intValue ?? 0:0,
+                                       velocity:SIMD3((row.count>13 ? (row[13] as? NSNumber)?.floatValue:nil) ?? 0,(row.count>14 ? (row[14] as? NSNumber)?.floatValue:nil) ?? 0,(row.count>15 ? (row[15] as? NSNumber)?.floatValue:nil) ?? 0),
+                                       angularVelocity:SIMD3((row.count>20 ? (row[20] as? NSNumber)?.floatValue:nil) ?? 0,(row.count>21 ? (row[21] as? NSNumber)?.floatValue:nil) ?? 0,(row.count>22 ? (row[22] as? NSNumber)?.floatValue:nil) ?? 0),
+                                       shotCount:row.count>29 ? (row[29] as? NSNumber)?.intValue ?? 0:0,
+                                       paused:row.count>36 && (row[36] as? NSNumber)?.boolValue == true,
+                                       down:row.count>38 ? (row[38] as? NSNumber)?.intValue ?? 0:0,
+                                       scriptAnimation:wireAnimation.isEmpty ? nil:wireAnimation,
+                                       ridingVehicleID:row.count>34 ? (row[34] as? [Any])?.first as? String:nil,
+                                       ridingSeat:row.count>34 ? (row[34] as? [Any]).flatMap{$0.count>1 ? ($0[1] as? NSNumber)?.intValue:nil} ?? 0:0,
+                                       supportVehicleID:row.count>39 ? (row[39] as? [Any])?.first as? String:nil,
+                                       supportOffset:row.count>39 ? (row[39] as? [Any]).flatMap {v in guard v.count>=4,let x=(v[1] as? NSNumber)?.floatValue,let y=(v[2] as? NSNumber)?.floatValue,let z=(v[3] as? NSNumber)?.floatValue else{return nil};return SIMD3(x,y,z)} ?? .zero:.zero,
+                                       kit:row.count>42 ? (row[42] as? [NSNumber])?.map(\.floatValue):nil,
+                                       packetReceivedAt:ProcessInfo.processInfo.systemUptime,
+                                       packetClockMilliseconds:row.count>16 ? (row[16] as? NSNumber)?.doubleValue ?? 0:0,
+                                       latencyMilliseconds:row.count>23 ? (row[23] as? NSNumber)?.floatValue ?? 0:0,
+                                       life:driving ? (row.count>43 ? (row[43] as? NSNumber)?.intValue ?? 100:100):(row.count>18 ? (row[18] as? NSNumber)?.intValue ?? 100:100),
+                                       armour:row.count>30 ? (row[30] as? NSNumber)?.intValue ?? 0:0)
             if let vehicleID, var vehicle = vehicles[vehicleID] {
                 vehicle.position = SIMD3(x, y, z)
                 vehicle.heading = row.count > 6 ? -((row[6] as? NSNumber)?.floatValue ?? 0) : 0

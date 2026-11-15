@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import UIKit
+import simd
 
 /// Plays the archived WAV banks directly from the owner's Mac. Routing and
 /// loop points are extracted by prepare_native_audio.py into ignored data.
@@ -36,10 +37,25 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         let from: Float; let to: Float
     }
     private struct Sample: Decodable { let rate: Int; let frames: Int; let loop: Int }
-    private struct LoopVoice { let sample: String; let player: AVAudioPlayer }
     private let server: ServerAddress
     let weather = NativeWeatherAudio()
     private let rateAudio = NativeRateAudio()
+    private let vehicleLoops=NativeVehicleLoopAudio()
+    private let roadEngine=NativeVehicleAudioDynamics.RoadEngine()
+    private let reverseEngine=NativeVehicleAudioDynamics.Reverse()
+    private let boatEngine=NativeVehicleAudioDynamics.Boat()
+    private let specialEngine=NativeVehicleAudioDynamics.Special()
+    private var registeredVehicleSamples=Set<String>()
+    private var aircraftPitch = -1.0
+    private final class RemoteEngine {
+        let model:Int
+        let road=NativeVehicleAudioDynamics.RemoteRoad()
+        let boat=NativeVehicleAudioDynamics.Boat()
+        let special=NativeVehicleAudioDynamics.Special()
+        var pitch = -1.0,time:Double
+        init(model:Int,time:Double) {self.model=model;self.time=time}
+    }
+    private var remoteEngines:[String:RemoteEngine]=[:]
     private var samples: [String: Sample] = [:]
     private var road: [String: [NSNumber]] = [:]
     private var aircraft: [String: [Any]] = [:]
@@ -52,12 +68,16 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var meleeHits: [String: [NSNumber]] = [:]
     private var explosionSettings: ExplosionSettings?
     private var streamSounds: [String: StreamSound] = [:]
+    private var sirens:[String:String]=[:]
+    private var sirenModels=Set<Int>()
+    private let hornController=NativeVehicleHornController()
     private var footstepSettings: Footsteps?
+    private var footstepAudio: NativeFootstepAudio?
     private var explosionIndex = 0
     private var data: [String: Data] = [:]
     private var requests: [String: URLSessionDataTask] = [:]
     private var completions: [String: [(Data?) -> Void]] = [:]
-    private var loops: [String: LoopVoice] = [:]
+    private var loops=Set<String>()
     private var oneShots: [ObjectIdentifier: AVAudioPlayer] = [:]
     private var fades: [ObjectIdentifier: Fade] = [:]
     private var fadeTimer: DispatchSourceTimer?
@@ -66,7 +86,6 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var suspended = false
     private var distanceSinceStep: Float = 0
     private var vehicleModel: Int?
-    private var rotor: Float = 0
     private(set) var loadedSampleCount = 0
     private(set) var lastEvent = ""
     var volume: Float = 0.7 {
@@ -97,7 +116,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         fadeTimer?.cancel()
         requests.values.forEach { $0.cancel() }
         notifications.forEach { NotificationCenter.default.removeObserver($0) }
-        loops.values.forEach { $0.player.stop() }
+        vehicleLoops.stopAll(immediate:true)
         oneShots.values.forEach { $0.stop() }
     }
 
@@ -118,6 +137,9 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
                 self.boats = document["boats"] as? [String: NSNumber] ?? [:]
                 self.special = document["special"] as? [String: [Any]] ?? [:]
                 self.trains = document["trains"] as? [String: [NSNumber]] ?? [:]
+                self.sirens=document["sirens"] as? [String:String] ?? [:]
+                self.sirenModels=Set(document["sirenModels"] as? [Int] ?? [])
+                self.preload(Array(self.sirens.values))
                 self.weapons = document["weapons"] as? [String: [NSNumber]] ?? [:]
                 self.reloads = document["reloads"] as? [String: [NSNumber]] ?? [:]
                 self.swings = document["swings"] as? [String: NSNumber] ?? [:]
@@ -133,8 +155,11 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
                 if let config = document["footsteps"],
                    let bytes = try? JSONSerialization.data(withJSONObject: config) {
                     self.footstepSettings = try? JSONDecoder().decode(Footsteps.self, from: bytes)
+                    if let configuration=try? JSONDecoder().decode(NativeFootstepAudio.Configuration.self,from:bytes) {
+                        self.footstepAudio=NativeFootstepAudio(configuration:configuration)
+                    }
                 }
-                self.preload(["0_1", "0_2", "0_3", "0_4", "0_5", "0_6", "143_87", "143_39", "143_40"])
+                self.preload(["0_0", "0_1", "0_2", "0_3", "0_4", "0_5", "0_6", "0_7", "0_8", "143_87", "143_39", "143_40"])
                 if let config = self.explosionSettings {
                     self.preload(config.layers.map(\.sample) + [config.stereoSample])
                 }
@@ -158,8 +183,9 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
 
     func suspend() {
         suspended = true
-        weather.stop();rateAudio.stop()
-        loops.values.forEach { $0.player.pause() }
+        weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
+        remoteEngines.removeAll()
+        loops.removeAll()
         oneShots.values.forEach { $0.stop() }
         oneShots.removeAll()
         clearFades()
@@ -168,13 +194,13 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     func resume() {
         configureSession()
         suspended = false
-        loops.values.forEach { $0.player.play() }
+
     }
 
     func stop() {
         suspended = true
-        weather.stop();rateAudio.stop()
-        loops.values.forEach { $0.player.stop() }
+        weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
+        remoteEngines.removeAll()
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
         oneShots.removeAll()
@@ -345,8 +371,16 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         }
     }
 
-    /// Use travelled distance rather than touch pressure so blocked walking
-    /// does not make steps. Default plain-ground banks match the browser.
+    /// The animation controller selects the exact original foot phase/profile.
+    func footstep(_ kind:String,material:Int?,surface:Int?,wading:Bool) {
+        guard !suspended,let footstepAudio else {return}
+        let plan:NativeFootstepAudio.Plan?
+        if kind == "fallLand" || kind == "collapse" {plan=footstepAudio.land(kind,water:wading)}
+        else {plan=footstepAudio.step(kind,material:material,surface:surface,wading:wading)}
+        guard let plan else {return}
+        once(plan.sample,rate:Float(plan.rate),gain:Float(plan.gain),start:plan.start)
+    }
+
     func footsteps(distance: Float, running: Bool, crouching: Bool = false,
                    swimming: Bool = false, grounded: Bool = true, material: Int? = nil) {
         guard !suspended, grounded, distance > 0, distance < 2 else {
@@ -424,8 +458,16 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
              rate: Float.random(in: 0.98...1.02), gain: min(0.8, 0.25 + severity / 100))
     }
 
-    func horn(model:Int?,active:Bool) {
+    func vehicleHornInput(model:Int?,identity:String?,pressed:Bool,milliseconds:Double)->NativeVehicleHornController.Frame {
+        hornController.update(pressed:pressed,milliseconds:milliseconds,identity:identity,emergency:model.map{sirenModels.contains($0)} ?? false)
+    }
+
+    func horn(model:Int?,active:Bool,siren:Bool=false) {
         let id = "effect:vehicleHorn"
+        if !suspended,siren,let model,sirenModels.contains(model),let sample=sirens[active ? "yelp":"wail"] {
+            stopLoop(id);loop("effect:vehicleSiren",sample:sample,rate:1,gain:0.7);return
+        }
+        stopLoop("effect:vehicleSiren")
         guard !suspended,active,let model else {stopLoop(id);return}
         let bank:Int,rate:Float
         if let row=road[String(model)],row.count >= 6 {
@@ -437,89 +479,191 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         loop(id,sample:"74_\(bank)",rate:rate,gain:0.8)
     }
 
-    /// The archived bank mapping is exact; road engine crossfades use the
-    /// native client's approximate speed and throttle until its full gearbox
-    /// state machine is ported. Missing bank files remain silent.
-    func updateVehicle(model: Int?, kind: String, speed: Float, throttle: Float,
-                       health: Int, delta: Float) {
-        guard !suspended else { return }
-        guard let model, health > 0 else { clearVehicle(); return }
-        if model != vehicleModel { clearVehicle(); vehicleModel = model }
-        let key = String(model)
-        let share = min(1, abs(speed) / 45)
-        var wanted: Set<String> = []
-        func layer(_ id: String, _ sample: String, _ rate: Float, _ gain: Float) {
-            wanted.insert(id)
-            loop(id, sample: sample, rate: rate, gain: gain)
+    /// Module1061 receives the same normalized gearbox/force snapshot as the
+    /// browser. Sample-clock playback retains the attack and archived loop tail.
+    func updateVehicle(model:Int?,kind:String,speed:Float,throttle:Float,health:Int,delta:Float,
+                       snapshot:NativeGroundVehicle.AudioSnapshot? = nil,
+                       hull:NativeGroundVehicle.HullAudio? = nil,ear:SIMD3<Float> = .zero) {
+        guard !suspended else {return}
+        guard let model,health>0 else {if vehicleModel != nil {clearVehicle()};return}
+        if model != vehicleModel {clearVehicle();vehicleModel=model;preloadVehicle(model)}
+        typealias D=NativeVehicleAudioDynamics
+        let time=Double(delta),velocity=snapshot?.speed ?? Double(speed),gas=snapshot?.gas ?? Double(throttle),key=String(model)
+        var layers:[D.Layer]=[],retain=Set<String>()
+        var up=1.0,nose=0.0,side=0.0,behind=0.5,distance=0.0
+        if let body=snapshot?.body {
+            let q=simd_quatd(ix:Double(body.rotation.imag.x),iy:Double(body.rotation.imag.y),iz:Double(body.rotation.imag.z),r:Double(body.rotation.real))
+            let forward=q.act(SIMD3<Double>(0,0,-1)),right=q.act(SIMD3<Double>(1,0,0)),vertical=q.act(SIMD3<Double>(0,1,0))
+            let difference=SIMD3<Double>(body.position)-SIMD3<Double>(SwiftRapierWorld.gtaToRapier(ear))
+            distance=simd_length(difference);up=vertical.y;nose=forward.y;side=right.y
+            if distance>0.001 {behind=(simd_dot(difference,forward)/distance+1)/2}
         }
-        if let row = aircraft[key], let type = row.first as? String {
-            rotor += ((max(0, throttle) > 0.05 ? 1 : 0.4) - rotor) * min(1, delta * 0.5)
-            if type == "jet" {
-                let pitch = 0.8 + rotor * 0.4
-                layer("front", "138_10", pitch, 0.25 + 0.3 * rotor)
-                layer("rear", "138_11", pitch, 0.25 + 0.3 * rotor)
-                layer("near", "138_26", 1, rotor * 0.2)
-            } else if row.count > 1, let bank = row[1] as? NSNumber {
-                let pitch: Float = type == "heli" ? 0.3 + rotor * 0.7 : 0.8 + rotor * 0.3
-                layer("front", "\(bank)_0", pitch, 0.25 + 0.3 * rotor)
-                layer("rear", "\(bank)_1", pitch, 0.25 + 0.3 * rotor)
-                if type == "heli" { layer("near", "\(bank)_3", 1, 0.2 * rotor) }
+        let top=snapshot?.top ?? 40
+        if let row=aircraft[key],let type=row.first as? String {
+            var input=D.AircraftInput()
+            input.rotor=(snapshot?.rotorScalar ?? 0)/0.22;input.throttle=gas;input.health=Double(health)
+            input.up=up;input.nose=nose;input.side=side;input.behind=behind;input.away=distance
+            let output=D.aircraft(kind:type,bank:(row.count>1 ? row[1] as? NSNumber:nil)?.intValue ?? 0,
+                                  input:input,previousPitch:aircraftPitch,delta:time,random:Double.random(in:0..<1))
+            aircraftPitch=output.pitch;layers=output.layers
+            layers += D.tyres(skid:snapshot?.skid ?? 0,surface:snapshot?.surface ?? 2,flat:false,speed:velocity,top:top)
+        } else if let bank=boats[key] {
+            layers=boatEngine.update(delta:time,throttle:hull?.gas ?? max(-0.3,gas),afloat:hull?.afloat ?? true,
+                                     up:hull?.up ?? 1,distance:distance,speed:velocity,bank:bank.intValue)
+            if let hull,let slam=boatEngine.slam(magnitude:hull.slam,time:ProcessInfo.processInfo.systemUptime,distance:distance) {
+                once(slam.sound,rate:Float(slam.rate),gain:Float(slam.gain))
             }
-        } else if let bank = boats[key] {
-            layer("engine", "\(bank)_0", 0.6 + max(0, throttle) * 0.4, 0.6)
-            if share > 0.05 { layer("water", "39_3", 0.8 + share * 0.2, share * 0.4) }
-        } else if let row = special[key], row.count > 1, let bank = row[1] as? NSNumber {
-            layer("engine", "\(bank)_0", 0.85 + share * 0.35, share > 0.05 ? 0.5 : 0.15)
-        } else if let row = trains[key], row.count > 1 {
-            layer("engine", "\(row[1])_0", 0.8 + share * 0.4, 0.45)
-            if share > 0.05 { layer("track", "\(row[0])_0", 0.8 + share * 0.4, share * 0.4) }
-        } else if let row = road[key], row.count >= 6 {
-            let multiplier = row[2].floatValue
-            let idle = row[1].intValue
-            let idlePitch = (0.85 + share * 0.65) * multiplier
-            let rev = min(1, share * 1.4 + max(0, throttle) * 0.3)
-            layer("idle", "\(idle)_1", idlePitch, 0.55 * (1 - rev * 0.55))
-            layer("revs", "\(idle)_0", (0.9 + rev * 0.6) * multiplier, rev * 0.5)
-            if speed < -0.2 { layer("reverse", "138_19", 0.75 + share * 0.2, share * 0.3) }
+        } else if let row=special[key],row.count>1,let type=row[0] as? String,let bank=row[1] as? NSNumber {
+            var input=D.SpecialInput()
+            input.share=abs(velocity)/max(top,1);input.speed=velocity;input.accel=max(0,gas);input.brake=max(0,-gas)
+            input.up=up;input.nose=nose;input.side=side
+            if ["rcHeli","rcPlane","hover"].contains(type) {input.rotor=snapshot?.rotorScalar}
+            layers=specialEngine.update(delta:time,kind:type,bank:bank.intValue,input:input)
+            if type == "golf" {layers += D.tyres(skid:snapshot?.skid ?? 0,surface:snapshot?.surface ?? 2,flat:false,speed:velocity,top:top)}
+        } else if let row=trains[key],row.count>1 {
+            var input=D.SpecialInput();input.speed=velocity;input.accel=max(0,gas);input.brake=max(0,-gas);input.nose=nose
+            layers=specialEngine.train(delta:time,brakeBank:row[0].intValue,engineBank:row[1].intValue,input:input)
+        } else if let row=road[key],row.count>=6 {
+            var input=D.RoadInput();input.id=model;input.speed=velocity;input.accel=max(0,gas);input.brake=max(0,-gas)
+            input.box=D.Box.fallback(top:max(top,1));input.gear=min(5,1+Int(floor(abs(velocity)/max(top,1)*5)))
+            if let heard=snapshot?.heard {
+                input.box=D.Box(gears:heard.box.gears.map{D.Gear(max:$0.max,up:$0.up,down:$0.down)},
+                                count:heard.box.count,max:heard.box.max,reverse:heard.box.reverse)
+                input.gear=max(0,min(heard.box.count,heard.gear));input.accel=heard.accel;input.brake=heard.brake
+                input.handbrake=heard.handbrake;input.grounded=heard.grounded;input.spin=heard.spin;input.climb=heard.climb
+                input.bike=heard.bike;input.lean=heard.lean
+            }
+            input.nitro=snapshot?.nitro ?? false
+            let sample=samples["\(row[0].intValue)_0"]
+            let rate=Double(sample?.rate ?? 1),duration=Double(sample?.frames ?? 1)/rate,loopStart=Double(max(0,sample?.loop ?? 0))/rate
+            let output=roadEngine.update(delta:time,input:input,runUpDuration:duration,loopStart:loopStart)
+            let plan=D.roadPlan(output,runUpBank:row[0].intValue,idleBank:row[1].intValue,
+                                pitch:row[2].doubleValue == 0 ? 1:row[2].doubleValue,gainDB:row[3].doubleValue)
+            layers=plan.layers;retain=plan.retain
+            if let reverse=reverseEngine.update(delta:time,gas:gas,gear:input.gear,speed:velocity,ground:input.grounded,
+                                                box:snapshot?.heard != nil && !input.bike ? input.box:nil) {layers.append(reverse)}
+            if let sputter=D.sputter(model:model,health:Double(health),speedShare:abs(velocity)/max(top,1),roadEnabled:true) {layers.append(sputter)}
+            layers += D.tyres(skid:snapshot?.skid ?? 0,surface:snapshot?.surface ?? 2,flat:snapshot?.flat ?? false,speed:velocity,top:top)
         }
-        for id in Array(loops.keys) where !id.hasPrefix("effect:") && !wanted.contains(id) { stopLoop(id) }
+        applyVehiclePlan(D.Plan(layers:layers.filter{$0.gain>0 && $0.rate>0.01},retain:retain))
+    }
+
+    private func preloadVehicle(_ model:Int) {
+        let key=String(model)
+        var names:[String]=[]
+        if let row=road[key],row.count>=2 {
+            names += (0...2).map{"\(row[0].intValue)_\($0)"}+(0...1).map{"\(row[1].intValue)_\($0)"}
+        }
+        if let row=aircraft[key],row.count>1,let bank=row[1] as? NSNumber {names += [0,1,3].map{"\(bank.intValue)_\($0)"}}
+        if let bank=boats[key] {names.append("\(bank.intValue)_0")}
+        if let row=special[key],row.count>1,let bank=row[1] as? NSNumber {names.append("\(bank.intValue)_0")}
+        if let row=trains[key],row.count>1 {names += ["\(row[0].intValue)_0","\(row[0].intValue)_1","\(row[1].intValue)_0","\(row[1].intValue)_2"]}
+        preload(names+["138_2","138_4","138_6","138_8","138_10","138_11","138_17","138_19","138_20","138_24","138_26","39_3","39_66"])
+    }
+
+    func updateRemoteVehicles(_ players:[RemotePlayer],ear:SIMD3<Float>,forward:SIMD3<Float>,top:(String)->Double?) {
+        guard !suspended else{return}
+        typealias D=NativeVehicleAudioDynamics
+        typealias S=NativeVehicleAudioSpatial
+        let listener=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(ear))
+        vehicleLoops.listener(position:listener,forward:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(forward)))
+        let catalogue=S.Catalogue(road:Set(road.keys.compactMap(Int.init)),aircraft:Set(aircraft.keys.compactMap(Int.init)),
+            boats:Set(boats.keys.compactMap(Int.init)),special:Set(special.keys.compactMap(Int.init)),trains:Set(trains.keys.compactMap(Int.init)))
+        let driving=players.filter{!$0.code.hasPrefix("s")}
+        let candidates=driving.compactMap { player -> S.Candidate? in
+            guard let model=Int(player.code.split(separator:".").first ?? "") else{return nil}
+            return .init(id:player.id,model:model,position:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(player.position)),speed:Double(player.speed))
+        }
+        let selected=S.select(candidates,listener:listener,catalogue:catalogue),ids=Set(selected.map{$0.candidate.id})
+        for id in Array(remoteEngines.keys) where !ids.contains(id) {
+            remoteEngines.removeValue(forKey:id)
+            vehicleLoops.apply(.init(layers:[]),prefix:"remote:"+id)
+            vehicleLoops.apply(.init(layers:[]),prefix:"far:"+id)
+        }
+        let now=ProcessInfo.processInfo.systemUptime
+        for selected in selected {
+            let candidate=selected.candidate,key=String(candidate.model),prefix="remote:"+candidate.id
+            guard let player=driving.first(where:{$0.id==candidate.id}) else{continue}
+            if remoteEngines[candidate.id]?.model != candidate.model {
+                vehicleLoops.apply(.init(layers:[]),prefix:prefix);vehicleLoops.apply(.init(layers:[]),prefix:"far:"+candidate.id)
+                remoteEngines[candidate.id]=RemoteEngine(model:candidate.model,time:now);preloadVehicle(candidate.model)
+            }
+            let state=remoteEngines[candidate.id]!,delta=max(0,now-state.time);state.time=now
+            let y=simd_quatd(angle:-Double(player.heading),axis:SIMD3(0,1,0))
+            let x=simd_quatd(angle:Double(player.pitch),axis:SIMD3(1,0,0))
+            let z=simd_quatd(angle:-Double(player.roll),axis:SIMD3(0,0,1)),q=y*x*z
+            let vertical=q.act(SIMD3<Double>(0,1,0)),ahead=q.act(SIMD3<Double>(0,0,-1)),right=q.act(SIMD3<Double>(1,0,0))
+            let offset=candidate.position-listener,distance=selected.distance,speed=candidate.speed
+            let behind=distance>0.001 ? (simd_dot(offset,ahead)/distance+1)/2:0.5
+            let maximum=top(key) ?? 45,share=min(1,abs(speed)/maximum)
+            var layers:[D.Layer]=[],specialKind:String?
+            if let row=aircraft[key],let type=row.first as? String {
+                var input=D.AircraftInput();input.rotor=type=="heli" ? 1:0.45+0.55*min(1,abs(speed)/40)
+                input.up=vertical.y;input.nose=ahead.y;input.side=right.y;input.behind=behind;input.away=distance
+                let output=D.aircraft(kind:type,bank:(row.count>1 ? row[1] as? NSNumber:nil)?.intValue ?? 0,input:input,
+                                      previousPitch:state.pitch,delta:delta,remote:true,random:Double.random(in:0..<1))
+                state.pitch=output.pitch;layers=output.layers.filter{$0.name != "far"}
+                let far=output.layers.filter{$0.name=="far" && $0.gain>0 && $0.rate>0.01}
+                applyVehiclePlan(.init(layers:far),prefix:"far:"+candidate.id,position:candidate.position,panner:S.panner(kind:.aircraft,far:true))
+            } else if let row=special[key],row.count>1,let type=row[0] as? String,let bank=row[1] as? NSNumber {
+                specialKind=type
+                var input=D.SpecialInput();input.share=abs(speed)/max(maximum,1);input.up=vertical.y;input.nose=ahead.y;input.side=right.y
+                layers=state.special.update(delta:delta,kind:type,bank:bank.intValue,input:input)
+                if player.horn&1 != 0,row.count>3,let horn=row[2] as? NSNumber,horn.intValue>=0 {
+                    let rate=(row[3] as? NSNumber)?.doubleValue ?? 1
+                    layers.append(.init(name:"horn",sound:"74_\(horn.intValue)",rate:rate==0 ? 1:rate,gain:0.9))
+                }
+            } else if let row=trains[key],row.count>1 {
+                var input=D.SpecialInput();input.speed=speed;input.mine=false;input.nose=ahead.y
+                layers=state.special.train(delta:delta,brakeBank:row[0].intValue,engineBank:row[1].intValue,input:input)
+            } else if let bank=boats[key] {
+                let gas=state.boat.remoteThrottle(speed:speed,time:now)
+                layers=state.boat.update(delta:delta,throttle:gas,afloat:true,up:vertical.y,distance:distance,speed:speed,bank:bank.intValue)
+            } else if let row=road[key],row.count>=6 {
+                layers=state.road.update(delta:delta,model:candidate.model,share:share,bank:row[1].intValue,
+                    pitch:row[2].doubleValue==0 ? 1:row[2].doubleValue,gainDB:row[3].doubleValue)
+                if let layer=D.sputter(model:candidate.model,health:Double(player.vehicleHealth),speedShare:share,roadEnabled:true) {layers.append(layer)}
+                if player.horn&2 != 0,let sample=sirens[player.horn&1 != 0 ? "yelp":"wail"] {
+                    layers.append(.init(name:"siren",sound:sample,rate:1,gain:0.9))
+                } else if player.horn&1 != 0,row[4].intValue>=0 {
+                    layers.append(.init(name:"horn",sound:"74_\(row[4].intValue)",rate:row[5].doubleValue==0 ? 1:row[5].doubleValue,gain:0.9))
+                }
+            }
+            applyVehiclePlan(.init(layers:layers.filter{$0.gain>0 && $0.rate>0.01}),prefix:prefix,
+                             position:candidate.position,panner:S.panner(kind:selected.kind,special:specialKind))
+        }
+    }
+
+    private func applyVehiclePlan(_ plan:NativeVehicleAudioDynamics.Plan,prefix:String="mine",position:SIMD3<Double>?=nil,panner:NativeVehicleAudioSpatial.Panner?=nil) {
+        for layer in plan.layers where !registeredVehicleSamples.contains(layer.sound) {
+            guard let bytes=data[layer.sound] else {if requests[layer.sound]==nil {fetch(layer.sound){_ in}};continue}
+            if vehicleLoops.register(bytes,name:layer.sound,loopStart:samples[layer.sound]?.loop ?? -1) {registeredVehicleSamples.insert(layer.sound)}
+        }
+        vehicleLoops.apply(plan,prefix:prefix,gain:Double(volume),spatialPosition:position,panner:panner)
     }
 
     private func clearVehicle() {
-        Array(loops.keys).filter { !$0.hasPrefix("effect:") }.forEach { stopLoop($0) }
-        vehicleModel = nil
-        rotor = 0
+        vehicleLoops.apply(.init(layers:[]),prefix:"mine")
+        vehicleModel=nil;aircraftPitch = -1
+        roadEngine.reset();reverseEngine.reset();boatEngine.reset();specialEngine.reset()
     }
 
-    private func stopLoop(_ id: String) {
-        loops.removeValue(forKey: id)?.player.stop()
+    private func stopLoop(_ id:String) {
+        loops.remove(id);vehicleLoops.stop("held:"+id)
     }
 
-    private func loop(_ id: String, sample name: String, rate: Float, gain: Float,pan: Float = 0) {
-        guard samples[name] != nil, gain > 0.001 else { stopLoop(id); return }
-        if let voice = loops[id], voice.sample == name {
-            voice.player.rate = max(0.5, min(2, rate))
-            voice.player.volume = max(0, min(1, gain * volume))
-            voice.player.pan = max(-1,min(1,pan))
-            if !voice.player.isPlaying { voice.player.play() }
+    private func loop(_ id:String,sample name:String,rate:Float,gain:Float,pan:Float=0) {
+        guard !suspended,samples[name] != nil,gain>0.001,rate>0 else {stopLoop(id);return}
+        guard let bytes=data[name] else {
+            if requests[name]==nil {fetch(name){_ in}}
             return
         }
-        // Start on a later update after prefetch; keep one pending request per
-        // sample rather than creating an ever-growing callback list per frame.
-        guard let bytes = data[name] else {
-            if requests[name] == nil { fetch(name) { _ in } }
-            return
+        if !registeredVehicleSamples.contains(name) {
+            guard vehicleLoops.register(bytes,name:name,loopStart:samples[name]?.loop ?? -1) else {return}
+            registeredVehicleSamples.insert(name)
         }
-        stopLoop(id)
-        let trimmed = Self.loopData(bytes, startFrame: samples[name]?.loop ?? -1) ?? bytes
-        guard let player = try? AVAudioPlayer(data: trimmed) else { return }
-        player.enableRate = true
-        player.rate = max(0.5, min(2, rate))
-        player.volume = max(0, min(1, gain * volume))
-        player.pan = max(-1,min(1,pan))
-        player.numberOfLoops = -1
-        loops[id] = LoopVoice(sample: name, player: player)
-        player.play()
+        let layer=NativeVehicleAudioDynamics.Layer(name:id,sound:name,rate:Double(rate),gain:Double(gain*volume))
+        if vehicleLoops.play(layer,id:"held:"+id,forceLoop:true,pan:Double(pan)) {loops.insert(id);vehicleLoops.start()}
     }
 
     /// Preserve the archived loop start in PCM frames, including WAV files

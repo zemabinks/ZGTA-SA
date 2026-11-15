@@ -9,6 +9,8 @@ import simd
         let models = document["models"] as! [String: [String: Any]]
         let manager = NativeGroundVehicle()!
         let count = manager.loadDefinitions(source)
+        let tracks=try Data(contentsOf:URL(fileURLWithPath:root).appendingPathComponent("local-only/site/game/native/trains.json"))
+        precondition(manager.loadTracks(tracks))
         precondition(count == models.values.filter { $0["solverSupported"] as? Bool == true }.count)
         var entered = 0
         for (model, row) in models where row["solverSupported"] as? Bool == true {
@@ -41,6 +43,6 @@ import simd
         let a = simulate(hz: 60), b = simulate(hz: 120)
         precondition(simd_distance(a.0,b.0) < 1e-6 && abs(a.1-b.1) < 1e-6)
         precondition(simd_length(a.2.vector-b.2.vector) < 1e-6)
-        print("PASS: \(entered) production ground chassis; shared SCL2 contacts; fixed 60/120 Hz cadence identical; Taxi420 final \(a.0), speed \(a.1)")
+        print("PASS: \(entered) production vehicle chassis including rail trains; shared SCL2 contacts; fixed 60/120 Hz cadence identical; Taxi420 final \(a.0), speed \(a.1)")
     }
 }

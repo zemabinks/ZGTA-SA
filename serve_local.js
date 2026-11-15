@@ -19,6 +19,7 @@ if (SELFHOST && HOST !== '127.0.0.1' && HOST !== '::1' &&
     (!(process.env.ZGTA_JOIN_CODE || process.env.ZGTA_JOIN_CODE_FILE) || !process.env.ZGTA_ALLOWED_HOSTS))
   throw new Error('Network hosting requires a join code and ZGTA_ALLOWED_HOSTS.');
 const localGame = SELFHOST ? require('./selfhost_backend') : null;
+const nativeRadio = SELFHOST ? require('./native_radio_server').create() : null;
 const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
   ...(process.env.ZGTA_ALLOWED_HOSTS || '').split(',').map(host => host.trim()).filter(Boolean)]);
 const UPSTREAM = 'play.samp.directory';
@@ -259,6 +260,9 @@ function serve(req, res) {
       }
       res.writeHead(401); return res.end('Access code required');
     }
+  }
+  if (nativeRadio && (pathname === '/game/radio/native/index' || /^\/game\/radio\/native\/track\/\d+\.wav$/.test(pathname))) {
+    void nativeRadio.handle(req,res,pathname);return;
   }
   // The game document needs its cookie before JavaScript opens the socket.
   // Assets are fetched concurrently and must not each create an account.

@@ -286,6 +286,8 @@ function savedGarage(value, cars) {
       item.paint : null;
     return {health: Math.max(0, Math.min(1000, Math.round(finite(item?.health, 1000)))),
       damage: typeof item?.damage === 'string' ? item.damage.slice(0, 512) : '',
+      pitch:rounded(item?.pitch),roll:rounded(item?.roll),
+      work:Math.round(Math.max(0,Math.min(2500,finite(item?.work)))),
       active: item?.active === true && !!position, position, paint,
       parkedHome: homeAt(item?.parkedHome) ? item.parkedHome : null};
   });
@@ -470,6 +472,7 @@ class LocalGame {
           trackedDiscovery: DISCOVERY_IDS.includes(value.trackedDiscovery) ?
             value.trackedDiscovery : null,
           supplies: savedSupplies(value.supplies),
+          flightGear:{parachute:value.flightGear?.parachute===true,jetpack:value.flightGear?.jetpack===true},
           cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
@@ -515,7 +518,7 @@ class LocalGame {
         gang: p.gang, gangSwitchUntil: p.gangSwitchUntil, turfCaptures: p.turfCaptures,
         discoveries: p.discoveries, trackedDiscovery: p.trackedDiscovery,
         supplies: p.supplies,
-        cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
+        flightGear:p.flightGear,cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
         discord: p.discord, settings: p.settings, inventory: p.inventory}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
     fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1,
@@ -537,7 +540,7 @@ class LocalGame {
         gang: null, gangSwitchUntil: 0, turfCaptures: 0,
         discoveries: [], trackedDiscovery: null,
         supplies: savedSupplies(),
-        cars: [], garage: [], homes: [], job: null,
+        flightGear:{parachute:false,jetpack:false},cars: [], garage: [], homes: [], job: null,
         discord: null, settings: {}});
       this.save();
     }
@@ -1004,6 +1007,7 @@ class LocalGame {
         tracked, items: discoveries, reward: DISCOVERY_PAY, finishReward: DISCOVERY_FINISH_PAY},
       discord: {available: this.discord.enabled, linked: !!player.discord,
         name: player.discord?.name || null, bonus: DISCORD_BONUS},
+      flightGear:player.flightGear || {parachute:false,jetpack:false},
       connected: !!pos, position: pos ? {x: rounded(pos.x), y: rounded(pos.y)} : null,
       breath: pos?.peer.inventoryEnabled ? Math.ceil(100*(pos.peer.nativeOxygen ?? 1150)/1150) :
         pos?.peer.submergedSince ? Math.max(0, Math.round(100-(Date.now()-pos.peer.submergedSince)/200)) : 100,
@@ -1231,8 +1235,8 @@ class LocalGame {
     if (!car || !entry?.position) return null;
     const id = `local-${this.nextVehicle++}`;
     const [x, y, z, heading] = entry.position;
-    const row = [id, player.name, this.vehicleCode(player, slot), x, y, z, heading, 0, 0,
-      entry.health, entry.damage, null];
+    const row = [id, player.name, this.vehicleCode(player, slot), x, y, z, heading,
+      finite(entry.pitch),finite(entry.roll),entry.health,entry.damage,null,null,null,null,null,finite(entry.work)];
     const vehicle = {id, owner: player, slot, row, lastGarageSave: 0};
     this.vehicles.set(id, vehicle);
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
@@ -1257,6 +1261,7 @@ class LocalGame {
     vehicle.row[3] = position[0]; vehicle.row[4] = position[1];
     vehicle.row[5] = position[2]; vehicle.row[6] = position[3];
     vehicle.row[7] = rounded(report.pitch); vehicle.row[8] = rounded(report.roll);
+    entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];
     if (Number.isFinite(report.health))
       entry.health = Math.min(entry.health,
         Math.max(0, Math.min(1000, Math.round(report.health))));
@@ -1296,6 +1301,37 @@ class LocalGame {
       if (other.ready) other.send({t: 'spawned', v: vehicle.row});
   }
 
+  updateUnattendedVehicle(peer, message) {
+    // The public client reports nearby unoccupied physics using eI/vmove.
+    // These authority checks belong to this independent local server.
+    if (!peer.ready || peer.player.insideHome || typeof message.v !== 'string') return;
+    const vehicle = this.vehicles.get(message.v), at = this.position(peer.player);
+    if (!vehicle || !at || vehicle.missionOwner && vehicle.missionOwner !== peer.player ||
+        [...this.peers].some(other => other.ready && other.state?.vehicle === vehicle.id &&
+          (other.state.driving === true || other.state.passenger === true))) return;
+    if (![message.x,message.y,message.z,message.h,message.p,message.r].every(Number.isFinite) ||
+        Math.abs(message.x)>6000 || Math.abs(message.y)>6000 || message.z< -200 || message.z>1000 ||
+        Math.hypot(at.x-vehicle.row[3],at.y-vehicle.row[4],at.z-vehicle.row[5])>80 ||
+        Math.hypot(at.x-message.x,at.y-message.y,at.z-message.z)>80) return;
+    vehicle.row[3]=rounded(message.x);vehicle.row[4]=rounded(message.y);vehicle.row[5]=rounded(message.z);
+    vehicle.row[6]=rounded(message.h);vehicle.row[7]=rounded(message.p);vehicle.row[8]=rounded(message.r);
+    if (Number.isFinite(message.hp)) vehicle.row[9]=Math.min(vehicle.row[9],
+      Math.max(0,Math.min(1000,Math.round(message.hp))));
+    if (typeof message.d==='string') vehicle.row[10]=message.d.slice(0,512);
+    if (Number.isFinite(message.w)) {
+      while (vehicle.row.length<17) vehicle.row.push(null);
+      vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,message.w)));
+    }
+    if (vehicle.owner) {
+      const entry=vehicle.owner.garage[vehicle.slot];
+      entry.position=vehicle.row.slice(3,7);entry.health=vehicle.row[9];entry.damage=vehicle.row[10];
+      entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];entry.work=vehicle.row[16] || 0;
+      if (Date.now()-vehicle.lastGarageSave>5000) {vehicle.lastGarageSave=Date.now();this.save();}
+    }
+    for (const other of this.peers) if (other!==peer && other.ready && !other.player.insideHome)
+      other.send({t:'veh',v:vehicle.row});
+  }
+
   spawnOwnedCar(player, slot) {
     const pos = this.position(player);
     if (!pos) throw new Error('Enter the game before spawning a car.');
@@ -1328,6 +1364,7 @@ class LocalGame {
         rounded(hangar.stand[2] + 1.1), 0] :
       [rounded(pos.x + 4), rounded(pos.y + 3), rounded(pos.z + 1.1), 0];
     entry.active = true;
+    entry.pitch=0;entry.roll=0;
     entry.parkedHome = null;
     this.addOwnedVehicle(player, slot);
     this.save();
@@ -2444,6 +2481,17 @@ class LocalGame {
 
   onMessage(peer, message) {
     if (!message || typeof message !== 'object') return;
+    if (peer.ready && peer.player.health<=0 && (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)) {
+      peer.player.flightGear={parachute:false,jetpack:false};
+      peer.send({t:'flightgear',...peer.player.flightGear});this.save();
+    }
+    if (message.t==='usedParachute' && peer.ready) {
+      if (peer.player.flightGear?.parachute) {
+        peer.player.flightGear.parachute=false;peer.send({t:'flightgear',...peer.player.flightGear});this.save();
+      }
+      return;
+    }
+    if (message.t === 'vmove') {this.updateUnattendedVehicle(peer,message);return;}
     if (message.t === 'detonate' && peer.ready && peer.inventoryEnabled) {
       this.projectiles.detonate(String(peer.player.number)); return;
     }
@@ -2457,6 +2505,10 @@ class LocalGame {
         life: [peer.player.health, peer.player.armour], out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0});
       peer.send(this.fullState(peer));
+      peer.send({t:'flightgear',...(peer.player.flightGear || {})});
+      if (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)
+        peer.send({t:'staff',...(peer.player.flightGear.parachute ? {give:[46,1]}:{}),
+          ...(peer.player.flightGear.jetpack ? {jetpack:true}:{})});
       if (peer.inventoryEnabled) peer.send({t: 'inventory', state: weaponInventory.state(peer.player)});
       peer.send(this.owned(peer.player));
       peer.send(this.homeStatus(peer.player));
@@ -2624,6 +2676,18 @@ class LocalGame {
   say(peer, raw) {
     const text = raw.trim().slice(0, 240);
     if (!text) return;
+    // Self-only free-play equipment on the independent Mac server. The
+    // browser consumes its original staff grant; native peers also retain it.
+    if (text==='/parachute' || text==='/jetpack' || text==='/jp') {
+      if (peer.player.health<=0 || peer.state?.driving===true)
+        return peer.send({t:'note',text:'Stand on foot and respawn before equipping flight gear.'});
+      peer.player.flightGear ||= {parachute:false,jetpack:false};
+      const parachute=text==='/parachute';
+      peer.player.flightGear[parachute ? 'parachute':'jetpack']=true;
+      peer.send({t:'staff',...(parachute ? {give:[46,1]}:{jetpack:true})});
+      peer.send({t:'flightgear',...peer.player.flightGear});this.save();
+      return peer.send({t:'note',text:parachute ? 'Parachute equipped. Use fire to open it during a high fall.':'Jetpack equipped. Sprint or move forward to lift; jump descends and crouch brakes.'});
+    }
     if (text.startsWith('/name ')) {
       const name = safeName(text.slice(6));
       if (name) { peer.player.name = name; this.save(); peer.send({t: 'note', text: `Your local name is ${name}.`}); }
