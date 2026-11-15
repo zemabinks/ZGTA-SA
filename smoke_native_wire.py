@@ -6,18 +6,20 @@ import tempfile
 ROOT=Path(__file__).resolve().parent
 JS=r'''
 const http=require('node:http'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
-let child,socket,done=false,driven=false,parked=false,foot=false,moved=false,flights=0,used=false;
+let child,socket,done=false,driven=false,parked=false,foot=false,moved=false,flights=0,used=false,shotSequence=0,boundHit=false,meleeBound=false;
 const damage='3434012122110101201';
 function send(value){const b=Buffer.from(JSON.stringify(value));let head;if(b.length<126)head=Buffer.from([129,b.length]);else{head=Buffer.alloc(4);head[0]=129;head[1]=126;head.writeUInt16BE(b.length,2)}socket.write(Buffer.concat([head,b]))}
 function row(){const r=Array(50).fill(null);Object.assign(r,{0:'42',1:'Browser peer',2:'420',3:1684.7612,4:-2101.9894,5:12.85125,6:.75,7:.25,8:-.125,9:13.25,10:.3,12:1,13:1.5,14:-2.25,15:.7,16:123456,17:1,18:645,19:damage,20:.1,21:.2,22:.3,23:23.4,24:2.13,25:1,26:1,27:22,28:.23,29:6,30:23,31:7,32:92,34:['passenger-car',2],35:'car-fixture',36:1,38:3,39:['trailer',.1,.2,.3],42:[.2,.4,1,.8,-.2],43:67});return r}
 function received(m){
+ if(m.t==='shot'){assert.equal(m.s,++shotSequence);assert.equal(m.w,22);assert.equal(m.c,'wire-nonce');send({t:'inventory',state:{revision:shotSequence,selected:22,weapons:[{id:22,clip:17-shotSequence,rest:30}],ack:{connection:'wire-nonce',processedShot:shotSequence}}})}
+ if(m.t==='hit'){assert.equal(m.to,'42');assert.equal(m.c,'wire-nonce');if(m.w===0){assert.equal(m.s,undefined);meleeBound=true}else{assert.equal(m.s,2);assert.equal(m.w,22);boundHit=true}}
  if(m.t==='usedParachute'){used=true}
- if(m.t==='hi'){assert.equal(m.nativeInventory,true);send({t:'hello',spot:[1684.7612,-2101.9894,12.85125,.75],life:[100,25]});send({t:'flightgear',parachute:true,jetpack:true});send({t:'all',vehicles:[['car-fixture','Browser peer','420',1684.7612,-2101.9894,12.85125,.75,.25,-.125,645,damage]],cars:[row()]})}
+ if(m.t==='hi'){assert.equal(m.nativeInventory,true);assert.equal(m.inventoryAck,1);send({t:'hello',inventoryAck:1,inventoryConnection:'wire-nonce',spot:[1684.7612,-2101.9894,12.85125,.75],life:[100,25]});send({t:'inventory',state:{revision:0,selected:22,weapons:[{id:22,clip:17,rest:30}],ack:{connection:'wire-nonce',processedShot:0}}});send({t:'flightgear',parachute:true,jetpack:true});send({t:'all',vehicles:[['car-fixture','Browser peer','420',1684.7612,-2101.9894,12.85125,.75,.25,-.125,645,damage]],cars:[row()]})}
  if(m.t==='vmove'){assert.equal(m.v,'car-fixture');assert.deepEqual([m.x,m.y,m.z,m.h,m.p,m.r,m.hp,m.d,m.w],[1685,-2102,12.8,.4,.1,-.2,623,damage,321]);moved=true;send({t:'veh',v:['car-fixture','Browser peer','420',1685,-2102,12.8,.4,.1,-.2,623,damage,null,null,null,null,null,321]})}
  if(m.t==='me'&&m.driving){assert(Math.abs(m.heading+.75)<1e-6);assert(Math.abs(m.steer+.3)<1e-6);assert.equal(m.pitch,.25);assert.equal(m.roll,.125);assert.equal(m.health,645);assert.equal(m.damage,damage);assert.equal(m.horn,3);assert.equal(m.act,1);assert.equal(m.lights,true);driven=true}
  if(m.t==='me'&&m.walking&&!m.parked&&m.act===28){assert.equal(m.move,2.13);assert.equal(m.anim,null);assert.equal(m.aim,.24);assert.equal(m.act,28);assert.equal(m.air,true);assert.equal(m.crouch,true);assert.equal(m.paused,true);assert.deepEqual([m.vx,m.vy,m.vz],[1.2,-2.3,.4]);assert.deepEqual([m.wx,m.wy,m.wz],[.1,.2,.3]);assert(Number.isFinite(m.clock));foot=true}
  if(m.t==='me'&&m.act>=50&&m.act<=62){assert.equal(m.pitch,-.23);assert.equal(m.roll,.46);if(m.act===60){assert.equal(m.move,2.13);assert.equal(m.air,true);assert.equal(m.crouch,true)}else{assert.equal(m.move,0);assert.equal(m.air,false);assert.equal(m.crouch,false)}assert.equal(m.aim,m.act===54?null:.24);flights++}
- if(m.t==='me'&&m.walking&&m.parked){assert(driven&&foot&&moved&&used&&flights===3);assert.equal(m.parked.damage,damage);assert.equal(m.parked.health,645);assert(Math.abs(m.parked.heading+.75)<1e-6);assert.equal(m.parked.roll,.125);parked=true;send({t:'cars',c:[]});send({t:'note',text:'WIRE COMPLETE'})}
+ if(m.t==='me'&&m.walking&&m.parked){assert(driven&&foot&&moved&&used&&flights===3&&shotSequence===2&&boundHit&&meleeBound);assert.equal(m.parked.damage,damage);assert.equal(m.parked.health,645);assert(Math.abs(m.parked.heading+.75)<1e-6);assert.equal(m.parked.roll,.125);parked=true;send({t:'cars',c:[]});send({t:'note',text:'WIRE COMPLETE'})}
 }
 const server=http.createServer();server.on('upgrade',(req,s)=>{socket=s;s.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')+'\r\n\r\n');let pending=Buffer.alloc(0);s.on('data',chunk=>{pending=Buffer.concat([pending,chunk]);while(pending.length>=2){let length=pending[1]&127,start=2;if(length===126){if(pending.length<4)return;length=pending.readUInt16BE(2);start=4}if(length===127)throw Error('Unexpected huge test packet');const masked=!!(pending[1]&128),mask=masked?pending.subarray(start,start+4):null;if(masked)start+=4;if(pending.length<start+length)return;const opcode=pending[0]&15,payload=Buffer.from(pending.subarray(start,start+length));pending=pending.subarray(start+length);if(masked)for(let i=0;i<length;i++)payload[i]^=mask[i%4];if(opcode===1)received(JSON.parse(payload));else if(opcode===8){s.end();return}}})});
 server.listen(0,'127.0.0.1',()=>{child=spawn(process.argv[2],['http://127.0.0.1:'+server.address().port],{stdio:'inherit'});child.on('exit',code=>{assert.equal(code,0);assert(driven&&parked);done=true;socket?.destroy();server.close();console.log('PASS actual native WebSocket client: fractional spawn, browser yaw/roll, full foot/flight and parked vehicle state, equipment, damage/lights/horn and empty snapshot')})});
@@ -46,6 +48,11 @@ client.onVehicles={vehicles in
  for state in [54,60,61]{client.sendPosition(v.position,heading:0.75,moving:true,running:false,pitch:-0.234,roll:0.456,airborne:true,weapon:46,crouching:true,movement:2.13,aim:0.236,action:state)}
  client.usedParachute()
  client.sendVehicleMove(v.id,state:["x":1685,"y":-2102,"z":12.8,"h":0.4,"p":0.1,"r":-0.2,"hp":623,"d":damage,"w":321])
+ let first=client.reserveShot()!,second=client.reserveShot()!
+ precondition(client.sendWeaponShot(weapon:22,from:v.position,to:v.position+SIMD3<Float>(1,0,0),player:nil,ticket:first))
+ precondition(!client.sendWeaponShot(weapon:22,from:v.position,to:v.position+SIMD3<Float>(1,0,0),player:nil,ticket:first),"duplicate ticket was sent twice")
+ precondition(client.sendWeaponShot(weapon:22,from:v.position,to:v.position+SIMD3<Float>(2,0,0),player:"42",ticket:second))
+ client.sendMeleeHit(to:"42")
  DispatchQueue.main.asyncAfter(deadline:.now()+0.1){client.sendExit(v.position+SIMD3<Float>(2,0,0),parked:v.position,heading:0.75,pitch:0.25,roll:-0.125,vehicle:v,vehicleHealth:645,vehicleDamage:damage)}
 }
 client.onStatus={text in if text=="WIRE COMPLETE"{precondition(spawned&&actors&&cleared&&vehicleUpdated&&gear);finished=true;client.disconnect()}}
@@ -58,7 +65,7 @@ def main():
         folder=Path(directory);(folder/'peer.cjs').write_text(JS)
         actor=(ROOT/'ios/App/NativeActorAnimation.swift').read_text()
         actor=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]
-        source=(ROOT/'ios/App/ServerAddress.swift').read_text()+'\n'+actor+'\n'+(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
+        source=(ROOT/'ios/App/ServerAddress.swift').read_text()+'\n'+(ROOT/'ios/App/NativeInventoryPrediction.swift').read_text()+'\n'+actor+'\n'+(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
         (folder/'main.swift').write_text(source+'\n'+SWIFT)
         subprocess.run(['swiftc','-module-cache-path','/private/tmp/zgtasa-wire-module-cache',str(folder/'main.swift'),'-o',str(folder/'client')],check=True)
         subprocess.run(['node',str(folder/'peer.cjs'),str(folder/'client')],check=True)

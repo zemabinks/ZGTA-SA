@@ -63,7 +63,7 @@ for test in cases {
   checkVector(controller.linearVelocity,state["velocity"]!,label+" velocity");frames += 1
  }
 }
-print("PASS: \(frames) original parachute/jetpack frames, \(comparisons) movement/state/landing checks; maximum error \(maximum)")
+print("PASS: \(frames) archived-browser parachute/jetpack frames, \(comparisons) movement/state/landing checks; maximum error \(maximum)")
 '''
 def main():
  with tempfile.TemporaryDirectory(prefix='zgta-personal-flight-')as directory:

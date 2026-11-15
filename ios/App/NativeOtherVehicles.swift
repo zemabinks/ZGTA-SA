@@ -92,6 +92,11 @@ final class NativeOtherVehicles {
             if let entry=entries[source.id]{
                 let changed = !rawEqual(entry.lastRaw,source)
                 entry.source=source
+                // Release local simulation before applying the authoritative
+                // occupied pose. Demoting afterwards overwrote that target
+                // with the old parked position; a stationary remote driver
+                // then never supplied another changed packet to correct it.
+                if entry.rig != nil && source.occupied { demote(entry) }
                 if changed {
                     entry.health=source.health;entry.damage=source.damage;entry.work=source.work
                     if let rig=entry.rig {
@@ -105,7 +110,6 @@ final class NativeOtherVehicles {
                     }
                     entry.lastRaw=source
                 }
-                if entry.rig != nil && source.occupied{demote(entry)}
             } else {
                 let entry=Entry(source,model:model,definition:definition,pose:Self.pose(source));entries[source.id]=entry;order.append(source.id)
                 if !source.occupied && source.pitch==0 && source.roll==0 {

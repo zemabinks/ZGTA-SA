@@ -131,7 +131,7 @@ for item in document["shakes"] as! [[String:Any]] {
 }
 let projection=try NativeGameCamera(data:metadata)
 for item in document["planes"] as! [[String:Any]]{let value=projection.projection(air:(item["air"] as! NSNumber).floatValue,farClip:(item["farClip"] as! NSNumber).floatValue),expected=item["expected"] as! [Double];close(value.near,expected[0],"near plane");close(value.far,expected[1],"far plane")}
-print("PASS: 180 original on-foot and 360 original vehicle camera frames, all six views, aim/scope/crouch/ledge/parachute transitions, FOV and collision margins, plus 360 original shake frames and projection deadband; \(comparisons) comparisons")
+print("PASS: 180 archived-browser on-foot and 360 archived-browser vehicle camera frames, all six views, aim/scope/crouch/ledge/parachute transitions, FOV and collision margins, plus 360 archived-browser shake frames and projection deadband; \(comparisons) comparisons")
 '''
 
 def main():

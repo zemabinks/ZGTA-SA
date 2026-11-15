@@ -25,15 +25,13 @@ final class MainMenuViewController: UIViewController {
                                      shade.topAnchor.constraint(equalTo: view.topAnchor),
                                      shade.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
 
-        let scroll = UIScrollView()
+        let scroll = NativeMenuScrollView()
         scroll.showsVerticalScrollIndicator = false
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
-        let content = UIStackView()
+        let content = scroll.column
         content.axis = .vertical
         content.spacing = 8
-        content.translatesAutoresizingMaskIntoConstraints = false
-        scroll.addSubview(content)
 
         let header = UIView()
         header.backgroundColor = UIColor.white.withAlphaComponent(0.96)
@@ -90,16 +88,8 @@ final class MainMenuViewController: UIViewController {
             scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 8),
-            content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -8),
-            content.centerXAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerXAnchor),
-            content.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor, constant: -24),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: 940)
+            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         ])
-        let width = content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)
-        width.priority = .defaultHigh
-        width.isActive = true
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -129,6 +119,7 @@ final class MainMenuViewController: UIViewController {
     }
 
     @objc private func openSetup() {
+        guard presentedViewController == nil else { return }
         let setup = HomeViewController()
         setup.modalPresentationStyle = .fullScreen
         present(setup, animated: true)

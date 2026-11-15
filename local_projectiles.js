@@ -56,6 +56,9 @@ function create(options = {}) {
     onEvent({type, ...copy(projectile), ...extra});
   }
   function interval(weapon) {
+    if (typeof options.interval==='function') {
+      const value=options.interval(weapon);if(Number.isFinite(value)&&value>=0)return value;
+    }
     const loop = stats[String(weapon)]?.loop;
     return Array.isArray(loop) && loop.length > 1 ? Math.max(80,
       Math.min(5000, (loop[1]-loop[0])/30*1000)) : 350;

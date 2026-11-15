@@ -152,6 +152,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var personalFlightBrake=false
     private var pendingParachuteOpen=false
     var wearingJetpack:Bool {personalFlight.worn}
+    var canDropJetpack:Bool {
+        personalFlight.worn && !personalFlight.on && !driving && climb==nil && health>0 &&
+            (character?.state.grounded ?? (verticalSpeed==0))
+    }
     var isChuting:Bool {personalFlight.chuting}
     var personalFlightPitch:Float {Float(personalFlight.pitch)}
     var personalFlightRoll:Float {Float(personalFlight.roll)}
@@ -159,6 +163,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         personalFlight.state>0 ? .init(state:personalFlight.state,pitch:personalFlight.pitch,roll:personalFlight.roll):nil
     }
     func setFlightGear(parachute:Bool,jetpack:Bool) {
+        if jetpack,climb != nil {pendingClimbDrop=true}
         hasParachute=parachute;if personalFlight.worn != jetpack {personalFlight.wear(jetpack)}
     }
     func openParachute() {if personalFlight.chuting {pendingParachuteOpen=true}}
@@ -181,6 +186,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var footWeaponDefinitions: [Int: NativeFootWeaponAnimation] = [:]
     private var footAnimator: NativeFootAnimation?
     private let footLocomotion = NativeFootLocomotion()
+    private let headingContinuity = NativeHeadingContinuity()
+    private var climb:NativeClimbController?
+    private var climbPhase:NativeClimbController.Part?
+    private var pendingClimbPull=false,pendingClimbDrop=false
+    private var airGrabTicks=0
+    var jumpHeld=false
+    var isClimbing:Bool {climb != nil}
+    private lazy var climbQueries=character.map {NativeRapierClimbQueries(world:$0.world,excluded:[$0.queries.walker,$0.queries.probe])}
     private var footAnimationFrame: NativeFootAnimation.Frame?
     private var footAnimationModel = ""
     private var footAirTime: Double = 0
@@ -252,13 +265,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private let waterWaves = NativeWaterWaves()
     private let gameCamera = NativeGameCamera()
+    private var ownCameraVisibility=NativeCameraVisibility()
+    private var ownCameraHidden=false
     private var gameCameraFrame: NativeGameCamera.Frame?
     private var cameraVehicleDefinitions: [String:CameraVehicleDefinition] = [:]
     private var cameraWasDriving = false
     private var waterTexture: MTLTexture?
     private var nearWaterMesh: Mesh?
     private var nearWaterOrigin: SIMD2<Float>?
-    private var lastAtmosphereFrame: Double = 0
+    private var renderClock=NativeGameFrameClock()
     private var atmosphereMilliseconds: Double = 0
     private var atmosphereAir: Float = 0
     private var roadWetness: Float = 0
@@ -408,6 +423,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var weaponReloading = false
     var weaponReady = true
     var onFootstep: ((String) -> Void)?
+    /// Fixed-step animation events own firing time; the inventory/network
+    /// consumer can synchronously update weaponReady before the next substep.
+    var onFootWeaponShot: ((Int,Bool) -> Bool)?
+    private var acceptedStreamShot=false
     var aiming = false
     var driving = false
     var remoteServerTimeOffsetMilliseconds: Double?
@@ -538,7 +557,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         gameCamera.trace = { [weak self] origin,direction,distance in
             guard let self else { return nil }
             let groups: UInt32 = self.driving ? 0xffff0083 : 0xffff0001
-            let excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : []
+            var excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : Set<UInt64>()
+            if let queries=self.character?.queries {excluded.formUnion([queries.walker,queries.probe])}
             let physics = self.groundVehicle?.world.raycast(origin: SwiftRapierWorld.gtaToRapier(origin),
                 direction: SwiftRapierWorld.gtaToRapier(direction),distance: distance,excludingColliders: excluded,groups: groups)?.distance
             let geometry = self.collisionFor(SIMD3(origin.x,origin.y,self.camera.z))?.raycast(from: origin,direction: direction,distance: distance)?.distance
@@ -604,15 +624,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var isWading: Bool {worldWater?.height(x:camera.x,y:camera.y,z:camera.z).map {$0>camera.z} ?? false}
     var hasOriginalFootAnimation: Bool {footAnimator != nil && footAnimationFrame != nil && !driving}
     var footWireMovementRatio:Double {
-        guard health>0,!personalFlight.on else{return 0}
+        guard health>0,!personalFlight.on,climb==nil else{return 0}
         let ratio=footSprintPace>=1 && footLocomotion.requestedMovementRatio>0.5 ? 3:footLocomotion.reportedRatio
         return floor(ratio*100+0.5)/100
     }
-    var footWireAction:Int {health>0 ? personalFlight.state>0 ? 50+personalFlight.state-1:footAnimator?.reportedAction ?? 0:0}
+    var footWireAction:Int {health>0 ? climb?.part.rawValue ?? (personalFlight.state>0 ? 50+personalFlight.state-1:footAnimator?.reportedAction ?? 0):0}
     var footWireAnimation:String? {health>0 && !swimController.on && footWireAction == 0 && footAnimator?.floored != true ? footAnimator?.tagged:nil}
-    var footWireAirborne:Bool {!personalFlight.on && footAirTime>0.05}
+    var footWireAirborne:Bool {climb==nil && !personalFlight.on && footAirTime>0.05}
     var footWireAim:Double? {
-        guard health>0,!personalFlight.chuting,footWeaponDefinitions[equippedWeapon]?.aims == true,
+        guard health>0,climb==nil,!personalFlight.chuting,footWeaponDefinitions[equippedWeapon]?.aims == true,
               aiming || weaponTriggerHeld || footAnimator?.gunUp == true else{return nil}
         return aiming ? Double(cameraPitch):0
     }
@@ -632,6 +652,36 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return SIMD3(sin(heading)*cos(cameraPitch),cos(heading)*cos(cameraPitch),sin(cameraPitch))
     }
     var cameraLookDirection: String?
+    func cancelCameraInput() { gameCamera.cancelLookInput();cameraLookDirection=nil }
+    func cancelWeaponInput() { weaponTriggerHeld=false;footAnimator?.cancelInput() }
+    func cancelReloadAnimation() {footAnimator?.cancelReload();footReloadRequested=false;footReloadWasActive=false}
+    func cancelGameplayInput() {
+        cancelWeaponInput();cancelCameraInput()
+        acceptedStreamShot=false
+        pendingNativeJump=0;pendingSwimJump=false;pendingDive=false;pendingSprintTap=false
+        pendingClimbPull=false;pendingClimbDrop=false;jumpHeld=false
+        pendingParachuteOpen=false;sprintWasHeld=false
+        personalFlightDown=false;personalFlightBrake=false;personalFlight.cancelInput()
+    }
+    func beginGameplayFrame() {acceptedStreamShot=false}
+    func resetDisplayClock() {renderClock.reset()}
+    var hasNativeFootWeaponTiming:Bool {
+        guard footAnimator != nil,let definition=footWeaponDefinitions[equippedWeapon],
+              ["gun","stream","launch","throw"].contains(definition.use ?? ""),climb==nil,!driving,!swimming,!personalFlight.chuting else{return false}
+        return !personalFlight.flying || definition.arm
+    }
+    var nativeWeaponStreamActive:Bool {
+        hasNativeFootWeaponTiming && [37,38,41,42].contains(equippedWeapon) &&
+            health>0 && !weaponReloading && (acceptedStreamShot ||
+                (weaponReady && weaponTriggerHeld && footAnimator?.gunShooting == true && footAnimator?.fired == true))
+    }
+    @discardableResult func requestFootWeaponFire()->Bool {
+        prepareFootAnimation()
+        guard hasNativeFootWeaponTiming,health>0,weaponReady,!weaponReloading,
+              let animator=footAnimator else{return false}
+        animator.arm(footWeaponDefinitions[equippedWeapon])
+        return animator.fire(held:true)
+    }
     func zoomCameraSight(_ delta: Float) { gameCamera.zoomSight(delta) }
     var scopedCameraHidesPlayer: Bool { gameCameraFrame?.hidesPlayer ?? false }
     var cameraViewName: String { driving ? gameCamera.vehicleViewName : ["near","middle","far"][gameCamera.footZoom-1] }
@@ -657,6 +707,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         actionTimeRemaining = max(0, actionTimeRemaining - delta)
         let inputLength = min(1, hypot(forward, sideways))
+        // Surface swimming uses the same camera-relative movement intent as
+        // walking even when the original skeletal animator is loaded.
+        if inputLength>=0.05 {
+            swimHeadingTarget=Float(NativeHeadingContinuity.inputFacing(camera:Double(heading),sideways:Double(sideways),forward:Double(forward)))
+        }
         if running && !sprintWasHeld { pendingSprintTap = true }
         sprintWasHeld = running
         if manualAnimation && inputLength > 0.05 { clearAction() }
@@ -806,6 +861,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let result = character.update(delta: Double(delta),displacement: next-start,
                 jump: pendingNativeJump,geometryReady: groundVehicle?.isCellLoaded(activeDetail) == true,
                 motion: { [self] step,state,intended in
+                    if let held=climbingMotion(delta:step,state:state,intended:intended) {return held}
                     let water = swimmingMotion(delta:step,state:state,intended:intended,push:Double(inputLength),running:running)
                     if swimController.on { return water }
                     if let flight=personalFlightMotion(delta:step,state:state,intended:water,forward:forward,sideways:sideways,running:running) {return flight}
@@ -931,6 +987,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     func jump() {
         guard !driving, health > 0 else { return }
+        if climb != nil {pendingClimbPull=true;return}
         if personalFlight.worn || personalFlight.chuting {return}
         if swimming { pendingSwimJump = true; return }
         guard verticalSpeed == 0 else { return }
@@ -946,6 +1003,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func toggleCrouch() {
+        if climb != nil {return}
         if personalFlight.worn || personalFlight.chuting {return}
         if swimController.on { pendingDive = true }
         else { crouching.toggle() }
@@ -970,6 +1028,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footLaunchRemaining = nil
         }
         guard swimController.on else { swimController.ashore(delta);return intended }
+        headingContinuity.external(.swimming)
         let profile = NativeSprintController.Profile.forMode(swimController.under ? .underwater : .water)
         let pace = sprintController.control(profile,ticks:50*delta,tapped:pendingSprintTap,held:running,
             staminaLeft:stamina.left,take:{ [self] in stamina.take($0) })
@@ -999,6 +1058,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         if swimController.consumeSplash() { onSplash?() }
         guard let result else { return intended }
+        if delta>0 {footAirVelocity=SIMD2(result.move.x/delta,-result.move.z/delta)}
         var input = intended
         input.displacement = SwiftRapierWorld.rapierToGTA(SIMD3<Float>(result.move))
         input.verticalOverride = result.rise;input.jump = 0
@@ -1019,8 +1079,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         if personalFlight.lifts,footAnimator?.busy != true {personalFlight.takeOff(heading:-Double(actorHeading));crouching=false}
         guard personalFlight.on || personalFlight.state==10 else{return nil}
-        guard let result=personalFlight.step(delta:delta,grounded:state.grounded,heading:-Double(heading),height:personalFlight.flying ? height:nil) else{return nil}
-        actorHeading = -Float(personalFlight.heading)
+        let ownedFacing=personalFlight.on
+        if ownedFacing {headingContinuity.external(personalFlight.chuting ? .parachute:.jetpack)}
+        let stepped=personalFlight.step(delta:delta,grounded:state.grounded,heading:-Double(heading),height:personalFlight.flying ? height:nil)
+        // Touchdown can finish the flight task without returning displacement.
+        // Publish its final facing before the foot task resumes in this tick.
+        if ownedFacing {actorHeading = -Float(personalFlight.heading)}
+        guard let result=stepped else{return nil}
+        if delta>0 {footAirVelocity=SIMD2(result.move.x/delta,-result.move.z/delta)}
         var land:String?
         if let landing=result.landed {
             if landing.canopy {hasParachute=false;onParachuteUsed?()}
@@ -1031,8 +1097,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             var animation=NativeFootAnimation.Input()
             animation.land=land;animation.fly=personalFlightAnimationInput
             animation.position=SIMD3<Double>(state.feet);animation.heading=Double(actorHeading)
+            let definition=footWeaponDefinitions[equippedWeapon]
+            let canAim=personalFlight.flying && definition?.arm == true && definition?.use == "gun"
+            animator.arm(canAim ? definition:nil)
+            if canAim {
+                animation.gun = .init(pitch:Double(cameraPitch),yaw:min(1.4,max(-1.4,NativeHeadingContinuity.difference(Double(actorHeading),from:Double(heading)))))
+                animator.control(.init(fire:weaponTriggerHeld && weaponReady,aim:aiming,held:weaponTriggerHeld,ready:weaponReady))
+            }
             if health<=0 && !animator.dead {animator.die("koFront")}
-            footAnimationFrame=animator.update(delta:delta,input:animation)
+            let frame=animator.update(delta:delta,input:animation)
+            footAnimationFrame=frame;emitFootWeaponEvents(frame)
         }
         footAirTime=0;footAirFall=0;footAirFell=false;footJumped=false;footLaunchRemaining=nil
         var motion=intended;motion.jump=0
@@ -1054,7 +1128,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let animator = NativeFootAnimation(library:library,style:style)
         animator.onStep = { [weak self] kind in self?.onFootstep?(kind) }
         footAnimator = animator;footAnimationModel = model
-        footLocomotion.reset(heading:Double(actorHeading));footAnimationFrame = nil
+        ownCameraVisibility.reset()
+        headingContinuity.reset(facing:Double(actorHeading),locomotion:footLocomotion);footAnimationFrame = nil
         footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footJumpMinimum = 0
         footLaunchRemaining = nil;footAirVelocity = .zero
     }
@@ -1065,6 +1140,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                             intended: NativeCharacterController.Motion,forward: Float,sideways: Float,running: Bool) -> NativeCharacterController.Motion {
         prepareFootAnimation()
         guard let animator = footAnimator else { pendingSprintTap = false;return intended }
+        headingContinuity.resumeFoot(facing:Double(actorHeading),locomotion:footLocomotion)
         let definition = footWeaponDefinitions[equippedWeapon]
         animator.arm(definition)
         if health <= 0 && !animator.dead { animator.die() }
@@ -1090,10 +1166,21 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if let remaining = footLaunchRemaining {
             if remaining-delta < 0 {
                 footLaunchRemaining = nil
-                if state.grounded { motion.jump = 6.07;jumping = true }
+                if state.grounded {
+                    if beginClimb(state:state,extended:true) {
+                        return climbingMotion(delta:delta,state:state,intended:motion,advance:false) ?? motion
+                    }
+                    motion.jump = 6.07;jumping = true
+                }
             } else { footLaunchRemaining = remaining-delta;motion.jump = 0 }
         }
         let airborne = !state.grounded || jumping
+        if airborne,footAirTime>0,footJumped,!footAirFell,state.rising > -10,simd_length(footAirVelocity)>2.5 {
+            airGrabTicks += 1
+            if airGrabTicks%2==0,beginClimb(state:state,extended:false) {
+                return climbingMotion(delta:delta,state:state,intended:motion,advance:false) ?? motion
+            }
+        } else {airGrabTicks=0}
         let wholeBodyAim = animator.gunUp && !(definition?.arm ?? false) && !crouching
         if !airborne {
             let restricted = wholeBodyAim || crouching || definition?.flags?["heavy"] == true || !animator.sprints
@@ -1107,7 +1194,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         animation.ratio = locomotion.ratio;animation.sprint = footSprintPace >= 1 && locomotion.pushing && !wholeBodyAim
         animation.pace = animation.sprint ? footSprintPace : 1
         animation.crouch = crouching;animation.strafe = locomotion.strafe
-        animation.gun = effectiveAim ? .init(pitch:aiming ? Double(cameraPitch) : 0,yaw:min(1.4,max(-1.4,Double(actorHeading-heading)))) : nil
+        animation.gun = effectiveAim ? .init(pitch:aiming ? Double(cameraPitch) : 0,yaw:min(1.4,max(-1.4,NativeHeadingContinuity.difference(Double(actorHeading),from:Double(heading))))) : nil
         if effectiveAim { animator.control(.init(fire:weaponTriggerHeld && weaponReady,aim:aiming,held:weaponTriggerHeld,pushed:locomotion.pushing,ready:weaponReady)) }
         if airborne {
             footAirTime += delta;footJumped = footJumped || jumping;footAirFall = max(footAirFall,-state.rising)
@@ -1124,6 +1211,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footJumpMinimum = 0
         }
         let frame = animator.update(delta:delta,input:animation);footAnimationFrame = frame
+        emitFootWeaponEvents(frame)
         var travel = NativeFootLocomotion.worldTravel(frame.travel,heading:locomotion.heading)
         if airborne {
             if jumping {
@@ -1147,6 +1235,74 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return motion
     }
 
+    private func emitFootWeaponEvents(_ frame:NativeFootAnimation.Frame) {
+        guard hasNativeFootWeaponTiming,health>0,!weaponReloading else{return}
+        for left in frame.shots {
+            guard weaponReady else{break}
+            if onFootWeaponShot?(equippedWeapon,left) == true,[37,38,41,42].contains(equippedWeapon) {acceptedStreamShot=true}
+        }
+    }
+
+    func letGoOfLedge() {if climb != nil {pendingClimbDrop=true}}
+
+    private func beginClimb(state:NativeCharacterController.Output,extended:Bool)->Bool {
+        guard health>0,climb==nil,!driving,!swimController.on,!personalFlight.on,!personalFlight.worn,
+              let library=skeletalLibrary,let animator=footAnimator,let queries=climbQueries,
+              let jump=library.duration(of:"ped/climb_jump"),let pull=library.duration(of:"ped/climb_pull"),
+              let stand=library.duration(of:"ped/climb_stand"),let vault=library.duration(of:"ped/climb_jump_b"),
+              min(jump,pull,stand,vault)>0 else{return false}
+        let feet=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(state.feet))
+        guard var ledge=queries.find(feet:feet,heading:-Double(actorHeading),extended:extended),ledge.fixed else{return false}
+        if !extended {ledge.high=ledge.hold.y-feet.y-1>=1.1}
+        climb=NativeClimbController(ledge:ledge,feet:feet,durations:.init(jump:jump,pull:pull,stand:stand,vault:vault))
+        climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        cancelWeaponInput();crouching=false;manualAnimation=false;animator.resetMovementTask()
+        footAirTime=0;footAirFall=0;footAirFell=false;footJumped=false;footLaunchRemaining=nil;footAirVelocity = .zero
+        return true
+    }
+
+    /// The held root is published on both the first and completion tick. Root
+    /// animation is visual here and must not be added to heldFeet a second time.
+    private func climbingMotion(delta:Double,state:NativeCharacterController.Output,intended:NativeCharacterController.Motion,
+                                advance:Bool=true)->NativeCharacterController.Motion? {
+        guard let task=climb else{return nil}
+        let end=advance ? task.step(delta:delta,pull:jumpHeld || pendingClimbPull,drop:pendingClimbDrop || health<=0):nil
+        pendingClimbPull=false;pendingClimbDrop=false
+        actorHeading = -Float(task.heading);headingContinuity.external(.climbing)
+        if let animator=footAnimator {
+            animator.arm(nil)
+            if task.part != climbPhase {
+                climbPhase=task.part
+                switch task.part {
+                case .jump:_=animator.act("ped/climb_jump",rooted:true,blend:8)
+                case .hang:_=animator.act("ped/climb_idle",loop:true,rooted:true,blend:4)
+                case .pull:_=animator.act("ped/climb_pull",rooted:true,cut:true)
+                case .edge:_=animator.act("ped/climb_stand",rooted:true,paused:true,blend:4)
+                case .stand:_=animator.act("ped/climb_stand",rooted:true,cut:true)
+                case .vault:_=animator.act("ped/climb_jump_b",rooted:true,cut:true)
+                }
+            }
+            if end != nil {
+                if task.part == .stand {_=animator.act("ped/climb_stand_finish",cut:true,once:true)}
+                else if task.part == .vault {_=animator.act("ped/climb_jump2fall",rooted:true,cut:true,once:true)}
+                else {animator.rest()}
+            }
+            if health<=0,!animator.dead {animator.die()}
+            var animation=NativeFootAnimation.Input()
+            animation.position=SIMD3<Double>(state.feet);animation.heading=Double(actorHeading)
+            footAnimationFrame=animator.update(delta:delta,input:animation)
+        }
+        character?.motor.setActive(true)
+        var motion=intended;motion.displacement = .zero;motion.jump=0;motion.verticalOverride=nil
+        motion.heldFeet=SwiftRapierWorld.rapierToGTA(SIMD3<Float>(task.feet))
+        if let end {
+            climb=nil;climbPhase=nil
+            footAirTime=end == .over ? 0.35:0;footAirFall=0;footAirFell=false;footJumped=false;footJumpMinimum=0;footLaunchRemaining=nil
+            footAirVelocity=end == .over ? SIMD2(-sin(task.heading),cos(task.heading)):.zero
+        }
+        return motion
+    }
+
     private func swimmingLedge(feet: SIMD3<Double>,heading: Double,surface: Double) -> SIMD3<Double>? {
         guard let character else { return nil }
         let forward = SIMD3<Float>(Float(-sin(heading)),0,Float(-cos(heading)))
@@ -1166,8 +1322,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func performFistAttack() {
+        guard climb==nil else{return}
         manualAnimation = false
         actorHeading = heading
+        headingContinuity.reset(facing:Double(actorHeading),locomotion:footLocomotion)
         actionClip = "fighta_1"
         actionTimeRemaining = 0.43
         pedestrian.perform("fighta_1", duration: 0.43)
@@ -1179,8 +1337,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func fireWeapon(clip: String, duration: Float) {
+        guard climb==nil else{return}
         manualAnimation = false
-        actorHeading = heading
+        // Native reloads retain the locomotion-owned facing; legacy fallback
+        // fire still explicitly adopts its requested facing in both caches.
+        if !clip.lowercased().contains("load") {
+            actorHeading = heading
+            headingContinuity.reset(facing:Double(actorHeading),locomotion:footLocomotion)
+        }
         actionClip = clip
         actionTimeRemaining = duration
         pedestrian.perform(clip, duration: Double(duration))
@@ -1191,10 +1355,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    func clearAction() { actionTimeRemaining = 0; pedestrian.clearAction();footAnimator?.rest();manualAnimation = false }
+    func clearAction() {
+        guard climb==nil else{return}
+        actionTimeRemaining = 0; pedestrian.clearAction();footAnimator?.rest();manualAnimation = false
+    }
     var animationClips: [String] { skeletalLibrary?.clipNames ?? [] }
     func playAnimation(_ name: String, looping: Bool) {
-        guard !driving, health > 0, let library = skeletalLibrary, library.contains(name) else { return }
+        guard !driving,climb==nil, health > 0, let library = skeletalLibrary, library.contains(name) else { return }
         manualAnimation = true
         manualAnimationSerial = (manualAnimationSerial+1)%10
         let wire = name + (looping ? "/l/" : "/o/") + String(manualAnimationSerial)
@@ -1225,6 +1392,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let snapshot=groundVehicle?.takeOtherVehicle(source.id)
         pendingVehicleBodyPose=snapshot?.physicalPose
         let vehicle=applying(snapshot,to:source)
+        ownCameraVisibility.reset()
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         personalFlight.stop()
         swimController.stop();swimming = false;underwater = false
         footAnimator?.rest(cut:true);footAnimationFrame = nil;footLaunchRemaining = nil
@@ -1281,6 +1450,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func exitVehicle() {
+        ownCameraVisibility.reset()
         let exactFeet=ownRiderPlayback?.state == .stood ? ownRiderFeet:nil
         pendingVehicleExit=nil
         let floor = collision?.height(x: camera.x, y: camera.y,
@@ -1300,6 +1470,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehicleFallbackRoll = 0
         activeModelOrigin = 0
         pendingVehicleBodyPose=nil
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         activeVehicleModel = ""
         activeHandling = nil
         vehicleKind = "car"
@@ -1315,16 +1486,27 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
         pedestrian.perform("car_getout_lhs", duration: 1.0)
-        footLocomotion.reset(heading:Double(actorHeading));footAnimationFrame = nil
-        footAirTime = 0;footAirFall = 0;footJumped = false;footAirVelocity = .zero
+        headingContinuity.reset(facing:Double(actorHeading),locomotion:footLocomotion);footAnimationFrame = nil
+        footAirTime = 0;footAirFall = 0;footAirFell=false;footJumped = false;footJumpMinimum=0;footLaunchRemaining=nil;footAirVelocity = .zero
+        let resumed=gameCamera.resumeFoot(from:gameCameraFrame,fallbackHeading:heading,fallbackPitch:cameraPitch)
+        heading=resumed.x;cameraPitch=resumed.y
+        cameraWasDriving=false
     }
 
     func teleport(x: Float, y: Float, z: Float, direction: Float? = nil) {
+        ownCameraVisibility.reset()
         pendingVehicleBodyPose=nil
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         swimController.stop();swimming = false;underwater = false;lastFootVelocity = .zero
+        personalFlight.stop();pendingParachuteOpen=false;pendingDive=false;pendingSwimJump=false
+        cancelGameplayInput();clearAction();footAnimator?.resetMovementTask()
         characterActive = false; pendingNativeJump = 0
         camera = SIMD3(x, y, z)
         if let direction { heading = direction; actorHeading = direction }
+        headingContinuity.reset(facing:Double(actorHeading),locomotion:footLocomotion)
+        footAnimationFrame=nil;footAirTime=0;footAirFall=0;footAirFell=false;footJumped=false
+        footJumpMinimum=0;footLaunchRemaining=nil;footAirVelocity = .zero;footSprintPace=0
+        gameCamera.resetFoot(heading:heading,pitch:cameraPitch);gameCameraFrame=nil
         groundVehicle?.teleport(modelPosition: camera, heading: heading)
         verticalSpeed = 0
         loadNearby()
@@ -1712,23 +1894,38 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         let now = ProcessInfo.processInfo.systemUptime
-        let delta = Float(lastAtmosphereFrame == 0 ? 1/60.0 : max(0,now-lastAtmosphereFrame))
-        lastAtmosphereFrame = now; atmosphereMilliseconds += Double(delta)*1000
+        let timing=renderClock.advance(timestamp:now,active:true)
+        let delta=Float(timing.delta)
+        if timing.discontinuity {
+            cancelCameraInput()
+            if driving {gameCamera.beginVehicle()}
+            else {gameCamera.resetFoot(heading:heading,pitch:cameraPitch)}
+        }
+        atmosphereMilliseconds += Double(delta)*1000
         let hour = gameHour
         let manualBlend = Float(min(1,max(0,(now-weatherChanged)/4)))
         if returningToRegionalWeather && manualBlend >= 1 { returningToRegionalWeather = false }
         let aspect = max(0.1,Float(view.drawableSize.width/max(1,view.drawableSize.height)))
         if cameraWasDriving != driving {
-            cameraWasDriving = driving;gameCamera.resetVehicle()
-            gameCamera.setDirection(heading: heading,pitch: cameraPitch)
+            cameraWasDriving = driving
+            if driving {gameCamera.beginVehicle()}
+            else {
+                let resumed=gameCamera.resumeFoot(from:gameCameraFrame,fallbackHeading:heading,fallbackPitch:cameraPitch)
+                heading=resumed.x;cameraPitch=resumed.y
+            }
         }
-        if driving,let input = nativeCameraVehicle() {
-            gameCameraFrame = gameCamera.followVehicle(input,delta: delta,look: cameraLookDirection,nowMilliseconds: now*1000)
-        } else if !driving {
-            gameCamera.setDirection(heading: heading,pitch: cameraPitch)
-            gameCameraFrame = gameCamera.followFoot(.init(position: camera,actorHeading: actorHeading,weapon: equippedWeapon,
-                aiming: aiming,crouching: crouching,sight: aiming ? gameCamera.sightForWeapon(equippedWeapon) : nil),delta: delta)
-        } else { gameCameraFrame = nil }
+        // Advance camera lag in bounded slices, consuming queued analog look
+        // only once. Render positions are current poses, not retroactive input.
+        for step in timing.steps.isEmpty ? [0]:timing.steps {
+            if driving,let input = nativeCameraVehicle() {
+                gameCameraFrame = gameCamera.followVehicle(input,delta:Float(step),look:cameraLookDirection,nowMilliseconds:now*1000)
+            } else if !driving {
+                gameCamera.setDirection(heading:heading,pitch:cameraPitch)
+                gameCameraFrame=gameCamera.followFoot(.init(position:camera,actorHeading:actorHeading,weapon:equippedWeapon,
+                    aiming:aiming,crouching:crouching,holdingLedge:climb != nil || swimController.hauled != nil,parachuting:personalFlight.chuting,
+                    sight:aiming ? gameCamera.sightForWeapon(equippedWeapon):nil),delta:Float(step))
+            } else {gameCameraFrame=nil}
+        }
         let defaultDistance: Float = driving ? 11 : 4.5
         let fallbackEye = camera+SIMD3<Float>(-sin(heading)*defaultDistance,-cos(heading)*defaultDistance,driving ? 4.5 : 2.4)
         let eye = gameCameraFrame?.source ?? fallbackEye
@@ -1746,6 +1943,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         atmosphereAir = indoors ? 0 : eye.z < 900 ? min(1,atmosphereAir+delta) : max(0,atmosphereAir-delta)
         conditions = environment?.sample(weatherFrom: sampledWeatherFrom,to: sampledWeatherTo,blend: blend,hour: hour,altitude: eye.z)
         let planes = gameCamera.projection(air: atmosphereAir,farClip: conditions?.farClip ?? 25000)
+        ownCameraHidden=ownCameraVisibility.update(eye:eye,feet:camera,nearPlane:planes.near)
         let projection=Self.perspective(aspect:aspect,verticalFov:gameCameraFrame?.verticalFov ?? 55.41293,near:planes.near,far:planes.far)
         let matrix=projection*viewMatrix
         night = NativeWorldEnvironment.nightShare(hour: hour)
@@ -2135,7 +2333,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     }
                 }
             }
-        } else if !scopedCameraHidesPlayer,let name = pedModels["7"] {
+        } else if !scopedCameraHidesPlayer,!ownCameraHidden,let name = pedModels["7"] {
             let original = footAnimationFrame != nil && skeletalActors[name] != nil
             let pose = skeletalActors[name].flatMap { actor in skeletalLibrary.flatMap { library in
                 footAnimationFrame.flatMap { actor.originalPose(blends:$0.blends,library:library,aim:$0.aim,hiddenBones:$0.hiddenBones,figurePitch:$0.figurePitch,figureRoll:$0.figureRoll,legBend:$0.legBend) }

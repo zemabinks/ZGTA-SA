@@ -19,3 +19,4 @@ jobs:
       - run: python3 smoke_public_source.py
       - run: python3 smoke_host.py
       - run: node smoke_discord.js
+      - run: node smoke_inventory_ack.js

@@ -96,6 +96,14 @@ final class NativeGunAnimation {
             if request.rawValue > State.fire.rawValue { request = .none }
         }
     }
+    /// Focus/menu cancellation must discard a queued trigger even before
+    /// the association becomes held. Normal cancel keeps its source behavior.
+    func cancelInput(_ config: Configuration) {
+        request = .none
+        cancel(config)
+        request = .none
+        streamTime = 0
+    }
     func shoot(_ config: Configuration) {
         active = true; ending = false; state = .fire; request = .none; hasFired = true
         delta = (1 - (there ? amount : 0)) * 16

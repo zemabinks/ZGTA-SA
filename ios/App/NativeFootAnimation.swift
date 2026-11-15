@@ -102,6 +102,8 @@ final class NativeFootAnimation {
         var aim = NativeSkeletalActor.OriginalAim()
         var shot = false
         var shotLeft = false
+        /// One event per emitted projectile/stream tick; true is left hand.
+        var shots:[Bool] = []
         var hiddenBones: Set<Int> = []
         var figurePitch: Float = 0
         var figureRoll: Float = 0
@@ -332,9 +334,32 @@ final class NativeFootAnimation {
         guard weapon?.reloads == true, let clip = reloadClip, death == nil else { return 0 }
         gunState = .reload; gunTime = 0; return duration(clip) * twinCount
     }
+    func cancelReload() {if gunState == .reload {gunState = .aim;gunTime = .infinity}}
     func cancelFire() {
         if usesGunCycle { if let config = gunConfiguration { gunCycle.cancel(config) };return }
         if gunState == .fire && weapon?.swings == nil { gunState = .aim; gunTime = .infinity }
+    }
+    func cancelInput() {
+        fireHeld=false;gunControl=nil
+        if usesGunCycle,let config=gunConfiguration {gunCycle.cancelInput(config)}
+        else {cancelFire()}
+    }
+    func resetFlight() {flightAnimation.reset()}
+    /// Hard task discontinuity. Keep equipment/style and death state, but do
+    /// not replay an old jump, landing, aim/trigger or water/flight modifier.
+    func resetMovementTask() {
+        cancelInput();action=nil;script=nil;flinching=nil
+        airWeights = .zero;airTimes = .zero;airTime=0;fell=false
+        stoppedRatio=0;stoppedTime=0;lastTravel = .zero
+        sprint=0;strafe=0;crouch=0;crouchVelocity=0;crouchMoving=0;crouchPhase=0;crouchClip=nil
+        straight=1;directionWeights = .zero;directionTargets = .zero;strafePhase=0
+        gunCycle.drop();gunState = .aim;gunTime = .infinity;gunFired=false;leftFired=false;gunLeft=false;gunSpare=0;gunStream=0
+        gunBlend=0;guardBlend=0;blockBlend=0;poiseBlend=0;parryTime=nil
+        swingIndex=0;swingTime = .infinity;swingAside=nil;weaponFireClip=weapon?.clip("fire")
+        priorWeapon=nil;lastGunClip=nil;lastGunTime=0;lastBlockAt=0;lastAim=GunAim();lastArm=false;lastTwin=false
+        reportedGuard=false;reportedBlock=false
+        swimAnimation=NativeSwimAnimation(duration:{[unowned self] in self.duration($0)})
+        flightAnimation.reset()
     }
     func parry() { parryTime = 0 }
 
@@ -410,12 +435,20 @@ final class NativeFootAnimation {
         let strafeSpeed = directionMoving ? 1.15 * moveSpeed * min(1, simd_length(direction ?? .zero)) : 0
         crouch = fade(crouch, input.crouch && death == nil, 4, 4)
         var shot = false
+        var shotEvents:[Bool] = []
         if usesGunCycle && death == nil && gunState != .reload, let config = gunConfiguration {
             var control = gunControl ?? GunControl(aim: input.gun != nil)
             if fireHeld { control.fire = true; control.held = true }
             gunCycle.control(fire: control.fire, aim: control.aim, held: control.held, pushed: control.pushed, ready: control.ready)
-            let shots = gunCycle.step(delta: dt, configuration: config)
-            if shots != 0 { shot = true; fireHeld = false; gunLeft = weapon?.continuous != true && shots == 2 }
+            let emitted = gunCycle.step(delta: dt, configuration: config)
+            if emitted != 0 {
+                shot=true;fireHeld=false;gunLeft=weapon?.continuous != true && emitted==2
+                if config.continuous {shotEvents=Array(repeating:false,count:emitted)}
+                else {
+                    if emitted&1 != 0 {shotEvents.append(false)}
+                    if emitted&2 != 0 {shotEvents.append(true)}
+                }
+            }
             gunBlend = max(gunCycle.blend, gunBlend - 4 * dt)
         } else { gunBlend = fade(gunBlend, death == nil && weapon != nil && fireClip != nil && (input.gun != nil || gunState != .aim || swingActive), 16, 4) }
         gunControl = nil
@@ -552,10 +585,10 @@ final class NativeFootAnimation {
             gunTime += dt
             if weapon.continuous == true {
                 gunStream += dt
-                if gunTime >= loop.fire && gunStream >= 0.02 { gunStream = min(gunStream - 0.02, 0.02); shot = true; gunFired = true }
+                if gunTime >= loop.fire && gunStream >= 0.02 { gunStream = min(gunStream - 0.02, 0.02); shot = true; gunFired = true;shotEvents.append(false) }
             } else if weapon.twin && gunFired && !leftFired && gunTime >= loop.fire + loop.interval / 2 - 0.006 {
-                shot = true; leftFired = true; gunLeft = true
-            } else if !gunFired && gunTime >= loop.fire { shot = true; gunFired = true; gunLeft = false }
+                shot = true; leftFired = true; gunLeft = true;shotEvents.append(true)
+            } else if !gunFired && gunTime >= loop.fire { shot = true; gunFired = true; gunLeft = false;shotEvents.append(false) }
             if gunTime >= loop.start + loop.interval - 0.006 {
                 gunSpare = min(gunTime - loop.start - loop.interval, loop.interval - 0.006)
                 gunState = .aim; swingTime = 0
@@ -652,7 +685,7 @@ final class NativeFootAnimation {
             aim.rightArm = lastArm ? Float(gunBlend) : 0
             aim.leftArm = lastTwin ? Float(gunBlend) : 0
         }
-        return Frame(blends: blends, travel: travel, steps: steps, look: death == nil ? input.look : 0, sprintShare: sprint, crouchShare: crouch, aim: aim, shot: shot, shotLeft: gunLeft, hiddenBones: lostHead ? [5] : [],figurePitch:Float(flight.figureControlled ? flight.figurePitch:swim.figurePitch),figureRoll:Float(flight.figureRoll),legBend:SIMD2<Float>(flight.bend),flight:flightAnimation.showing || flight.figureControlled ? flight:nil)
+        return Frame(blends: blends, travel: travel, steps: steps, look: death == nil ? input.look : 0, sprintShare: sprint, crouchShare: crouch, aim: aim, shot: shot, shotLeft: gunLeft,shots:shotEvents, hiddenBones: lostHead ? [5] : [],figurePitch:Float(flight.figureControlled ? flight.figurePitch:swim.figurePitch),figureRoll:Float(flight.figureRoll),legBend:SIMD2<Float>(flight.bend),flight:flightAnimation.showing || flight.figureControlled ? flight:nil)
     }
 
     private func duration(_ name: String) -> Double { library.duration(of: name) ?? 0 }

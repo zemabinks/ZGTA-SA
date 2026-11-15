@@ -13,11 +13,30 @@ const MAX_PACKS = 20;
 const NATIVE_PROJECTILES = new Set([16, 17, 18, 35, 36, 39]);
 const NATIVE_AREA_EFFECTS = new Set([37, 41, 42]);
 
-function create(catalog = {}) {
+function create(catalog = {}, options = {}) {
   const items = (Array.isArray(catalog.items) ? catalog.items : []).filter(item =>
     Number.isInteger(item.id) && Number.isInteger(item.ammo) && item.ammo > 0 &&
     Number.isSafeInteger(item.price) && item.price >= 0 && typeof item.name === 'string');
   const byID = new Map(items.map(item => [item.id, item]));
+  const timings = new Map();
+  let timingRows = options.timingDefinitions;
+  if (timingRows === undefined) {
+    try { timingRows = JSON.parse(fs.readFileSync(path.join(__dirname,'local-only/site/game/native/foot-animation.json'),'utf8')).weapons; }
+    catch (error) {
+      timingRows=[];
+      if (error.code !== 'ENOENT') console.warn('Native weapon timing unavailable; using bounded weapon-stat cadence.');
+    }
+  }
+  for (const row of Array.isArray(timingRows) ? timingRows : []) {
+    if (!Number.isInteger(row?.id) || !['gun','stream','launch','throw','melee'].includes(row.use)) continue;
+    const loops=[row.loop?.every,row.crouched?.every].filter(n=>Number.isFinite(n)&&n>0&&n<=5);
+    if (!loops.length) continue;
+    const stream=row.use==='stream'||row.continuous===true;
+    const intervalMs=stream&&row.continuous===true ? 20:Math.max(20,Math.min(...loops)*1000/(row.twin===true?2:1));
+    timings.set(row.id,{intervalMs,capacity:stream?4:2,use:row.use,twin:row.twin===true,source:'animation'});
+  }
+  const rates = new WeakMap();
+  const sequences = new WeakMap();
   const armourID = Number.isInteger(catalog.armourID) ? catalog.armourID : 48;
   const shops = (Array.isArray(catalog.shops) ? catalog.shops : []).filter(shop =>
     typeof shop.id === 'string' && typeof shop.name === 'string' &&
@@ -27,10 +46,12 @@ function create(catalog = {}) {
   const capacity = item => Math.max(1, Math.min(MAX_AMMO, count(item.capacity) || 1));
   const reloadMs = item => capacity(item) <= 2 ? 1200 : 1800;
   const intervalMs = item => {
+    const timing=timings.get(item?.id ?? 0);if(timing)return timing.intervalMs;
     const loop = item?.stats?.loop;
     return Array.isArray(loop) && loop.length > 1 ?
       Math.max(80, Math.min(5000, (loop[1] - loop[0]) / 30 * 1000)) : 350;
   };
+  const cadence = id => timings.get(id) || {intervalMs:intervalMs(byID.get(id)),capacity:2,use:'fallback',twin:false,source:'stats'};
 
   function bump(inventory) {
     inventory.revision = Math.min(Number.MAX_SAFE_INTEGER, inventory.revision + 1);
@@ -196,7 +217,7 @@ function create(catalog = {}) {
     return {message, changed: true, inventory: state(player, pos, now)};
   }
 
-  function acceptShot(player, id, now = Date.now()) {
+  function acceptShot(player, id, now = Date.now(), context = {}) {
     tick(player, now);
     const inventory = player.inventory;
     const reject = reason => ({ok: false, reason});
@@ -206,9 +227,27 @@ function create(catalog = {}) {
     const item = id === 0 ? null : byID.get(id);
     if (id !== 0 && (!item || !inventory.weapons[String(id)])) return reject('Weapon not owned.');
     if (inventory.reload) return reject('Weapon is reloading.');
-    if (inventory.lastShotAt && now-inventory.lastShotAt < intervalMs(item)) return reject('Weapon fire interval has not elapsed.');
     const ammo = inventory.weapons[String(id)];
     if (id !== 0 && ammo.clip <= 0) return reject('Weapon is empty. Reload or buy ammunition.');
+    if (!Number.isFinite(now)) return reject('Invalid weapon clock.');
+    const sequence=context.sequence;
+    if (sequence!==undefined && (!Number.isSafeInteger(sequence)||sequence<0)) return reject('Invalid shot sequence.');
+    const timing=cadence(id),interval=timing.intervalMs;
+    let rate=rates.get(player);
+    if (!rate) {
+      rate={at:now,interval,credit:inventory.lastShotAt ? Math.min(timing.capacity,Math.max(0,now-inventory.lastShotAt)/interval):1};
+      rates.set(player,rate);
+    }
+    const scope=context.sequenceScope && typeof context.sequenceScope==='object' ? context.sequenceScope:player;
+    if (sequence!==undefined && sequence<=(sequences.get(scope) ?? -1)) return reject('Shot sequence already consumed.');
+    // Server-time token credit permits bounded render/network catch-up while
+    // retaining the canonical long-term rate. Switching weapons carries time
+    // credit across, rather than granting a free shot on every selection.
+    rate.credit=Math.min(timing.capacity,(rate.credit*rate.interval+Math.max(0,now-rate.at))/interval);
+    rate.at=Math.max(rate.at,now);rate.interval=interval;
+    if (rate.credit<1-1e-8) return reject('Weapon fire interval has not elapsed.');
+    rate.credit=Math.max(0,rate.credit-1);
+    if (sequence!==undefined) sequences.set(scope,sequence);
     inventory.lastShotAt = now;
     if (ammo) ammo.clip--;
     bump(inventory);
@@ -216,7 +255,7 @@ function create(catalog = {}) {
       clip: ammo?.clip || 0, rest: ammo?.rest || 0};
   }
 
-  return {ensure, tick, state, action, acceptShot, nearestShop, quote,
+  return {ensure, tick, state, action, acceptShot, cadence, nearestShop, quote,
     catalog: {items, shops, armourID}, SHOP_RADIUS, MAX_AMMO};
 }
 

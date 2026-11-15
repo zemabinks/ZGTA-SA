@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 
 /// Catalog geometry and timing come from the ignored archived client data.
 /// Inventory and ammunition are owned by the Mac server. Local firing is
@@ -24,14 +25,32 @@ final class NativeWeaponState {
     private(set) var reloadUntil: Double = 0
     private var lastShot: Double = -.infinity
     private var revision = -1
+    private let clock: () -> Double
+    private let allowLegacySnapshots: Bool
+    private let prediction: NativeInventoryPrediction
+    private var serverReloading = false
+    private var reloadRequest: String?
+    private var reloadRequestStarted: Double?
+    private var resyncNotified = false
+    private var reloadRefreshKey: String?
     var onChange: (() -> Void)?
     var onNeedsRefresh: (() -> Void)?
+    var onNeedsResync: (() -> Void)?
     var current: Weapon { catalog.first { $0.id == selected } ?? catalog[0] }
-    var rounds: Int { ammunition[String(selected)]?.first ?? 0 }
-    var reserve: Int { ammunition[String(selected)]?.last ?? 0 }
-    var reloading: Bool { reloadUntil > ProcessInfo.processInfo.systemUptime }
+    var rounds: Int { prediction.connection != nil ? prediction.rounds(selected)?.clip ?? 0 : ammunition[String(selected)]?.first ?? 0 }
+    var reserve: Int { prediction.connection != nil ? prediction.rounds(selected)?.reserve ?? 0 : ammunition[String(selected)]?.last ?? 0 }
+    var reloading: Bool { serverReloading || reloadRequest != nil }
 
-    init(server: ServerAddress) {
+    /// An injected monotonic clock also permits deterministic inventory and
+    /// animation-event transition tests without fetching a server catalog.
+    init(catalog: [Weapon] = [], allowLegacySnapshots: Bool = false, clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime }) {
+        self.clock = clock; self.allowLegacySnapshots = allowLegacySnapshots
+        self.prediction = NativeInventoryPrediction(clock: clock)
+        if !catalog.isEmpty { self.catalog += catalog.filter { $0.id != 0 } }
+    }
+
+    convenience init(server: ServerAddress) {
+        self.init()
         URLSession.shared.dataTask(with: server.path("game/native/weapons.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -52,38 +71,132 @@ final class NativeWeaponState {
         }.resume()
     }
 
-    func apply(_ inventory: [String: Any]) {
-        let incoming = (inventory["revision"] as? NSNumber)?.intValue ?? 0
-        guard incoming >= revision else { return }
-        revision = incoming
-        let rows = inventory["weapons"] as? [[String: Any]] ?? []
-        owned = Set(rows.compactMap { ($0["id"] as? NSNumber)?.intValue }); owned.insert(0)
-        ammunition = Dictionary(uniqueKeysWithValues: rows.compactMap { row in
-            guard let id = row["id"] as? NSNumber else { return nil }
-            return (id.stringValue, [(row["clip"] as? NSNumber)?.intValue ?? 0,
-                                    (row["rest"] as? NSNumber)?.intValue ?? 0])
-        })
-        selected = (inventory["selected"] as? NSNumber)?.intValue ?? 0
-        if !owned.contains(selected) { selected = 0 }
-        let pending = inventory["reload"] as? [String: Any]
-        let remaining = (pending?["remainingMs"] as? NSNumber)?.doubleValue ?? 0
-        reloadUntil = remaining > 0 ? ProcessInfo.processInfo.systemUptime + remaining / 1000 : 0
+    /// A fresh socket must announce its own nonce before snapshots can enable
+    /// firing. HTTP or delayed old-socket state cannot negotiate this boundary.
+    func setConnection(_ nonce: String?) {
+        guard nonce != prediction.connection else { return }
+        if let nonce, !nonce.isEmpty { prediction.connected(nonce) } else { prediction.disconnected() }
+        selected = 0; owned = [0]; ammunition = [:]; revision = -1
+        reloadUntil = 0; serverReloading = false; reloadRequest = nil; reloadRequestStarted = nil
+        resyncNotified = false; reloadRefreshKey = nil; lastShot = -.infinity
         onChange?()
     }
 
-    func fire() -> Bool {
-        tick()
-        let now = ProcessInfo.processInfo.systemUptime
-        guard !reloading, now-lastShot >= current.interval,
-              !current.isGun || rounds > 0 else { return false }
-        lastShot = now
-        if current.isGun { ammunition[String(selected)] = [rounds-1, reserve] }
+    var pendingShotCount: Int { prediction.pending.count }
+    var synchronized: Bool { prediction.connection != nil ? prediction.synchronized && !prediction.needsResync : allowLegacySnapshots }
+    var canFire: Bool { synchronized && !reloading && current.id == selected && (!current.isGun || rounds > 0) }
+
+    /// Unacknowledged snapshots are ignored unless an explicit offline legacy
+    /// mode was selected by a test. They never overwrite sequenced truth.
+    @discardableResult func apply(_ inventory: [String: Any]) -> Bool {
+        guard let parsed = Self.parse(inventory) else { return false }
+        if let ack = inventory["ack"] as? [String: Any] {
+            guard let connection = ack["connection"] as? String,
+                  let processed = Self.integer(ack["processedShot"]), prediction.connection == connection else { return false }
+            let snapshot = NativeInventoryPrediction.Snapshot(connection: connection, processedShot: processed,
+                revision: parsed.revision, selected: parsed.selected, reloading: parsed.reloading,
+                weapons: parsed.weapons.filter { $0.key != 0 })
+            guard prediction.apply(snapshot) == .applied else { return false }
+            revision = parsed.revision; selected = prediction.selected
+            owned = Set(parsed.weapons.keys); owned.insert(0)
+        } else {
+            guard allowLegacySnapshots, prediction.connection == nil, parsed.revision >= revision else { return false }
+            revision = parsed.revision; selected = parsed.selected
+            owned = Set(parsed.weapons.keys); owned.insert(0)
+            ammunition = Dictionary(uniqueKeysWithValues: parsed.weapons.map { (String($0.key), [$0.value.clip,$0.value.reserve]) })
+        }
+        serverReloading = parsed.reloading
+        reloadUntil = parsed.reloading ? clock() + parsed.remaining / 1000 : 0
+        if !serverReloading { reloadRefreshKey = nil }
+        onChange?(); tick()
         return true
     }
 
+    func fire(ticket: NativeShotTicket? = nil) -> Bool {
+        tick()
+        let now = clock()
+        guard canFire, now.isFinite, now-lastShot >= current.interval else { return false }
+        guard consumeRound(weapon: selected, ticket: ticket) else { return false }
+        lastShot = now; return true
+    }
+
+    /// Animation timing is authoritative for the local muzzle event. It must
+    /// reserve its network sequence before consuming predicted ammunition.
+    @discardableResult func consumeAnimationShot(weapon: Int, ticket: NativeShotTicket? = nil) -> Bool {
+        tick()
+        guard selected == weapon, current.id == weapon, canFire,
+              consumeRound(weapon: weapon, ticket: ticket) else { return false }
+        lastShot = clock(); return true
+    }
+
+    private func consumeRound(weapon: Int, ticket: NativeShotTicket?) -> Bool {
+        if !current.isGun { return synchronized } // melee spends no predicted ammunition
+        if allowLegacySnapshots && prediction.connection == nil {
+            if current.isGun { ammunition[String(selected)] = [rounds-1, reserve] }
+            return true
+        }
+        guard let ticket, ticket.connection == prediction.connection else { return false }
+        let accepted = prediction.predict(weapon: weapon, sequence: ticket.sequence)
+        if !accepted { tick() }
+        return accepted
+    }
+
+    @discardableResult func beginReloadRequest() -> String {
+        if let reloadRequest { return reloadRequest }
+        let id = UUID().uuidString; reloadRequest = id; reloadRequestStarted = clock(); onChange?(); return id
+    }
+    /// nil means the transport outcome is unknown. Do not optimistically clear
+    /// a possibly accepted reload; reconnect to authoritative state instead.
+    func finishReloadRequest(id: String, succeeded: Bool?) {
+        guard reloadRequest == id else { return }
+        if succeeded == nil { markTransportUncertain(); return }
+        reloadRequest = nil; reloadRequestStarted = nil; onChange?()
+    }
+    func markTransportUncertain() {
+        prediction.markUncertain(); tick()
+    }
+
     func tick() {
-        guard reloadUntil > 0, !reloading else { return }
-        reloadUntil = 0
-        onNeedsRefresh?()
+        if let began = reloadRequestStarted, clock() - began > 2 { prediction.markUncertain() }
+        if prediction.connection != nil, prediction.needsResync {
+            if !resyncNotified { resyncNotified = true; onNeedsResync?() }
+        } else { resyncNotified = false }
+        guard serverReloading, reloadUntil <= clock() else { return }
+        let key = "\(revision):\(prediction.processedShot)"
+        guard reloadRefreshKey != key else { return }
+        reloadRefreshKey = key; onNeedsRefresh?()
+    }
+
+    private struct Parsed {
+        let revision: Int, selected: Int
+        let weapons: [Int: NativeInventoryPrediction.Rounds]
+        let reloading: Bool
+        let remaining: Double
+    }
+    private static func integer(_ value: Any?) -> Int? {
+        guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
+              n.doubleValue.isFinite, n.doubleValue >= 0, n.doubleValue <= Double(NativeShotSequence.maximum),
+              let integer = Int(exactly: n.doubleValue) else { return nil }
+        return integer
+    }
+    private static func parse(_ inventory: [String: Any]) -> Parsed? {
+        guard let revision = integer(inventory["revision"]), let selected = integer(inventory["selected"]),
+              let rows = inventory["weapons"] as? [[String: Any]] else { return nil }
+        var weapons: [Int: NativeInventoryPrediction.Rounds] = [:]
+        for row in rows {
+            guard let id = integer(row["id"]), id <= 46, weapons[id] == nil,
+                  let clip = integer(row["clip"]), let reserve = integer(row["rest"]),
+                  clip <= 9999, reserve <= 9999-clip else { return nil }
+            weapons[id] = .init(clip: clip, reserve: reserve)
+        }
+        guard selected == 0 || weapons[selected] != nil else { return nil }
+        let reload = inventory["reload"] as? [String: Any]
+        let remaining = (reload?["remainingMs"] as? NSNumber)?.doubleValue ?? 0
+        guard remaining.isFinite, remaining >= 0, remaining <= 10000 else { return nil }
+        let reloading = remaining > 0 || reload?["weapon"] != nil
+        if let reloadWeapon = reload?["weapon"] {
+            guard integer(reloadWeapon) == selected, selected != 0 else { return nil }
+        }
+        return Parsed(revision: revision, selected: selected, weapons: weapons, reloading: reloading, remaining: remaining)
     }
 }

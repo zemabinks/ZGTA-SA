@@ -534,6 +534,8 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
              rate: Float.random(in: 0.98...1.02), gain: min(0.8, 0.25 + severity / 100))
     }
 
+    func cancelHornInput() { hornController.cancelPress() }
+
     func vehicleHornInput(model:Int?,identity:String?,pressed:Bool,milliseconds:Double)->NativeVehicleHornController.Frame {
         hornController.update(pressed:pressed,milliseconds:milliseconds,identity:identity,emergency:model.map{sirenModels.contains($0)} ?? false)
     }

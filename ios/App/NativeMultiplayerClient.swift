@@ -89,6 +89,11 @@ final class NativeMultiplayerClient {
     var orderedVehicles:[RemoteVehicle] {vehicleOrder.compactMap{vehicles[$0]}}
     private var remoteAnimationTimes: [String: (String, Double)] = [:]
     private var shots = 0
+    private let shotSequence = NativeShotSequence()
+    private var resynchronizingInventory = false
+    private var announcedInventoryConnection: String?
+    var inventoryConnection: String? { shotSequence.connection }
+    var onInventoryConnection: ((String?) -> Void)?
     private(set) var localName = "LOCAL PLAYER"
     private(set) var cash = 0
     private(set) var health = 100
@@ -117,19 +122,35 @@ final class NativeMultiplayerClient {
     init(server: ServerAddress) { self.server = server }
 
     func connect() {
+        resynchronizingInventory = false
+        openSocket()
+    }
+    private func openSocket() {
+        closeSocket()
         guard var parts = URLComponents(url: server.path("api/world/live"), resolvingAgainstBaseURL: false) else { return }
         parts.scheme = server.url.scheme == "https" ? "wss" : "ws"
         guard let url = parts.url else { return }
         let task = URLSession.shared.webSocketTask(with: url)
-        socket = task
-        task.resume()
-        send(["t": "hi", "nativeInventory": true])
+        socket = task; task.resume()
+        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1])
         receive()
     }
+    private func closeSocket() {
+        let old = socket; socket = nil
+        old?.cancel(with: .normalClosure, reason: nil)
+        shotSequence.reset(); announcedInventoryConnection = nil; onInventoryConnection?(nil)
+    }
+    func disconnect() { resynchronizingInventory = false; closeSocket() }
 
-    func disconnect() {
-        socket?.cancel(with: .normalClosure, reason: nil)
-        socket = nil
+    /// A reconnect provides a fresh authoritative baseline even when a failed
+    /// local write may or may not have reached the old server connection.
+    func requestInventoryResync() {
+        guard !resynchronizingInventory else { return }
+        resynchronizingInventory = true; openSocket()
+    }
+    func reserveShot() -> NativeShotTicket? {
+        guard socket != nil, health > 0, !passive else { return nil }
+        return shotSequence.reserve()
     }
 
     func sendPosition(_ position: SIMD3<Float>, heading: Float, moving: Bool, running: Bool,
@@ -228,29 +249,35 @@ final class NativeMultiplayerClient {
     func detonateSatchels() { send(["t":"detonate"]) }
 
     func sendMeleeHit(to player: String) {
-        guard health > 0, !passive else { return }
-        send(["t": "hit", "to": player, "w": 0])
+        guard health > 0, !passive, let connection = inventoryConnection else { return }
+        send(["t": "hit", "to": player, "w": 0, "c": connection])
         shots += 1
     }
 
-    func sendPistolShot(from origin: SIMD3<Float>, to hit: SIMD3<Float>,
-                        player: String?) {
-        sendWeaponShot(weapon: 22, from: origin, to: hit, player: player)
+    @discardableResult func sendPistolShot(from origin: SIMD3<Float>, to hit: SIMD3<Float>,
+                        player: String?, ticket: NativeShotTicket? = nil) -> Bool {
+        sendWeaponShot(weapon: 22, from: origin, to: hit, player: player, ticket: ticket)
     }
 
-    func sendWeaponShot(weapon: Int, from origin: SIMD3<Float>, to hit: SIMD3<Float>,
-                        player: String?) {
-        guard health > 0, !passive else { return }
+    @discardableResult func sendWeaponShot(weapon: Int, from origin: SIMD3<Float>, to hit: SIMD3<Float>,
+                        player: String?, ticket: NativeShotTicket? = nil) -> Bool {
+        guard let task = socket, health > 0, !passive, let ticket,
+              ticket.connection == inventoryConnection, shotSequence.claim(ticket) else { return false }
         shots += 1
-        let shot: [String: Any] = ["t": "shot", "w": weapon,
+        let shot: [String: Any] = ["t": "shot", "w": weapon, "s": ticket.sequence, "c": ticket.connection,
                                    "o": [Double(origin.x), Double(origin.y), Double(origin.z)],
                                    "h": [Double(hit.x), Double(hit.y), Double(hit.z)]]
-        guard let data = try? JSONSerialization.data(withJSONObject: shot),
-              let text = String(data: data, encoding: .utf8) else { return }
-        socket?.send(.string(text)) { [weak self] error in
-            guard error == nil, let player else { return }
-            self?.send(["t": "hit", "to": player, "w": weapon])
+        guard let data = try? JSONSerialization.data(withJSONObject: shot), let text = String(data: data, encoding: .utf8) else {
+            requestInventoryResync(); return false
         }
+        task.send(.string(text)) { [weak self] error in
+            DispatchQueue.main.async {
+                guard let self, self.socket === task, self.inventoryConnection == ticket.connection else { return }
+                if error != nil { self.requestInventoryResync(); return }
+                if let player { self.send(["t": "hit", "to": player, "w": weapon, "s": ticket.sequence, "c": ticket.connection]) }
+            }
+        }
+        return true
     }
 
     func respawn() {
@@ -291,30 +318,36 @@ final class NativeMultiplayerClient {
     }
 
     private func send(_ object: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: object),
+        guard let task = socket, let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else { return }
-        socket?.send(.string(text)) { [weak self] error in
-            if let error { DispatchQueue.main.async { self?.onStatus?("MULTIPLAYER: \(error.localizedDescription)") } }
+        task.send(.string(text)) { [weak self] error in
+            guard let error else { return }
+            DispatchQueue.main.async {
+                guard let self, self.socket === task else { return }
+                self.onStatus?("MULTIPLAYER: \(error.localizedDescription)")
+            }
         }
     }
 
     private func receive() {
-        socket?.receive { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .failure(let error):
-                DispatchQueue.main.async { self.onStatus?("MULTIPLAYER: \(error.localizedDescription)") }
-            case .success(let message):
-                let data: Data
-                switch message {
-                case .string(let text): data = Data(text.utf8)
-                case .data(let bytes): data = bytes
-                @unknown default: return
+        guard let task = socket else { return }
+        task.receive { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self, self.socket === task else { return }
+                switch result {
+                case .failure(let error):
+                    self.closeSocket()
+                    self.onStatus?("MULTIPLAYER: \(error.localizedDescription)")
+                case .success(let message):
+                    let data: Data
+                    switch message {
+                    case .string(let text): data = Data(text.utf8)
+                    case .data(let bytes): data = bytes
+                    @unknown default: return
+                    }
+                    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.handle(object) }
+                    self.receive()
                 }
-                if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    DispatchQueue.main.async { self.handle(object) }
-                }
-                self.receive()
             }
         }
     }
@@ -331,8 +364,17 @@ final class NativeMultiplayerClient {
         case "shot":
             if let weapon = message["w"] as? Int { onWeaponSound?(weapon) }
         case "inventory":
-            if let state = message["state"] as? [String: Any] { onInventory?(state) }
+            if let state = message["state"] as? [String: Any], let ack = NativeInventoryAcknowledgement(state),
+               ack.connection == inventoryConnection {
+                shotSequence.observeAcknowledgement(ack.processedShot)
+                resynchronizingInventory = false; onInventory?(state)
+            }
         case "hello":
+            if message["inventoryAck"] as? Int == 1, let nonce = message["inventoryConnection"] as? String,
+               shotSequence.negotiate(nonce) {
+                if announcedInventoryConnection != nonce { announcedInventoryConnection = nonce; onInventoryConnection?(nonce) }
+            }
+            else { onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING") }
             if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
             if let spot = message["spot"] as? [NSNumber], spot.count >= 3 {
                 onTeleport?(SIMD3(spot[0].floatValue,spot[1].floatValue,spot[2].floatValue),

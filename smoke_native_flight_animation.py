@@ -51,7 +51,7 @@ for row in rows {
  if let jet=actual.jet{let value=expected["jet"] as! [String:Any];compare(jet.pitch,n(value,"pitch"),"jet pitch");compare(jet.leftRoll,n(value,"leftRoll"),"jet left roll");compare(jet.rightRoll,n(value,"rightRoll"),"jet right roll");assert(jet.sound==value["sound"] as! String)}else{assert(expected["jet"] is NSNull,"jet visibility")}
  if let canopy=actual.canopy,canopy.visible {let value=expected["canopy"] as! [String:Any];compare(canopy.scale,n(value,"scale"),"canopy scale");compare(canopy.pitch,n(value,"pitch"),"canopy pitch");compare(canopy.roll,n(value,"roll"),"canopy roll")}else{assert(expected["canopy"] is NSNull,"frame \(row["frame"]!) canopy visibility")}
 }
-print("PASS: \(rows.count) original parachute/jetpack pose frames, \(checks) blend/clock/figure/canopy/leg-pendulum checks; maxerror \(maximum)")
+print("PASS: \(rows.count) archived-browser parachute/jetpack pose frames, \(checks) blend/clock/figure/canopy/leg-pendulum checks; maxerror \(maximum)")
 '''
 def main():
  with tempfile.TemporaryDirectory(prefix='zgta-flight-animation-')as tmp:

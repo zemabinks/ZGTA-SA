@@ -72,6 +72,7 @@ final class NativeGameCamera {
     private var shakeGain: Double = 0,shakeSince: Double = 0
     private var footDistance: Double = 1.5
     private var footAim = false,oldFootAim = false
+    private var footNeedsReset = false
     private var aimShare: Double = 0,aimStart: Double = 0,aimClock: Double = 0,targetFov: Double = 70
     private var crouchDrop: Double = 0,aimDrop: Double = 0
     private var ledgeClock: Double = 0
@@ -132,7 +133,35 @@ final class NativeGameCamera {
         return Planes(near: nearPlane,far: farPlane)
     }
     func sightForWeapon(_ weapon: Int) -> String? { table?.weaponSights[String(weapon)] }
-    func setDirection(heading: Float,pitch: Float) { self.heading = heading;self.pitch = pitch }
+    func setDirection(heading: Float,pitch: Float) {
+        guard heading.isFinite, pitch.isFinite else { return }
+        self.heading = heading;self.pitch = pitch
+    }
+    /// Clear queued deltas when an input source disappears. This deliberately
+    /// preserves the current view and the player's chosen zoom.
+    func cancelLookInput() { carLook = .zero }
+    /// A mode/teleport boundary must not reuse an old foot chase/aim anchor.
+    func resetFoot(heading: Float, pitch: Float) {
+        setDirection(heading: heading, pitch: max(-1.4835299, min(.pi / 4, pitch)))
+        footNeedsReset = true; chase = false; previousDistance = 0; ledgeClock = 0
+        footAim = false; oldFootAim = false; aimShare = 0; aimStart = 0; aimClock = 0
+        crouchDrop = 0; aimDrop = 0; footAimSource = nil; sight = nil; sightVelocity = 0; sightClock = 0
+        if let table { footDistance = table.footDistances[footZoom - 1] }
+        cancelLookInput()
+    }
+    /// Keep the direction currently on screen on vehicle exit. Angles differing
+    /// by a whole turn represent the same view; choose the nearest equivalent.
+    @discardableResult func resumeFoot(from frame: Frame?, fallbackHeading: Float, fallbackPitch: Float) -> SIMD2<Float> {
+        let reference = fallbackHeading.isFinite ? fallbackHeading : 0
+        let wanted = frame?.heading ?? reference
+        let target = wanted.isFinite ? reference + Self.shortestAngle(wanted - reference) : reference
+        resetFoot(heading: target, pitch: frame?.pitch ?? fallbackPitch)
+        return SIMD2(heading, pitch)
+    }
+    static func shortestAngle(_ angle: Float) -> Float {
+        guard angle.isFinite else { return 0 }
+        return Float(atan2(sin(Double(angle)), cos(Double(angle))))
+    }
     func cycleFootZoom() { setFootZoom(footZoom%3+1) }
     func setFootZoom(_ value: Int) { footZoom = max(1,min(3,value));if persistViews { UserDefaults.standard.set(footZoom,forKey: "world.view.foot") } }
     func cycleVehicleView() { setVehicleView(vehicleView%6+1) }
@@ -141,10 +170,18 @@ final class NativeGameCamera {
         guard let table else { return };let kind = table.vehicleProfiles[value] != nil ? value : "car"
         if kind != carKind {carKind = kind;carDistance = table.vehicleDistances[kind]![carZoom-1]}
     }
-    func resetVehicle() { carReset = true;resetCockpit() }
+    func resetVehicle() { carReset = true; resetCockpit() }
+    /// Entering a different vehicle is a lifecycle boundary, beyond the public
+    /// camera helper's reset flag. Old manual deltas must not affect the new car.
+    func beginVehicle() {
+        carReset = true; carLookReset = false; manualHold = 0; carLook = .zero
+        carYawVelocity = 0; carPitchVelocity = 0; oldElevation = -9999; oldAzimuth = -9999
+        resetCockpit()
+    }
     private func resetCockpit() { cockpitYaw = 0;cockpitPitch = 0;cockpitHold = 0;cinematicSource = nil }
     /// Browser pointer deltas are CSS pixels; positive y moves the view down.
     func lookPixels(x: Float,y: Float,driving: Bool = false) {
+        guard x.isFinite, y.isFinite else { return }
         if driving { carLook += SIMD2(Double(x),Double(y));return }
         heading += x*0.0022
         let lower: Float = sight != nil ? -1.55 : footAim ? -1.5533431 : -1.4835299
@@ -152,10 +189,12 @@ final class NativeGameCamera {
         pitch = max(lower,min(upper,pitch-y*0.0022))
     }
     func lookTouch(x: Float,y: Float,driving: Bool = false,sensitivity: Float = 1,aimSensitivity: Float = 1,inverted: Bool = false) {
+        guard sensitivity.isFinite, aimSensitivity.isFinite, sensitivity >= 0, aimSensitivity >= 0 else { return }
         let scale = sensitivity*(driving ? 1.5 : 2.3)*(driving ? 1 : footTurning*(footAim || sight != nil ? aimSensitivity : 1))
         lookPixels(x: x*scale,y: y*scale*(inverted ? -1 : 1),driving: driving)
     }
     func lookAnalog(x: Float,y: Float,delta: Float,driving: Bool = false,sensitivity: Float = 1,inverted: Bool = false) {
+        guard x.isFinite, y.isFinite, delta.isFinite, delta > 0, sensitivity.isFinite, sensitivity >= 0 else { return }
         let scale = 3.2*sensitivity*(0.3+0.7*hypot(x,y))*(driving ? 1 : footTurning*(footAim || sight != nil ? 0.5 : 1))*delta/0.0022
         lookPixels(x: x*scale,y: y*scale*0.6*(inverted ? -1 : 1),driving: driving)
     }
@@ -166,8 +205,9 @@ final class NativeGameCamera {
     }
 
     func followFoot(_ input: Foot,delta: Float) -> Frame? {
-        guard let table,delta.isFinite else { return nil }
-        let dt = Double(delta),feet = Self.double(input.position),speed = 50*dt
+        guard let table, delta.isFinite, delta >= 0, Self.finite(input.position), input.actorHeading.isFinite else { return nil }
+        let dt = footNeedsReset ? 0 : Double(delta), feet = Self.double(input.position), speed = 50 * dt
+        footNeedsReset = false
         footAim = input.aiming && input.sight == nil
         if input.sight != sight {
             sight = table.footSights[input.sight ?? ""] != nil ? input.sight : nil
@@ -272,7 +312,8 @@ final class NativeGameCamera {
         shakeGain = 0;return frame
     }
     private func processVehicle(_ input: Vehicle,delta: Float,look: String? = nil) -> Frame? {
-        guard let table,delta.isFinite else { return nil }
+        guard let table, delta.isFinite, delta >= 0, Self.finite(input.position), Self.finite(input.forward), Self.finite(input.right),
+              Self.finite(input.moveSpeed), Self.finite(input.turnSpeed), input.up.map(Self.finite) ?? true else { return nil }
         let kind = table.vehicleProfiles[input.kind] != nil ? input.kind : "car"
         setVehicleKind(kind)
         let p = table.vehicleProfiles[kind]!,desiredDistance = table.vehicleDistances[kind]![carZoom-1]
@@ -422,6 +463,7 @@ final class NativeGameCamera {
         }
         return frame(source: source,target: target,fov: Self.verticalFov(fov))
     }
+    private static func finite(_ value: SIMD3<Float>) -> Bool { value.x.isFinite && value.y.isFinite && value.z.isFinite }
     private static func horizontal(_ value: SIMD3<Double>) -> Double { hypot(value.x,value.y) }
     private static func azimuth(_ value: SIMD3<Double>) -> Double { atan2(-value.x,value.y) }
     private static func carWay(_ elevation: Double,_ azimuth: Double) -> SIMD3<Double> { SIMD3(-cos(azimuth)*cos(elevation),-sin(azimuth)*cos(elevation),sin(elevation)) }

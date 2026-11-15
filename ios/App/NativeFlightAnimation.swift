@@ -30,9 +30,18 @@ final class NativeFlightAnimation {
     private let canopyClips=[5:"para_open_o",6:"para_float_o",7:"para_decel_o",8:"para_steerl_o",9:"para_steerr_o",10:"para_land_o"]
     var showing:Bool {amount>0 || canopyName != nil || jetVisible}
     init(duration:@escaping(String)->Double?){self.duration=duration}
+    /// New physical task/teleport: do not reuse velocity samples or leg swing
+    /// from an unrelated position. Natural touchdown keeps its normal decay.
+    func reset() {
+        amount=0;previous=0;pitch=0;roll=0
+        weights=Array(repeating:0,count:9);times=Array(repeating:0,count:9)
+        canopyName=nil;canopyTime=0;canopyOpening=0;thrust=0;figureWasControlled=false
+        previousPosition=nil;velocity = .zero
+        forward=0;side=0;forwardSpeed=0;sideSpeed=0;jetVisible=false
+    }
     func update(delta dt:Double,input:Input?,position:SIMD3<Double>,heading:Double,available:Bool=true,canopyAvailable:Bool=true,jetAvailable:Bool=true)->Frame {
         // R6 only calls ap.draw while its state or showing getter is active.
-        guard input != nil || showing else{var frame=Frame();frame.bend=SIMD2(forward,side);return frame}
+        guard input != nil || showing else{return Frame()}
         let state=input?.state ?? 0
         let selected=(1...9).contains(state) ? state-1:nil
         var measured=SIMD3<Double>.zero

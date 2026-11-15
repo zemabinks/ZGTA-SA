@@ -6,6 +6,7 @@ final class NativeGameplayClient {
     private let server: ServerAddress
     private(set) var state: [String: Any] = [:]
     private var busy = false
+    var inventoryConnection:String?
     var onState: (([String: Any]) -> Void)?
     var onResult: ((String) -> Void)?
 
@@ -13,7 +14,9 @@ final class NativeGameplayClient {
 
     func refresh() {
         guard !busy else { return }
-        URLSession.shared.dataTask(with: server.path("api/local/state")) { [weak self] data, response, error in
+        var request=URLRequest(url:server.path("api/local/state"))
+        if let inventoryConnection {request.setValue(inventoryConnection,forHTTPHeaderField:"X-ZGTA-Inventory-Connection")}
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             guard let self else { return }
             if let data, let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                (response as? HTTPURLResponse)?.statusCode == 200 {
@@ -27,11 +30,12 @@ final class NativeGameplayClient {
         }.resume()
     }
 
-    func perform(_ action: String, payload: [String: Any] = [:]) {
-        guard !busy else { return }
+    func perform(_ action: String, payload: [String: Any] = [:],completion:((Bool?)->Void)?=nil) {
+        guard !busy else {completion?(false); return }
         busy = true
         var request = URLRequest(url: server.path("api/local/action"))
         request.httpMethod = "POST"
+        if let inventoryConnection {request.setValue(inventoryConnection,forHTTPHeaderField:"X-ZGTA-Inventory-Connection")}
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload.merging(["action": action]) { _, new in new })
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
@@ -44,8 +48,10 @@ final class NativeGameplayClient {
                     self.state = next
                     self.onState?(next)
                     self.onResult?((body["message"] as? String) ?? "DONE")
+                    completion?(true)
                 } else {
                     self.onResult?((body["error"] as? String) ?? error?.localizedDescription ?? "Action failed")
+                    completion?(response == nil ? nil:false)
                 }
             }
         }.resume()

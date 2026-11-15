@@ -437,15 +437,21 @@ final class NativeGroundVehicle {
         damageController = nil
     }
     func teleport(modelPosition: SIMD3<Float>, heading: Float) {
-        guard let rigid, let definition = definitions[model] else { return }
-        let rotation = Self.rotation(heading:heading)
-        let position = SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0))
-        if let configuration=definition.trainConfiguration,let tracks,
-           let train=NativeTrainDynamics(configuration:configuration,tracks:tracks,position:SIMD3<Double>(position),heading:-Double(heading)) {
-            trainDynamics=train
-            world.setBodyState(.init(position:SIMD3<Float>(train.initial.position),rotation:simd_quatf(vector:SIMD4<Float>(train.initial.rotation.vector))),for:rigid)
-        } else {world.setBodyState(.init(position: position, rotation: rotation), for: rigid)}
-        accumulator = 0; updatePose()
+        guard active, definitions[model] != nil,
+              modelPosition.x.isFinite, modelPosition.y.isFinite,
+              modelPosition.z.isFinite, heading.isFinite else { return }
+        // Original62540.place/lift rebuilds the solver through tp. Moving only
+        // the rigid body left wheel compression/counts, transmission inertia,
+        // steering, flight thrust and cached contact output at the old place.
+        // Damage is a separate controller in that source and survives tp.
+        let currentModel = model, damage = damageController
+        let fun = dynamics?.fun ?? bikeDynamics?.fun ?? 0
+        let manual = dynamics?.manual ?? bikeDynamics?.manual ?? false
+        guard enter(model:currentModel,modelPosition:modelPosition,heading:heading) else { return }
+        dynamics?.fun = fun; bikeDynamics?.fun = fun
+        dynamics?.manual = manual; bikeDynamics?.manual = manual
+        damageController = damage
+        if let damage { dynamics?.setTyres(damage.state.wheels); bikeDynamics?.setTyres(damage.state.wheels) }
     }
     func setDamageHinges(_ gta:[Int:SIMD3<Double>]) {
         damageController?.hinges=gta.mapValues{SIMD3($0.x,$0.z,-$0.y)}
@@ -484,7 +490,9 @@ final class NativeGroundVehicle {
         onDamageEvents?(events,body)
     }
     func update(delta: Double, input: NativeVehicleDynamics.Input, currentCell: String) {
-        guard let rigid, dynamics != nil || bikeDynamics != nil || trainDynamics != nil, loadedCells.contains(currentCell) else { return }
+        guard delta.isFinite, delta > 0, let rigid,
+              dynamics != nil || bikeDynamics != nil || trainDynamics != nil,
+              loadedCells.contains(currentCell) else { return }
         accumulator += min(max(0,delta),0.2)
         let fixed = 1.0 / 60
         while accumulator + 1e-12 >= fixed {

@@ -84,6 +84,10 @@ final class SwiftRapierWorld {
     }
     enum MeshError: Error { case invalidHeader, invalidCounts, truncated, invalidVertex, invalidIndex }
     private let handle: OpaquePointer
+    // Native bodies are created through this owner. Preserve exact type for
+    // queries that distinguish fixed parents from kinematic vehicle parents;
+    // ColliderInfo.dynamic alone cannot make that distinction.
+    private var bodyKinds:[BodyID:BodyKind] = [:]
     static let timestep: Float = 1 / 60
 
     init?(gravity: SIMD3<Float> = SIMD3(0, -9.81, 0)) {
@@ -112,7 +116,9 @@ final class SwiftRapierWorld {
                  mass: Mass = Mass(value: 1, turnMass: 1), gravityScale: Float = 0) -> BodyID? {
         let pose = [position.x, position.y, position.z, rotation.imag.x, rotation.imag.y, rotation.imag.z, rotation.real]
         let id = zgtaphys_body_new(handle, kind.rawValue, pose, mass.values, gravityScale)
-        return id == 0 ? nil : id
+        guard id != 0 else{return nil}
+        bodyKinds[id]=kind
+        return id
     }
     @discardableResult
     func setNextKinematicPose(_ id: BodyID, position: SIMD3<Float>,
@@ -132,7 +138,12 @@ final class SwiftRapierWorld {
         return zgtaphys_body_set_browser_next_rotation(handle, id, [q.x,q.y,q.z,q.w]) != 0
     }
     @discardableResult
-    func removeBody(_ id: BodyID) -> Bool { zgtaphys_body_remove(handle, id) != 0 }
+    func removeBody(_ id: BodyID) -> Bool {
+        guard zgtaphys_body_remove(handle,id) != 0 else{return false}
+        bodyKinds.removeValue(forKey:id)
+        return true
+    }
+    func bodyKind(_ id:BodyID)->BodyKind? {bodyKinds[id]}
     func bodyState(_ id: BodyID) -> BodyState? {
         var result = [Float](repeating: 0, count: 13)
         guard zgtaphys_body_state(handle, id, &result) != 0 else { return nil }

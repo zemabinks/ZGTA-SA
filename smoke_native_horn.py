@@ -22,6 +22,20 @@ for (index,row) in frames.enumerated(){
  precondition(result.horn==expected["horn"] && result.siren==expected["siren"],"frame \(index) horn/siren mismatch")
 }
 print("PASS: \(frames.count) actual emergency horn/siren tap/hold/identity frames")
+// A synthetic release after focus loss must not count as an intentional tap.
+for hz in [15.0,30.0,60.0,120.0] {
+ let horn=NativeVehicleHornController(),tick=1000/hz
+ _=horn.update(pressed:true,milliseconds:0,identity:"ambulance",emergency:true)
+ horn.cancelPress()
+ let cancelled=horn.update(pressed:false,milliseconds:tick,identity:"ambulance",emergency:true)
+ precondition(!cancelled.horn && !cancelled.siren,"cancelled gesture toggled siren at \(hz)Hz")
+ _=horn.update(pressed:true,milliseconds:1000,identity:"ambulance",emergency:true)
+ precondition(horn.update(pressed:false,milliseconds:1000+tick,identity:"ambulance",emergency:true).siren)
+ _=horn.update(pressed:true,milliseconds:2000,identity:"ambulance",emergency:true)
+ horn.cancelPress()
+ precondition(horn.update(pressed:false,milliseconds:2000+tick,identity:"ambulance",emergency:true).siren,"cancellation lost active siren")
+}
+print("PASS: interrupted horn gestures preserve siren at15/30/60/120Hz")
 '''
 def main():
  with tempfile.TemporaryDirectory(prefix='zgta-horn-')as directory:

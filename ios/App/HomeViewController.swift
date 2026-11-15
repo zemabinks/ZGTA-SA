@@ -38,18 +38,19 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
                                      shade.topAnchor.constraint(equalTo: view.topAnchor),
                                      shade.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
 
-        let scroll = UIScrollView()
+        let scroll = NativeMenuScrollView()
         scroll.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(scroll)
-        let content = UIStackView()
+        let content = scroll.column
         content.axis = .vertical
         content.spacing = 8
-        content.translatesAutoresizingMaskIntoConstraints = false
-        scroll.addSubview(content)
         let header = UIView()
         header.backgroundColor = .white
         let title = label("CONNECT TO YOUR MAC", size: 26, color: .black, bold: true)
         title.translatesAutoresizingMaskIntoConstraints = false
+        title.numberOfLines = 1
+        title.adjustsFontSizeToFitWidth = true
+        title.minimumScaleFactor = 0.6
         header.addSubview(title)
         let back = UIButton(type: .system)
         back.setTitle("BACK", for: .normal)
@@ -61,6 +62,7 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
         NSLayoutConstraint.activate([header.heightAnchor.constraint(equalToConstant: 55),
                                      title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 16),
                                      title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+                                     title.trailingAnchor.constraint(lessThanOrEqualTo: back.leadingAnchor, constant: -8),
                                      back.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -15),
                                      back.centerYAnchor.constraint(equalTo: header.centerYAnchor)])
         content.addArrangedSubview(header)
@@ -119,16 +121,8 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
             scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: 8),
-            content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -8),
-            content.centerXAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerXAnchor),
-            content.widthAnchor.constraint(lessThanOrEqualTo: scroll.frameLayoutGuide.widthAnchor, constant: -24),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: 940)
+            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
         ])
-        let width = content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -24)
-        width.priority = .defaultHigh
-        width.isActive = true
     }
 
     private func label(_ text: String, size: CGFloat, color: UIColor, bold: Bool = false) -> UILabel {
@@ -222,6 +216,7 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
                 self.checking = false
                 self.play.isEnabled = true
                 UserDefaults.standard.set(server.url.absoluteString, forKey: "serverAddress")
+                self.view.endEditing(true)
                 self.status.text = "CONNECTED. LOADING NATIVE GAME…"
                 self.status.textColor = .white
                 let game = NativeGameViewController(server: server)
@@ -309,5 +304,44 @@ private enum LocalGuestSession {
         }
         if saved { UserDefaults.standard.removeObject(forKey: fallbackKey(for: server)) }
         else { UserDefaults.standard.set(token, forKey: fallbackKey(for: server)) }
+    }
+}
+
+
+/// The viewport content has a required width independent of label/field
+/// intrinsic sizes. Re-presenting after a fullscreen game/keyboard transition
+/// therefore cannot solve the form as an arbitrarily narrow vertical column.
+final class NativeMenuScrollView: UIScrollView {
+    let column = UIStackView()
+    private let viewportContent = UIView()
+    private var columnWidth: NSLayoutConstraint!
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentInsetAdjustmentBehavior = .never
+        keyboardDismissMode = .interactive
+        showsHorizontalScrollIndicator = false
+        viewportContent.translatesAutoresizingMaskIntoConstraints = false
+        column.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(viewportContent); viewportContent.addSubview(column)
+        columnWidth = column.widthAnchor.constraint(equalToConstant: 940)
+        NSLayoutConstraint.activate([
+            viewportContent.leadingAnchor.constraint(equalTo: contentLayoutGuide.leadingAnchor),
+            viewportContent.trailingAnchor.constraint(equalTo: contentLayoutGuide.trailingAnchor),
+            viewportContent.topAnchor.constraint(equalTo: contentLayoutGuide.topAnchor),
+            viewportContent.bottomAnchor.constraint(equalTo: contentLayoutGuide.bottomAnchor),
+            viewportContent.widthAnchor.constraint(equalTo: frameLayoutGuide.widthAnchor),
+            column.centerXAnchor.constraint(equalTo: viewportContent.centerXAnchor),
+            column.topAnchor.constraint(equalTo: viewportContent.topAnchor, constant: 8),
+            column.bottomAnchor.constraint(equalTo: viewportContent.bottomAnchor, constant: -8),
+            columnWidth
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+    override func layoutSubviews() {
+        if bounds.width > 24 {
+            let width = min(940, bounds.width - 24)
+            if abs(columnWidth.constant - width) > 0.25 { columnWidth.constant = width }
+        }
+        super.layoutSubviews()
     }
 }

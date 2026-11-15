@@ -48,6 +48,10 @@ available; they do not obtain the publisher's private backend.
 
 ## Development status
 
+Core movement, animation, camera, physics, vehicles and combat now take priority
+over advanced roleplay. See the [core parity checklist](CORE_GAMEPLAY_PARITY.md)
+and [audit journal](CORE_GAMEPLAY_JOURNAL.md) for verified fixes and remaining differences.
+
 This is an in-progress reconstruction. The independent server uses its own
 mission/economy policies, and the native client still has gaps compared with
 the browser game. It is not yet a full 1:1 port. [FEATURE_MATRIX.md](FEATURE_MATRIX.md)

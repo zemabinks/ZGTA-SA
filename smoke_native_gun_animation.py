@@ -54,7 +54,7 @@ for row in rows{
  for(k,v)in[("on",state.on),("firing",state.firing),("fired",state.fired),("shooting",state.shooting),("ended",state.ended)]{assert(v==expected[k] as! Bool,"\(key):\(frame) \(k)");comparisons+=1}
  comparisons+=3
 }
-print("PASS: \(rows.count) original tM gun animation frames, \(comparisons) comparisons: aim/fire/cancel/restart, continuous streams, twin shots, not-ready pause and breakout")
+print("PASS: \(rows.count) archived-browser tM gun animation frames, \(comparisons) comparisons: aim/fire/cancel/restart, continuous streams, twin shots, not-ready pause and breakout")
 '''
 def main():
     source=next(path for path in (ROOT/'local-only/site/_next/static/chunks').glob('*.js') if 'tM=function(){let t={there:' in path.read_text())

@@ -36,7 +36,7 @@ for (frame,row)in rows.enumerated(){
  assert(swim.showing==expected["showing"] as! Bool,"showing")
  for(index,blend)in actual.blends.enumerated(){let other=blends[index];assert(blend.clip==other["clip"] as! String,"clip name");assert(abs(blend.time-(other["time"] as! NSNumber).doubleValue)<0.000000001,"frame \(frame) clip time");assert(abs(blend.weight-(other["weight"] as! NSNumber).doubleValue)<0.000000001,"frame \(frame) weight");comparisons+=3};comparisons+=3
 }
-print("PASS: \(rows.count) original WY swim pose frames, \(comparisons) clip/clock/weight/figure comparisons across all seven states, climb and exit fade")
+print("PASS: \(rows.count) archived-browser WY swim pose frames, \(comparisons) clip/clock/weight/figure comparisons across all seven states, climb and exit fade")
 '''
 def main():
  with tempfile.TemporaryDirectory(prefix='zgta-swim-animation-')as tmp:

@@ -69,6 +69,11 @@ const WEAPON_DAMAGE = Object.freeze({0: 8, 1: 10, 2: 14, 3: 14, 4: 25,
   5: 16, 6: 18, 7: 20, 8: 18, 9: 30, 22: 18, 23: 20, 24: 40,
   25: 35, 26: 28, 27: 32, 28: 12, 29: 18, 30: 24, 31: 24,
   32: 14, 33: 36, 34: 70});
+// Public stream geometry/cadence, independent self-host damage policy. The
+// public client requests hit(...,1,weapon); private/retail damage is unknown.
+// Extinguisher only suppresses existing fires; it never damages pedestrians.
+const AREA_EFFECTS = Object.freeze({37:{range:5.1,damage:1},41:{range:6.1,damage:1},42:{range:10.1,damage:0}});
+const AREA_HIT_MS=300, AREA_EVIDENCE_MS=350;
 const JOBS = Object.freeze([
   {id: 'courier', name: 'Courier', pay: 250, distance: 38},
   {id: 'taxi', name: 'Taxi', pay: 300, distance: 48},
@@ -266,6 +271,15 @@ function fireSpot(job) {
   const offset = FIRE_OFFSETS[job?.index];
   return home && offset ? [home.out[0] + offset[0], home.out[1] + offset[1], home.out[2]] : null;
 }
+function advanceFireSpot(fire) {
+  fire.index++;
+  if (fire.index===FIRE_OFFSETS.length) {fire.stage='rescue';return 'All fires are out. Get out and rescue the person near the call location.';}
+  return `Fire ${fire.index}/${FIRE_OFFSETS.length} out. Move to the next fire spot.`;
+}
+function areaCylinder(origin,direction,point,range,radius) {
+  const offset=point.map((n,i)=>n-origin[i]),along=offset.reduce((sum,n,i)=>sum+n*direction[i],0);
+  return along>=0 && along<=range && Math.hypot(...offset.map((n,i)=>n-along*direction[i]))<=radius;
+}
 function nearestHome(pos, minimum = 120, excluded = []) {
   return HOME_CATALOG.filter(home => home.out && !excluded.includes(home.id) &&
     Math.hypot(home.out[0] - pos.x, home.out[1] - pos.y) >= minimum)
@@ -419,6 +433,9 @@ class LocalGame {
     this.territories = Object.fromEntries(TURFS.map(id => [id, null]));
     this.turfCaptures = new Map();
     this.projectiles = LocalProjectiles.create({
+      // Only inventory-authorized shots enter this manager. Do not apply a
+      // second, differently timed raw-stats gate after consuming ammunition.
+      interval: () => 0,
       trace: (origin, direction, distance) => worldCollision.trace(origin, direction, distance),
       ground: (x,y,z) => worldCollision.height(x,y,z,8),
       complete: () => worldCollision.lastQueryComplete,
@@ -737,22 +754,42 @@ class LocalGame {
   }
 
   handleShot(peer, message) {
+    const acknowledged=peer.inventoryAckEnabled===true;
+    const reply=(accepted,reason='')=>this.sendInventory(peer,null,{sequence:Number.isSafeInteger(message.s)?message.s:null,accepted,reason});
+    const reject=reason=>{if(acknowledged)reply(false,reason);};
+    if (acknowledged) {
+      if (message.c!==peer.inventoryConnection) return reject('Inventory connection changed.');
+      if (!Number.isSafeInteger(message.s) || message.s<1) return reject('Invalid shot sequence.');
+      if (message.s<=(peer.processedShotSequence || 0)) return reject('Shot sequence already processed.');
+      // Every lower sequence is now permanently settled (accepted, rejected or
+      // skipped). A late/retried lower packet can never mutate the inventory.
+      peer.processedShotSequence=message.s;
+    }
     const point = value => Array.isArray(value) && value.length === 3 &&
       value.every(Number.isFinite) && value.every(n => Math.abs(n) <= 10000);
     const position = this.position(peer.player);
     if (!Number.isInteger(message.w) || message.w < 0 || message.w > 46 ||
         !point(message.o) || !point(message.h) || !position ||
-        peer.player.passive) return;
+        peer.player.passive) return reject('Invalid shot or player cannot attack.');
     if (Math.hypot(message.o[0] - position.x, message.o[1] - position.y,
       message.o[2] - position.z) > 15 ||
       Math.hypot(message.h[0] - message.o[0], message.h[1] - message.o[1],
-        message.h[2] - message.o[2]) > 200) return;
+        message.h[2] - message.o[2]) > 200) return reject('Shot origin or range is invalid.');
+    const ray=message.h.map((n,i)=>n-message.o[i]),length=Math.hypot(...ray);
+    if (AREA_EFFECTS[message.w] && (length<0.000001 ||
+        Math.hypot(message.o[0]-position.x,message.o[1]-position.y,message.o[2]-position.z-0.9)>3.5)) return reject('Stream origin is invalid.');
     const now = Date.now();
-    if (now - (peer.lastShotAt || 0) < 70) return;
+    if (!peer.inventoryEnabled && now - (peer.lastShotAt || 0) < 70) return;
     if (peer.inventoryEnabled) {
-      const accepted = weaponInventory.acceptShot(peer.player, message.w, now);
-      peer.send({t: 'inventory', state: weaponInventory.state(peer.player, position)});
-      if (!accepted.ok) { this.note(peer.player, accepted.reason); return; }
+      const accepted = weaponInventory.acceptShot(peer.player, message.w, now,{sequence:message.s,sequenceScope:peer});
+      if (!accepted.ok) {this.sendInventory(peer,null,{sequence:message.s ?? null,accepted:false,reason:accepted.reason});this.note(peer.player,accepted.reason);return;}
+      const records=peer.acceptedShots || (peer.acceptedShots=[]);
+      const record={sequence:message.s ?? null,weapon:message.w,at:now,origin:[...message.o],
+        direction:ray.map(n=>n/Math.max(0.000001,length)),hit:[...message.h],
+        dimension:peer.player.insideHome || null,used:false,areaTargets:new Set()};
+      records.push(record);
+      peer.acceptedShots=records.filter(record=>now-record.at<=2000).slice(-128);
+      if (message.w===42) this.applyExtinguisher(peer,record,now);
       this.save();
     }
     peer.lastShotAt = now;
@@ -770,32 +807,57 @@ class LocalGame {
     if (Number.isInteger(message.bp)) shot.bp = message.bp;
     for (const other of this.peers) if (other !== peer && other.ready &&
       (other.player.insideHome || null) === (peer.player.insideHome || null)) other.send(shot);
+    if (peer.inventoryEnabled) reply(true);
   }
 
   handleHit(peer, message) {
+    if (peer.inventoryAckEnabled && message.c!==peer.inventoryConnection) return;
     const target = [...this.peers].find(other => other.ready &&
       String(other.player.number) === message.to);
     const from = this.position(peer.player);
     const to = target && this.position(target.player);
     if (!from || !to || !target || target === peer ||
-        peer.player.passive || target.player.passive || target.player.health <= 0 ||
+        peer.player.health <= 0 || peer.player.passive || target.player.passive || target.player.health <= 0 ||
         (peer.player.insideHome || null) !== (target.player.insideHome || null)) return;
     const weapon = peer.inventoryEnabled && Number.isInteger(message.w) ? message.w : Date.now() - (peer.lastShotAt || 0) <= 2000 ? peer.lastWeapon :
       Number.isInteger(peer.state?.weapon) ? peer.state.weapon : 0;
-    const damage = WEAPON_DAMAGE[weapon];
-    if (!damage) return;
-    if (peer.inventoryEnabled && weapon !== 0 && peer.lastWeapon !== weapon) return;
+    const area=AREA_EFFECTS[weapon],damage=area ? area.damage:WEAPON_DAMAGE[weapon];
+    if (!area && !damage) return;
     const distance = Math.hypot(from.x - to.x, from.y - to.y);
     const gun = weapon >= 22;
-    if (gun && peer.inventoryEnabled && !worldCollision.lineOfSight([from.x,from.y,from.z+1.35],[to.x,to.y,to.z+1.15])) return;
+    if (peer.inventoryEnabled && !gun && weaponInventory.ensure(peer.player).selected !== weapon) return;
+    if (peer.inventoryEnabled && !gun && weapon !== 0 && peer.lastWeapon !== weapon) return;
+    const now = Date.now();
+    const authorized = peer.inventoryEnabled && gun ? [...(peer.acceptedShots || [])].reverse().find(record=>
+      !record.used && record.weapon===weapon && now-record.at>=0 && now-record.at<=(area ? AREA_EVIDENCE_MS:2000) &&
+      (message.s===undefined ? record.sequence===null:record.sequence===message.s)) : null;
+    if (peer.inventoryEnabled && gun && !authorized) return;
+    if (area) {
+      if (!peer.inventoryEnabled || !authorized) return;
+      const inventory=weaponInventory.ensure(peer.player,now),centre=[to.x,to.y,to.z+0.9];
+      if (inventory.selected!==weapon || inventory.reload || authorized.dimension!==(peer.player.insideHome || null) ||
+          Math.hypot(authorized.origin[0]-from.x,authorized.origin[1]-from.y,authorized.origin[2]-from.z-0.9)>3.5 ||
+          !areaCylinder(authorized.origin,authorized.direction,centre,area.range,0.8)) return;
+      // One accepted emission may affect multiple people, as the original
+      // stream loop does, but never the same target twice or faster than300ms.
+      if (authorized.areaTargets.has(message.to)) return;
+      authorized.areaTargets.add(message.to);
+      const times=peer.areaHitTimes || (peer.areaHitTimes=new Map());
+      for (const [id,time]of times)if(now-time>AREA_EVIDENCE_MS)times.delete(id);
+      if (now-(times.get(message.to) ?? -Infinity)<AREA_HIT_MS) return;
+      times.set(message.to,now);
+      if (!worldCollision.lineOfSight(authorized.origin,centre)) return;
+      if (!damage) return;
+    }
+    if (!area && gun && peer.inventoryEnabled && !worldCollision.lineOfSight([from.x,from.y,from.z+1.35],[to.x,to.y,to.z+1.15])) return;
     const range = peer.inventoryEnabled && gun ?
       Math.min(200,weaponInventory.catalog.items.find(item => item.id === weapon)?.stats?.range || 90) : gun ? 90 : 4;
-    if (distance > range ||
-        (gun && (Date.now() - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon ||
-          !peer.lastShotHit || Math.hypot(peer.lastShotHit[0] - to.x,
-            peer.lastShotHit[1] - to.y, peer.lastShotHit[2] - to.z) > 8))) return;
-    const now = Date.now();
-    if (now - (peer.lastHitAt || 0) < (gun ? 90 : 300)) return;
+    if (!area && (distance > range ||
+        (gun && !authorized && (now - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon)) ||
+        (gun && (!(authorized?.hit || peer.lastShotHit) || Math.hypot((authorized?.hit || peer.lastShotHit)[0] - to.x,
+            (authorized?.hit || peer.lastShotHit)[1] - to.y, (authorized?.hit || peer.lastShotHit)[2] - to.z) > 8)))) return;
+    if (!(peer.inventoryEnabled && gun) && now - (peer.lastHitAt || 0) < (gun ? 90 : 300)) return;
+    if (authorized && !area) authorized.used=true;
     peer.lastHitAt = now;
     const victim = target.player;
     const absorbed = Math.min(victim.armour, damage);
@@ -815,6 +877,26 @@ class LocalGame {
       this.note(victim, 'You were defeated. Respawn to rejoin the world.');
     }
     this.save();
+  }
+
+  applyExtinguisher(peer,shot,now) {
+    const player=peer.player,from=this.position(player),fire=player.job,target=fireSpot(fire);
+    if (!from || player.health<=0 || player.passive || from.peer.state.walking!==true ||
+        fire?.mode!=='fire' || fire.stage!=='extinguish' || now-fire.started>FIRE_MS || !target ||
+        shot.dimension!==(player.insideHome || null) || shot.dimension!==null ||
+        !areaCylinder(shot.origin,shot.direction,target,AREA_EFFECTS[42].range,1) ||
+        !worldCollision.lineOfSight(shot.origin,[target[0],target[1],target[2]+0.05])) {peer.areaDousing=null;return;}
+    let douse=peer.areaDousing;
+    if (!douse || douse.job!==fire || douse.index!==fire.index) douse={job:fire,index:fire.index,seconds:0,at:now};
+    // Duration comes from server time. Network catch-up packets at the same
+    // timestamp add no extra spray; a disconnected trigger cannot bank time.
+    const seconds=douse.seconds===0 ? 0.02:Math.max(0,Math.min(0.1,(now-douse.at)/1000));
+    douse.seconds += now-douse.at>AREA_EVIDENCE_MS ? 0.02:seconds;douse.at=now;peer.areaDousing=douse;
+    if (douse.seconds+1e-8<0.5) return;
+    // Existing mission spots have one logical fire. Their visual flame's
+    // unit strength at2/sec yields a0.5s suppression policy; no vehicle health
+    // is increased to imitate putting out a server-untracked engine fire.
+    const message=advanceFireSpot(fire);peer.areaDousing=null;this.note(player,message);this.save();
   }
 
   applyBlastHit(target, damage, event) {
@@ -839,7 +921,30 @@ class LocalGame {
     this.save();
   }
 
-  gameplayState(player) {
+  inventoryState(player,peer=null) {
+    const state=weaponInventory.state(player,this.position(player));
+    if (peer?.inventoryAckEnabled && peer.player===player && peer.ready && !peer.closed && this.peers.has(peer))
+      state.ack={connection:peer.inventoryConnection,processedShot:peer.processedShotSequence || 0};
+    return state;
+  }
+  sendInventory(peer,state=null,result=null) {
+    if (!peer?.inventoryEnabled) return;
+    const snapshot=state ? {...state}:this.inventoryState(peer.player,peer);
+    if (state && peer.inventoryAckEnabled)
+      snapshot.ack={connection:peer.inventoryConnection,processedShot:peer.processedShotSequence || 0};
+    else if (!peer.inventoryAckEnabled) delete snapshot.ack;
+    peer.send({t:'inventory',state:snapshot,...(result ? {result}: {})});
+  }
+  requestInventoryPeer(req,player) {
+    const id=req.headers['x-zgta-inventory-connection'];
+    if (id===undefined) return null;
+    if (typeof id!=='string' || !/^[a-zA-Z0-9_-]{16,80}$/.test(id)) throw new Error('Invalid inventory connection.');
+    const peer=[...this.peers].find(p=>p.player===player && p.ready && !p.closed && p.inventoryAckEnabled && p.inventoryConnection===id);
+    if (!peer) throw new Error('Inventory connection expired. Reconnect before refreshing or changing weapons.');
+    return peer;
+  }
+
+  gameplayState(player,inventoryPeer=null) {
     const pos = this.position(player);
     const nearHangar = nearestHangar(pos);
     const active = player.job;
@@ -976,7 +1081,7 @@ class LocalGame {
       .sort((a, b) => Math.hypot(pos.x - a.out[0], pos.y - a.out[1]) -
         Math.hypot(pos.x - b.out[0], pos.y - b.out[1]))[0] : null;
     return {name: player.name, cash: player.cash, xp: player.xp, jobsDone: player.jobsDone,
-      weaponInventory: weaponInventory.state(player, pos),
+      weaponInventory: this.inventoryState(player,inventoryPeer),
       pilot: {flights: player.pilotFlights || 0, streak: player.pilotStreak || 0,
         level: pilotLevel(player),
         aircraft: PILOT_AIRCRAFT.map(item => ({...item,
@@ -1921,11 +2026,7 @@ class LocalGame {
         if (!(inTruck && distance <= 23) &&
             !(pos?.peer.state.walking === true && distance <= 8))
           throw new Error('Get the marked fire truck within 23 m, or approach the fire on foot within 8 m.');
-        fire.index++;
-        if (fire.index === FIRE_OFFSETS.length) {
-          fire.stage = 'rescue';
-          message = 'All fires are out. Get out and rescue the person near the call location.';
-        } else message = `Fire ${fire.index}/${FIRE_OFFSETS.length} out. Move to the next fire spot.`;
+        message = advanceFireSpot(fire);
       }
       this.save();
     } else if (action === 'job.pickup') {
@@ -2315,7 +2416,8 @@ class LocalGame {
       const result = weaponInventory.action(player, action, input, pos);
       message = result.message;
       this.save(); this.updatePlayer(player);
-      pos?.peer.send({t: 'inventory', state: result.inventory});
+      for (const peer of this.peers) if (peer.player===player && peer.ready && peer.inventoryEnabled)
+        this.sendInventory(peer,result.inventory);
     } else if (action === 'home.buy') {
       const home = HOME_CATALOG.find(item => item.id === input.home);
       if (!home) throw new Error('Unknown home.');
@@ -2403,12 +2505,23 @@ class LocalGame {
     const {id, player} = this.ensurePlayer(req, res);
     if (url.pathname === '/api/local/discord/start' && req.method === 'GET')
       return this.discordStart(req, res);
-    if (url.pathname === '/api/local/state' && req.method === 'GET')
-      return json(res, 200, this.gameplayState(player));
+    if (url.pathname === '/api/local/state' && req.method === 'GET') {
+      try {return json(res,200,this.gameplayState(player,this.requestInventoryPeer(req,player)));}
+      catch (error) {return json(res,409,{error:error.message});}
+    }
     if (url.pathname === '/api/local/action' && req.method === 'POST') {
+      try {this.requestInventoryPeer(req,player);}
+      catch (error) {return json(res,409,{error:error.message});}
       try {
         const body = await readBody(req, 2048);
-        return json(res, 200, this.action(player, body.action, body));
+        // The peer can disconnect while the HTTP body is being received.
+        // Validate again before mutating an account or inventory.
+        let peer;
+        try {peer=this.requestInventoryPeer(req,player);}
+        catch (error) {return json(res,409,{error:error.message});}
+        const result=this.action(player,body.action,body);
+        result.state.weaponInventory=this.inventoryState(player,peer);
+        return json(res,200,result);
       } catch (error) { return json(res, 400, {error: error.message}); }
     }
     if (url.pathname === '/api/auth/me' && req.method === 'GET')
@@ -2497,19 +2610,25 @@ class LocalGame {
     }
     if (message.t === 'hi') {
       peer.player.insideHome = null;
-      peer.inventoryEnabled = message.nativeInventory === true;
+      peer.inventoryEnabled = peer.inventoryEnabled || message.nativeInventory === true;
+      if (peer.inventoryEnabled && message.inventoryAck===1) {
+        peer.inventoryAckEnabled=true;
+        peer.inventoryConnection ||= crypto.randomBytes(18).toString('base64url');
+        peer.processedShotSequence ??= 0;
+      }
       peer.ready = true;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
         spot: [1480, -1738, 13, 0],
         life: [peer.player.health, peer.player.armour], out: [1480, -1738],
-        zombies: false, traffic: 0, peds: 0, party: 0});
+        zombies: false, traffic: 0, peds: 0, party: 0,
+        ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {})});
       peer.send(this.fullState(peer));
       peer.send({t:'flightgear',...(peer.player.flightGear || {})});
       if (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)
         peer.send({t:'staff',...(peer.player.flightGear.parachute ? {give:[46,1]}:{}),
           ...(peer.player.flightGear.jetpack ? {jetpack:true}:{})});
-      if (peer.inventoryEnabled) peer.send({t: 'inventory', state: weaponInventory.state(peer.player)});
+      if (peer.inventoryEnabled) this.sendInventory(peer);
       peer.send(this.owned(peer.player));
       peer.send(this.homeStatus(peer.player));
       peer.send({t: 'passive', on: peer.player.passive,
@@ -2678,6 +2797,21 @@ class LocalGame {
     if (!text) return;
     // Self-only free-play equipment on the independent Mac server. The
     // browser consumes its original staff grant; native peers also retain it.
+    if (text==='/dropjetpack') {
+      const state=peer.state,action=Number.isInteger(state?.act) ? state.act&63:0;
+      // Personal-flight and swim packets deliberately clear the generic air
+      // flag, so their action code must also exclude an airborne/water drop.
+      if (peer.player.health<=0 || !peer.ready || !state || state.walking!==true ||
+          state.driving===true || !!state.air ||
+          (action>=61 && action<=62) || (action>=50 && action<=58) || (action>=10 && action<=16) ||
+          !Number.isFinite(peer.lastSeen) || Date.now()-peer.lastSeen>10000)
+        return peer.send({t:'note',text:'Land on foot before removing the jetpack.'});
+      peer.player.flightGear ||= {parachute:false,jetpack:false};
+      peer.player.flightGear.jetpack=false;
+      peer.send({t:'staff',jetpack:false});
+      peer.send({t:'flightgear',...peer.player.flightGear});this.save();
+      return peer.send({t:'note',text:'Jetpack removed.'});
+    }
     if (text==='/parachute' || text==='/jetpack' || text==='/jp') {
       if (peer.player.health<=0 || peer.state?.driving===true)
         return peer.send({t:'note',text:'Stand on foot and respawn before equipping flight gear.'});

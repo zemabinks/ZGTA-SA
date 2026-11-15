@@ -86,6 +86,10 @@ final class NativeCharacterController {
             if let feet = input.heldFeet {
                 let point = SwiftRapierWorld.gtaToRapier(feet)
                 head = SIMD3(Double(point.x),Double(point.y)+1.7,Double(point.z))
+                // A climb/attachment can place the actor without running the
+                // walking motor. Keep its enabled contact capsule at that
+                // same location before the shared rigid-body world advances.
+                queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
             } else {
                 let point = SwiftRapierWorld.gtaToRapier(input.displacement)
                 motor.step(position: &head, displacement: SIMD3<Double>(point), jump: input.jump, delta: Self.fixed,

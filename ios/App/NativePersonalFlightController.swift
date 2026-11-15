@@ -35,8 +35,15 @@ final class NativePersonalFlightController {
     }
     var lifts:Bool {worn && !flying && !chuting && (up || y != 0)}
     func takeOff(heading:Double,velocity:V? = nil) {flying=true;self.heading=heading;self.velocity=velocity ?? .zero}
+    /// Clear pending controls without interrupting physical flight or changing
+    /// its momentum, equipment, phase or facing.
+    func cancelInput() {x=0;y=0;open=false;up=false;down=false;brake=false}
     func stop() {
-        chute=0;flying=false;lean=0;chuteRoll=0;jetPitch=0;jetRoll=0;jetVertical=0;velocity = .zero
+        // A discontinuity cancels queued controls as well as current motion.
+        // Equipment and physical facing survive teleport/death/water handoff.
+        chute=0;flying=false;lean=0;chuteRoll=0;forward=0;rise=0;elapsed=0;maximumFall=0;opening=nil
+        jetPitch=0;jetRoll=0;jetVertical=0;stopping=false;velocity = .zero
+        cancelInput()
     }
     func steer(x:Double=0,y:Double=0,open:Bool=false,up:Bool=false,down:Bool=false,stop:Bool=false) {
         self.x=x;self.y=y;if !self.open {self.open=open};self.up=up;self.down=down;brake=stop

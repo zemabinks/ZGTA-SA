@@ -46,6 +46,11 @@ those files out of GitHub.
 
 ## Native iOS parity audit
 
+The current core-gameplay priority and evidence rules are tracked in
+[CORE_GAMEPLAY_PARITY.md](CORE_GAMEPLAY_PARITY.md). Static ledge climbing,
+vaulting, hanging/pulling/dropping and acknowledged ammo prediction have since
+been integrated; moving carriers and retail-game equivalence remain unverified.
+
 This table records the Swift/UIKit/Metal port as of 15 November 2026. Helper
 replays compare the archived executable JavaScript with the native code. They
 are distinct from the combined app's simulator/device acceptance checks.
