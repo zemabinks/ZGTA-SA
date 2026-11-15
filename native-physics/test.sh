@@ -12,7 +12,7 @@ case "$PHYSICS_HOST" in
   x86_64-apple-darwin) PHYSICS_LIB="$PHYSICS_OUTPUT/macos-x86_64"; PHYSICS_TRIPLE=x86_64-apple-macosx13.0 ;;
   *) print -u2 "Unsupported native test host: $PHYSICS_HOST"; exit 2 ;;
 esac
-if [[ "${PHYSICS_SKIP_BUILD:-0}" != 1 ]]; then "$PHYSICS_ROOT/build.sh" host; fi
+if [[ "${PHYSICS_SKIP_BUILD:-0}" != 1 ]]; then zsh "$PHYSICS_ROOT/build.sh" host; fi
 mkdir -p "$PHYSICS_OUTPUT/tests"
 xcrun clang -target "$PHYSICS_TRIPLE" -I "$PHYSICS_ROOT/include" "$PHYSICS_ROOT/tests/smoke.c" "$PHYSICS_LIB/libzgtasa_native_physics.a" -framework Security -framework CoreFoundation -liconv -o "$PHYSICS_OUTPUT/tests/c-smoke"
 "$PHYSICS_OUTPUT/tests/c-smoke"

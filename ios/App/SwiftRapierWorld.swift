@@ -9,6 +9,7 @@ final class SwiftRapierWorld {
     typealias BodyID = UInt64
     typealias ColliderID = UInt64
     enum BodyKind: UInt32 { case fixed = 0, dynamic = 1, kinematicPosition = 2, kinematicVelocity = 3 }
+    enum CombineRule: UInt32 { case average = 0, min = 1, multiply = 2, max = 3 }
     struct BodyState {
         var position: SIMD3<Float>
         var rotation: simd_quatf
@@ -92,8 +93,18 @@ final class SwiftRapierWorld {
     }
     deinit { zgtaphys_world_free(handle) }
 
+    /// Original fixed-step manager ordering: parked force updates precede
+    /// the core, parked damage/pose updates precede the driven contact drain.
+    var beforeStep:((Double)->Void)?
+    var afterStep:((Double)->Void)?
     @discardableResult
-    func step() -> Bool { zgtaphys_world_step(handle) != 0 }
+    func step() -> Bool {
+        let delta=1.0/60.0
+        beforeStep?(delta)
+        let succeeded=zgtaphys_world_step(handle) != 0
+        if succeeded {afterStep?(delta)}
+        return succeeded
+    }
 
     @discardableResult
     func addBody(kind: BodyKind = .dynamic, position: SIMD3<Float>,
@@ -140,6 +151,16 @@ final class SwiftRapierWorld {
     }
     @discardableResult
     func setMass(_ mass: Mass, for id: BodyID) -> Bool { zgtaphys_body_set_mass(handle, id, mass.values) != 0 }
+    func mass(of id: BodyID) -> Float? {
+        var value: Float = 0
+        return zgtaphys_body_mass(handle,id,&value) != 0 ? value:nil
+    }
+    @discardableResult
+    func recomputeMassProperties(_ id: BodyID) -> Bool { zgtaphys_body_recompute_mass(handle,id) != 0 }
+    @discardableResult
+    func setColliderFrictionCombine(_ id: ColliderID, _ rule: CombineRule) -> Bool {
+        zgtaphys_collider_friction_combine(handle,id,rule.rawValue) != 0
+    }
     @discardableResult
     func applyImpulse(_ value: SIMD3<Float>, to id: BodyID, at point: SIMD3<Float>? = nil) -> Bool {
         var values = [value.x, value.y, value.z]

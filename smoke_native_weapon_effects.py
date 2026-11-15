@@ -31,14 +31,16 @@ const cases=[
 {name:'grenade_bounce',weapon:16,start:[0,0,.2],direction:[1,0,-1],dt:.125,steps:1,ground:true},
 {name:'molotov_contact',weapon:18,start:[0,0,.2],direction:[1,0,-1],dt:.125,steps:1,ground:true},
 {name:'satchel_stick',weapon:39,start:[0,0,.2],direction:[1,0,-1],dt:.125,steps:1,ground:true},
+{name:'teargas_effect',weapon:17,start:[0,0,.2],direction:[0,0,-1],dt:.125,steps:40,ground:true},
+{name:'molotov_fire_effect',weapon:18,start:[0,0,.2],direction:[1,0,-1],dt:.125,steps:8,ground:true},
 {name:'seeker',weapon:36,start:[0,0,10],direction:[1,0,0],dt:.125,steps:8,target:[50,30,10]}
 ];
-for(const c of cases){const events=[];const feel=(p,d,len)=>{if(!c.ground||d.y>=0)return null;const distance=-p.y/d.y;return distance>=0&&distance<=len?{distance,normal:new V(0,1,0)}:null};
-const manager=sandbox.factory({scene:{add(){},remove(){}},feel,onBoom:(weapon,position)=>events.push({weapon,position:gta(position)})});
+for(const c of cases){const events=[],trails=[],gas=[],flames=[];const feel=(p,d,len)=>{if(!c.ground||d.y>=0)return null;const distance=-p.y/d.y;return distance>=0&&distance<=len?{distance,normal:new V(0,1,0)}:null};
+const manager=sandbox.factory({scene:{add(){},remove(){}},feel,effects:{blast(){},large(){},explosion(){},trail:(p,delta,flaming=false)=>trails.push({position:gta(p),delta,flaming}),gas:(p,delta)=>gas.push({position:gta(p),delta}),flames:(p,delta)=>flames.push({position:gta(p),delta})},onBoom:(weapon,position)=>{events.push({weapon,position:gta(position)});if(weapon===18)manager.blast(weapon,position)}});
 const direction=vec(c.direction).normalize();if([35,36].includes(c.weapon))manager.launch(c.weapon,vec(c.start),direction,null,{carry:c.carry?vec(c.carry):null});else manager.lob(c.weapon,vec(c.start),direction);
 const cars=c.target?[{id:'target',position:vec(c.target)}]:[];
 for(let i=0;i<c.steps;i++)manager.update(c.dt,{cars});
-c.expected={projectiles:manager.__list().map(p=>({position:gta(p.holder.position),velocity:gta(p.velocity),stuck:p.stuck,lying:p.lying})),events};}
+c.expected={projectiles:manager.__list().map(p=>({position:gta(p.holder.position),velocity:gta(p.velocity),stuck:p.stuck,lying:p.lying})),events,trails,gas,flames};}
 fs.writeFileSync(process.argv[3],JSON.stringify(cases));
 '''
 
@@ -55,8 +57,11 @@ for value in cases {
     let name = value["name"] as! String
     let weapon = value["weapon"] as! Int
     var events: [NativeWeaponEffects.Detonation] = []
-    helper.onDetonation = { events.append($0) }
+    helper.onDetonation = { [weak helper] event in events.append(event);if event.weapon==18{helper?.receiveBlast(weapon:event.weapon,position:event.position)} }
+    var trails:[(SIMD3<Float>,Float,Bool)]=[],gas:[(SIMD3<Float>,Float)]=[],flames:[(SIMD3<Float>,Float)]=[]
+    helper.onTrail={trails.append(($0,$1,$2))};helper.onGas={gas.append(($0,$1))};helper.onFlames={flames.append(($0,$1))}
     if value["ground"] as? Bool == true {
+        helper.groundHeight={_,_,_ in 0}
         helper.trace = { p,d,length in
             guard d.z < 0 else {return nil};let distance = -p.z/d.z
             return distance>=0 && distance<=length ? NativeWeaponEffects.Contact(distance: distance,normal: SIMD3(0,0,1)) : nil
@@ -82,6 +87,12 @@ for value in cases {
         assert(actual.stuck == (reference["stuck"] as! Bool))
         assert(actual.lying == (reference["lying"] as! Bool))
     }
+    for (label,values)in [("gas",gas),("flames",flames)] {
+        let refs=expected[label] as! [[String:Any]];assert(values.count==refs.count,"\(name) \(label) callback count \(values.count) != \(refs.count)")
+        for(actual,reference)in zip(values,refs){close(actual.0,vector(reference["position"]!),name+label+" position");assert(abs(actual.1-(reference["delta"] as! NSNumber).floatValue)<0.00001)}
+    }
+    let refTrails=expected["trails"] as! [[String:Any]];assert(trails.count==refTrails.count,"\(name) trail count")
+    for(actual,reference)in zip(trails,refTrails){close(actual.0,vector(reference["position"]!),name+" trail before movement");assert(abs(actual.1-(reference["delta"] as! NSNumber).floatValue)<0.00001);assert(actual.2==reference["flaming"] as! Bool)}
     assert(events.count==referenceEvents.count,"\(name) events")
     for (actual,reference) in zip(events,referenceEvents) {close(actual.position,vector(reference["position"]!),name+" detonation")}
 }

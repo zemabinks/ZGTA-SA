@@ -17,6 +17,11 @@ uint32_t zgtaphys_body_state(ZGTAPhysicsWorld*,uint64_t body,float *state);
 uint32_t zgtaphys_body_set_state(ZGTAPhysicsWorld*,uint64_t body,const float *state);
 uint32_t zgtaphys_body_set_velocities(ZGTAPhysicsWorld*,uint64_t body,const float *linear_angular_xyz);
 uint32_t zgtaphys_body_set_mass(ZGTAPhysicsWorld*,uint64_t body,const float *mass);
+/* Creation/set_mass leave effective mass pending until step or explicit recompute. */
+uint32_t zgtaphys_body_mass(ZGTAPhysicsWorld*,uint64_t body,float *mass);
+uint32_t zgtaphys_body_recompute_mass(ZGTAPhysicsWorld*,uint64_t body);
+/* Original coefficient rule IDs:0Average,1Min,2Multiply,3Max. */
+uint32_t zgtaphys_collider_friction_combine(ZGTAPhysicsWorld*,uint64_t collider,uint32_t rule);
 /* kind0 linear impulse xyz; kind1 torque impulse xyz; kind2 impulse xyz + point xyz. */
 uint32_t zgtaphys_body_impulse(ZGTAPhysicsWorld*,uint64_t body,const float *impulse,uint32_t kind);
 uint64_t zgtaphys_collider_ball(ZGTAPhysicsWorld*,uint64_t body,float radius,const float *transform,float friction,float restitution);

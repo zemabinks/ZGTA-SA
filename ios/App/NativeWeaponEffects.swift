@@ -78,6 +78,11 @@ final class NativeWeaponEffects {
     /// Used to place the six seeded molotov fires, matching the 4 m down ray.
     var groundHeight: ((Float, Float, Float) -> Float?)?
     var onDetonation: ((Detonation) -> Void)?
+    // Original cY calls these before advancing projectile position, so a fast
+    // rocket's smoke begins at its actual previous point on the trajectory.
+    var onTrail:((SIMD3<Float>,Float,Bool)->Void)?
+    var onGas:((SIMD3<Float>,Float)->Void)?
+    var onFlames:((SIMD3<Float>,Float)->Void)?
     var onStreamHit: ((String, Int) -> Void)?
     var onDouse: ((SIMD3<Float>, Float) -> Void)?
     private(set) var projectiles: [Projectile] = []
@@ -224,6 +229,7 @@ final class NativeWeaponEffects {
             fires[index].burst -= delta
         }
         fires.removeAll { $0.remaining <= 0 || !$0.flames.contains(where: { $0.strength > 0 }) }
+        for fire in fires {for flame in fire.flames where flame.strength>0{onFlames?(flame.position,delta*min(1,fire.remaining))}}
         var retained: [Projectile] = []
         for var projectile in projectiles {
             projectile.age += delta
@@ -231,12 +237,15 @@ final class NativeWeaponEffects {
                 if projectile.weapon != 17 && projectile.weapon != 39 { detonate(projectile) }
                 continue
             }
+            if projectile.weapon==17 && projectile.lying{onGas?(projectile.position,delta)}
             if projectile.stuck || projectile.lying { retained.append(projectile); continue }
             if projectile.rocket {
                 if projectile.seeking { steer(&projectile, vehicles: vehicles, delta: delta) }
+                onTrail?(projectile.position,delta,false)
             } else {
                 projectile.velocity.z -= Self.gravity * delta
                 projectile.rotation += projectile.spin * delta
+                if projectile.weapon==18{onTrail?(projectile.position,delta,true)}
             }
             let speed = simd_length(projectile.velocity)
             guard speed >= 0.0001 else { retained.append(projectile); continue }
@@ -297,12 +306,18 @@ final class NativeWeaponEffects {
 
     private func allocateID() -> UInt64 { defer { nextID &+= 1 }; return nextID }
 
+    /// Public cY.blast receives the authoritative echo separately from local
+    /// projectile prediction. Remote molotovs therefore seed the same fire
+    /// even when a newer snapshot already removed their projectile.
+    func receiveBlast(weapon:Int,position:SIMD3<Float>,owner:String?=nil) {
+        if weapon==18{ignite(at:position,owner:owner)}
+    }
+
     private func detonate(_ projectile: Projectile) {
         func rounded(_ value: Float) -> Float { floor(value * 100 + 0.5) / 100 }
         let at = SIMD3<Float>(rounded(projectile.position.x), rounded(projectile.position.y),
                               rounded(projectile.position.z))
         let event = Self.blast(weapon: projectile.weapon, position: at, owner: projectile.owner)
-        if projectile.weapon == 18 { ignite(at: at, owner: projectile.owner) }
         onDetonation?(event)
     }
 

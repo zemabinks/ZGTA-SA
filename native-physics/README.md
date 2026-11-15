@@ -15,10 +15,21 @@ Verification details and original package/WASM digests remain in ignored
 
 ## Build
 
-The project-local official Rust toolchain lives under `local-only/toolchains/`.
-No shell profile or system installation is changed. Install its targets for
-`aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`,
-`aarch64-apple-darwin`, and `x86_64-apple-darwin` before building all artifacts.
+On a fresh Mac, install full Xcode with its iOS/Simulator SDKs and Metal Toolchain,
+then install XcodeGen (`brew install xcodegen`). Run:
+
+```sh
+zsh native-physics/setup.sh
+zsh native-physics/setup.sh --check
+```
+
+The setup downloads official Rust1.100.0 and all five Apple target standard
+libraries into `local-only/toolchains/`. It does not edit shell profiles, global
+Rust, Xcode settings or an existing project-local toolchain. An already matching
+local compiler is reused. The check also compiles a minimal iPhone Metal kernel,
+including the downloaded Xcode26 Metal component when `xcrun` resolves a stub.
+See [fresh-host instructions](../NATIVE_BUILD.md). Browser-only hosting does not
+require Rust or Xcode.
 
 ```sh
 zsh native-physics/build.sh all
@@ -27,12 +38,19 @@ zsh native-physics/test_character.sh
 zsh native-physics/test_vehicle.sh
 zsh native-physics/test_contacts.sh
 zsh native-physics/test_rotation.sh
+zsh native-physics/test_boundaries.sh
 zsh native-physics/test_apple_abi.sh
 ```
 
 Static libraries and executable tests stay under ignored
 `local-only/native-physics/`. `ios-device` contains ARM64, `ios-simulator`
 contains ARM64 and Intel, and `macos` contains ARM64 and Intel.
+Builds fetch missing Cargo dependencies by default; use `ZGTA_NATIVE_OFFLINE=1`
+only after the local cache exists. `build_parallel.sh [1..4]` builds independent
+targets concurrently and falls back to regular copies on non-APFS volumes.
+Source stamps make the gameplay launcher rebuild stale libraries after a pull.
+Most reference fixture tests also require the owner's local archived client;
+the engine build and toolchain preflight need no game assets.
 
 Xcode integration uses the `ZGTARapier` Clang module in `include/`, adds its
 path to Swift's import search path, links `libzgtasa_native_physics.a` from the
@@ -46,8 +64,18 @@ The C ABI uses primitive values and borrowed arrays. A world belongs to one
 calling thread. Body state arrays contain position XYZ, quaternion XYZW,
 linear velocity XYZ, then angular velocity XYZ. Custom mass properties contain
 mass, local centre of mass XYZ, and principal inertia XYZ. Colliders have zero
-density so they preserve those handling mass properties, with minimum friction
-and default average restitution combine rules. Dynamic bodies use CCD and remain awake.
+density so they preserve those handling mass properties. Vehicle primitives use
+minimum friction; SCL2 world meshes preserve the original Average friction rule.
+Restitution uses default Average. Explicit friction-combine setters expose all
+four original rules. Dynamic bodies use CCD and remain awake.
+
+Effective mass follows JS timing: newly created bodies have mass0 until the
+first physics step, and `setMass` leaves the old mass effective until the next
+step. `recomputeMassProperties` is the separate explicit JS operation for an
+immediate update. `mass(of:)` exposes the actual engine value. The original
+11-stage creation/setter/impulse trace matches exactly; all480 Average/Min
+synthetic contact frames also match the source engine exactly. Calibration
+shapes are explicit and are not claimed to be publisher vehicle geometry.
 
 Coordinates pass through unchanged. The original solver uses Y up;
 `SwiftRapierWorld.decodeSCL2` converts the locally archived GTA Z-up mesh into

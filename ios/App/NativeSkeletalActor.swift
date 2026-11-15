@@ -159,6 +159,12 @@ final class NativeSkeletalAnimationLibrary {
 
     /// 49368.XM samples the quantized ANP3 quaternion before normalization.
     /// Normalizing individual keys changes the original weighted pose result.
+    struct DoubleSample {let bone:Int;let turn:SIMD4<Double>;let place:SIMD3<Double>?}
+    func originalDoubleSamples(_ name:String,at time:Double)->[DoubleSample] {
+        guard let clip=clip(name) else{return []}
+        return clip.tracks.map{bone,keys in let value=Self.originalSample(keys,time:time);return DoubleSample(bone:bone,turn:value.0,place:value.1)}
+    }
+
     func originalSamples(_ name: String, at time: Double) -> [OriginalSample] {
         guard let clip = clip(name) else { return [] }
         return clip.tracks.map { bone, keys in
@@ -268,6 +274,9 @@ final class NativeSkeletalActor {
         fileprivate let nativeGlobals: [simd_float4x4]
         fileprivate let rootTurn: simd_quatf
         fileprivate let rootHeight: Float
+        fileprivate var figurePosition=SIMD3<Double>.zero
+        fileprivate var rawTurns:[SIMD4<Double>]?
+        fileprivate var rawPlaces:[SIMD3<Double>]?
     }
     private struct Frame {
         let parent: Int
@@ -608,29 +617,40 @@ extension NativeSkeletalActor {
     /// Public bA's distinct raw seated poser. Unlike R6 it samples the full
     /// root translation and sequentially slerps without normalizing keys.
     func riderPose(frame: NativeRiderAnimation.Frame,library: NativeSkeletalAnimationLibrary,
-                   figurePosition: SIMD3<Float>,figureTurn: Float = 0) -> Pose {
-        var turns=restTurns,places=restPlaces
+                   figurePosition: SIMD3<Float>,figureTurn: Float = 0,previous:Pose? = nil,transition:Double = 1) -> Pose {
+        var turns=restTurns.map{SIMD4<Double>($0.vector)},places=restPlaces.map{SIMD3<Double>($0)}
         func apply(_ name:String,_ time:Double,_ weight:Double){
-            for sample in library.originalSamples(name,at:time){
-                guard let index=byBone[sample.bone] else {continue}
-                let point=sample.bone==0 ? restPlaces[index]+(sample.place ?? .zero) : sample.place ?? restPlaces[index]
-                if weight>=1{turns[index]=simd_quatf(vector:sample.turn);places[index]=point}
-                else{let q=NativeSkeletalAnimationLibrary.slerpOriginal(SIMD4<Double>(turns[index].vector),SIMD4<Double>(sample.turn),weight);turns[index]=simd_quatf(vector:SIMD4(q));places[index] += (point-places[index])*Float(weight)}
+            for sample in library.originalDoubleSamples(name,at:time){
+                guard let index=byBone[sample.bone] else{continue}
+                let point=sample.bone==0 ? SIMD3<Double>(restPlaces[index])+(sample.place ?? .zero):sample.place ?? SIMD3<Double>(restPlaces[index])
+                if weight>=1{turns[index]=sample.turn;places[index]=point}
+                else{turns[index]=NativeSkeletalAnimationLibrary.slerpOriginal(turns[index],sample.turn,weight);places[index]+=(point-places[index])*weight}
             }
         }
         if let clip=frame.base{apply(clip,frame.time,1)}
         for mix in frame.mixes where mix.weight>0.001{apply(mix.clip,mix.time,min(1,mix.weight))}
-        func compose(_ value:simd_quatf,_ point:SIMD3<Float>)->simd_float4x4{
-            let q=value.vector,x2=q.x+q.x,y2=q.y+q.y,z2=q.z+q.z
-            let xx=q.x*x2,xy=q.x*y2,xz=q.x*z2,yy=q.y*y2,yz=q.y*z2,zz=q.z*z2,wx=q.w*x2,wy=q.w*y2,wz=q.w*z2
-            return simd_float4x4(columns:(SIMD4(1-(yy+zz),xy+wz,xz-wy,0),SIMD4(xy-wz,1-(xx+zz),yz+wx,0),SIMD4(xz+wy,yz-wx,1-(xx+yy),0),SIMD4(point,1)))
+        var anchor=SIMD3<Double>(figurePosition)
+        if let previous {
+            for(_,index)in byBone {
+                let oldTurn=previous.rawTurns?[index] ?? SIMD4<Double>(previous.localTurns[index].vector)
+                let oldPlace=previous.rawPlaces?[index] ?? SIMD3<Double>(previous.localPlaces[index])
+                turns[index]=NativeSkeletalAnimationLibrary.slerpOriginal(oldTurn,turns[index],transition)
+                places[index]=oldPlace+(places[index]-oldPlace)*transition
+            }
+            anchor=previous.figurePosition+(anchor-previous.figurePosition)*transition
         }
-        let figure=compose(simd_quatf(angle:figureTurn,axis:SIMD3<Float>(0,0,1)),figurePosition)
+        func compose(_ q:SIMD4<Double>,_ point:SIMD3<Double>)->simd_float4x4 {
+            let x2=q.x+q.x,y2=q.y+q.y,z2=q.z+q.z
+            let xx=q.x*x2,xy=q.x*y2,xz=q.x*z2,yy=q.y*y2,yz=q.y*z2,zz=q.z*z2,wx=q.w*x2,wy=q.w*y2,wz=q.w*z2
+            return simd_float4x4(columns:(SIMD4<Float>(SIMD4(1-(yy+zz),xy+wz,xz-wy,0)),SIMD4<Float>(SIMD4(xy-wz,1-(xx+zz),yz+wx,0)),SIMD4<Float>(SIMD4(xz+wy,yz-wx,1-(xx+yy),0)),SIMD4<Float>(SIMD4(point,1))))
+        }
+        let figure=compose(SIMD4<Double>(simd_quatf(angle:figureTurn,axis:SIMD3<Float>(0,0,1)).vector),anchor)
         var globals:[simd_float4x4]=[]
         for index in frames.indices{let local=compose(turns[index],places[index]);globals.append(frames[index].parent>=0 ? globals[frames[index].parent]*local:local)}
         let native=globals.map{figure*$0},palette=bones.map{native[$0.frame]*$0.inverseBind}
-        return Pose(palette:palette,hand:byBone[24].map{native[$0]} ?? matrix_identity_float4x4,pelvis:native[byBone[1]!],localTurns:turns,localPlaces:places,nativeGlobals:native,rootTurn:simd_quatf(angle:0,axis:SIMD3<Float>(0,0,1)),rootHeight:0)
+        return Pose(palette:palette,hand:byBone[24].map{native[$0]} ?? matrix_identity_float4x4,pelvis:native[byBone[1]!],localTurns:turns.map{simd_quatf(vector:SIMD4<Float>($0))},localPlaces:places.map{SIMD3<Float>($0)},nativeGlobals:native,rootTurn:simd_quatf(angle:0,axis:SIMD3<Float>(0,0,1)),rootHeight:0,figurePosition:anchor,rawTurns:turns,rawPlaces:places)
     }
+
 }
 
 
@@ -658,5 +678,17 @@ extension NativeSkeletalActor {
         }
         let native=globals.map{figure*$0},palette=bones.map{native[$0.frame]*$0.inverseBind}
         return Pose(palette:palette,hand:byBone[24].map{native[$0]} ?? matrix_identity_float4x4,pelvis:native[byBone[1]!],localTurns:turns,localPlaces:places,nativeGlobals:native,rootTurn:simd_quatf(vector:SIMD4(0,0,0,1)),rootHeight:0)
+    }
+}
+
+
+extension NativeSkeletalActor {
+    /// bA.stood: root supplies horizontal feet; the figure anchor projected
+    /// onto z=-origin supplies the upright ground plane beneath the car.
+    func riderFeet(pose:Pose,model:simd_float4x4,origin:Float)->(position:SIMD3<Float>,heading:Float)? {
+        guard let root=transform(bone:0,in:pose) else{return nil}
+        let world=model*root,plane=model*SIMD4(Float(pose.figurePosition.x),Float(pose.figurePosition.y),-origin,1)
+        let direction=world*SIMD4<Float>(0,1,0,0)
+        return(SIMD3(world.columns.3.x,world.columns.3.y,plane.z),atan2(direction.x,direction.y))
     }
 }

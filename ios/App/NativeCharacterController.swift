@@ -28,6 +28,9 @@ final class NativeCharacterController {
     private var pendingTravel = SIMD3<Double>.zero
     private var pendingJump = 0.0
     private var active = false
+    /// Original walker press routing occurs after motor motion and before
+    /// CQ.beforeStep applies the queued impulse to promoted parked vehicles.
+    var onPress:(([NativeCharacterMotor.Press])->Void)?
     private static let fixed = 1.0 / 60.0
 
     init?(world: SwiftRapierWorld) {
@@ -89,6 +92,7 @@ final class NativeCharacterController {
                            held: input.held, verticalOverride: input.verticalOverride, carrying: carrying)
             }
             pendingJump = 0
+            if input.heldFeet == nil {onPress?(motor.pressed)}
             world.step()
         }
         return state

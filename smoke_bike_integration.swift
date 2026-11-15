@@ -57,8 +57,8 @@ import simd
         } }
         let output=URL(fileURLWithPath:root).appendingPathComponent("local-only/native-physics/tests/bike-integration.json")
         try JSONSerialization.data(withJSONObject:rows,options:[.prettyPrinted,.sortedKeys]).write(to:output)
-        let failed=rows.filter { $0["maxPositionError"] as! Double>0.01 || $0["finalPositionError"] as! Double>0.01 || $0["maxVelocityError"] as! Double>0.1 }
-        print("\(failed.isEmpty ? "PASS":"FAIL"): all15 motorcycle/bicycle cases within1cm/0.1m/s integration gates; full stress metrics saved locally")
+        let failed=rows.filter { $0["maxPositionError"] as! Double>1e-9 || $0["finalPositionError"] as! Double>1e-9 || $0["maxVelocityError"] as! Double>1e-9 || $0["maxQuaternionComponentError"] as! Double>1e-9 }
+        print("\(failed.isEmpty ? "PASS":"FAIL"): all15 motorcycle/bicycle cases within1e-9 position/velocity/quaternion integration gates; full stress metrics saved locally")
         if !failed.isEmpty { exit(1) }
     }
 }

@@ -14,7 +14,7 @@ function received(m){
  if(m.t==='usedParachute'){used=true}
  if(m.t==='hi'){assert.equal(m.nativeInventory,true);send({t:'hello',spot:[1684.7612,-2101.9894,12.85125,.75],life:[100,25]});send({t:'flightgear',parachute:true,jetpack:true});send({t:'all',vehicles:[['car-fixture','Browser peer','420',1684.7612,-2101.9894,12.85125,.75,.25,-.125,645,damage]],cars:[row()]})}
  if(m.t==='vmove'){assert.equal(m.v,'car-fixture');assert.deepEqual([m.x,m.y,m.z,m.h,m.p,m.r,m.hp,m.d,m.w],[1685,-2102,12.8,.4,.1,-.2,623,damage,321]);moved=true;send({t:'veh',v:['car-fixture','Browser peer','420',1685,-2102,12.8,.4,.1,-.2,623,damage,null,null,null,null,null,321]})}
- if(m.t==='me'&&m.driving){assert(Math.abs(m.heading+.75)<1e-6);assert(Math.abs(m.steer+.3)<1e-6);assert.equal(m.pitch,.25);assert.equal(m.roll,.125);assert.equal(m.health,645);assert.equal(m.damage,damage);assert.equal(m.horn,3);assert.equal(m.lights,true);driven=true}
+ if(m.t==='me'&&m.driving){assert(Math.abs(m.heading+.75)<1e-6);assert(Math.abs(m.steer+.3)<1e-6);assert.equal(m.pitch,.25);assert.equal(m.roll,.125);assert.equal(m.health,645);assert.equal(m.damage,damage);assert.equal(m.horn,3);assert.equal(m.act,1);assert.equal(m.lights,true);driven=true}
  if(m.t==='me'&&m.walking&&!m.parked&&m.act===28){assert.equal(m.move,2.13);assert.equal(m.anim,null);assert.equal(m.aim,.24);assert.equal(m.act,28);assert.equal(m.air,true);assert.equal(m.crouch,true);assert.equal(m.paused,true);assert.deepEqual([m.vx,m.vy,m.vz],[1.2,-2.3,.4]);assert.deepEqual([m.wx,m.wy,m.wz],[.1,.2,.3]);assert(Number.isFinite(m.clock));foot=true}
  if(m.t==='me'&&m.act>=50&&m.act<=62){assert.equal(m.pitch,-.23);assert.equal(m.roll,.46);if(m.act===60){assert.equal(m.move,2.13);assert.equal(m.air,true);assert.equal(m.crouch,true)}else{assert.equal(m.move,0);assert.equal(m.air,false);assert.equal(m.crouch,false)}assert.equal(m.aim,m.act===54?null:.24);flights++}
  if(m.t==='me'&&m.walking&&m.parked){assert(driven&&foot&&moved&&used&&flights===3);assert.equal(m.parked.damage,damage);assert.equal(m.parked.health,645);assert(Math.abs(m.parked.heading+.75)<1e-6);assert.equal(m.parked.roll,.125);parked=true;send({t:'cars',c:[]});send({t:'note',text:'WIRE COMPLETE'})}
@@ -41,7 +41,7 @@ client.onVehicles={vehicles in
  if let changed=vehicles.first,changed.work==321{precondition(changed.health==623 && changed.heading == -0.4 && changed.roll==0.2);vehicleUpdated=true}
  guard !sent,actors,let v=vehicles.first else{return};sent=true
  precondition(v.damage==damage && v.health==645 && v.roll==0.125 && v.heading == -0.75)
- client.sendPosition(v.position,heading:0.75,moving:true,running:false,vehicle:v,speed:13.25,steer:0.3,pitch:0.25,roll:-0.125,vehicleHealth:645,vehicleDamage:damage,lights:true,horn:true,siren:true)
+ client.sendPosition(v.position,heading:0.75,moving:true,running:false,vehicle:v,speed:13.25,steer:0.3,pitch:0.25,roll:-0.125,vehicleHealth:645,vehicleDamage:damage,lights:true,horn:true,siren:true,action:1)
  client.sendPosition(v.position,heading:0.75,moving:true,running:false,airborne:true,weapon:22,crouching:true,movement:2.13,aim:0.236,action:28,velocity:SIMD3(1.2,-2.3,0.4),angularVelocity:SIMD3(0.1,0.2,0.3),paused:true)
  for state in [54,60,61]{client.sendPosition(v.position,heading:0.75,moving:true,running:false,pitch:-0.234,roll:0.456,airborne:true,weapon:46,crouching:true,movement:2.13,aim:0.236,action:state)}
  client.usedParachute()

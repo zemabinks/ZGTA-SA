@@ -152,6 +152,7 @@ final class NativeGameViewController: UIViewController {
         renderer?.onSplash = { [weak self] in self?.audio.land(water:true) }
         renderer?.onVehicleExplosion = { [weak self] _ in self?.audio.explosion(weapon:51) }
         renderer?.onVehicleMove = { [weak self] id,state in self?.network.sendVehicleMove(id,state:state) }
+        renderer?.onContactAudio = { [weak self] collisions,body in self?.audio.vehicleContacts(collisions,body:body) }
         renderer?.onLocalHealth = { [weak self] value in self?.network.reportLocalHealth(value) }
         renderer?.onParachuteUsed = { [weak self] in self?.network.usedParachute() }
         network.onFlightGear = { [weak self] parachute,jetpack in self?.renderer?.setFlightGear(parachute:parachute,jetpack:jetpack) }
@@ -914,28 +915,34 @@ final class NativeGameViewController: UIViewController {
     @objc private func toggleVehicle() {
         guard let renderer else { return }
         if currentVehicle != nil {
-            let parked = renderer.vehicleWirePosition, heading = renderer.direction
-            let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
-            let damage = renderer.vehicleDamage
-            renderer.exitVehicle()
-            if let currentVehicle {
-                network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
-                                 vehicle: currentVehicle, vehicleHealth: renderer.vehicleHealth,vehicleDamage:damage)
-            }
-            currentVehicle = nil
-            vehicleButton.setTitle("ENTER CAR", for: .normal)
-            gameHUD.updateVehicle(name: nil, speed: 0)
-            setDrivingControls(false)
-            radio.stop()
-            return
+            if [1,3].contains(renderer.riderWireAction) {status.text="ENTERING VEHICLE";return}
+            if renderer.beginVehicleExit(onReady:{[weak self] in self?.completeVehicleExit()}) {return}
+            completeVehicleExit();return
         }
-        guard let nearest = network.vehicles.values.min(by: {
+        guard let nearest = network.orderedVehicles.map(renderer.predictedVehicle).min(by: {
             simd_distance($0.position, renderer.position) < simd_distance($1.position, renderer.position)
         }), simd_distance(nearest.position, renderer.position) <= 8 else {
             status.text = "MOVE WITHIN 8 M OF A VEHICLE"
             return
         }
         network.requestEnter(nearest)
+    }
+
+    private func completeVehicleExit() {
+        guard let renderer,currentVehicle != nil else{return}
+        let parked = renderer.vehicleWirePosition, heading = renderer.direction
+        let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
+        let damage = renderer.vehicleDamage
+        renderer.exitVehicle()
+        if let currentVehicle {
+            network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
+                             vehicle: currentVehicle, vehicleHealth: renderer.vehicleHealth,vehicleDamage:damage)
+        }
+        currentVehicle = nil
+        vehicleButton.setTitle("ENTER CAR", for: .normal)
+        gameHUD.updateVehicle(name: nil, speed: 0)
+        setDrivingControls(false)
+        radio.stop()
     }
 
     private func showObjective(_ state: [String: Any]) {
@@ -1153,8 +1160,10 @@ final class NativeGameViewController: UIViewController {
                                 throttle: forward, health: renderer.vehicleHealth, delta: delta,
                                 snapshot:renderer.nativeVehicleAudioSnapshot,hull:renderer.takeVehicleHullAudio(),ear:renderer.audioEar)
             audio.horn(model:currentVehicle.flatMap {Int($0.code.split(separator:".").first ?? "")},active:renderer.vehicleHorn,siren:renderer.vehicleSiren)
-            audio.updateRemoteVehicles(Array(network.players.values),ear:renderer.audioEar,forward:renderer.audioForward,
+            audio.updateRemoteVehicles(network.orderedPlayers,ear:renderer.audioEar,forward:renderer.audioForward,
                                        top:{renderer.remoteVehicleAudioTop($0)})
+            audio.updateContacts(delta:Double(delta))
+            audio.updateFlightPacks(renderer.flightAudioVoices,delta:Double(delta))
             previousAudioPosition = renderer.position
         }
         if link.timestamp - lastHUD > 0.1, let renderer {
@@ -1168,7 +1177,7 @@ final class NativeGameViewController: UIViewController {
             gameHUD.updateClock(hour: renderer.gameHour)
             gameHUD.updateBreath(renderer.swimmingBreath)
             if currentVehicle == nil {
-                vehicleButton.isHidden = !network.vehicles.values.contains {
+                vehicleButton.isHidden = !network.orderedVehicles.map(renderer.predictedVehicle).contains {
                     simd_distance($0.position, renderer.position) <= 8
                 }
             }
@@ -1188,7 +1197,7 @@ final class NativeGameViewController: UIViewController {
                                  crouching: renderer.crouching,swimState: renderer.swimmingState,
                                  swimPitch: renderer.swimmingPitch,swimRatio: renderer.swimmingRatio,
                                  movement:renderer.footWireMovementRatio,aim:renderer.footWireAim,
-                                 action:renderer.footWireAction,
+                                 action:currentVehicle != nil ? renderer.riderWireAction:renderer.footWireAction,
                                  velocity:renderer.currentWireVelocity,angularVelocity:renderer.currentWireAngularVelocity,
                                  kit:renderer.vehicleWireKit(tuck:Double(lookVertical)),paused:!acceptsInput)
         }

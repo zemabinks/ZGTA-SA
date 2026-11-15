@@ -55,6 +55,10 @@ def source_files(root):
     for path in sorted(root.iterdir()):
         if path.is_file() and allowed(path.name):
             yield path
+    if (root / 'ios').is_dir():
+        for path in sorted((root / 'ios').iterdir()):
+            if path.is_file() and allowed(path.relative_to(root).as_posix()):
+                yield path
     for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', '.github'):
         base = root / directory
         if base.is_dir():

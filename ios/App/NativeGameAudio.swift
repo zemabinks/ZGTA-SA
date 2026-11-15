@@ -73,6 +73,9 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private let hornController=NativeVehicleHornController()
     private var footstepSettings: Footsteps?
     private var footstepAudio: NativeFootstepAudio?
+    private var contactAudio:NativeContactAudio?
+    private var pendingContactManifest:URLSessionDataTask?
+    private var flightPackIdle:[String:Double]=[:]
     private var explosionIndex = 0
     private var data: [String: Data] = [:]
     private var requests: [String: URLSessionDataTask] = [:]
@@ -113,6 +116,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
 
     deinit {
         pendingManifest?.cancel()
+        pendingContactManifest?.cancel()
         fadeTimer?.cancel()
         requests.values.forEach { $0.cancel() }
         notifications.forEach { NotificationCenter.default.removeObserver($0) }
@@ -122,6 +126,16 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
 
     func prepare() {
         configureSession()
+        pendingContactManifest?.cancel()
+        pendingContactManifest=URLSession.shared.dataTask(with:server.path("game/native/contact-audio.json")) { [weak self] bytes,response,_ in
+            guard let bytes,(response as? HTTPURLResponse)?.statusCode==200,
+                  let configuration=try? JSONDecoder().decode(NativeContactAudio.Configuration.self,from:bytes) else{return}
+            DispatchQueue.main.async {
+                self?.contactAudio=NativeContactAudio(configuration:configuration)
+                self?.preload(configuration.samples.map{"39_\($0)"}+(0...4).map{"128_\($0)"})
+            }
+        }
+        pendingContactManifest?.resume()
         pendingManifest?.cancel()
         pendingManifest = URLSession.shared.dataTask(with: server.path("game/native/audio.json")) { [weak self] bytes, response, _ in
             guard let bytes, (response as? HTTPURLResponse)?.statusCode == 200,
@@ -185,6 +199,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         suspended = true
         weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
         remoteEngines.removeAll()
+        _ = contactAudio?.quiet();flightPackIdle.removeAll()
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
         oneShots.removeAll()
@@ -201,6 +216,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         suspended = true
         weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
         remoteEngines.removeAll()
+        _ = contactAudio?.quiet();flightPackIdle.removeAll()
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
         oneShots.removeAll()
@@ -448,6 +464,66 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     func meleeHit(weapon id: Int = 0) {
         guard let value = meleeHits[String(id)]?.randomElement() else { return }
         once("143_\(value.intValue)", rate: Float.random(in: 0.95...1.05), gain: 0.8)
+    }
+
+    func vehicleContacts(_ collisions:[NativeVehicleDamageController.Collision],body:NativeVehicleDamage.Body) {
+        guard !suspended,let contactAudio else{return}
+        let slide=max(simd_length(body.move),simd_length(body.turn))
+        for collision in collisions {
+            let mine=contactAudio.carMaterial(other:collision.material,normal:collision.normal,up:body.up)
+            let point=SwiftRapierWorld.rapierToGTA(SIMD3<Float>(collision.point))
+            playContacts(contactAudio.crash(id:"world:\(collision.material)",impact:collision.impact,
+                position:SIMD3<Double>(point),mine:mine,other:collision.material,slide:slide))
+        }
+    }
+
+    func updateContacts(delta:Double) {
+        guard !suspended,let contactAudio else{return}
+        playContacts(contactAudio.update(delta:delta))
+    }
+
+    private func playContacts(_ events:[NativeContactAudio.Event]) {
+        for event in events {
+            let prefix="contact:"+event.id
+            if event.kind=="drop" {vehicleLoops.apply(.init(layers:[]),prefix:prefix);continue}
+            let point=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(SIMD3<Float>(event.position)))
+            let panner=NativeVehicleAudioSpatial.Panner(reference:event.near,maximum:event.reach,rolloff:1.6)
+            var layer=NativeVehicleAudioDynamics.Layer(name:"sound",sound:event.sample,rate:event.rate,gain:event.gain)
+            layer.startFraction=event.start
+            if event.kind=="hold" {applyVehiclePlan(.init(layers:[layer]),prefix:prefix,position:point,panner:panner);continue}
+            let received=ProcessInfo.processInfo.systemUptime
+            let play={ [weak self] in
+                guard let self,!self.suspended else{return}
+                self.fetch(event.sample) { [weak self] bytes in
+                    guard let self,!self.suspended,let bytes,
+                          ProcessInfo.processInfo.systemUptime-received<event.delay+0.5 else{return}
+                    if !self.registeredVehicleSamples.contains(event.sample) {
+                        guard self.vehicleLoops.register(bytes,name:event.sample,loopStart:self.samples[event.sample]?.loop ?? -1) else{return}
+                        self.registeredVehicleSamples.insert(event.sample)
+                    }
+                    self.applyVehiclePlan(.init(layers:[layer]),prefix:"contact-once:"+UUID().uuidString,position:point,panner:panner)
+                }
+            }
+            if event.delay>0 {DispatchQueue.main.asyncAfter(deadline:.now()+event.delay,execute:play)}else{play()}
+        }
+    }
+
+    func updateFlightPacks(_ voices:[NativeWorldRenderer.FlightAudioVoice],delta:Double) {
+        guard !suspended else{return}
+        let seen=Set(voices.map(\.id))
+        for voice in voices {
+            guard let sound=streamSounds[voice.sound] else{continue}
+            flightPackIdle[voice.id]=0
+            let layer=NativeVehicleAudioDynamics.Layer(name:"pack",sound:sound.sample,rate:Double(sound.rate),gain:Double(sound.gain))
+            let position=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(voice.position))
+            applyVehiclePlan(.init(layers:[layer]),prefix:"flight:"+voice.id,position:position,
+                             panner:.init(reference:5,maximum:80,rolloff:1.6))
+        }
+        for id in Array(flightPackIdle.keys) where !seen.contains(id) {
+            let idle=flightPackIdle[id] ?? 0
+            if idle+delta<0.2 {flightPackIdle[id]=idle+delta}
+            else{flightPackIdle.removeValue(forKey:id);vehicleLoops.apply(.init(layers:[]),prefix:"flight:"+id)}
+        }
     }
 
     func collision(severity: Float) {

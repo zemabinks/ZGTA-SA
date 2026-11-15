@@ -113,8 +113,26 @@ final class NativeGroundVehicle {
     let world: SwiftRapierWorld
     private lazy var others = NativeOtherVehicles(world:world)
     var otherColliders: Set<SwiftRapierWorld.ColliderID> {others.colliders}
-    func synchronizeOtherVehicles(_ poses:[NativeOtherVehicles.Pose],excluding:String?,near position:SIMD3<Float>) {
-        others.synchronize(poses,excluding:excluding,near:position)
+    var onOtherMove:((String,[String:Any])->Void)?
+    var onOtherCollidersChanged:(()->Void)?
+    func synchronizeOtherVehicles(_ poses:[NativeOtherVehicles.Pose],excluding:String?,near position:SIMD3<Float>,
+                                  promoteNear:SIMD3<Float>?=nil,delta:Double=0,wetness:Double=0) {
+        others.wetness=wetness
+        others.synchronize(poses,excluding:excluding,near:position,promoteNear:promoteNear,delta:delta)
+    }
+    func otherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.snapshot(id)}
+    func takeOtherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.take(id)}
+    func shoveOtherVehicle(body:UInt64,direction:SIMD2<Double>,point:SIMD3<Double>,speed:Double){
+        others.shove(body:body,direction:direction,point:point,speed:speed)
+    }
+    func parkCurrentVehicle(id:String,code:String,health:Int,damage:String,work:Int) {
+        guard let rigid,let current=world.bodyState(rigid) else{exit();return}
+        let position=SwiftRapierWorld.rapierToGTA(current.position)
+        let pose=NativeUnattendedVehicle.Pose(position:SIMD3<Double>(current.position),rotation:NativeUnattendedVehicle.quaternion(current.rotation))
+        let angle=NativeUnattendedVehicle.euler(pose.rotation),rotor=dynamics?.flight?.turning ?? 0,gear=landingGearUp
+        let source=NativeOtherVehicles.Pose(id:id,code:code,position:position,heading:Float(-angle.heading),pitch:Float(angle.pitch),roll:Float(-angle.roll),health:health,damage:damage,work:work)
+        exit()
+        others.park(source,physicalPose:pose,linear:SIMD3<Double>(current.linearVelocity),angular:SIMD3<Double>(current.angularVelocity),rotor:rotor,gearUp:gear)
     }
     private var definitions: [String: Definition] = [:]
     private var audioTopCache:[String:Double] = [:]
@@ -129,6 +147,7 @@ final class NativeGroundVehicle {
     var onContactForces: (([SwiftRapierWorld.ContactForceEvent], SwiftRapierWorld.BodyID, Double) -> Void)?
     private(set) var damageController: NativeVehicleDamageController?
     var onDamageEvents: (([NativeVehicleDamage.Event], NativeVehicleDamage.Body) -> Void)?
+    var onCollisions:(([NativeVehicleDamageController.Collision],NativeVehicleDamage.Body)->Void)?
     /// Original Rapier Y-up surface-query boundary, separated base/wave parts.
     var waterLevel: ((SIMD3<Double>) -> Double?)?
     var waterWave: ((SIMD3<Double>) -> NativeVehicleBuoyancy.Wave)?
@@ -247,6 +266,12 @@ final class NativeGroundVehicle {
             world.setColliderGroups(seabed, collision: 131071, solver: 0xffffffff)
         }
         self.world = world
+        others.waterLevel = {[weak self] in self?.waterLevel?($0)}
+        others.waterWave = {[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:SIMD3(0,1,0))}
+        others.onMove = {[weak self] in self?.onOtherMove?($0,$1)}
+        others.onCollidersChanged = {[weak self] in self?.onOtherCollidersChanged?()}
+        world.beforeStep = {[weak self] in self?.others.beforeStep(delta:$0)}
+        world.afterStep = {[weak self] in self?.others.afterStep(delta:$0)}
     }
 
     @discardableResult func loadDefinitions(_ data: Data) -> Int {
@@ -347,10 +372,11 @@ final class NativeGroundVehicle {
     static func modelOffset(origin: Float, heading: Float, pitch: Float = 0, roll: Float = 0) -> SIMD3<Float> {
         SwiftRapierWorld.rapierToGTA(rotation(heading:heading,pitch:pitch,roll:roll).act(SIMD3(0,origin,0)))
     }
-    @discardableResult func enter(model: String, modelPosition: SIMD3<Float>, heading: Float, pitch: Float = 0, roll: Float = 0) -> Bool {
+    @discardableResult func enter(model: String, modelPosition: SIMD3<Float>, heading: Float, pitch: Float = 0, roll: Float = 0,
+                                  bodyPose:NativeUnattendedVehicle.Pose?=nil) -> Bool {
         guard let definition = definitions[model] else { return false }
-        let rotation = Self.rotation(heading:heading,pitch:pitch,roll:roll)
-        let position = SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0))
+        let rotation = bodyPose.map{simd_quatf(vector:SIMD4<Float>($0.rotation.vector))} ?? Self.rotation(heading:heading,pitch:pitch,roll:roll)
+        let position = bodyPose.map{SIMD3<Float>($0.position)} ?? (SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0)))
         let train:NativeTrainDynamics? = definition.trainConfiguration.flatMap { configuration in tracks.flatMap { NativeTrainDynamics(configuration:configuration,tracks:$0,position:SIMD3<Double>(position),heading:-Double(heading)) } }
         let bike = definition.bikeConfiguration.flatMap { NativeBikeDynamics(configuration: $0) }
         let dynamics = bike == nil && train == nil ? NativeVehicleDynamics(configuration: definition.configuration) : nil
@@ -384,11 +410,15 @@ final class NativeGroundVehicle {
             world.setContactForceEvents(collider)
             chassisColliders.insert(collider)
         }
+        // Original62540.tp applies rbSetRotation after building the body;
+        // its Float quaternion is normalized at this setter boundary.
+        world.setBrowserRotation(body,rotation:initialRotation)
         rigid = body; self.dynamics = dynamics; bikeDynamics = bike; trainDynamics = train; self.model = model
         let table = definition.configuration.table
         let damage = NativeVehicleDamageController(world:world,mass:table.mass,collisionDamage:definition.collisionDamage,
             maxX:definition.damageWidth,flags:table.modelFlags,model:table.model,origin:definition.configuration.origin,flight:dynamics?.flight != nil)
         damage.onEvents = { [weak self] events,body in self?.handleDamageEvents(events,body:body) }
+        damage.onCollisions = {[weak self] collisions,body in self?.onCollisions?(collisions,body)}
         damage.isOtherVehicle = { [weak self] id in self?.others.colliders.contains(id) == true }
         damage.isRhino = { [weak self] id in self?.others.rhinos.contains(id) == true }
         damageController = damage

@@ -2,10 +2,10 @@
 # Isolated Cargo output directories allow independent Apple targets to compile
 # concurrently without Cargo's shared build-directory lock.
 set -euo pipefail
+unsetopt BG_NICE
 PHYSICS_ROOT="${0:A:h}"
 PROJECT_ROOT="${PHYSICS_ROOT:h}"
-export RUSTUP_HOME="$PROJECT_ROOT/local-only/toolchains/rustup"
-export CARGO_HOME="$PROJECT_ROOT/local-only/toolchains/cargo"
+source "$PHYSICS_ROOT/toolchain_env.sh"
 export IPHONEOS_DEPLOYMENT_TARGET=16.0
 export MACOSX_DEPLOYMENT_TARGET=13.0
 PHYSICS_OUTPUT="$PROJECT_ROOT/local-only/native-physics"
@@ -17,19 +17,22 @@ build_one() {
   local physics_cache="$PHYSICS_OUTPUT/parallel-targets/$physics_target"
   mkdir -p "$physics_cache"
   if [[ ! -d "$physics_cache/$physics_target" && -d "$PHYSICS_OUTPUT/target/$physics_target" ]]; then
-    cp -cR "$PHYSICS_OUTPUT/target/$physics_target" "$physics_cache/"
+    cp -cR "$PHYSICS_OUTPUT/target/$physics_target" "$physics_cache/" 2>/dev/null || cp -R "$PHYSICS_OUTPUT/target/$physics_target" "$physics_cache/"
   fi
   if [[ ! -d "$physics_cache/release" && -d "$PHYSICS_OUTPUT/target/release" ]]; then
-    cp -cR "$PHYSICS_OUTPUT/target/release" "$physics_cache/"
+    cp -cR "$PHYSICS_OUTPUT/target/release" "$physics_cache/" 2>/dev/null || cp -R "$PHYSICS_OUTPUT/target/release" "$physics_cache/"
   fi
   print "Building native physics: $physics_target"
-  if ! CARGO_TARGET_DIR="$physics_cache" "$CARGO_HOME/bin/cargo" build --locked --offline --release --jobs 2 --manifest-path "$PHYSICS_ROOT/Cargo.toml" --target "$physics_target" > "$PHYSICS_OUTPUT/build-logs/$physics_target.log" 2>&1; then
+  local -a physics_flags=(--locked --release --jobs 2)
+  [[ "${ZGTA_NATIVE_OFFLINE:-0}" != 1 ]] || physics_flags+=(--offline)
+  if ! CARGO_TARGET_DIR="$physics_cache" "$CARGO_HOME/bin/cargo" build "${physics_flags[@]}" --manifest-path "$PHYSICS_ROOT/Cargo.toml" --target "$physics_target" > "$PHYSICS_OUTPUT/build-logs/$physics_target.log" 2>&1; then
     tail -45 "$PHYSICS_OUTPUT/build-logs/$physics_target.log"
     return 1
   fi
   mkdir -p "$PHYSICS_OUTPUT/$physics_directory"
   cp "$physics_cache/$physics_target/release/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/$physics_directory/libzgtasa_native_physics.a.pending"
   mv "$PHYSICS_OUTPUT/$physics_directory/libzgtasa_native_physics.a.pending" "$PHYSICS_OUTPUT/$physics_directory/libzgtasa_native_physics.a"
+  python3 "$PHYSICS_ROOT/source_stamp.py" write "$PHYSICS_OUTPUT/$physics_directory"
   print "Built native physics: $physics_target"
 }
 PHYSICS_PIDS=()
@@ -51,6 +54,8 @@ wait_batch
 mkdir -p "$PHYSICS_OUTPUT/ios-simulator" "$PHYSICS_OUTPUT/macos"
 xcrun lipo -create "$PHYSICS_OUTPUT/ios-sim-arm64/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/ios-sim-x86_64/libzgtasa_native_physics.a" -output "$PHYSICS_OUTPUT/ios-simulator/libzgtasa_native_physics.a.pending"
 mv "$PHYSICS_OUTPUT/ios-simulator/libzgtasa_native_physics.a.pending" "$PHYSICS_OUTPUT/ios-simulator/libzgtasa_native_physics.a"
+python3 "$PHYSICS_ROOT/source_stamp.py" write "$PHYSICS_OUTPUT/ios-simulator"
 xcrun lipo -create "$PHYSICS_OUTPUT/macos-arm64/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/macos-x86_64/libzgtasa_native_physics.a" -output "$PHYSICS_OUTPUT/macos/libzgtasa_native_physics.a.pending"
 mv "$PHYSICS_OUTPUT/macos/libzgtasa_native_physics.a.pending" "$PHYSICS_OUTPUT/macos/libzgtasa_native_physics.a"
+python3 "$PHYSICS_ROOT/source_stamp.py" write "$PHYSICS_OUTPUT/macos"
 print 'Built native physics for all Apple targets'

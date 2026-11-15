@@ -85,7 +85,7 @@ function create(options = {}) {
           }
         } finally { fs.closeSync(descriptor); }
         await new Promise((resolve, reject) => {
-          const child = spawn(options.python || 'python3', [path.join(__dirname, 'prepare_native_radio_audio.py'), input, partial],
+          const child = spawn(options.python || process.env.ZGTA_PYTHON || process.env.PYTHON || 'python3', [path.join(__dirname, 'prepare_native_radio_audio.py'), input, partial],
             {stdio: ['ignore', 'pipe', 'pipe']});
           let errors = '', metadata = '';
           child.stdout.on('data', data => { metadata = (metadata + data).slice(-8192); });

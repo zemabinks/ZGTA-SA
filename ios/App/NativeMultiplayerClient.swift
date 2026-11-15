@@ -84,6 +84,9 @@ final class NativeMultiplayerClient {
     private var socket: URLSessionWebSocketTask?
     private(set) var players: [String: RemotePlayer] = [:]
     private(set) var vehicles: [String: RemoteVehicle] = [:]
+    private var playerOrder:[String]=[],vehicleOrder:[String]=[]
+    var orderedPlayers:[RemotePlayer] {playerOrder.compactMap{players[$0]}}
+    var orderedVehicles:[RemoteVehicle] {vehicleOrder.compactMap{vehicles[$0]}}
     private var remoteAnimationTimes: [String: (String, Double)] = [:]
     private var shots = 0
     private(set) var localName = "LOCAL PLAYER"
@@ -152,6 +155,7 @@ final class NativeMultiplayerClient {
                   "speed": Double(speed), "steer": -Double(steer),
                   "health": vehicleHealth, "life": health, "armour": armour]
             packet["damage"] = vehicleDamage;packet["lights"] = lights;packet["horn"] = horn
+            packet["act"]=action
             if siren {packet["horn"]=(horn ? 1:0)+2}
             packet.merge(motion){_,new in new};if let kit {packet["kit"]=kit}
             addPendingChat(to: &packet)
@@ -274,8 +278,9 @@ final class NativeMultiplayerClient {
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
                   vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "") {
         var parked=vehicle;parked.position=position;parked.heading=heading;parked.pitch=pitch;parked.roll=roll
+        if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
         parked.health=vehicleHealth;parked.damage=vehicleDamage;vehicles[vehicle.id]=parked
-        onVehicles?(Array(vehicles.values))
+        onVehicles?(orderedVehicles)
         send(["t": "me", "walking": true, "skin": 7,
               "vehicle": vehicle.id, "car": vehicle.code,
               "x": Double(feet.x), "y": Double(feet.y), "z": Double(feet.z),
@@ -355,15 +360,20 @@ final class NativeMultiplayerClient {
             if let rows = message["chat"] as? [[Any]] { receiveChat(rows) }
             updateRows(message["cars"])
             if let rows = message["vehicles"] as? [[Any]] {
-                vehicles = Dictionary(uniqueKeysWithValues: rows.compactMap(RemoteVehicle.init(row:)).map { ($0.id, $0) })
-                onVehicles?(Array(vehicles.values))
+                vehicles.removeAll();vehicleOrder.removeAll()
+                for row in rows {
+                    guard let vehicle=RemoteVehicle(row:row) else{continue}
+                    if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
+                    vehicles[vehicle.id]=vehicle
+                }
+                onVehicles?(orderedVehicles)
             }
             onStatus?("ONLINE AS \(localName.uppercased())")
         case "cars": updateRows(message["c"])
         case "gone":
             if let id = message["id"] as? String {
                 players.removeValue(forKey:id); remoteAnimationTimes.removeValue(forKey:id)
-                onPlayers?(Array(players.values))
+                playerOrder.removeAll{$0==id};onPlayers?(orderedPlayers)
             }
         case "chat":
             if let rows = message["lines"] as? [[Any]] { receiveChat(rows) }
@@ -401,13 +411,14 @@ final class NativeMultiplayerClient {
                          "HIT — \(health) HEALTH REMAINING")
         case "veh", "spawned":
             if let row = message["v"] as? [Any], let vehicle = RemoteVehicle(row: row) {
+                if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
                 vehicles[vehicle.id] = vehicle
-                onVehicles?(Array(vehicles.values))
+                onVehicles?(orderedVehicles)
             }
         case "vgone":
             if let id = message["id"] as? String {
                 vehicles.removeValue(forKey: id)
-                onVehicles?(Array(vehicles.values))
+                vehicleOrder.removeAll{$0==id};onVehicles?(orderedVehicles)
             }
         case "enter":
             if let id = message["v"] as? String { onEnter?(id, message["ok"] as? Bool == true) }
@@ -424,12 +435,14 @@ final class NativeMultiplayerClient {
     private func updateRows(_ value: Any?) {
         guard let rows = value as? [[Any]] else { return }
         var updated: [String: RemotePlayer] = [:]
+        var incomingOrder:[String]=[]
         for row in rows where row.count >= 6 {
             guard let id = row[0] as? String,
                   let name = row[1] as? String,
                   let x = (row[3] as? NSNumber)?.floatValue,
                   let y = (row[4] as? NSNumber)?.floatValue,
                   let z = (row[5] as? NSNumber)?.floatValue else { continue }
+            if updated[id]==nil {incomingOrder.append(id)}
             let code = row[2] as? String ?? "s7"
             let driving = !code.hasPrefix("s")
             let vehicleID = driving && row.count > 35 ? row[35] as? String : nil
@@ -509,8 +522,11 @@ final class NativeMultiplayerClient {
             }
         }
         players = updated
+        playerOrder.removeAll{updated[$0]==nil}
+        let retained=Set(playerOrder)
+        playerOrder += incomingOrder.filter{!retained.contains($0)}
         remoteAnimationTimes = remoteAnimationTimes.filter { updated[$0.key] != nil }
-        onPlayers?(Array(updated.values))
-        onVehicles?(Array(vehicles.values))
+        onPlayers?(orderedPlayers)
+        onVehicles?(orderedVehicles)
     }
 }

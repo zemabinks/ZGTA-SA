@@ -205,7 +205,8 @@ pub unsafe extern "C" fn zgtaphys_body_new(
     }
     let id = w.allocate();
     let handle = w.bodies.insert(builder.user_data(id as u128));
-    w.bodies[handle].recompute_mass_properties_from_colliders(&w.colliders);
+    // The JS binding leaves additional mass pending until world.step (or its
+    // explicit recompute method). An impulse before that first step is inert.
     w.body_ids.insert(id, handle);
     w.reverse_bodies.insert(handle, id);
     id
@@ -302,7 +303,35 @@ pub unsafe extern "C" fn zgtaphys_body_set_mass(
         return 0;
     };
     w.bodies[*handle].set_additional_mass_properties(m, true);
+    1
+}
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_body_mass(ptr: *mut ZGTAPhysicsWorld, id: Id, output: *mut f32) -> u32 {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(handle) = w.body_ids.get(&id) else { return 0 };
+    if output.is_null() { return 0; }
+    *output = w.bodies[*handle].mass();
+    1
+}
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_body_recompute_mass(ptr: *mut ZGTAPhysicsWorld, id: Id) -> u32 {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(handle) = w.body_ids.get(&id) else { return 0 };
     w.bodies[*handle].recompute_mass_properties_from_colliders(&w.colliders);
+    1
+}
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_collider_friction_combine(ptr: *mut ZGTAPhysicsWorld, id: Id, rule: u32) -> u32 {
+    let rule = match rule {
+        0 => CoefficientCombineRule::Average,
+        1 => CoefficientCombineRule::Min,
+        2 => CoefficientCombineRule::Multiply,
+        3 => CoefficientCombineRule::Max,
+        _ => return 0,
+    };
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(handle) = w.collider_ids.get(&id) else { return 0 };
+    w.colliders[*handle].set_friction_combine_rule(rule);
     1
 }
 #[no_mangle]
@@ -438,6 +467,9 @@ pub unsafe extern "C" fn zgtaphys_collider_trimesh(
     if id == 0 {
         return 0;
     }
+    // Original39943 O() supplies friction.8 and keeps the engine's Average
+    // rule. Vehicle chassis choose Min explicitly through the common builder.
+    w.colliders[w.collider_ids[&id]].set_friction_combine_rule(CoefficientCombineRule::Average);
     let count = triangle_count as usize;
     w.meshes.insert(
         w.collider_ids[&id],

@@ -195,6 +195,18 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var footReloadRequested = false
     private var riderDefinitions: NativeRiderDefinitions?
     private var ownRiderAnimation: NativeRiderAnimation?
+    private var ownRiderPlayback:NativeRiderPlayback?
+    private var ownRiderCapture:NativeSkeletalActor.Pose?
+    private var ownRiderPrevious:NativeSkeletalActor.Pose?
+    private var ownRiderSide = -1
+    private var ownRiderFeet:(position:SIMD3<Float>,heading:Float)?
+    private var pendingVehicleExit:(()->Void)?
+    private var riderDoorHolds:[String:[Int:Double]]=[:]
+    private var remoteRiderPlayback:[String:(String,NativeRiderPlayback)]=[:]
+    private var remoteRiderActions:[String:Int]=[:]
+    private var remoteRiderCapture:[String:NativeSkeletalActor.Pose]=[:]
+    private var remoteRiderPrevious:[String:NativeSkeletalActor.Pose]=[:]
+
     private var remoteRiderAnimations: [String: NativeRiderAnimation] = [:]
     private var remoteFootAnimations: [String:(String,NativeRemoteFootAnimation)] = [:]
     private var remoteBikeAnimations: [String:NativeRemoteBikeAnimation] = [:]
@@ -208,6 +220,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var identity:String?
     }
     private var lastRiderDraw: Double = 0
+    struct FlightAudioVoice {var id:String;var sound:String;var position:SIMD3<Float>;var thrust:Float}
+    private(set) var flightAudioVoices:[FlightAudioVoice]=[]
     private var flightCanopyMesh:Mesh?
     private var flightCanopyActor:NativeSkeletalActor?
     private var flightJetMesh:Mesh?
@@ -220,6 +234,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var objectiveMarker: Mesh?
     private var waterMesh: Mesh?
     private let weaponEffects = NativeWeaponEffects()
+    private var particleEffects:NativeParticleEffects?
+    private var particleRenderer:NativeParticleRenderer?
+    private var particleLoading=false
+    private var particleDrawDelta:Double=0
     private var effectAtlas: MTLTexture?
     private var effectSprites: [String: Int] = [:]
     private var blasts: [(SIMD3<Float>, Int, Double)] = []
@@ -319,6 +337,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var activeVehicleModel = ""
     private var activeHandling: VehicleHandling?
     private var activeModelOrigin: Float = 0
+    private var pendingVehicleBodyPose:NativeUnattendedVehicle.Pose?
     private var vehicleFallbackRoll: Float = 0
     private let groundVehicle = NativeGroundVehicle()
     var vehicleHandbrake = false
@@ -379,6 +398,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var onSplash: (() -> Void)?
     var onVehicleExplosion: ((SIMD3<Float>) -> Void)?
     var onVehicleMove: ((String,[String:Any]) -> Void)?
+    var onContactAudio: (([NativeVehicleDamageController.Collision],NativeVehicleDamage.Body) -> Void)?
     var onLocalHealth: ((Int) -> Void)?
     var onParachuteUsed: (() -> Void)?
     private var actionTimeRemaining: Float = 0
@@ -481,13 +501,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.markerDepth = markerDepth
         textureLoader = MTKTextureLoader(device: device)
         super.init()
+        groundVehicle?.onOtherMove = {[weak self] id,state in self?.onVehicleMove?(id,state)}
+        groundVehicle?.onOtherCollidersChanged = {[weak self] in
+            guard let self else{return}
+            self.character?.otherColliders=self.groundVehicle?.otherColliders ?? []
+        }
+        character?.onPress = {[weak self] presses in
+            for press in presses {
+                self?.groundVehicle?.shoveOtherVehicle(body:press.body,direction:press.direction,point:press.point,speed:press.speed)
+            }
+        }
+
+        groundVehicle?.onCollisions = { [weak self] collisions,body in self?.onContactAudio?(collisions,body) }
         groundVehicle?.onDamageEvents = { [weak self] events,body in
             guard let self else { return }
             for event in events {
-                if event.type == "sparks" { self.onCollision?(Float(event.force ?? 0)) }
                 if event.type == "blow" {
                     let point = SwiftRapierWorld.rapierToGTA(SIMD3<Float>(body.position))
-                    self.showBlast(weapon:16,position:point)
+                    self.showBlast(weapon:16,position:point,large:true)
                     self.onVehicleExplosion?(point)
                 }
             }
@@ -518,6 +549,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let self, let hit = self.collisionFor(origin)?.raycast(from: origin, direction: direction, distance: distance) else { return nil }
             return NativeWeaponEffects.Contact(distance: hit.distance, normal: hit.normal)
         }
+        weaponEffects.onGas={[weak self] point,delta in self?.particleEffects?.burst("teargas",at:SIMD3<Double>(point),delta:Double(delta))}
+        weaponEffects.onFlames={[weak self] point,delta in self?.particleEffects?.burst("fire",at:SIMD3<Double>(point),delta:Double(delta))}
+        weaponEffects.onTrail={[weak self] point,delta,flaming in
+            guard let effects=self?.particleEffects else{return}
+            if flaming{effects.burst("molotov_flame",at:SIMD3<Double>(point),delta:Double(delta))}
+            else {effects.spawn("prt_smokeii_3_expand",at:SIMD3<Double>(point),velocity:SIMD3(0,0,0.3),count:Int(floor(40*Double(delta)+Double.random(in:0..<1))),options:.init(jitter:0.4,mult:.init(size:0.35,life:0.5,alpha:0.6)))}
+        }
         weaponEffects.groundHeight = { [weak self] x,y,z in
             self?.collisionFor(SIMD3(x,y,z))?.height(x:x,y:y,near:z,maxDrop:4)
         }
@@ -531,15 +569,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return collisions["\(point.z > 700 ? "i" : "c")\(y*16+x)"]
     }
     func synchronizeProjectiles(_ rows: [[String: Any]]) { weaponEffects.synchronizeServer(rows) }
-    func showBlast(weapon: Int, position: SIMD3<Float>) {
+    func showBlast(weapon: Int, position: SIMD3<Float>,large:Bool=false) {
         let now = ProcessInfo.processInfo.systemUptime
         guard !blasts.contains(where: { $0.1 == weapon && now-$0.2 < 0.3 && simd_distance($0.0,position)<1.5 }) else { return }
         blasts.append((position,weapon,now))
+        weaponEffects.receiveBlast(weapon:weapon,position:position)
+        if weapon != 17 {particleEffects?.play(large ? "explosion_large":weapon==18 ? "explosion_molotov":"explosion_small",at:SIMD3<Double>(position))}
         if driving { gameCamera.shake(at: position,strength: 0.6,nowMilliseconds: now*1000) }
     }
     func streamWeapon(_ weapon: Int?, delta: Float) {
         if let weapon {
-            weaponEffects.stream(weapon: weapon, from: camera + SIMD3(0,0,1.3), direction: aimDirection, delta: delta)
+            let source=camera+SIMD3<Float>(0,0,1.3),way=aimDirection
+            weaponEffects.stream(weapon:weapon,from:source,direction:way,delta:delta)
+            let name=weapon==37 ? "flamethrower":weapon==41 ? "spraycan":weapon==42 ? "extinguisher":nil
+            if let name {
+                particleEffects?.burst(name,at:SIMD3<Double>(source),delta:Double(delta),options:.init(clock:1,turn:simd_quatd(from:SIMD3<Double>(0,1,0),to:SIMD3<Double>(way))))
+            }
         } else { weaponEffects.endStream() }
     }
 
@@ -603,7 +648,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func move(forward: Float, sideways: Float, turn: Float, delta: Float,
               running: Bool = false, lookVertical: Float = 0, lift: Float = 0) {
         vehicleLeanInput = driving ? lookVertical : 0
-        synchronizeOtherVehiclePhysics()
+        synchronizeOtherVehiclePhysics(delta:Double(delta))
         if !driving && gameCamera.isLoaded {
             gameCamera.lookAnalog(x: turn,y: -lookVertical,delta: delta)
             heading = gameCamera.heading;cameraPitch = gameCamera.pitch
@@ -634,7 +679,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var next = camera
         if driving {
             steeringInput = max(-1, min(1, turn))
-            let throttle = vehicleHealth > 0 && health > 0 && ProcessInfo.processInfo.systemUptime-entryStarted >= 1 ? forward : 0
+            let throttle = vehicleHealth > 0 && health > 0 && (ownRiderPlayback?.inside ?? (ProcessInfo.processInfo.systemUptime-entryStarted >= 1)) ? forward : 0
             let table = activeHandling
             let speedLimit = table?.roadTopSpeed ?? 32
             let acceleration = max(1.5, (table?.acceleration ?? 20) * 0.24)
@@ -644,9 +689,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let groundVehicle, !groundVehicle.active, groundVehicle.supports(activeVehicleModel),
                groundVehicle.isCellLoaded(activeDetail) {
                 let origin = groundVehicle.modelOrigin(activeVehicleModel) ?? 0
-                camera += NativeGroundVehicle.modelOffset(origin:origin-activeModelOrigin,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)
+                if let pose=pendingVehicleBodyPose {
+                    let transform=NativeGroundVehicle.transform(position:pose.position,rotation:pose.rotation,origin:Double(origin))
+                    camera=SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
+                }else{camera += NativeGroundVehicle.modelOffset(origin:origin-activeModelOrigin,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)}
                 activeModelOrigin = origin
-                groundVehicle.enter(model:activeVehicleModel,modelPosition:camera,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)
+                if groundVehicle.enter(model:activeVehicleModel,modelPosition:camera,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll,bodyPose:pendingVehicleBodyPose){pendingVehicleBodyPose=nil}
                 groundVehicle.damageController?.state.load(health:Double(vehicleHealth),text:activeVehicleDamage)
                 if let name=vehicleModels[activeVehicleModel],let rig=vehicleRigs[name] {groundVehicle.setDamageHinges(rig.damageHinges)}
             }
@@ -861,19 +909,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             vehicles: remoteVehicles.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) })
     }
 
-    private func synchronizeOtherVehiclePhysics() {
+    private func synchronizeOtherVehiclePhysics(delta:Double) {
         guard let groundVehicle else {return}
         var poses:[String:NativeOtherVehicles.Pose] = [:]
+        var order:[String] = []
         for vehicle in remoteVehicles {
+            order.append(vehicle.id)
             poses[vehicle.id] = .init(id:vehicle.id,code:vehicle.code,position:vehicle.position,
-                heading:vehicle.heading,pitch:vehicle.pitch,roll:vehicle.roll)
+                heading:vehicle.heading,pitch:vehicle.pitch,roll:vehicle.roll,health:vehicle.health,damage:vehicle.damage,work:vehicle.work)
         }
         for player in remotePlayers {
             guard let id=player.vehicleID else {continue}
+            if poses[id] == nil{order.append(id)}
             poses[id] = .init(id:id,code:player.code,position:player.position,
-                heading:player.heading,pitch:player.pitch,roll:player.roll)
+                heading:player.heading,pitch:player.pitch,roll:player.roll,health:player.vehicleHealth,damage:player.vehicleDamage,occupied:true)
         }
-        groundVehicle.synchronizeOtherVehicles(Array(poses.values),excluding:currentVehicleID,near:camera)
+        groundVehicle.synchronizeOtherVehicles(order.compactMap{poses[$0]},excluding:currentVehicleID,near:camera,
+            promoteNear:driving && groundVehicle.active ? vehicleWirePosition:nil,delta:delta,wetness:Double(roadWetness))
         character?.otherColliders = groundVehicle.otherColliders
     }
 
@@ -1156,11 +1208,27 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return collision?.lineOfSight(from: start, to: finish) ?? true
     }
 
-    func enter(_ vehicle: RemoteVehicle, kind: String) {
+    func predictedVehicle(_ vehicle:RemoteVehicle)->RemoteVehicle {
+        applying(groundVehicle?.otherVehicle(vehicle.id),to:vehicle)
+    }
+    private func applying(_ snapshot:NativeOtherVehicles.Snapshot?,to original:RemoteVehicle)->RemoteVehicle {
+        guard let snapshot else{return original}
+        var vehicle=original
+        vehicle.position=snapshot.position;vehicle.heading=snapshot.heading;vehicle.pitch=snapshot.pitch;vehicle.roll=snapshot.roll
+        vehicle.health=snapshot.health;vehicle.damage=snapshot.damage;vehicle.work=snapshot.work
+        return vehicle
+    }
+    private func parkedVehicle(name:String,position:SIMD3<Float>)->RemoteVehicle? {
+        remoteVehicles.lazy.map{self.predictedVehicle($0)}.first{self.actorName(code:$0.code)==name && $0.position==position}
+    }
+    func enter(_ source: RemoteVehicle, kind: String) {
+        let snapshot=groundVehicle?.takeOtherVehicle(source.id)
+        pendingVehicleBodyPose=snapshot?.physicalPose
+        let vehicle=applying(snapshot,to:source)
         personalFlight.stop()
         swimController.stop();swimming = false;underwater = false
         footAnimator?.rest(cut:true);footAnimationFrame = nil;footLaunchRemaining = nil
-        ownRiderAnimation = nil
+        ownRiderAnimation = nil;ownRiderPlayback=nil;ownRiderCapture=nil;ownRiderPrevious=nil;ownRiderFeet=nil;pendingVehicleExit=nil
         character?.setActive(false); characterActive = false; pendingNativeJump = 0
         groundVehicle?.exit()
         entryOrigin = camera
@@ -1182,7 +1250,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // Browser vehicle packets carry the rigid-body/root position; its
         // visible model is a child translated up by this original DFF offset.
         activeModelOrigin = groundVehicle?.modelOrigin(activeVehicleModel) ?? 0
-        camera += NativeGroundVehicle.modelOffset(origin:activeModelOrigin,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)
+        if let transform=snapshot?.transform {camera=SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)}
+        else{camera += NativeGroundVehicle.modelOffset(origin:activeModelOrigin,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)}
         activeHandling = vehicleHandling[activeVehicleModel]
         vehicleKind = kind
         waterHeight = vehicle.position.z
@@ -1193,11 +1262,36 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         loadNearby()
     }
 
+    var riderWireAction:Int {
+        guard driving,let playback=ownRiderPlayback else{return 0}
+        if playback.state == .entering{return ownRiderSide<0 ? 1:3}
+        if playback.state == .leaving{return ownRiderSide<0 ? 2:4}
+        return 0
+    }
+
+    /// Keep ownership while the public get-out/door-close queue plays. Forced
+    /// exits may still call exitVehicle directly (death/teleport/disconnect).
+    @discardableResult func beginVehicleExit(onReady:@escaping()->Void)->Bool {
+        guard driving,pendingVehicleExit==nil,let playback=ownRiderPlayback,playback.inside else{return pendingVehicleExit != nil}
+        pendingVehicleExit=onReady;ownRiderFeet=nil
+        let part=riderDefinitions?.models[activeVehicleModel]?.seats.first?.door
+        let leaveOpen=part.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
+        playback.leave(side:ownRiderSide,leaveOpen:leaveOpen)
+        return true
+    }
+
     func exitVehicle() {
+        let exactFeet=ownRiderPlayback?.state == .stood ? ownRiderFeet:nil
+        pendingVehicleExit=nil
         let floor = collision?.height(x: camera.x, y: camera.y,
                                       near: camera.z, maxDrop: 1000)
         let falling = floor.map { camera.z > $0 + 3 } ?? false
-        groundVehicle?.exit()
+        if let id=currentVehicleID,groundVehicle?.active == true {
+            let code=remoteVehicles.first{$0.id==id}?.code ?? "\(activeVehicleModel).6.1.0."
+            let work=remoteVehicles.first{$0.id==id}?.work ?? 0
+            activeVehicleDamage=vehicleDamage
+            groundVehicle?.parkCurrentVehicle(id:id,code:code,health:vehicleHealth,damage:activeVehicleDamage,work:work)
+        } else{groundVehicle?.exit()}
         driving = false
         currentVehicleID = nil
         drivingSpeed = 0
@@ -1205,21 +1299,28 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehiclePitch = 0
         vehicleFallbackRoll = 0
         activeModelOrigin = 0
+        pendingVehicleBodyPose=nil
         activeVehicleModel = ""
         activeHandling = nil
         vehicleKind = "car"
-        camera.x += cos(heading) * 2.5
-        camera.y -= sin(heading) * 2.5
-        if falling { verticalSpeed = -1 }
-        else { camera.z = collision?.height(x: camera.x, y: camera.y,
-                                           near: camera.z - 1.1) ?? camera.z - 1.1 }
-        actorHeading = heading
+        if let exactFeet {
+            camera=exactFeet.position;heading=exactFeet.heading;actorHeading=exactFeet.heading
+            verticalSpeed=falling ? -1:0
+        } else {
+            camera.x += cos(heading) * 2.5
+            camera.y -= sin(heading) * 2.5
+            if falling { verticalSpeed = -1 }
+            else { camera.z = collision?.height(x: camera.x, y: camera.y,near: camera.z - 1.1) ?? camera.z - 1.1 }
+            actorHeading = heading
+        }
+        ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
         pedestrian.perform("car_getout_lhs", duration: 1.0)
         footLocomotion.reset(heading:Double(actorHeading));footAnimationFrame = nil
         footAirTime = 0;footAirFall = 0;footJumped = false;footAirVelocity = .zero
     }
 
     func teleport(x: Float, y: Float, z: Float, direction: Float? = nil) {
+        pendingVehicleBodyPose=nil
         swimController.stop();swimming = false;underwater = false;lastFootVelocity = .zero
         characterActive = false; pendingNativeJump = 0
         camera = SIMD3(x, y, z)
@@ -1347,7 +1448,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var server: ServerAddress?
 
     func loadModelIndex() {
-        loadFlightAssets()
+        loadFlightAssets();loadParticleEffects()
         guard let server else { return }
         URLSession.shared.dataTask(with:server.path("game/native/riders.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
@@ -1645,7 +1746,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         atmosphereAir = indoors ? 0 : eye.z < 900 ? min(1,atmosphereAir+delta) : max(0,atmosphereAir-delta)
         conditions = environment?.sample(weatherFrom: sampledWeatherFrom,to: sampledWeatherTo,blend: blend,hour: hour,altitude: eye.z)
         let planes = gameCamera.projection(air: atmosphereAir,farClip: conditions?.farClip ?? 25000)
-        let matrix = Self.perspective(aspect: aspect,verticalFov: gameCameraFrame?.verticalFov ?? 55.41293,near: planes.near,far: planes.far)*viewMatrix
+        let projection=Self.perspective(aspect:aspect,verticalFov:gameCameraFrame?.verticalFov ?? 55.41293,near:planes.near,far:planes.far)
+        let matrix=projection*viewMatrix
         night = NativeWorldEnvironment.nightShare(hour: hour)
         if let conditions {
             atmosphereSnapshot = atmosphere.update(delta: delta,hour: hour,weatherFrom: sampledWeatherFrom,weatherTo: sampledWeatherTo,blend: blend,
@@ -1683,10 +1785,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
         for name in activeDetails { if let mesh = meshes[name] { draw(mesh: mesh,cellSize: 128,matrix: matrix,encoder: encoder) } }
+        particleDrawDelta=Double(delta)
         drawActors(encoder: encoder,matrix: matrix)
         if !indoors { drawWater(eye: eye,matrix: matrix,encoder: encoder) }
         if let atmosphereSnapshot { drawAtmosphereQuads(atmosphereSnapshot.quads.filter { !$0.paintedOnSky },matrix: matrix,encoder: encoder) }
-        drawEffects(encoder: encoder,matrix: matrix)
+        drawEffects(encoder:encoder,matrix:matrix,eye:eye,viewMatrix:viewMatrix,projection:projection,delta:Double(delta))
         if let weatherSnapshot {
             drawAtmosphereQuads(weatherSnapshot.quads,matrix: matrix,encoder: encoder)
             drawRainLines(weatherSnapshot.lines,matrix: matrix,encoder: encoder)
@@ -1927,6 +2030,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         lastRiderDraw = riderTime
         let riderIDs = Set(remotePlayers.filter { $0.vehicleID != nil || $0.ridingVehicleID != nil }.map(\.id))
         remoteRiderAnimations = remoteRiderAnimations.filter { riderIDs.contains($0.key) }
+        remoteRiderPlayback=remoteRiderPlayback.filter{riderIDs.contains($0.key)}
+        remoteRiderActions=remoteRiderActions.filter{riderIDs.contains($0.key)}
+        remoteRiderCapture=remoteRiderCapture.filter{riderIDs.contains($0.key)}
+        remoteRiderPrevious=remoteRiderPrevious.filter{riderIDs.contains($0.key)}
+        riderDoorHolds.removeAll(keepingCapacity:true)
+        flightAudioVoices.removeAll(keepingCapacity:true)
         remoteBikeAnimations = remoteBikeAnimations.filter { riderIDs.contains($0.key) }
         let footIDs = Set(remotePlayers.filter { $0.vehicleID == nil && $0.ridingVehicleID == nil }.map(\.id))
         remoteFootAnimations = remoteFootAnimations.filter { footIDs.contains($0.key) }
@@ -1971,7 +2080,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         actor.pose(clip:clip,elapsed:elapsed,library:$0,layers:layers,looping:!entering)
                     } }
                     var originalDriver = false
-                    if !entering,let definition = riderDefinitions?.models[activeVehicleModel],
+                    if let definition = riderDefinitions?.models[activeVehicleModel],
                        let sourceSeat = definition.seats.first,let place = sourceSeat.position,
                        let actor = skeletalActors[ped],let library = skeletalLibrary {
                         if ownRiderAnimation == nil { ownRiderAnimation = NativeRiderAnimation(duration:{ [weak self] in self?.skeletalLibrary?.duration(of:$0) }) }
@@ -1980,9 +2089,31 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                             lean:Double(groundVehicle?.bikeLean ?? 0),tuck:Double(vehicleLeanInput),
                             pedal:groundVehicle?.bicyclePedal,crank:groundVehicle.map { Double($0.bicycleCrank) },
                             hop:Double(groundVehicle?.bicycleHop ?? 0),dead:health <= 0)
-                        if let frame = ownRiderAnimation?.update(delta:riderDelta,configuration:definition.configuration(),input:input) {
-                            driverPose = actor.riderPose(frame:frame,library:library,figurePosition:place,figureTurn:Float(sourceSeat.turn ?? 0))
-                            originalDriver = true
+                        let car=nativeVehicleTransform ?? (Self.translation(camera)*Self.rotationZ(-heading)*Self.rotationX(vehiclePitch))
+                        if ownRiderPlayback==nil,let playback=NativeRiderPlayback(definition:definition,library:library) {
+                            let near=car.inverse*SIMD4(entryOrigin,1);ownRiderSide=near.x<0 ? -1:1
+                            let door=sourceSeat.door.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
+                            if time>3{playback.sit()}else{playback.enter(side:ownRiderSide,doorOpen:door ? 1:0)}
+                            ownRiderPlayback=playback
+                        }
+                        if let frame=ownRiderPlayback?.update(delta:riderDelta,input:input) {
+                            if let capture=frame.capture {
+                                switch capture {
+                                case .current:ownRiderCapture=ownRiderPrevious
+                                case .sample(let value):ownRiderCapture=actor.riderPose(frame:value.pose,library:library,figurePosition:SIMD3<Float>(value.anchor))
+                                }
+                            }
+                            driverPose=actor.riderPose(frame:frame.sample.pose,library:library,figurePosition:SIMD3<Float>(frame.sample.anchor),figureTurn:Float(frame.turn),previous:frame.transitioning ? ownRiderCapture:nil,transition:frame.transition)
+                            ownRiderPrevious=driverPose
+                            if let part=frame.doorPart{riderDoorHolds[currentVehicleID ?? "own",default:[:]][part]=frame.doorOpen}
+                            if let release=frame.releasedDoor,let damage=groundVehicle?.damageController?.state,damage.doors.indices.contains(release.0){damage.letGo(release.0,angle:damage.doors[release.0].open*release.1)}
+                            if let driverPose{ownRiderFeet=actor.riderFeet(pose:driverPose,model:car,origin:Float(definition.origin))}
+                            if frame.state == .stood,let ready=pendingVehicleExit {
+                                pendingVehicleExit=nil;DispatchQueue.main.async(execute:ready)
+                            }
+                            originalDriver=true
+                        } else if let frame=ownRiderAnimation?.update(delta:riderDelta,configuration:definition.configuration(),input:input) {
+                            driverPose=actor.riderPose(frame:frame,library:library,figurePosition:place,figureTurn:Float(sourceSeat.turn ?? 0));originalDriver=true
                         }
                     }
                     let alias = entering ? "entryEnd" : "car_sit"
@@ -1994,9 +2125,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         var transform = originalDriver ? car : car * Self.translation(seat) * Self.rotationZ(.pi) * Self.translation(-pelvis)
                         let sitting = SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
                         let amount = Float(min(1,max(0,time/max(0.001,duration))))
-                        let at = entering ? entryOrigin+(sitting-entryOrigin)*amount : sitting
+                        let at = entering && !originalDriver ? entryOrigin+(sitting-entryOrigin)*amount : sitting
                         transform.columns.3 = SIMD4(at,1)
-                        appendPed(ped,at,heading,0,clip,elapsed,0,pose:driverPose,transform:transform,original:originalDriver)
+                        var riderVisible=true
+                        if originalDriver,let pose=driverPose,let actor=skeletalActors[ped],let head=actor.transform(bone:5,in:pose),let eye=gameCameraFrame?.source {
+                            let world=transform*head.columns.3;riderVisible=simd_distance(SIMD3(world.x,world.y,world.z),eye)>0.45
+                        }
+                        if riderVisible{appendPed(ped,at,heading,0,clip,elapsed,0,pose:driverPose,transform:transform,original:originalDriver)}
                     }
                 }
             }
@@ -2012,7 +2147,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             // source seat inside the referenced car instead of a second walker.
             if let vehicleID = player.ridingVehicleID {
                 let driver = remotePlayers.first { $0.vehicleID == vehicleID }
-                let parked = remoteVehicles.first { $0.id == vehicleID }
+                let parked = remoteVehicles.first { $0.id == vehicleID }.map{predictedVehicle($0)}
                 let own = driving && currentVehicleID == vehicleID
                 let code = own ? (parked?.code ?? "\(activeVehicleModel).6.1.0.") : driver?.code ?? parked?.code
                 guard let code,let name=actorName(code:code),let ped=pedModels[String(player.skin)] else {continue}
@@ -2074,8 +2209,36 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 remoteBikeFrames[player.id]=frame
                 input.lean=frame.lean;input.tuck=frame.tuck;input.pedal=frame.pedal;input.crank=frame.crank;input.hop=frame.hop
             }
-            let frame=animator.update(delta:riderDelta,configuration:source.configuration(),input:input)
-            let pose=actor.riderPose(frame:frame,library:library,figurePosition:place,figureTurn:Float(sourceSeat.turn ?? 0))
+            var pose:NativeSkeletalActor.Pose
+            let playbackKey="\(player.vehicleID ?? ""):\(model):0"
+            let playback:NativeRiderPlayback?
+            if let cached=remoteRiderPlayback[player.id],cached.0==playbackKey{playback=cached.1}
+            else {
+                playback=NativeRiderPlayback(definition:source,library:library)
+                if let playback{remoteRiderPlayback[player.id]=(playbackKey,playback);remoteRiderActions[player.id]=nil;remoteRiderCapture[player.id]=nil;remoteRiderPrevious[player.id]=nil}
+            }
+            if let playback {
+                let action=player.action&63
+                if remoteRiderActions[player.id] != action {
+                    remoteRiderActions[player.id]=action
+                    switch action {
+                    case 1,3,5,6:playback.enter(side:action==1 || action==5 ? -1:1,jack:action==5 || action==6)
+                    case 2,4:playback.leave(side:action==2 ? -1:1,leaveOpen:sourceSeat.door.map{NativeVehicleDamage.decode(player.vehicleDamage)?.open[$0] ?? false} ?? false)
+                    default:if playback.state != .entering{playback.sit()}
+                    }
+                }
+                if let frame=playback.update(delta:riderDelta,input:input) {
+                    if let capture=frame.capture {
+                        switch capture {
+                        case .current:remoteRiderCapture[player.id]=remoteRiderPrevious[player.id]
+                        case .sample(let value):remoteRiderCapture[player.id]=actor.riderPose(frame:value.pose,library:library,figurePosition:SIMD3<Float>(value.anchor))
+                        }
+                    }
+                    pose=actor.riderPose(frame:frame.sample.pose,library:library,figurePosition:SIMD3<Float>(frame.sample.anchor),figureTurn:Float(frame.turn),previous:frame.transitioning ? remoteRiderCapture[player.id]:nil,transition:frame.transition)
+                    remoteRiderPrevious[player.id]=pose
+                    if let part=frame.doorPart,let vehicle=player.vehicleID {riderDoorHolds[vehicle,default:[:]][part]=frame.doorOpen}
+                } else {pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
+            } else {pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
             let car = Self.translation(player.position) * Self.rotationZ(-player.heading) *
                 Self.rotationX(player.pitch) * Self.rotationY(player.roll) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
@@ -2087,12 +2250,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let pitch = atan2(projectile.velocity.z,hypot(projectile.velocity.x,projectile.velocity.y))
             modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0))
         }
-        for vehicle in remoteVehicles where vehicle.id != currentVehicleID &&
-            !drivenVehicleIDs.contains(vehicle.id) &&
-            simd_distance(vehicle.position, camera) < 130 {
-            if let name = actorName(code: vehicle.code) {
-                modelInstances.append((name, vehicle.position, vehicle.heading, vehicle.pitch, "", 0, 0))
-            }
+        var parkedTransforms:[String:simd_float4x4] = [:]
+        for source in remoteVehicles where source.id != currentVehicleID && !drivenVehicleIDs.contains(source.id) {
+            let vehicle=predictedVehicle(source)
+            guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
+            modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0))
+            if let exact=groundVehicle?.otherVehicle(vehicle.id)?.transform{parkedTransforms[key(name,vehicle.position)]=exact}
         }
         var carriageTransforms:[String:simd_float4x4] = [:]
         var carriageIdentifiers:[String:String] = [:]
@@ -2126,12 +2289,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if clip.isEmpty,let vehicle = remotePlayers.first(where: { $0.position == position && $0.vehicleID != nil }) {
                 transform *= Self.rotationY(vehicle.roll)
                 transform *= Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code)))
-            } else if clip.isEmpty,let vehicle = remoteVehicles.first(where: { $0.position == position && actorName(code:$0.code) == name }) {
+            } else if clip.isEmpty,let vehicle = parkedVehicle(name:name,position:position) {
                 transform *= Self.rotationY(vehicle.roll)
                 transform *= Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code)))
             }
             if driving && position == camera && clip.isEmpty, let exact = nativeVehicleTransform { transform = exact }
             if let exact=queued?.transform {transform=exact}
+            if let parked=parkedTransforms[key(name,position)] {transform=parked}
             if let carriage=carriageTransforms[key(name,position)] {transform=carriage}
             var uniforms = Uniforms(viewProjection: matrix * transform,
                                     settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), night, 128))
@@ -2232,6 +2396,38 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func loadParticleEffects() {
+        guard !particleLoading,particleRenderer==nil,let server else{return}
+        particleLoading=true
+        let group=DispatchGroup(),lock=NSLock();var metadata:Data?,definitions:Data?
+        for (name,url) in [("metadata",server.path("game/native/effects/fx-textures.json")),("definitions",server.path("game/world/fx.json"))] {
+            group.enter();URLSession.shared.dataTask(with:url){data,response,_ in
+                lock.lock();if (response as? HTTPURLResponse)?.statusCode==200{if name=="metadata"{metadata=data}else{definitions=data}};lock.unlock();group.leave()
+            }.resume()
+        }
+        group.notify(queue:.main){[weak self] in
+            guard let self else{return}
+            guard let metadata,let definitions,let library=self.device.makeDefaultLibrary(),
+                  let renderer=NativeParticleRenderer(device:self.device,queue:self.queue,library:library,metadata:metadata),
+                  let effects=try? NativeParticleEffects(data:definitions,textures:Set(renderer.document.sprites.keys)) else{self.particleLoading=false;return}
+            effects.water={[weak self] point in self?.worldWater?.height(x:Float(point.x),y:Float(point.y),z:Float(point.z)).map(Double.init)}
+            let loaded=DispatchGroup()
+            for(index,sheet)in renderer.document.sheets.enumerated() {
+                guard !sheet.file.isEmpty,sheet.file.count<64,sheet.file.utf8.allSatisfy({(48...57).contains($0)||(65...90).contains($0)||(97...122).contains($0)||[45,46,95].contains($0)}) else{continue}
+                loaded.enter();URLSession.shared.dataTask(with:server.path("game/native/effects/"+sheet.file)){data,response,_ in
+                    DispatchQueue.main.async {
+                        if (response as? HTTPURLResponse)?.statusCode==200,let data{_ = renderer.install(sheet:index,data:data)}
+                        loaded.leave()
+                    }
+                }.resume()
+            }
+            loaded.notify(queue:.main){[weak self] in
+                guard let self else{return};self.particleLoading=false
+                if renderer.ready{self.particleRenderer=renderer;self.particleEffects=effects}
+            }
+        }
+    }
+
     private func loadFlightAssets() {
         guard !flightAssetLoading,let server else{return}
         flightAssetLoading=true
@@ -2278,8 +2474,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         } else {flightCanopyLanded[identity]=nil}
         if let jet=flight.jet,let mesh=flightJetMesh,let document=flightJetAssets,let spine=actor.transform(bone:3,in:pose) {
+            flightAudioVoices.append(.init(id:identity,sound:jet.sound,position:SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z),thrust:Float(jet.thrust)))
             let matrices=document.jetPose(jet)
             guard matrices.count==document.nodes.count else{return}
+            if let effects=particleEffects {
+                for(index,node)in document.nodes.enumerated() where node.name=="jetball1" || node.name=="jetball2" {
+                    let world=transform*spine*matrices[index],vector=world*SIMD4<Float>(0,0,-1,0)
+                    let direction=simd_normalize(SIMD3<Double>(SIMD3(vector.x,vector.y,vector.z)))
+                    let origin=SIMD3<Double>(SIMD3(world.columns.3.x,world.columns.3.y,world.columns.3.z))+direction*0.15
+                    effects.burst("jetpack",at:origin,delta:particleDrawDelta,options:.init(time:jet.thrust,velocity:flight.velocity,scale:0.6,turn:simd_quatd(from:SIMD3(0,0,-1),to:direction)))
+                }
+            }
             encoder.setRenderPipelineState(pipeline)
             var uniforms=Uniforms(viewProjection:matrix*transform*spine,settings:SIMD4(Float(mesh.atlas.width),Float(mesh.atlas.height),night,128));configureEnvironment(&uniforms)
             encoder.setVertexBuffer(mesh.vertices,offset:0,index:0);encoder.setFragmentTexture(mesh.atlas,index:0)
@@ -2294,7 +2499,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private func vehicleRigFrame(name:String,position:SIMD3<Float>,rig:NativeVehicleRig,carriage:String?)->NativeVehicleRig.Frame {
         let now=ProcessInfo.processInfo.systemUptime
         let player=remotePlayers.first{$0.vehicleID != nil && $0.position==position && actorName(code:$0.code)==name}
-        let parked=remoteVehicles.first{$0.position==position && actorName(code:$0.code)==name}
+        let parked=parkedVehicle(name:name,position:position)
         let own=driving && position==camera && name==vehicleModels[activeVehicleModel]
         let token=carriage ?? (own ? "own:\(currentVehicleID ?? name):\(name)":"remote:\(player?.vehicleID ?? parked?.id ?? name):\(name)")
         let delta=min(0.1,max(0,now-(vehicleRigTimes[token] ?? now)));vehicleRigTimes[token]=now
@@ -2329,6 +2534,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 if kit.indices.contains(5),rig.document.id != 520,((groundVehicle?.handlingFlags(String(rig.document.id)) ?? 0)&64) != 0 {input.rearSteering=Double(kit[5])}
                 input.gearUp=kit.indices.contains(6) && kit[6] != 0
             }
+            if let parked,let frame=groundVehicle?.otherVehicle(parked.id),frame.dynamic {
+                input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin;input.offsets=frame.offsets
+            }
             let text=player?.vehicleDamage ?? parked?.damage ?? ""
             if let decoded=NativeVehicleDamage.decode(text) {
                 input.looks=decoded.looks;input.tyres=decoded.wheels;input.brokenLights=decoded.lights
@@ -2339,6 +2547,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             input.scorched=(player?.vehicleHealth ?? parked?.health ?? 1000)<=0
             input.lights=(player?.lights ?? false) && !input.scorched
+        }
+        let heldID=own ? currentVehicleID ?? "own":player?.vehicleID ?? parked?.id
+        if let heldID,let held=riderDoorHolds[heldID] {
+            let doors=own ? groundVehicle?.damageController?.state.doors:NativeVehicleDamage(mass:1000,flags:groundVehicle?.modelFlags(String(rig.document.id)) ?? 0,model:rig.document.id).doors
+            if let doors {
+                for(part,fraction)in held where doors.indices.contains(part) && input.doorAngles.indices.contains(part){input.doorAngles[part]=doors[part].open*fraction}
+            }
         }
         var state=vehicleRigStates[token] ?? .init()
         let frame=rig.pose(input,state:&state,delta:delta);vehicleRigStates[token]=state
@@ -2356,8 +2571,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         uniforms.fogSettings = SIMD4(conditions.fogStart,conditions.farClip,atmosphereAir,0)
     }
 
-    private func drawEffects(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
-        guard let atlas = effectAtlas else { return }
+    private func drawEffects(encoder:MTLRenderCommandEncoder,matrix:simd_float4x4,eye:SIMD3<Float>,viewMatrix:simd_float4x4,projection:simd_float4x4,delta:Double) {
+        if let effects=particleEffects,let renderer=particleRenderer {
+            effects.update(delta:delta,brightness:1-0.6*Double(night))
+            let fog=weatherSnapshot?.flash==true ? SIMD4<Float>(1,1,1,1):conditions?.skyBottom ?? SIMD4<Float>(0,0,0,1)
+            renderer.draw(effects.particles,eye:eye,view:viewMatrix,projection:projection,fogColor:SIMD3(fog.x,fog.y,fog.z),fogNear:conditions?.fogStart ?? 0,fogFar:conditions?.farClip ?? 25000,fogAmount:conditions==nil || camera.z>=700 ? 0:atmosphereAir,encoder:encoder)
+            encoder.setDepthStencilState(depth)
+        }
+        guard let atlas=effectAtlas else{return}
         let now = ProcessInfo.processInfo.systemUptime
         blasts.removeAll { now-$0.2 > 1.1 }
         var vertices: [NativeVertex] = [], indices: [UInt32] = []
@@ -2371,15 +2592,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             indices += [base,base+1,base+2,base+1,base+3,base+2]
         }
-        for (position,_,started) in blasts {
+        for (position,_,started) in blasts where particleEffects==nil {
             let age = Float(now-started), size = 1+age*7
             sprite("fireball6",at:position+SIMD3(0,0,size*0.25),width:size,height:size,color:SIMD4(1,0.65,0.22,max(0,1-age)))
             if age > 0.15 { sprite("smoke5",at:position+SIMD3(0,0,age*4),width:size*1.3,height:size,color:SIMD4(0.3,0.3,0.3,0.45*(1-age))) }
         }
-        for fire in weaponEffects.fires { for flame in fire.flames where flame.strength > 0 {
+        for fire in weaponEffects.fires where particleEffects==nil { for flame in fire.flames where flame.strength > 0 {
             sprite("fireball6",at:flame.position+SIMD3(0,0,0.8),width:1,height:1.8,color:SIMD4(1,0.55,0.1,min(1,flame.strength)))
         } }
-        for stream in weaponEffects.streams {
+        for stream in weaponEffects.streams where particleEffects==nil {
             let texture = stream.weapon == 37 ? "fireball6" : stream.weapon == 42 ? "smoke" : "sphere"
             let color = stream.weapon == 37 ? SIMD4<Float>(1,0.55,0.1,0.6) : SIMD4<Float>(0.9,0.95,1,0.35)
             for n in 1...12 {
@@ -2387,7 +2608,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 sprite(texture,at:stream.position+stream.direction*(share*stream.range),width:spread,height:spread,color:color)
             }
         }
-        for projectile in weaponEffects.projectiles where projectile.weapon == 17 && projectile.age > 0.5 {
+        for projectile in weaponEffects.projectiles where particleEffects==nil && projectile.weapon==17 && projectile.lying {
             sprite("smoke5",at:projectile.position+SIMD3(0,0,0.8),width:2,height:2,color:SIMD4(0.7,0.8,0.65,0.35))
         }
         guard !vertices.isEmpty,

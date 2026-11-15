@@ -4,8 +4,8 @@ PHYSICS_ROOT="${0:A:h}"
 PROJECT_ROOT="${PHYSICS_ROOT:h}"
 PHYSICS_OUTPUT="$PROJECT_ROOT/local-only/native-physics"
 case "$(uname -m)" in
-  arm64) PHYSICS_LIB="$PHYSICS_OUTPUT/macos-arm64"; PHYSICS_TRIPLE=arm64-apple-macosx13.0 ;;
-  x86_64) PHYSICS_LIB="$PHYSICS_OUTPUT/macos-x86_64"; PHYSICS_TRIPLE=x86_64-apple-macosx13.0 ;;
+  arm64) PHYSICS_LIB="${PHYSICS_HOST_LIB:-$PHYSICS_OUTPUT/macos-arm64}"; PHYSICS_TRIPLE=arm64-apple-macosx13.0 ;;
+  x86_64) PHYSICS_LIB="${PHYSICS_HOST_LIB:-$PHYSICS_OUTPUT/macos-x86_64}"; PHYSICS_TRIPLE=x86_64-apple-macosx13.0 ;;
   *) print -u2 'Unsupported host'; exit 2 ;;
 esac
 node "$PROJECT_ROOT/smoke_character_motor.js"

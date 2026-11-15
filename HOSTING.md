@@ -128,7 +128,7 @@ authentication and compatible protocol.
 Guest progress is stored in the host's `local-only/selfhost/players.json` and
 identified by the visitor's cookie; the native app retains its own server
 identity. Clearing that identity can lose access to the guest save. Optional
-Discord identity linking and its one-time bonus are documented in README.md;
+Discord identity linking and its one-time bonus are documented in DEVELOPMENT_NOTES.md;
 the server starts normally without OAuth credentials.
 
 Stop Node, back up `local-only/selfhost/` privately, and then update source.

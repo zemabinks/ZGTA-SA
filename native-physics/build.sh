@@ -2,10 +2,8 @@
 set -euo pipefail
 PHYSICS_ROOT="${0:A:h}"
 PROJECT_ROOT="${PHYSICS_ROOT:h}"
-export RUSTUP_HOME="$PROJECT_ROOT/local-only/toolchains/rustup"
-export CARGO_HOME="$PROJECT_ROOT/local-only/toolchains/cargo"
+source "$PHYSICS_ROOT/toolchain_env.sh"
 export CARGO_TARGET_DIR="$PROJECT_ROOT/local-only/native-physics/target"
-export PATH="$CARGO_HOME/bin:$PATH"
 PHYSICS_OUTPUT="$PROJECT_ROOT/local-only/native-physics"
 if [[ ! -x "$CARGO_HOME/bin/cargo" ]]; then
   print -u2 "The project-local Rust toolchain is missing at $CARGO_HOME/bin/cargo"
@@ -14,9 +12,13 @@ fi
 build_target() {
   local physics_target="$1"
   local physics_directory="$2"
-  cargo build --locked --release --jobs 2 --manifest-path "$PHYSICS_ROOT/Cargo.toml" --target "$physics_target"
+  local -a physics_flags=(--locked --release --jobs 2)
+  [[ "${ZGTA_NATIVE_OFFLINE:-0}" != 1 ]] || physics_flags+=(--offline)
+  cargo build "${physics_flags[@]}" --manifest-path "$PHYSICS_ROOT/Cargo.toml" --target "$physics_target"
   mkdir -p "$PHYSICS_OUTPUT/$physics_directory"
-  cp "$CARGO_TARGET_DIR/$physics_target/release/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/$physics_directory/"
+  cp "$CARGO_TARGET_DIR/$physics_target/release/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/$physics_directory/libzgtasa_native_physics.a.pending"
+  mv "$PHYSICS_OUTPUT/$physics_directory/libzgtasa_native_physics.a.pending" "$PHYSICS_OUTPUT/$physics_directory/libzgtasa_native_physics.a"
+  python3 "$PHYSICS_ROOT/source_stamp.py" write "$PHYSICS_OUTPUT/$physics_directory"
 }
 case "${1:-all}" in
   host)
@@ -37,6 +39,7 @@ case "${1:-all}" in
     build_target x86_64-apple-ios ios-sim-x86_64
     mkdir -p "$PHYSICS_OUTPUT/ios-simulator"
     xcrun lipo -create "$PHYSICS_OUTPUT/ios-sim-arm64/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/ios-sim-x86_64/libzgtasa_native_physics.a" -output "$PHYSICS_OUTPUT/ios-simulator/libzgtasa_native_physics.a"
+    python3 "$PHYSICS_ROOT/source_stamp.py" write "$PHYSICS_OUTPUT/ios-simulator"
     ;;
   mac)
     export MACOSX_DEPLOYMENT_TARGET=13.0
@@ -44,11 +47,12 @@ case "${1:-all}" in
     build_target x86_64-apple-darwin macos-x86_64
     mkdir -p "$PHYSICS_OUTPUT/macos"
     xcrun lipo -create "$PHYSICS_OUTPUT/macos-arm64/libzgtasa_native_physics.a" "$PHYSICS_OUTPUT/macos-x86_64/libzgtasa_native_physics.a" -output "$PHYSICS_OUTPUT/macos/libzgtasa_native_physics.a"
+    python3 "$PHYSICS_ROOT/source_stamp.py" write "$PHYSICS_OUTPUT/macos"
     ;;
   all)
-    "$PHYSICS_ROOT/build.sh" ios
-    "$PHYSICS_ROOT/build.sh" sim
-    "$PHYSICS_ROOT/build.sh" mac
+    zsh "$PHYSICS_ROOT/build.sh" ios
+    zsh "$PHYSICS_ROOT/build.sh" sim
+    zsh "$PHYSICS_ROOT/build.sh" mac
     ;;
   *)
     print -u2 'Usage: native-physics/build.sh [all|host|ios|sim|mac]'

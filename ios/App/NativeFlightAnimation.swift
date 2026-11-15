@@ -10,6 +10,7 @@ final class NativeFlightAnimation {
     struct Jet { var visible:Bool;var pitch:Double;var leftRoll:Double;var rightRoll:Double;var thrust:Double;var sound:String }
     struct Frame {
         var blends:[NativeSkeletalBlend]=[]
+        var velocity=SIMD3<Double>.zero
         var figurePitch:Double=0
         var figureRoll:Double=0
         var figureControlled=false
@@ -49,7 +50,7 @@ final class NativeFlightAnimation {
         amount=clamp(amount+(selected != nil ? 8:-4)*dt,0,1)
         pitch += clamp((selected != nil ? input?.pitch ?? 0:0)-pitch,-3*dt,3*dt)
         roll += clamp((selected != nil ? input?.roll ?? 0:0)-roll,-3*dt,3*dt)
-        var result=Frame()
+        var result=Frame();result.velocity=measured
         result.figureControlled=amount>0 || figureWasControlled
         result.figurePitch=amount>0 ? pitch:0;result.figureRoll=amount>0 ? roll:0
         figureWasControlled=amount>0

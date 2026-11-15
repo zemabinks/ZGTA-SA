@@ -21,8 +21,8 @@ while (( $# )); do
   esac
 done
 command -v xcodegen >/dev/null || { print -u2 'XcodeGen is required to regenerate the native project.'; exit 1; }
-if [[ "$target" != device && ! -f "$project_dir/local-only/native-physics/ios-simulator/libzgtasa_native_physics.a" ]] ||
-   [[ "$target" != simulator && ! -f "$project_dir/local-only/native-physics/ios-device/libzgtasa_native_physics.a" ]]; then
+if { [[ "$target" != device ]] && ! python3 "$project_dir/native-physics/source_stamp.py" check "$project_dir/local-only/native-physics/ios-simulator"; } ||
+   { [[ "$target" != simulator ]] && ! python3 "$project_dir/native-physics/source_stamp.py" check "$project_dir/local-only/native-physics/ios-device"; }; then
   zsh "$project_dir/native-physics/build.sh" all
 fi
 (cd "$project_dir/ios" && xcodegen generate --spec project.yml)

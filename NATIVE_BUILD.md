@@ -4,6 +4,38 @@ Gameplay uses optimized Swift Release by default. The Xcode scheme's Run and
 Profile actions select Release; normal Debug remains available in Xcode and
 through the build script:
 
+For a fresh Mac, first install full [Xcode](https://developer.apple.com/xcode/)
+and open it once to accept its license and install the iOS/Simulator platform.
+Install [XcodeGen](https://github.com/yonaskolb/XcodeGen#installing) with
+`brew install xcodegen` or its documented source/release installation. On Xcode26
+the [Metal component](https://developer.apple.com/documentation/xcode/downloading-and-installing-additional-xcode-components)
+is separate; install it with `xcodebuild -downloadComponent MetalToolchain` if
+missing. Command Line Tools alone do not include the iPhone SDKs.
+
+Then bootstrap this clone's own Rust and validate the native tools:
+
+```sh
+zsh native-physics/setup.sh
+zsh native-physics/setup.sh --check
+```
+
+This installs/reuses official Rust1.100.0 under ignored `local-only/toolchains/`,
+with targets `aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`,
+`aarch64-apple-darwin` and `x86_64-apple-darwin`. The installer uses rustup's
+[`--no-modify-path` and custom homes](https://github.com/rust-lang/rustup/blob/main/doc/user-guide/src/installation/index.md);
+it leaves global Rust and shell profiles alone. `--check` installs nothing,
+checks the compiler/targets/SDKs/XcodeGen and compiles a tiny iPhone Metal kernel
+in the clone's ignored cache. If Xcode is installed outside the selected
+developer directory, run with its temporary `DEVELOPER_DIR` environment setting.
+
+The tested tool versions are Xcode26.3(17C529), XcodeGen2.46.0 and Rust1.100.0
+(0ef1bc386). The app targets iOS16; native Mac test libraries target macOS13.
+These are the tested build tools, rather than an assertion that every earlier
+Xcode version works. Browser hosting on macOS/Linux uses `host.py` and needs
+none of these native build tools.
+
+Build optimized gameplay:
+
 ```sh
 zsh build_native.sh simulator
 zsh build_native.sh device
@@ -19,7 +51,10 @@ configure your development team in Xcode when installing on a physical phone.
 
 The native physics static libraries must match the C/Swift bridge. If they are
 absent, the script invokes `native-physics/build.sh all` using the project-local
-Rust toolchain. After changing the bridge, rebuild those libraries explicitly.
+Rust toolchain. Source stamps also detect bridge/header changes and rebuild
+stale libraries after a source update. Missing Cargo packages are fetched
+normally on a first build; `ZGTA_NATIVE_OFFLINE=1` is an optional cached-build
+setting. All setup/build scripts work without relying on executable file modes.
 Mac server launchers prepare runtime data separately with
 `prepare_native_runtime.sh`; game assets remain under local-only.
 
