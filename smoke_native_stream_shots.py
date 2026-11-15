@@ -9,7 +9,8 @@ const http=require('node:http'),crypto=require('node:crypto'),assert=require('no
 let child,done=false,connections=0;const peers=[];
 function send(p,m){const b=Buffer.from(JSON.stringify(m)),h=b.length<126?Buffer.from([129,b.length]):Buffer.from([129,126,b.length>>8,b.length&255]);p.s.write(Buffer.concat([h,b]))}
 function received(p,m){
- if(m.t==='hi'){assert.equal(m.inventoryAck,1);send(p,{t:'hello',inventoryAck:1,inventoryConnection:p.nonce,life:[100,0]});return}
+ if(m.t==='hi'){assert.equal(m.inventoryAck,1);send(p,{t:'hello',inventoryAck:1,inventoryConnection:p.nonce,life:[100,0]});send(p,{t:'inventory',state:{revision:0,selected:37,weapons:[{id:37,clip:99,rest:0}],reload:null,ack:{connection:p.nonce,processedShot:0}}});setTimeout(()=>{p.ready=true;send(p,{t:'all',you:'Stream peer',cash:0,cars:[],vehicles:[],chat:[]})},50);return}
+ if(!['ping','board'].includes(m.t))assert(p.ready,'Stream claim before all/inventory ready');
  if(m.t==='shot'){
   assert.equal(m.c,p.nonce);assert.equal(m.s,++p.sequence);p.shots.set(m.s,m.w);
   assert.equal(m.w,p.index===1?[37,22,42,41][m.s-1]:42);return;
@@ -38,7 +39,19 @@ def main():
   motion=(ROOT/'ios/App/NativeActorAnimation.swift').read_text();motion=motion[motion.index('struct NativePedestrianMotion {'):motion.index('struct NativeWeaponAnimation {')]
   method=function((ROOT/'ios/App/NativeMultiplayerClient.swift').read_text(),'    @discardableResult func sendWeaponShot(')
   tests=(ROOT/'smoke_native_stream_shots.swift').read_text().replace('// ACTUAL_SEND_WEAPON_SHOT',method)
-  source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeMultiplayerClient'])+'\n'+motion+'\n'+tests
+  old='var socket:DeferredSocket?=DeferredSocket(),health=100,passive=false,shots=0,resyncs=0'
+  assert old in tests
+  tests=tests.replace(old,old+',isReady=true;var transportGeneration:UInt64=0',1)
+  old='func requestInventoryResync(){resyncs += 1}'
+  assert old in tests
+  tests=tests.replace(old,old+'\n func failTransport(generation:UInt64,reason:String){resyncs += 1}',1)
+  old='client.onInventoryConnection={nonce in\n guard nonce != nil else{return};nonceCount += 1'
+  assert old in tests
+  tests=tests.replace(old,'client.onConnectionState={state in\n guard state == .ready else{return};nonceCount += 1',1)
+  old='check(client.reserveShot()==nil,"Unnegotiated stream cannot fire")'
+  assert old in tests
+  tests=tests.replace(old,'client.onInventoryConnection={nonce in if nonce != nil {check(!client.isReady && client.reserveShot()==nil,"Hello alone cannot fire stream")}}\nclient.onInventory={_ in if !client.isReady {check(client.reserveShot()==nil,"Inventory before all cannot fire stream")}}\n'+old,1)
+  source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeMultiplayerClient'])+'\n'+motion+'\n'+tests
   (work/'main.swift').write_text(source)
   subprocess.run(['swiftc','-O','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',str(work/'main.swift'),'-o',str(work/'verify')],check=True)
   subprocess.run(['node',str(work/'peer.cjs'),str(work/'verify')],check=True)

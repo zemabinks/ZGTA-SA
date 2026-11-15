@@ -1,0 +1,17 @@
+{
+  "description": "Exact prior AGPL project handler specimens for the Core84 responder-bubbling regression; no game assets.",
+  "sources": {
+    "game": {
+      "path": "ios/App/NativeGameViewController.swift",
+      "sourceSHA256": "c7ddb64037bc02f5c466d1c6d91f7b1a2143224b9f170260a3a31b74bb007bc9",
+      "methodSHA256": "faed87bfe7fa0bb8016f72117ed17a8150b383c148b650cb556c750808141f5e",
+      "pressesBegan": "    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {\n        guard applicationActive, presentedViewController == nil else { return }\n        if presses.contains(where:{$0.key?.keyCode == .keyboardEscape}) {\n            guard !NativeMenuKeyLatch.isHeld(Int(UIKeyboardHIDUsage.keyboardEscape.rawValue)) else { return }\n            if heldKeys.insert(.keyboardEscape).inserted {performBinding(.pause)}\n            super.pressesBegan(presses,with:event);return\n        }\n        guard network.isReady else{return}\n        var firstKeys:[UIKeyboardHIDUsage]=[]\n        for press in presses {\n            guard let code=press.key?.keyCode else {continue}\n            guard !NativeMenuKeyLatch.isHeld(Int(code.rawValue)) else { continue }\n            if heldKeys.insert(code).inserted {firstKeys.append(code)}\n        }\n        // All simultaneous modifiers must be visible before jump/enter edges.\n        // Otherwise an unordered Shift+aim batch can jump instead of blocking.\n        let context=bindingContext\n        for code in firstKeys {\n            if let action=NativeGameBindings.keyAction(Int(code.rawValue),context:context) {performBinding(action)}\n            if presentedViewController != nil {break}\n        }\n        super.pressesBegan(presses, with: event)\n    }"
+    },
+    "panel": {
+      "path": "ios/App/NativeDEMenuStyle.swift",
+      "sourceSHA256": "01a798690fc44c14a2807c7e2d2dcd0c43bc0a126ce9cefb3d75ac8714dbcc42",
+      "methodSHA256": "840d75538b45e9d3b11479ca218e620c76311122103164ec77cac72c1adbebf2",
+      "pressesBegan": "    override func pressesBegan(_ presses:Set<UIPress>,with event:UIPressesEvent?) {\n        for press in presses {\n            switch press.key?.keyCode {\n            case .keyboardEscape:\n                if NativeMenuKeyState.press(.keyboardEscape) {closeMenu()};return\n            case .keyboardUpArrow:\n                if NativeMenuKeyState.press(.keyboardUpArrow) {moveSelection(-1)};return\n            case .keyboardDownArrow:\n                if NativeMenuKeyState.press(.keyboardDownArrow) {moveSelection(1)};return\n            case .keyboardLeftArrow:\n                if NativeMenuKeyState.press(.keyboardLeftArrow) {adjustSelection(-1)};return\n            case .keyboardRightArrow:\n                if NativeMenuKeyState.press(.keyboardRightArrow) {adjustSelection(1)};return\n            case .keyboardReturnOrEnter,.keyboardSpacebar:\n                if let key=press.key?.keyCode,NativeMenuKeyState.press(key) {activateSelection()};return\n            default:break\n            }\n        }\n        super.pressesBegan(presses,with:event)\n    }"
+    }
+  }
+}

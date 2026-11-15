@@ -82,7 +82,8 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var completions: [String: [(Data?) -> Void]] = [:]
     private var loops=Set<String>()
     private var oneShots: [ObjectIdentifier: AVAudioPlayer] = [:]
-    private var fades: [ObjectIdentifier: Fade] = [:]
+    private var oneShotLevels:[ObjectIdentifier:NativeAudioEnvelope]=[:]
+    private var settingsGain:Float=1
     private var fadeTimer: DispatchSourceTimer?
     private var notifications: [NSObjectProtocol] = []
     private var pendingManifest: URLSessionDataTask?
@@ -93,6 +94,15 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private(set) var lastEvent = ""
     var volume: Float = 0.7 {
         didSet { volume = max(0, min(1, volume)) }
+    }
+
+    func applySettings(_ snapshot:NativeAppSettings.Snapshot) {
+        // Existing 0.7 source gains remain untouched. The normalized control
+        // attenuates every graph exactly once, including already-playing audio.
+        settingsGain=min(1,max(0,snapshot.validated().effectiveEffectsGain/0.7))
+        rateAudio.outputGain=settingsGain
+        vehicleLoops.outputGain=settingsGain
+        refreshOneShotVolumes(at:ProcessInfo.processInfo.systemUptime)
     }
 
     init(server: ServerAddress) {
@@ -203,6 +213,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
         oneShots.removeAll()
+        oneShotLevels.removeAll()
         clearFades()
     }
 
@@ -220,6 +231,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
         oneShots.removeAll()
+        oneShotLevels.removeAll()
         clearFades()
         vehicleModel = nil
         distanceSinceStep = 0
@@ -261,35 +273,31 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
             voice.enableRate = true
             voice.rate = max(0.5, min(2, rate))
             voice.pan = max(-1, min(1, pan))
-            let targetVolume = max(0,min(1,gain*self.volume))
-            voice.volume = rise > 0 ? 0 : targetVolume
+            let now=ProcessInfo.processInfo.systemUptime
+            let envelope=NativeAudioEnvelope(gain:gain,started:now,rise:max(0,rise),
+                fade:fade.flatMap{f in f.ends>f.begins && f.to<gain ? .init(begins:now+f.begins,ends:now+f.ends,from:gain,to:max(0.0001,f.to)):nil})
+            voice.volume=envelope.level(at:now,baseVolume:self.volume,multiplier:self.settingsGain)
             voice.currentTime = max(0, min(0.99, start)) * voice.duration
             voice.delegate = self
             self.oneShots[ObjectIdentifier(voice)] = voice
+            self.oneShotLevels[ObjectIdentifier(voice)]=envelope
             voice.play()
-            if rise > 0 { voice.setVolume(targetVolume,fadeDuration:rise) }
-            if let fade, fade.ends > fade.begins, fade.to < gain {
-                let now = ProcessInfo.processInfo.systemUptime
-                self.fades[ObjectIdentifier(voice)] = Fade(begins: now + fade.begins,
-                    ends: now + fade.ends, from: gain, to: max(0.0001, fade.to))
-                self.startFadeTimer()
-            }
+            if envelope.animating(at:now) {self.startFadeTimer()}
             self.lastEvent = name
             if self.oneShots.count > 24, let oldest = self.oneShots.first {
                 oldest.value.stop()
                 self.oneShots.removeValue(forKey: oldest.key)
-                self.fades.removeValue(forKey: oldest.key)
+                self.oneShotLevels.removeValue(forKey:oldest.key)
             }
         }
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         oneShots.removeValue(forKey: ObjectIdentifier(player))
-        fades.removeValue(forKey: ObjectIdentifier(player))
+        oneShotLevels.removeValue(forKey:ObjectIdentifier(player))
     }
 
     private func clearFades() {
-        fades.removeAll()
         fadeTimer?.cancel()
         fadeTimer = nil
     }
@@ -301,17 +309,16 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             let now = ProcessInfo.processInfo.systemUptime
-            for (id, fade) in self.fades {
-                guard let voice = self.oneShots[id] else { self.fades.removeValue(forKey: id); continue }
-                guard now >= fade.begins else { continue }
-                let share = Float(max(0, min(1, (now - fade.begins) / (fade.ends - fade.begins))))
-                voice.volume = min(1, max(0, fade.from * pow(fade.to / max(fade.from, 0.0001), share) * self.volume))
-                if share >= 1 { self.fades.removeValue(forKey: id) }
-            }
-            if self.fades.isEmpty { self.clearFades() }
+            self.refreshOneShotVolumes(at:now)
+            if !self.oneShotLevels.values.contains(where:{$0.animating(at:now)}) {self.clearFades()}
         }
         fadeTimer = timer
         timer.resume()
+    }
+    private func refreshOneShotVolumes(at time:Double) {
+        for (id,voice) in oneShots {
+            if let level=oneShotLevels[id] {voice.volume=level.level(at:time,baseVolume:volume,multiplier:settingsGain)}
+        }
     }
 
     /// Exact layering from archived module99488: three impact layers and a

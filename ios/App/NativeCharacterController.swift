@@ -29,6 +29,9 @@ final class NativeCharacterController {
     private var pendingJump = 0.0
     private var active = false
     private var rootHeld = false
+    /// Last committed fixed-step velocity, in Rapier axes and world units/s.
+    /// Retain it between display frames that do not advance the motor.
+    private(set) var stepVelocity = SIMD3<Double>.zero
     /// Original walker press routing occurs after motor motion and before
     /// CQ.beforeStep applies the queued impulse to promoted parked vehicles.
     var onPress:(([NativeCharacterMotor.Press])->Void)?
@@ -48,17 +51,20 @@ final class NativeCharacterController {
         guard Self.finite(feet) else { return }
         let p = SwiftRapierWorld.gtaToRapier(feet)
         head = SIMD3(Double(p.x), Double(p.y) + 1.7, Double(p.z))
-        clearPendingMotion(); rootHeld = false
+        clearPendingMotion(); rootHeld = false; stepVelocity = .zero
         self.active = active; motor.setActive(active)
         queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
         if grounded { motor.stand() }
     }
     func setActive(_ active: Bool) {
-        self.active = active; clearPendingMotion(); rootHeld = false
+        self.active = active; clearPendingMotion(); rootHeld = false; stepVelocity = .zero
         motor.setActive(active)
     }
     private static func finite(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite }
     private func clearPendingMotion() { accumulator = 0; pendingTravel = .zero; pendingJump = 0 }
+    /// Input loss discards unconsumed commands, preserving the fixed clock,
+    /// committed velocity, airborne momentum and animation-owned root.
+    func cancelPendingInput() { pendingTravel = .zero; pendingJump = 0 }
     var state: Output {
         let p = SIMD3<Float>(Float(head.x), Float(head.y - 1.7), Float(head.z))
         return Output(feet: SwiftRapierWorld.rapierToGTA(p), grounded: motor.grounded,
@@ -86,6 +92,7 @@ final class NativeCharacterController {
         accumulator += delta
         if jump.isFinite, jump > 0 { pendingJump = jump }
         while accumulator + 1e-10 >= Self.fixed {
+            let previousFeet = state.feet
             let travel = pendingTravel * (Self.fixed / accumulator)
             pendingTravel -= travel; accumulator = max(0, accumulator - Self.fixed)
             let intended = Motion(displacement: SwiftRapierWorld.rapierToGTA(SIMD3<Float>(travel)),
@@ -94,7 +101,7 @@ final class NativeCharacterController {
             guard Self.finite(input.displacement), input.jump.isFinite,
                   input.verticalOverride?.isFinite != false,
                   input.heldFeet.map(Self.finite) != false else {
-                pendingJump = 0; motor.clearContactEvents(); world.step(); continue
+                pendingJump = 0; stepVelocity = .zero; motor.clearContactEvents(); world.step(); continue
             }
             if let feet = input.heldFeet {
                 // Animation roots own translation while hanging/hauling. A
@@ -116,6 +123,9 @@ final class NativeCharacterController {
             pendingJump = 0
             if input.heldFeet == nil {onPress?(motor.pressed)}
             world.step()
+            // Use the same published Float feet boundary as the renderer's
+            // prior 60-Hz measurement, with the tick that actually moved it.
+            stepVelocity = SIMD3<Double>(SwiftRapierWorld.gtaToRapier((state.feet-previousFeet)/Float(Self.fixed)))
         }
         return state
     }

@@ -524,7 +524,7 @@ The iPhone build executable SHA-256 was
 The frozen 131-file App/bridge/server manifest remained unchanged. An iPhone
 build is not physical-device execution or controller acceptance.
 
-The native Simulator and actual browser connected to the isolated 8777 world.
+The native Simulator and actual browser connected to the isolated 8778 world.
 A fresh Escape correctly resumed from pause, exercising the modal release
 handoff that failed in the installed 81 trial. One native punch reduced the
 browser player's server armour from 25 to 17 and advanced the native strike
@@ -550,3 +550,133 @@ iPhone/controller or original retail-runtime parity is inferred. Production
 port 8766, its saves and the stable LAN deployment were unchanged. The supplied
 Definitive Edition IPA and its menu are a separate next reference/design pass;
 this release does not claim an original story Singleplayer runtime.
+
+## Core83–84 — owner DE menu and further core transition audit
+
+The owner's Definitive Edition IPA was investigated as a local data source.
+Selected Pak indexes and compressed payload hashes, tagged UMG properties,
+resolved font/texture imports and raw pixels established the menu presentation.
+The independent importer reproduces six PNGs, two unchanged fonts and four
+unchanged frontend WAVs. All original bytes and decoded outputs remain ignored
+under local-only. The menu implementation and bounded importers are independent
+public source. See NATIVE_DE_MENU.md and OWNER_MENU_IMPORT.md for the exact
+presentation scope, touchscreen adaptations and unverified runtime animation.
+
+The three title actions connect to actual guest Multiplayer, Game management
+and native Options. There is no advertised story campaign or fake voice/chat/
+character-slot UI. Existing profile/statistics/status APIs and per-server guest
+identities are reused. Persisted settings apply to their renderer, camera,
+radar and audio owners; default gains and gameplay values are preserved.
+Menu keyboard/controller ownership is released across responders, so closing a
+menu cannot repeat its Escape/Space into gameplay. Raw keyboard state also
+clears on lifecycle interruption. Pause remains available during reconnection.
+
+Menu integration checks passed101 geometry assertions across compact/wide
+phones, iPad and design canvas;450 settings checks;25 existing management plus45
+real HTTP connection checks;27 extracted responder checks;152 gain/envelope plus
+25713 real offline PCM checks. Every one of15180 samples in the four original
+menu sounds matched an independent decoder. The importer passed its synthetic
+integrity/boundary groups and two complete selected-resource imports with exact
+output hashes. Core83's56 aggregate gates passed against unchanged App sources.
+Both optimized diagnostic Simulator/device builds passed. Installed diagnostic
+UI confirmed the original art/font rendering and actual saved profile, statistics,
+server information and contextual help. These builds preceded the final input/
+core fixes and are not substitutes for final Core84 build/installed acceptance.
+
+That passing baseline did not establish complete cadence parity. A separate
+real native-controller/Rapier/Renderer probe found a constant2m/s movement became
+0–4m/s at120 display FPS; deploying a parachute at the tested fixed tick inherited
+zero horizontal speed. The old renderer differentiated fixed-step body position
+using a display-frame delta. Core84 publishes the last committed fixed-step
+velocity, retains it across zero-tick display frames and supplies it before
+water/parachute handoff. The30/60 baseline is unchanged;120 now inherits the same
+2.000005m/s at that tick. No averaging/filter or guessed acceleration was added.
+
+The same audit reproduced a queued fallback jump surviving cancellation: a
+half-tick press, cancelled outer input and another half tick still launched at
+rising6.07. Cancelling the controller's queued travel/jump intent now preserves
+its accumulator, committed velocity and ongoing physical/root-motion state.
+The expanded real integration gate passes69333 checks across30/60/120/uneven
+cadence, original animation clocks, actual jetpack touchdown, wall contact,
+streaming pause, reset and queued-intent cancellation. Original retail-runtime
+feel and all moving-carrier cases remain separate verification requirements.
+
+The network audit also found that native receive failure permanently closed
+its socket, and a naive retry would teleport a stale owned vehicle on hello.
+Core84 adds bounded retries/watchdog/foreground repair and requires a fresh hello,
+matching inventory and complete world baseline before accepting gameplay.
+Connection loss clears old peer state, pending commands and local driver/body
+ownership without parking/exit packets or an exit-side offset. It preserves the
+self-hosted server's existing fresh-spawn policy; this differs from the archived
+browser's guarded reconnect spawn behavior. Saved account identity and a new
+inventory nonce serve different purposes. HTTP generations cancel/suppress old
+peer replies, prevent an older GET rolling back a mutation and preserve current
+busy ownership during reentrant callbacks. Full network/build acceptance is
+recorded separately after those concrete checks complete.
+
+### Core85 — keyboard events must not reach a covered presenter
+
+Installed Core84 live acceptance found a gap despite60 passing regression gates:
+Escape opened the game pause path and was also forwarded to UIKit's next
+responder. Its presenting connection screen now inherited the DE Back handler,
+so that second handler dismissed the game. The exact candidate build and
+observations were retained privately. This was not a server disconnect or a
+Metal-rendering failure.
+
+Core85 consumes keyboard presses owned by the game and forwards only non-key
+presses. Covered title/submenu controllers also reject navigation while they
+present another controller. The added responder-chain test must model actual
+super-to-presenter propagation; a responder stub that silently dropped super
+calls was insufficient coverage. Final build/live regression is recorded after
+this correction. Core83/84 remain bounded diagnostic candidates, not releases
+claiming complete native interaction parity.
+
+### Core85 final native/source checks
+
+The corrected frozen App passed all60 aggregate gates without source changes.
+The responder suite now has61 checks: it retains the original27 release-latch
+cases and adds34 real-method propagation/mixed-batch/covered-parent cases.
+The frozen Core84 handler specimens reproduce the old failure. Optimized Core85
+builds passed for universal ARM64/x86_64 Simulator and unsigned ARM64 iPhone.
+Simulator executable SHA-256:
+`6875423c8e491e57f5b2130c1494ed46f44ff95cd93592db18f2915b58030a2c`.
+iPhone executable SHA-256:
+`5317f1655fcbfb43b5ca4873e1595d53cc565bf14480633254a108dc4ec6432e`.
+The131-file App manifest remained unchanged. Generic-device compilation is not
+physical-device performance or controller acceptance.
+
+Installed final-build acceptance loaded the real isolated multiplayer world as
+the existing guest beside a browser player. Escape opened Pause, resumed and
+opened Pause again while preserving the game, inventory, cash and both peers.
+The in-game Options route returned to the same live game on Back/Escape; its
+visual capture was unavailable during that transition. The same actual Options
+controller was visually exercised from the title screen. Resolution/FPS changes
+updated their persisted values. A separate compact iPhone SE3 Simulator displayed
+the original title art and all actions in landscape; keyboard focus scrolled to
+the settings footer, changed Reduce Motion, restored defaults and returned.
+Intermittent blank computer-use captures are not counted as visual acceptance.
+
+Fresh-source packaging received a separate correction: XcodeGen's `optional`
+source flag merely suppresses path validation, leaving a dangling copy reference.
+The public base project now contains no original-resource reference. A second
+owner spec adds that folder only when the build wrapper finds a manifest.
+Four isolated generation cases preserve all110 App compile entries and all App
+bytes; the generated owner-enabled project is byte-identical to the project
+used for the accepted private builds. This verifies both source-only fallback
+and owner-resource packaging without publishing original files.
+
+A separate sampled-stack hypothesis about KCC query-tree construction was tested
+before changing the engine. The actual spawn cells had109 colliders; controlled
+queries were under0.1ms. An isolated bulk-tree alternative preserved exact query/
+contact outputs but slightly regressed the interleaved city cases. It was not
+adopted. The retained private research does not establish the cause of capture
+failures, device FPS or a general renderer performance result. Accepted physics
+source/libraries remain unchanged.
+
+An additional isolated iPhone17 Pro Max Simulator displayed the title artwork,
+logo, portrait and all three actions with notch-safe landscape placement.
+Keyboard opened the actual Options controller and Back returned to the title.
+The display and camera settings were visually checked at the large size.
+Repeated capture sometimes returned blank; rotating/rebinding recovered actual
+rendered menu and Options images. This does not extend acceptance to a physical
+phone or prove original runtime animation timing.

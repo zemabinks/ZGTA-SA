@@ -63,6 +63,11 @@ final class NativeVehicleLoopAudio {
     private var keepsListening = false
     private var cleanup: Timer?
     private let outputRate: Double
+    private var settingsGain:Float=1
+    var outputGain:Float {
+        get {lock.lock();defer{lock.unlock()};return settingsGain}
+        set {lock.lock();settingsGain=newValue.isFinite ? min(1,max(0,newValue)):1;lock.unlock()}
+    }
     var isRunning: Bool { engine.isRunning }
 
     init(engine: AVAudioEngine = AVAudioEngine(), sampleRate: Double = 48_000) {
@@ -250,6 +255,9 @@ final class NativeVehicleLoopAudio {
                 voice.rate += (voice.targetRate-voice.rate)*rateEase
             }
         }
+        // Apply preferences after the original source/spatial mix, preserving
+        // voice smoothing, phase, held loops and the exact default sample path.
+        if settingsGain != 1 {for i in 0..<frames {left[i] *= settingsGain;right[i] *= settingsGain}}
         renderedFrames += UInt64(frames)
     }
     struct Probe { let sound: String; let frame: Double; let rate: Double; let gain: Double }

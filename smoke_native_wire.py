@@ -6,16 +6,17 @@ import tempfile
 ROOT=Path(__file__).resolve().parent
 JS=r'''
 const http=require('node:http'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
-let child,socket,done=false,driven=false,parked=false,foot=false,moved=false,flights=0,used=false,shotSequence=0,boundHit=false,meleeBound=false,meleeMarkers=0;
+let baselineReady=false;let child,socket,done=false,driven=false,parked=false,foot=false,moved=false,flights=0,used=false,shotSequence=0,boundHit=false,meleeBound=false,meleeMarkers=0;
 const damage='3434012122110101201';
 function send(value){const b=Buffer.from(JSON.stringify(value));let head;if(b.length<126)head=Buffer.from([129,b.length]);else{head=Buffer.alloc(4);head[0]=129;head[1]=126;head.writeUInt16BE(b.length,2)}socket.write(Buffer.concat([head,b]))}
 function row(){const r=Array(50).fill(null);Object.assign(r,{0:'42',1:'Browser peer',2:'420',3:1684.7612,4:-2101.9894,5:12.85125,6:.75,7:.25,8:-.125,9:13.25,10:.3,12:1,13:1.5,14:-2.25,15:.7,16:123456,17:1,18:645,19:damage,20:.1,21:.2,22:.3,23:23.4,24:2.13,25:1,26:1,27:22,28:.23,29:6,30:23,31:7,32:92,34:['passenger-car',2],35:'car-fixture',36:1,38:3,39:['trailer',.1,.2,.3],42:[.2,.4,1,.8,-.2],43:67});return r}
 function received(m){
+ if(!['hi','ping','board'].includes(m.t))assert(baselineReady,'Gameplay before complete baseline');
  if(m.t==='shot'){assert.equal(m.s,++shotSequence);assert.equal(m.w,22);assert.equal(m.c,'wire-nonce');send({t:'inventory',state:{revision:shotSequence,selected:22,weapons:[{id:22,clip:17-shotSequence,rest:30}],ack:{connection:'wire-nonce',processedShot:shotSequence}}})}
  if(m.t==='hit'){assert.equal(m.to,'42');assert.equal(m.c,'wire-nonce');if(m.w===0){assert.equal(m.s,undefined);meleeBound=true}else{assert.equal(m.s,2);assert.equal(m.w,22);boundHit=true}}
  if(m.t==='me'&&m.walking&&!m.parked&&m.act===0&&m.weapon===0){assert.equal(m.shots,[3,4,4][meleeMarkers++],'Public strike counter must include a miss, avoid double-counting a hit and reject guns on the melee path')}
  if(m.t==='usedParachute'){used=true}
- if(m.t==='hi'){assert.equal(m.nativeInventory,true);assert.equal(m.inventoryAck,1);send({t:'hello',inventoryAck:1,inventoryConnection:'wire-nonce',spot:[1684.7612,-2101.9894,12.85125,.75],life:[100,25]});send({t:'inventory',state:{revision:0,selected:22,weapons:[{id:22,clip:17,rest:30}],ack:{connection:'wire-nonce',processedShot:0}}});send({t:'flightgear',parachute:true,jetpack:true});send({t:'all',vehicles:[['car-fixture','Browser peer','420',1684.7612,-2101.9894,12.85125,.75,.25,-.125,645,damage]],cars:[row()]})}
+ if(m.t==='hi'){assert.equal(m.nativeInventory,true);assert.equal(m.inventoryAck,1);send({t:'hello',inventoryAck:1,inventoryConnection:'wire-nonce',spot:[1684.7612,-2101.9894,12.85125,.75],life:[100,25]});send({t:'inventory',state:{revision:0,selected:22,weapons:[{id:22,clip:17,rest:30}],ack:{connection:'wire-nonce',processedShot:0}}});send({t:'flightgear',parachute:true,jetpack:true});setTimeout(()=>{baselineReady=true;send({t:'all',you:'Native wire',cash:0,chat:[],vehicles:[['car-fixture','Browser peer','420',1684.7612,-2101.9894,12.85125,.75,.25,-.125,645,damage]],cars:[row()]})},50)}
  if(m.t==='vmove'){assert.equal(m.v,'car-fixture');assert.deepEqual([m.x,m.y,m.z,m.h,m.p,m.r,m.hp,m.d,m.w],[1685,-2102,12.8,.4,.1,-.2,623,damage,321]);moved=true;send({t:'veh',v:['car-fixture','Browser peer','420',1685,-2102,12.8,.4,.1,-.2,623,damage,null,null,null,null,null,321]})}
  if(m.t==='me'&&m.driving){assert(Math.abs(m.heading+.75)<1e-6);assert(Math.abs(m.steer+.3)<1e-6);assert.equal(m.pitch,.25);assert.equal(m.roll,.125);assert.equal(m.health,645);assert.equal(m.damage,damage);assert.equal(m.horn,3);assert.equal(m.act,1);assert.equal(m.lights,true);driven=true}
  if(m.t==='me'&&m.walking&&!m.parked&&m.act===28){assert.equal(m.move,2.13);assert.equal(m.anim,null);assert.equal(m.aim,.24);assert.equal(m.act,28);assert.equal(m.air,true);assert.equal(m.crouch,true);assert.equal(m.paused,true);assert.deepEqual([m.vx,m.vy,m.vz],[1.2,-2.3,.4]);assert.deepEqual([m.wx,m.wy,m.wz],[.1,.2,.3]);assert(Number.isFinite(m.clock));foot=true}
@@ -42,7 +43,10 @@ client.onPlayers={players in
 }
 client.onVehicles={vehicles in
  if let changed=vehicles.first,changed.work==321{precondition(changed.health==623 && changed.heading == -0.4 && changed.roll==0.2);vehicleUpdated=true}
- guard !sent,actors,let v=vehicles.first else{return};sent=true
+ sendIfReady()
+}
+func sendIfReady(){
+ guard client.isReady,!sent,actors,let v=client.orderedVehicles.first else{return};sent=true
  precondition(v.damage==damage && v.health==645 && v.roll==0.125 && v.heading == -0.75)
  client.sendPosition(v.position,heading:0.75,moving:true,running:false,vehicle:v,speed:13.25,steer:0.3,pitch:0.25,roll:-0.125,vehicleHealth:645,vehicleDamage:damage,lights:true,horn:true,siren:true,action:1)
  client.sendPosition(v.position,heading:0.75,moving:true,running:false,airborne:true,weapon:22,crouching:true,movement:2.13,aim:0.236,action:28,velocity:SIMD3(1.2,-2.3,0.4),angularVelocity:SIMD3(0.1,0.2,0.3),paused:true)
@@ -62,6 +66,9 @@ client.onVehicles={vehicles in
  client.sendPosition(v.position,heading:0,moving:false,running:false,weapon:0)
  DispatchQueue.main.asyncAfter(deadline:.now()+0.1){client.sendExit(v.position+SIMD3<Float>(2,0,0),parked:v.position,heading:0.75,pitch:0.25,roll:-0.125,vehicle:v,vehicleHealth:645,vehicleDamage:damage)}
 }
+client.onConnectionState={state in if state == .ready {sendIfReady()}}
+client.onInventoryConnection={nonce in if nonce != nil {precondition(!client.isReady && client.reserveShot()==nil,"Hello alone unlocked gameplay")}}
+client.onInventory={_ in if !client.isReady {precondition(client.reserveShot()==nil,"Inventory before all unlocked gameplay")}}
 client.onStatus={text in if text=="WIRE COMPLETE"{precondition(spawned&&actors&&cleared&&vehicleUpdated&&gear);finished=true;client.disconnect()}}
 client.connect();let deadline=Date().addingTimeInterval(15)
 while !finished && Date()<deadline{RunLoop.main.run(until:Date().addingTimeInterval(0.02))}
@@ -72,7 +79,7 @@ def main():
         folder=Path(directory);(folder/'peer.cjs').write_text(JS)
         actor=(ROOT/'ios/App/NativeActorAnimation.swift').read_text()
         actor=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]
-        source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims'])+'\n'+actor+'\n'+(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
+        source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims'])+'\n'+actor+'\n'+(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
         (folder/'main.swift').write_text(source+'\n'+SWIFT)
         subprocess.run(['swiftc','-module-cache-path','/private/tmp/zgtasa-wire-module-cache',str(folder/'main.swift'),'-o',str(folder/'client')],check=True)
         subprocess.run(['node',str(folder/'peer.cjs'),str(folder/'client')],check=True)

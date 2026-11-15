@@ -22,3 +22,11 @@ behavior is used as a local reference for native translations and numerical
 comparisons. Public asset tools depend on the archived client version; they
 do not include or reconstruct private server source. Coverage and open work
 are tracked in FEATURE_MATRIX.md.
+
+The optional owner-menu importer uses the independently implemented MIT-licensed
+[`oozextract`0.5.7](https://github.com/lvlvllvlvllvlvl/oozextract), pinned with a
+checksummed Cargo lock. It decodes selected local data without loading the
+game's compression library. Its binary/cache and original menu resources are
+excluded from this source release. The native RIFF Microsoft-ADPCM preparation
+code is independently written; no original audio or game engine code is bundled
+with public source.

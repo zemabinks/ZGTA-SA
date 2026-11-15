@@ -274,6 +274,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private let waterWaves = NativeWaterWaves()
     private let gameCamera = NativeGameCamera()
+    private var appPreferences = NativeAppSettings.defaults
     private var ownCameraVisibility=NativeCameraVisibility()
     private var gameCameraFrame: NativeGameCamera.Frame?
     private var cameraVehicleDefinitions: [String:CameraVehicleDefinition] = [:]
@@ -721,6 +722,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         cancelWeaponInput();cancelCameraInput()
         acceptedStreamShot=false
         pendingNativeJump=0;pendingSwimJump=false;pendingDive=false;pendingSprintTap=false
+        character?.cancelPendingInput()
         pendingClimbPull=false;pendingClimbDrop=false;jumpHeld=false;walkHeld=false
         pendingParachuteOpen=false;sprintWasHeld=false
         vehicleHop=false;groundVehicle?.cancelPendingInput()
@@ -801,9 +803,30 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func zoomCameraSight(_ delta: Float) { gameCamera.zoomSight(delta) }
     var scopedCameraHidesPlayer: Bool { gameCameraFrame?.hidesPlayer ?? false }
     var cameraViewName: String { driving ? gameCamera.vehicleViewName : ["near","middle","far"][gameCamera.footZoom-1] }
+    var footCameraView: Int { gameCamera.footZoom }
+    var vehicleCameraView: Int { gameCamera.vehicleView }
     func cycleCameraView() { if driving { gameCamera.cycleVehicleView() } else { gameCamera.cycleFootZoom() } }
+    /// Presentation preferences only. Physics cell coverage, movement input,
+    /// world time and server authority are deliberately outside this boundary.
+    func applySettings(_ snapshot: NativeAppSettings.Snapshot, maximumFPS: Int) {
+        appPreferences = snapshot.validated()
+        gameCamera.setFootZoom(appPreferences.footView)
+        gameCamera.setVehicleView(appPreferences.vehicleView)
+        if weatherAuto != appPreferences.regionalWeather { weatherAuto = appPreferences.regionalWeather }
+        view.preferredFramesPerSecond = appPreferences.effectiveFrameRate(maximum: maximumFPS)
+        updateSettingsViewport()
+    }
+    func updateSettingsViewport() {
+        // Always start at the unscaled point bounds. autoResizeDrawable would
+        // otherwise overwrite a manually selected resolution on the next layout.
+        view.autoResizeDrawable = false
+        let scale = view.window?.screen.scale ?? view.contentScaleFactor
+        if let size = appPreferences.drawableSize(bounds: view.bounds.size, displayScale: scale),
+           view.drawableSize != size { view.drawableSize = size }
+    }
     func lookCamera(x: Float,y: Float,delta: Float) {
-        gameCamera.lookAnalog(x: x,y: -y,delta: delta,driving: driving)
+        gameCamera.lookAnalog(x: x,y: -y,delta: delta,driving: driving,
+                              sensitivity: Float(appPreferences.cameraSensitivity), inverted: appPreferences.invertY)
         if !driving { heading = gameCamera.heading;cameraPitch = gameCamera.pitch }
     }
     var vehicleNose: Float { driving ? vehiclePitch : 0 }
@@ -816,7 +839,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehicleLeanInput = driving ? lookVertical : 0
         synchronizeOtherVehiclePhysics(delta:Double(delta))
         if !driving && gameCamera.isLoaded {
-            gameCamera.lookAnalog(x: turn,y: -lookVertical,delta: delta)
+            gameCamera.lookAnalog(x: turn,y: -lookVertical,delta: delta,
+                                  sensitivity: Float(appPreferences.cameraSensitivity), inverted: appPreferences.invertY)
             heading = gameCamera.heading;cameraPitch = gameCamera.pitch
         } else if !driving || (vehicleKind != "plane" && vehicleKind != "helicopter") {
             cameraPitch = max(-0.4, min(0.5, cameraPitch + lookVertical * delta * 0.45))
@@ -980,6 +1004,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let result = character.update(delta: Double(delta),displacement: next-start,
                 jump: pendingNativeJump,geometryReady: groundVehicle?.isCellLoaded(activeDetail) == true && meshes[activeDetail] != nil,
                 motion: { [self] step,state,intended in
+                    // Water/parachute handoffs inherit the preceding physical
+                    // tick, including when this display frame contains none.
+                    lastFootVelocity = character.stepVelocity
                     if let held=climbingMotion(delta:step,state:state,intended:intended) {return held}
                     let water = swimmingMotion(delta:step,state:state,intended:intended,push:Double(inputLength),running:running)
                     if swimController.on { return water }
@@ -1030,7 +1057,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let surface = waterSurface(at: camera)?.height
         swimming = !driving && swimController.on
         underwater = swimming && swimController.under
-        if !driving && delta > 0 {
+        if !driving, let character {
+            lastFootVelocity = character.stepVelocity
+        } else if !driving && delta > 0 {
             lastFootVelocity = SIMD3<Double>(SwiftRapierWorld.gtaToRapier((camera-start)/delta))
         }
         if let characterOutput {
@@ -1648,6 +1677,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let resumed=gameCamera.resumeFoot(from:gameCameraFrame,fallbackHeading:heading,fallbackPitch:cameraPitch)
         heading=resumed.x;cameraPitch=resumed.y
         cameraWasDriving=false
+    }
+
+    /// A new server peer owns a new world baseline. Discard the previous
+    /// owned vehicle without an exit animation, parking packet or side offset.
+    /// The subsequent hello applies the self-hosted server's spawn policy.
+    func resetMultiplayerSession() {
+        groundVehicle?.exit()
+        driving=false;currentVehicleID=nil;drivingSpeed=0;flightVerticalSpeed=0
+        vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleBodyPose=nil
+        activeVehicleModel="";activeHandling=nil;vehicleKind="car"
+        pendingVehicleExit=nil;ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
+        riderDoorHolds.removeAll()
+        remotePlayers=[];remoteVehicles=[]
+        synchronizeProjectiles([])
+        personalFlight.wear(false);hasParachute=false
+        cancelReloadAnimation()
+        teleport(x:camera.x,y:camera.y,z:camera.z)
     }
 
     func teleport(x: Float, y: Float, z: Float, direction: Float? = nil) {

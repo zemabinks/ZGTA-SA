@@ -15,7 +15,7 @@ def extract(marker,source=vc):
     while depth:
         depth += (source[end]=='{')-(source[end]=='}');end += 1
     return source[start:end].replace('private ','').replace('@objc ','')
-methods='\n'.join(extract(x) for x in ['private var bindingContext:','private func performBinding(','private func cycleWeapon(','private func sendWeaponSelection(','@objc private func jump()','override func pressesBegan(','override func pressesEnded('])
+methods='\n'.join(extract(x) for x in ['private var canNavigateMenus:','private var acceptsHeldInput:','private var bindingContext:','private func performBinding(','private func cycleWeapon(','private func sendWeaponSelection(','@objc private func jump()','override func pressesBegan(','override func pressesEnded('])
 attack_start=vc.index('        if NativeGameBindings.shouldRequestAttack(')
 attack_end=vc.index('\n',vc.index('        lastAttackButton = gamepadAttacking',attack_start))
 attack_block=vc[attack_start:attack_end]
@@ -74,7 +74,7 @@ class FakeResponder {
     func pressesEnded(_ presses:Set<UIPress>,with event:UIPressesEvent?) {}
 }
 class FakeWeapons {var synchronized=true;var selected=0;var weapons=[Row(id:0),Row(id:22),Row(id:25)]}
-class FakeNetwork {var inventoryConnection:String?="one";var resyncs=0,health=100;var passive=false;func requestInventoryResync(){resyncs += 1}}
+class FakeNetwork {var isReady=true;var inventoryConnection:String?="one";var resyncs=0,health=100;var passive=false;func requestInventoryResync(){resyncs += 1}}
 class FakeGameplay {
     var state:[String:Any]=[:]
     var requests:[(String,[String:Any],(Bool?)->Void)]=[]
@@ -95,8 +95,10 @@ enum State {case normal}
 class FakeButton {func setTitle(_ text:String,for state:State){}}
 class FakeRadio {var stationName="radio",previousCount=0;func previous(){previousCount += 1}}
 class FakeStatus {var text=""}
+class FakeView {var window:Int?=1}
 class Harness:FakeResponder {
-    var acceptsHeldInput=true,currentVehicle:Int?,renderer:FakeRenderer?=FakeRenderer()
+    let viewIfLoaded:FakeView?=FakeView()
+    var currentVehicle:Int?,renderer:FakeRenderer?=FakeRenderer()
     var applicationActive=true,presentedViewController:Int?,heldKeys:Set<RawKey>=[],touchMeleeGuard=false,lastGamepadAim=false,usingMelee=true
     var pauseEscapeHandoff:NativeModalKeyHandoff?
     var lastAttackButton=false
@@ -107,14 +109,27 @@ class Harness:FakeResponder {
     func reload(){events.append("reload")};func performNearbyMissionAction(){events.append("action")};func openGameplay(){events.append("jobs")}
     func openChat(){events.append("chat")};func openMap(){events.append("map")};func openAnimations(){events.append("animations")}
     func toggleGear(){events.append("gear")};func nextRadioStation(){events.append("radioNext")};func openPause(){events.append("pause")};func attack(){events.append("attack")}
+    func cycleCameraPreference(){renderer?.cycleCameraView()}
 '''
 integration=r'''
+let offline=Harness()
+offline.network.isReady=false
+offline.performBinding(.attack);offline.performBinding(.jump)
+check(offline.events.isEmpty && offline.renderer?.jumps==0,"offline gameplay blocked by actual computed readiness")
+offline.performBinding(.pause)
+check(offline.events==["pause"],"offline player can still open game menu")
+offline.events=[];offline.pressesBegan([UIPress(26)],with:nil)
+check(offline.heldKeys.isEmpty,"offline keyboard movement not latched")
+offline.network.isReady=true;offline.pressesBegan([UIPress(26)],with:nil)
+check(!offline.heldKeys.isEmpty,"fresh ready keyboard movement resumes")
+offline.presentedViewController=1;offline.performBinding(.pause)
+check(offline.events.isEmpty,"offline exception cannot open nested pause over modal")
 let h=Harness()
 h.performBinding(.jump);h.performBinding(.enter);h.performBinding(.pause)
 check(h.renderer?.jumps==1 && h.events==["enter/drop","pause"],"actual VC dispatch targets")
-h.acceptsHeldInput=false;h.performBinding(.attack)
+h.presentedViewController=1;h.performBinding(.attack)
 check(h.events.count==2,"actual dispatch suppresses overlay/background input")
-h.acceptsHeldInput=true
+h.presentedViewController=nil
 h.gameplay.state=["weaponInventory":["weapons":[["id":25,"slot":3],["id":0,"slot":0],["id":22,"slot":2]]]]
 h.performBinding(.weaponNext);h.performBinding(.weaponNext);h.performBinding(.weaponPrevious)
 check(h.gameplay.requests.count==1,"actual VC serializes equip HTTP calls")

@@ -17,6 +17,8 @@ jobs:
           python-version: '3.11'
       - run: python3 check_public_source.py
       - run: python3 smoke_public_source.py
+      - run: python3 smoke_de_menu_import.py
+      - run: python3 smoke_native_project.py
       - run: python3 smoke_host.py
       - run: node smoke_discord.js
       - run: node smoke_inventory_ack.js

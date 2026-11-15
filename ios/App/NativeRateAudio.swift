@@ -15,6 +15,11 @@ final class NativeRateAudio {
     private var buffers: [String:AVAudioPCMBuffer] = [:]
     private var voices: [UUID:Voice] = [:]
     private var timer: DispatchSourceTimer?
+    /// Preferences attenuate the complete graph once; source/voice gains and
+    /// playback clocks retain the original defaults and current envelopes.
+    var outputGain:Float=1 {
+        didSet {outputGain=outputGain.isFinite ? min(1,max(0,outputGain)):1;engine.mainMixerNode.outputVolume=outputGain}
+    }
     init(engine: AVAudioEngine = AVAudioEngine()) { self.engine = engine }
     deinit { timer?.cancel();engine.stop() }
 

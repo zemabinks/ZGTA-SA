@@ -7,6 +7,8 @@ final class NativePausePanel: UIViewController {
     var cameraName: (() -> String)?
     var onCamera: (() -> Void)?
     var onJobs: (() -> Void)?
+    var onMap: (() -> Void)?
+    var onOptions: (() -> Void)?
     var onAnimations: (() -> Void)?
     var onRadio: (() -> Void)?
     var onFlightGear: (() -> Void)?
@@ -89,6 +91,8 @@ final class NativePausePanel: UIViewController {
         }
         _ = button("RESUME") { [weak self] in self?.dismiss(animated:true) }
         _ = button("JOBS / GARAGE") { [weak self] in self?.dismiss(animated:true,completion:self?.onJobs) }
+        if onMap != nil { _ = button("MAP") { [weak self] in self?.dismiss(animated:true,completion:self?.onMap) } }
+        if onOptions != nil { _ = button("OPTIONS") { [weak self] in self?.dismiss(animated:true,completion:self?.onOptions) } }
         _ = button("PROJECT SOURCE · AGPL") {
             if let url = URL(string:"https://github.com/zemabinks/ZGTA-SA") {
                 UIApplication.shared.open(url)

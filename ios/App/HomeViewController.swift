@@ -2,12 +2,17 @@ import UIKit
 import Security
 import GameController
 
-final class HomeViewController: UIViewController, UITextFieldDelegate {
+final class HomeViewController: NativeDEPanelViewController, UITextFieldDelegate {
     private let address = UITextField()
     private let code = UITextField()
     private let status = UILabel()
     private let play = UIButton(type: .system)
     private var checking = false
+    private var connection:NativeMenuProfileClient?
+    private var active=false
+
+    init() {super.init(title:"MULTIPLAYER")}
+    required init?(coder:NSCoder) {fatalError("Programmatic menu")}
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -20,108 +25,36 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
     }
 
     private func buildLayout() {
-        let art = UIImageView(image: UIImage(named: "SoloCard"))
-        art.contentMode = .scaleAspectFill
-        art.clipsToBounds = true
-        art.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(art)
-        let shade = UIView()
-        shade.backgroundColor = UIColor.black.withAlphaComponent(0.54)
-        shade.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(shade)
-        NSLayoutConstraint.activate([art.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                                     art.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                                     art.topAnchor.constraint(equalTo: view.topAnchor),
-                                     art.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-                                     shade.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                                     shade.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                                     shade.topAnchor.constraint(equalTo: view.topAnchor),
-                                     shade.bottomAnchor.constraint(equalTo: view.bottomAnchor)])
-
-        let scroll = NativeMenuScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(scroll)
-        let content = scroll.column
-        content.axis = .vertical
-        content.spacing = 8
-        let header = UIView()
-        header.backgroundColor = .white
-        let title = label("CONNECT TO YOUR MAC", size: 26, color: .black, bold: true)
-        title.translatesAutoresizingMaskIntoConstraints = false
-        title.numberOfLines = 1
-        title.adjustsFontSizeToFitWidth = true
-        title.minimumScaleFactor = 0.6
-        header.addSubview(title)
-        let back = UIButton(type: .system)
-        back.setTitle("BACK", for: .normal)
-        back.setTitleColor(.black, for: .normal)
-        back.titleLabel?.font = .systemFont(ofSize: 19, weight: .black, width: .condensed)
-        back.translatesAutoresizingMaskIntoConstraints = false
-        back.addTarget(self, action: #selector(close), for: .touchUpInside)
-        header.addSubview(back)
-        NSLayoutConstraint.activate([header.heightAnchor.constraint(equalToConstant: 55),
-                                     title.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 16),
-                                     title.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-                                     title.trailingAnchor.constraint(lessThanOrEqualTo: back.leadingAnchor, constant: -8),
-                                     back.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -15),
-                                     back.centerYAnchor.constraint(equalTo: header.centerYAnchor)])
-        content.addArrangedSubview(header)
-        let rule = UIView()
-        rule.backgroundColor = UIColor(red: 0.17, green: 0.43, blue: 0.84, alpha: 1)
-        rule.heightAnchor.constraint(equalToConstant: 5).isActive = true
-        content.addArrangedSubview(rule)
-        let panel = UIView()
-        panel.backgroundColor = UIColor.black.withAlphaComponent(0.83)
-        content.addArrangedSubview(panel)
-        let fields = UIStackView()
-        fields.axis = .vertical
-        fields.spacing = 8
-        fields.translatesAutoresizingMaskIntoConstraints = false
-        panel.addSubview(fields)
-        NSLayoutConstraint.activate([fields.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: 18),
-                                     fields.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -18),
-                                     fields.topAnchor.constraint(equalTo: panel.topAnchor, constant: 12),
-                                     fields.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -12)])
-        fields.addArrangedSubview(label("PLAY ON THE SAME WI-FI. DISCORD IS OPTIONAL.", size: 15, color: .white))
-        let row = UIStackView()
-        row.axis = .horizontal
-        row.spacing = 8
-        row.distribution = .fill
-        configureField(address, placeholder: "192.168.1.10:8766", secure: false)
-        address.keyboardType = .URL
-        address.textContentType = .URL
-        configureField(code, placeholder: "Join code, if needed", secure: true)
-        let addressColumn = UIStackView(arrangedSubviews: [
-            label("SERVER ADDRESS", size: 12, color: UIColor.white.withAlphaComponent(0.74), bold: true), address
-        ])
-        let codeColumn = UIStackView(arrangedSubviews: [
-            label("JOIN CODE", size: 12, color: UIColor.white.withAlphaComponent(0.74), bold: true), code
-        ])
-        for column in [addressColumn, codeColumn] {
-            column.axis = .vertical
-            column.spacing = 6
-            row.addArrangedSubview(column)
+        let scroll=NativeMenuScrollView()
+        scroll.keyboardDismissMode = .interactive
+        scroll.translatesAutoresizingMaskIntoConstraints=false;contentView.addSubview(scroll)
+        let content=scroll.column;content.axis = .vertical;content.spacing=12
+        content.addArrangedSubview(label("CONNECT TO YOUR SERVER. DISCORD SIGN IN IS OPTIONAL.",size:16,color:.white))
+        configureField(address,placeholder:"192.168.1.10:8766",secure:false)
+        address.keyboardType = .URL;address.textContentType = .URL
+        configureField(code,placeholder:"Join code, if required",secure:true)
+        address.accessibilityLabel="Server address";code.accessibilityLabel="Join code"
+        let row=UIStackView();row.axis = .horizontal;row.spacing=12;row.distribution = .fill
+        for (name,field) in [("SERVER ADDRESS",address),("JOIN CODE",code)] {
+            let column=UIStackView(arrangedSubviews:[label(name,size:15,color:.white),field])
+            column.axis = .vertical;column.spacing=6;row.addArrangedSubview(column)
+            registerMenuControl(field,activate:{field.becomeFirstResponder()})
         }
-        address.accessibilityLabel = "Server address"
-        code.accessibilityLabel = "Join code"
-        fields.addArrangedSubview(row)
-        address.widthAnchor.constraint(equalTo: row.widthAnchor, multiplier: 0.6, constant: -5).isActive = true
-        play.setTitle("PLAY ON THIS SERVER", for: .normal)
-        play.setTitleColor(.black, for: .normal)
-        play.titleLabel?.font = .systemFont(ofSize: 22, weight: .black, width: .condensed)
-        play.backgroundColor = .white
-        play.heightAnchor.constraint(equalToConstant: 48).isActive = true
-        fields.addArrangedSubview(play)
-        status.text = "ENTER THE ADDRESS SHOWN BY ZGTA:SA SHARE ON YOUR MAC."
-        status.textColor = UIColor.white.withAlphaComponent(0.75)
-        status.font = .systemFont(ofSize: 12, weight: .medium)
-        status.numberOfLines = 2
-        fields.addArrangedSubview(status)
+        address.widthAnchor.constraint(equalTo:row.widthAnchor,multiplier:0.6,constant:-6).isActive=true
+        content.addArrangedSubview(row)
+        play.setTitle("PLAY ON THIS SERVER",for:.normal);play.setTitleColor(.black,for:.normal)
+        play.titleLabel?.font=menuFont(size:27);play.backgroundColor = .white
+        play.heightAnchor.constraint(greaterThanOrEqualToConstant:48).isActive=true
+        registerMenuControl(play);content.addArrangedSubview(play)
+        status.text="ENTER THE ADDRESS SHOWN BY ZGTA:SA SHARE ON YOUR MAC."
+        status.textColor=UIColor.white.withAlphaComponent(0.8);status.font=bodyFont(size:15);status.numberOfLines=0
+        status.accessibilityTraits.insert(.updatesFrequently);content.addArrangedSubview(status)
+        let preferredBottom=scroll.bottomAnchor.constraint(equalTo:contentView.bottomAnchor);preferredBottom.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            scroll.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+            scroll.leadingAnchor.constraint(equalTo:contentView.leadingAnchor),scroll.trailingAnchor.constraint(equalTo:contentView.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo:contentView.topAnchor),preferredBottom,
+            scroll.bottomAnchor.constraint(lessThanOrEqualTo:contentView.bottomAnchor),
+            scroll.bottomAnchor.constraint(lessThanOrEqualTo:view.keyboardLayoutGuide.topAnchor)
         ])
     }
 
@@ -129,7 +62,7 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
         let result = UILabel()
         result.text = text
         result.textColor = color
-        result.font = .systemFont(ofSize: size, weight: bold ? .black : .regular, width: .condensed)
+        result.font = bodyFont(size:size)
         result.numberOfLines = 0
         return result
     }
@@ -141,7 +74,7 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
         field.textColor = .white
         field.tintColor = .white
         field.backgroundColor = UIColor.white.withAlphaComponent(0.12)
-        field.font = .systemFont(ofSize: 17)
+        field.font = bodyFont(size:17)
         field.autocapitalizationType = .none
         field.autocorrectionType = .no
         field.smartDashesType = .no
@@ -159,87 +92,40 @@ final class HomeViewController: UIViewController, UITextFieldDelegate {
         return true
     }
 
-    @objc private func close() { dismiss(animated: true) }
-
+    override func viewWillAppear(_ animated:Bool) {super.viewWillAppear(animated);active=true}
+    override func viewWillDisappear(_ animated:Bool) {
+        active=false;connection?.cancelPendingRequests();checking=false;play.isEnabled=true
+        view.endEditing(true);super.viewWillDisappear(animated)
+    }
     @objc private func connect() {
-        guard !checking else { return }
-        guard let server = ServerAddress(address.text ?? "") else {
-            status.text = "ENTER A VALID SERVER ADDRESS."
-            status.textColor = .systemOrange
-            return
+        guard active,!checking else{return}
+        guard let server=ServerAddress(address.text ?? "") else{
+            status.text="ENTER A VALID SERVER ADDRESS.";status.textColor = .systemOrange;return
         }
-        LocalGuestSession.restore(for: server)
-        checking = true
-        play.isEnabled = false
-        status.text = "CHECKING SERVER…"
-        status.textColor = .white
-        let joinCode = code.text ?? ""
-        var request = URLRequest(url: server.path("api/local/status"))
-        request.timeoutInterval = 8
-        URLSession.shared.dataTask(with: request) { [weak self] _, response, error in
-            guard let self else { return }
-            let http = response as? HTTPURLResponse
-            if error == nil, http?.statusCode == 200 {
-                self.authenticate(server)
-            } else if http?.statusCode == 401, !joinCode.isEmpty {
-                var join = URLRequest(url: server.path("api/local/join"))
-                join.httpMethod = "POST"
-                join.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                join.httpBody = try? JSONSerialization.data(withJSONObject: ["code": joinCode])
-                URLSession.shared.dataTask(with: join) { [weak self] _, joinResponse, joinError in
-                    guard let self else { return }
-                    if joinError == nil, (joinResponse as? HTTPURLResponse)?.statusCode == 200 {
-                        self.authenticate(server)
-                    } else {
-                        self.finish(error: "JOIN CODE WAS REJECTED")
-                    }
-                }.resume()
-            } else {
-                self.finish(error: http?.statusCode == 401
-                            ? "ENTER THE JOIN CODE SHOWN ON YOUR MAC"
-                            : "COULD NOT REACH THE MAC GAME SERVER")
+        checking=true;play.isEnabled=false;status.text="CONNECTING…";status.textColor = .white
+        view.endEditing(true)
+        let client=NativeMenuProfileClient(server:server);connection=client
+        client.connect(joinCode:code.text ?? "") { [weak self,weak client] result in
+            guard let self,self.active,self.connection === client,self.presentedViewController==nil else{return}
+            self.checking=false;self.play.isEnabled=true
+            switch result {
+            case .failure(let error):self.status.text=error.message;self.status.textColor = .systemOrange
+            case .success:
+                UserDefaults.standard.set(server.url.absoluteString,forKey:"serverAddress")
+                self.status.text="CONNECTED. LOADING NATIVE GAME…"
+                let game=NativeGameViewController(server:server);game.modalPresentationStyle = .fullScreen
+                NativeMenuKeyState.reset()
+                self.present(game,animated:!self.menuMotionReduced)
             }
-        }.resume()
-    }
-
-    private func authenticate(_ server: ServerAddress) {
-        URLSession.shared.dataTask(with: server.path("api/auth/me")) { [weak self] _, response, error in
-            guard let self else { return }
-            guard error == nil, (response as? HTTPURLResponse)?.statusCode == 200 else {
-                self.finish(error: "LOCAL PLAYER LOGIN FAILED")
-                return
-            }
-            if let response = response as? HTTPURLResponse {
-                LocalGuestSession.remember(response, for: server)
-            }
-            DispatchQueue.main.async {
-                self.checking = false
-                self.play.isEnabled = true
-                UserDefaults.standard.set(server.url.absoluteString, forKey: "serverAddress")
-                self.view.endEditing(true)
-                self.status.text = "CONNECTED. LOADING NATIVE GAME…"
-                self.status.textColor = .white
-                let game = NativeGameViewController(server: server)
-                game.modalPresentationStyle = .fullScreen
-                self.present(game, animated: true)
-            }
-        }.resume()
-    }
-
-    private func finish(error: String) {
-        DispatchQueue.main.async {
-            self.checking = false
-            self.play.isEnabled = true
-            self.status.text = error
-            self.status.textColor = .systemOrange
         }
     }
+
 }
 
 /// HTTP cookies are shared between ports and session cookies can disappear on
 /// app restart. Keep each Mac server's anonymous player token in the Keychain.
 /// An unsigned Simulator build uses app preferences when Keychain is unavailable.
-private enum LocalGuestSession {
+enum LocalGuestSession {
     private static let service = "com.zema.zgtasa.localGuest"
     private static let cookieName = "zgta_local"
 

@@ -113,3 +113,9 @@ turn-mass value differs only in decimal rounding. These are data comparisons,
 not evidence that the independent simulation reproduces the original engine.
 All reference images, binaries, extracted data and disassembly stay local.
 Original runtime behavior and the forthcoming iOS reference remain open gates.
+
+Core84 adds fixed-step-owned foot velocity and explicit queued-intent cancellation
+(see CORE_FIXED_STEP_VELOCITY_AUDIT.md), plus fresh-baseline connection recovery
+(see CORE_CONNECTION_RECOVERY.md). These fix specific demonstrated transition
+failures. Passing regression counts do not upgrade the remaining retail-runtime
+rows to verified1:1 parity.

@@ -206,3 +206,13 @@ final class NativeModalKeyHandoff {
     func press()->Bool {edge.update(pressed:true)}
     func release() {_=edge.update(pressed:false)}
 }
+
+/// Raw-HID ownership crosses UIKit menu/game responders. A release delivered
+/// to the game must clear the same latch that suppressed menu auto-repeat.
+enum NativeMenuKeyLatch {
+    private static var held: Set<Int> = []
+    static func press(_ key: Int) -> Bool { held.insert(key).inserted }
+    static func isHeld(_ key: Int) -> Bool { held.contains(key) }
+    static func release(_ key: Int) { held.remove(key) }
+    static func reset() { held.removeAll() }
+}

@@ -5,7 +5,7 @@ San Andreas. Players can join as guests; Discord account linking is optional.
 Each host runs its own world, accounts, economy and saved progress.
 
 **Start here: [Hosting guide](HOSTING.md)** · [Native iOS builds](NATIVE_BUILD.md) ·
-[Feature coverage](FEATURE_MATRIX.md) · [AGPL license](LICENSE)
+[Native menu](NATIVE_DE_MENU.md) · [Feature coverage](FEATURE_MATRIX.md) · [AGPL license](LICENSE)
 
 ## Run a server
 

@@ -80,7 +80,18 @@ struct RemoteVehicle {
 /// Browser heading/roll are Three Y-yaw/Z-roll. GTA native controls use the
 /// opposite signs for those two angles; convert once at this wire boundary.
 final class NativeMultiplayerClient {
+    typealias ConnectionState = NativeConnectionRecovery.State
     private let server: ServerAddress
+    private let session: URLSession
+    private let clock: () -> Double
+    private let automaticRecoveryTimer: Bool
+    private var recovery = NativeConnectionRecovery()
+    private var recoveryTimer: DispatchSourceTimer?
+    private var transportGeneration: UInt64 = 0
+    private var lastPing: Double = -.infinity
+    private(set) var state: ConnectionState = .stopped
+    var isReady: Bool { recovery.state == .ready && socket != nil }
+    var onConnectionState: ((ConnectionState) -> Void)?
     private var socket: URLSessionWebSocketTask?
     private(set) var players: [String: RemotePlayer] = [:]
     private(set) var vehicles: [String: RemoteVehicle] = [:]
@@ -120,37 +131,99 @@ final class NativeMultiplayerClient {
     var onFlightGear: ((Bool,Bool) -> Void)?
     var onChat: (([String]) -> Void)?
 
-    init(server: ServerAddress) { self.server = server }
+    init(server: ServerAddress, session: URLSession = .shared,
+         clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
+         automaticRecoveryTimer: Bool = true) {
+        self.server = server; self.session = session; self.clock = clock
+        self.automaticRecoveryTimer = automaticRecoveryTimer
+    }
+    deinit { recoveryTimer?.cancel(); socket?.cancel(with: .normalClosure, reason: nil) }
 
     func connect() {
         resynchronizingInventory = false
-        openSocket()
+        startRecoveryTimer()
+        run(recovery.start(now: clock()))
     }
-    private func openSocket() {
+    func disconnect() {
+        recovery.stop(); resynchronizingInventory = false
+        recoveryTimer?.cancel(); recoveryTimer = nil
+        closeSocket(); publishState()
+    }
+    func setApplicationActive(_ active: Bool) {
+        recovery.setActive(active, now: clock())
+        if active { lastPing = -.infinity; tickConnection(now: clock()) }
+    }
+    func tickConnection(now: Double) {
+        run(recovery.tick(now: now))
+        if recovery.active, socket != nil, now.isFinite, now-lastPing >= 2 {
+            lastPing = now
+            send(["t": "ping", "c": now * 1000], allowBeforeReady: true)
+        }
+    }
+    private func startRecoveryTimer() {
+        guard automaticRecoveryTimer, recoveryTimer == nil else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now() + 0.25, repeating: 0.25)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }; self.tickConnection(now: self.clock())
+        }
+        recoveryTimer = timer; timer.resume()
+    }
+    private func publishState() {
+        guard state != recovery.state else { return }
+        state = recovery.state; onConnectionState?(state)
+        if state == .ready { onStatus?("ONLINE AS \(localName.uppercased())") }
+    }
+    private func run(_ action: NativeConnectionRecovery.Action?) {
+        publishState()
+        switch action {
+        case .open(let generation): openSocket(generation: generation)
+        case .timeout(let generation): failTransport(generation: generation, reason: "CONNECTION TIMED OUT — RECONNECTING")
+        case nil: break
+        }
+    }
+    private func openSocket(generation: UInt64) {
+        guard recovery.desired, recovery.hasTransport, recovery.generation == generation else { return }
         closeSocket()
-        guard var parts = URLComponents(url: server.path("api/world/live"), resolvingAgainstBaseURL: false) else { return }
+        guard recovery.desired, recovery.hasTransport, recovery.generation == generation else { return }
+        transportGeneration = generation; lastPing = -.infinity
+        guard var parts = URLComponents(url: server.path("api/world/live"), resolvingAgainstBaseURL: false) else {
+            failTransport(generation: generation, reason: "INVALID MULTIPLAYER ADDRESS"); return
+        }
         parts.scheme = server.url.scheme == "https" ? "wss" : "ws"
-        guard let url = parts.url else { return }
-        let task = URLSession.shared.webSocketTask(with: url)
+        guard let url = parts.url else { failTransport(generation: generation, reason: "INVALID MULTIPLAYER ADDRESS"); return }
+        let task = session.webSocketTask(with: url)
         socket = task; task.resume()
-        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1])
+        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1], allowBeforeReady: true)
         receive()
     }
     private func closeSocket() {
         let old = socket; socket = nil
         old?.cancel(with: .normalClosure, reason: nil)
-        shotSequence.reset();streamShotClaims.reset(); announcedInventoryConnection = nil; onInventoryConnection?(nil)
+        shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
+        onInventoryConnection?(nil)
+        // A fresh peer has a fresh row/clock/shot namespace. Never carry a
+        // previous driver, remote actor, projectile or queued command into it.
+        players.removeAll(); vehicles.removeAll(); playerOrder.removeAll(); vehicleOrder.removeAll()
+        remoteAnimationTimes.removeAll(); pendingSays.removeAll(); shots = 0; positionPackets = 0
+        lastChatSequence = 0; chatMessages.removeAll(); serverTimeOffsetMilliseconds = 0
+        onPlayers?([]); onVehicles?([]); onProjectiles?([]); onPresence?(0, []); onChat?([])
     }
-    func disconnect() { resynchronizingInventory = false; closeSocket() }
+    private func failTransport(generation: UInt64, reason: String) {
+        guard recovery.failed(generation: generation, now: clock()) else { return }
+        resynchronizingInventory = false
+        closeSocket(); publishState(); onStatus?("MULTIPLAYER: \(reason)")
+    }
 
-    /// A reconnect provides a fresh authoritative baseline even when a failed
-    /// local write may or may not have reached the old server connection.
+    /// Uncertain writes are settled by a new authoritative peer, never replayed.
     func requestInventoryResync() {
-        guard !resynchronizingInventory else { return }
-        resynchronizingInventory = true; openSocket()
+        guard recovery.desired, !resynchronizingInventory else { return }
+        resynchronizingInventory = true
+        let action = recovery.restart(now: clock())
+        closeSocket(); run(action)
     }
     func reserveShot() -> NativeShotTicket? {
-        guard socket != nil, health > 0, !passive else { return nil }
+        guard isReady, socket != nil, health > 0, !passive else { return nil }
         return shotSequence.reserve()
     }
 
@@ -165,6 +238,7 @@ final class NativeMultiplayerClient {
                       movement:Double? = nil,aim:Double? = nil,action:Int = 0,
                       velocity:SIMD3<Float> = .zero,angularVelocity:SIMD3<Float> = .zero,
                       kit:[Double]? = nil,paused:Bool = false) {
+        guard isReady else { return }
         func rounded(_ value:Double)->Double {value.isFinite ? floor(value*100+0.5)/100:0}
         let motion:[String:Any] = ["vx":rounded(Double(velocity.x)),"vy":rounded(Double(velocity.y)),"vz":rounded(Double(velocity.z)),
             "wx":rounded(Double(angularVelocity.x)),"wy":rounded(Double(angularVelocity.y)),"wz":rounded(Double(angularVelocity.z)),
@@ -214,6 +288,7 @@ final class NativeMultiplayerClient {
     }
 
     func sendChat(_ line: String) {
+        guard isReady else { onStatus?("OFFLINE — MESSAGE NOT SENT"); return }
         let trimmed = String(line.trimmingCharacters(in: .whitespacesAndNewlines).prefix(240))
         guard !trimmed.isEmpty else { return }
         pendingSays.append(trimmed)
@@ -252,13 +327,13 @@ final class NativeMultiplayerClient {
     /// Public strike counter animates remote misses as well as damaging hits.
     /// It is independent of gun ammunition sequences and victim selection.
     @discardableResult func recordMeleeStrike(weapon: Int) -> Bool {
-        guard socket != nil,health>0,!passive,(0...15).contains(weapon),inventoryConnection != nil else{return false}
+        guard isReady,socket != nil,health>0,!passive,(0...15).contains(weapon),inventoryConnection != nil else{return false}
         shots += 1
         return true
     }
 
     @discardableResult func sendMeleeHit(to player: String, weapon: Int = 0) -> Bool {
-        guard socket != nil, health > 0, !passive, (0...15).contains(weapon),
+        guard isReady,socket != nil, health > 0, !passive, (0...15).contains(weapon),
               let connection = inventoryConnection else { return false }
         send(["t": "hit", "to": player, "w": weapon, "c": connection])
         return true
@@ -271,7 +346,7 @@ final class NativeMultiplayerClient {
 
     @discardableResult func sendWeaponShot(weapon: Int, from origin: SIMD3<Float>, to hit: SIMD3<Float>,
                         player: String?, ticket: NativeShotTicket? = nil,streamPlayers:[String]=[]) -> Bool {
-        guard let task = socket, health > 0, !passive, let ticket,
+        guard isReady,let task = socket, health > 0, !passive, let ticket,
               ticket.connection == inventoryConnection, shotSequence.claim(ticket) else { return false }
         let effectTargets=NativeStreamShotClaims.normalized(streamPlayers)
         shots += 1
@@ -284,7 +359,7 @@ final class NativeMultiplayerClient {
         task.send(.string(text)) { [weak self] error in
             DispatchQueue.main.async {
                 guard let self, self.socket === task, self.inventoryConnection == ticket.connection else { return }
-                if error != nil { self.requestInventoryResync(); return }
+                if let error { self.failTransport(generation: self.transportGeneration, reason: error.localizedDescription); return }
                 if NativeStreamShotTargets.weapons.contains(weapon) {
                     let targets=self.streamShotClaims.take(weapon:weapon,connection:ticket.connection,players:effectTargets,
                         milliseconds:ProcessInfo.processInfo.systemUptime*1000)
@@ -319,6 +394,7 @@ final class NativeMultiplayerClient {
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
                   vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "") {
+        guard isReady else { return }
         var parked=vehicle;parked.position=position;parked.heading=heading;parked.pitch=pitch;parked.roll=roll
         if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
         parked.health=vehicleHealth;parked.damage=vehicleDamage;vehicles[vehicle.id]=parked
@@ -332,27 +408,28 @@ final class NativeMultiplayerClient {
                          "pitch": Double(pitch), "roll": -Double(roll), "health": vehicleHealth,"damage":vehicleDamage]])
     }
 
-    private func send(_ object: [String: Any]) {
+    private func send(_ object: [String: Any], allowBeforeReady: Bool = false) {
+        guard isReady || allowBeforeReady else { return }
         guard let task = socket, let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else { return }
         task.send(.string(text)) { [weak self] error in
             guard let error else { return }
             DispatchQueue.main.async {
                 guard let self, self.socket === task else { return }
-                self.onStatus?("MULTIPLAYER: \(error.localizedDescription)")
+                self.failTransport(generation: self.transportGeneration, reason: error.localizedDescription)
             }
         }
     }
 
     private func receive() {
         guard let task = socket else { return }
+        let generation = transportGeneration
         task.receive { [weak self] result in
             DispatchQueue.main.async {
-                guard let self, self.socket === task else { return }
+                guard let self, self.socket === task, self.transportGeneration == generation else { return }
                 switch result {
                 case .failure(let error):
-                    self.closeSocket()
-                    self.onStatus?("MULTIPLAYER: \(error.localizedDescription)")
+                    self.failTransport(generation: self.transportGeneration, reason: error.localizedDescription)
                 case .success(let message):
                     let data: Data
                     switch message {
@@ -360,15 +437,21 @@ final class NativeMultiplayerClient {
                     case .data(let bytes): data = bytes
                     @unknown default: return
                     }
-                    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.handle(object) }
+                    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.handle(object, generation: generation) }
+                    guard self.socket === task, self.transportGeneration == generation else { return }
                     self.receive()
                 }
             }
         }
     }
 
-    private func handle(_ message: [String: Any]) {
+    private func handle(_ message: [String: Any], generation: UInt64) {
         switch message["t"] as? String {
+        case "pong":
+            if let echoed = (message["c"] as? NSNumber)?.doubleValue, echoed.isFinite,
+               let time = (message["s"] as? NSNumber)?.doubleValue, time.isFinite {
+                recovery.received(generation: generation, now: clock())
+            }
         case "projectiles":
             if let rows = message["rows"] as? [[String: Any]] { onProjectiles?(rows) }
         case "projectile":
@@ -380,16 +463,17 @@ final class NativeMultiplayerClient {
             if let weapon = message["w"] as? Int { onWeaponSound?(weapon) }
         case "inventory":
             if let state = message["state"] as? [String: Any], let ack = NativeInventoryAcknowledgement(state),
-               ack.connection == inventoryConnection {
+               ack.connection == inventoryConnection, NativeConnectionRecovery.validInventory(state) {
                 shotSequence.observeAcknowledgement(ack.processedShot)
                 resynchronizingInventory = false; onInventory?(state)
+                recovery.received(.inventory, generation: generation, now: clock()); publishState()
             }
         case "hello":
-            if message["inventoryAck"] as? Int == 1, let nonce = message["inventoryConnection"] as? String,
-               shotSequence.negotiate(nonce) {
-                if announcedInventoryConnection != nonce { announcedInventoryConnection = nonce; onInventoryConnection?(nonce) }
+            guard message["inventoryAck"] as? Int == 1, let nonce = message["inventoryConnection"] as? String,
+                  shotSequence.negotiate(nonce) else {
+                onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING"); return
             }
-            else { onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING") }
+            if announcedInventoryConnection != nonce { announcedInventoryConnection = nonce; onInventoryConnection?(nonce) }
             if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
             if let spot = message["spot"] as? [NSNumber], spot.count >= 3 {
                 onTeleport?(SIMD3(spot[0].floatValue,spot[1].floatValue,spot[2].floatValue),
@@ -404,14 +488,18 @@ final class NativeMultiplayerClient {
                 armour = max(0, min(100, life[1].intValue))
                 onVitals?(health, armour)
             }
-            onStatus?("CONNECTED TO LOCAL WORLD")
-            send(["t": "board"])
+            recovery.received(.hello, generation: generation, now: clock()); publishState()
+            send(["t": "board"], allowBeforeReady: true)
         case "weather":
             onEnvironment?((message["weather"] as? NSNumber)?.intValue ?? (message["w"] as? NSNumber)?.intValue, nil, nil)
         case "day":
             onEnvironment?(nil, (message["shift"] as? NSNumber)?.doubleValue,
                            (message["hold"] as? NSNumber)?.doubleValue)
         case "all":
+            guard let name = message["you"] as? String, !name.isEmpty,
+                  message["cars"] is [[Any]], message["vehicles"] is [[Any]],
+                  message["chat"] is [[Any]], let amount = (message["cash"] as? NSNumber)?.doubleValue,
+                  amount.isFinite else { return }
             localName = (message["you"] as? String) ?? localName
             cash = (message["cash"] as? Int) ?? cash
             if let rows = message["chat"] as? [[Any]] { receiveChat(rows) }
@@ -425,7 +513,7 @@ final class NativeMultiplayerClient {
                 }
                 onVehicles?(orderedVehicles)
             }
-            onStatus?("ONLINE AS \(localName.uppercased())")
+            recovery.received(.world, generation: generation, now: clock()); publishState()
         case "cars": updateRows(message["c"])
         case "gone":
             if let id = message["id"] as? String {

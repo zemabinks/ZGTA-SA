@@ -49,6 +49,10 @@ final class NativeVehicleRadio {
     }
     private var preferenceKey: String { "ZGTA.radio.\(server.path("").absoluteString)" }
 
+    func applySettings(_ snapshot:NativeAppSettings.Snapshot) {
+        volume=snapshot.validated().effectiveRadioGain
+    }
+
     init(server: ServerAddress) {
         self.server = server
         if let saved = UserDefaults.standard.object(forKey: preferenceKey) as? Int,

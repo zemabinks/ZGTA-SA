@@ -10,6 +10,8 @@ final class NativeGameViewController: UIViewController {
     private let weapons: NativeWeaponState
     private let audio: NativeGameAudio
     private let renderer: NativeWorldRenderer?
+    private let appSettings: NativeAppSettings
+    private var settingsObserver: NSObjectProtocol?
     private let status = NativeTransientStatusLabel()
     private let players = NativeHUDTextLabel()
     private let objective = NativeHUDTextLabel()
@@ -83,13 +85,24 @@ final class NativeGameViewController: UIViewController {
     private var contextActionShown:String?
     private var autoReloadWeapon:Int?
     private var heldKeys: Set<UIKeyboardHIDUsage> = []
-    private var acceptsHeldInput: Bool { applicationActive && viewIfLoaded?.window != nil && presentedViewController == nil }
+    private var canNavigateMenus:Bool { applicationActive && viewIfLoaded?.window != nil && presentedViewController == nil }
+    private var acceptsHeldInput: Bool { canNavigateMenus && network.isReady }
     override var canBecomeFirstResponder: Bool { true }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         applicationActive = UIApplication.shared.applicationState == .active
+        applyAppSettings()
+        network.setApplicationActive(applicationActive)
         becomeFirstResponder()
+    }
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        renderer?.updateSettingsViewport()
+    }
+    deinit {
+        if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
+        displayLink?.invalidate();network.disconnect();gameplay.setConnectionReady(false)
     }
     override func present(_ viewControllerToPresent: UIViewController, animated flag: Bool, completion: (() -> Void)? = nil) {
         resetControls()
@@ -100,10 +113,10 @@ final class NativeGameViewController: UIViewController {
     }
     @objc private func applicationResigned() {
         pauseEscapeHandoff?.release()
-        applicationActive = false; frameClock.reset();renderer?.resetDisplayClock(); resetControls()
+        applicationActive = false;network.setApplicationActive(false); frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
     @objc private func applicationReturned() {
-        applicationActive = true; frameClock.reset();renderer?.resetDisplayClock(); resetControls()
+        applicationActive = true;network.setApplicationActive(true); frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
     private func resetControls() {
         heldKeys.removeAll(); stick.reset(); lookStick.reset(); controllerGate.reset()
@@ -127,14 +140,19 @@ final class NativeGameViewController: UIViewController {
         audio.stream(weapon: 0, active: false)
     }
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        let unhandled=Set(presses.filter{$0.key == nil})
+        defer {if !unhandled.isEmpty {super.pressesBegan(unhandled,with:event)}}
         guard applicationActive, presentedViewController == nil else { return }
         if presses.contains(where:{$0.key?.keyCode == .keyboardEscape}) {
+            guard !NativeMenuKeyLatch.isHeld(Int(UIKeyboardHIDUsage.keyboardEscape.rawValue)) else { return }
             if heldKeys.insert(.keyboardEscape).inserted {performBinding(.pause)}
-            super.pressesBegan(presses,with:event);return
+            return
         }
+        guard network.isReady else{return}
         var firstKeys:[UIKeyboardHIDUsage]=[]
         for press in presses {
             guard let code=press.key?.keyCode else {continue}
+            guard !NativeMenuKeyLatch.isHeld(Int(code.rawValue)) else { continue }
             if heldKeys.insert(code).inserted {firstKeys.append(code)}
         }
         // All simultaneous modifiers must be visible before jump/enter edges.
@@ -144,7 +162,8 @@ final class NativeGameViewController: UIViewController {
             if let action=NativeGameBindings.keyAction(Int(code.rawValue),context:context) {performBinding(action)}
             if presentedViewController != nil {break}
         }
-        super.pressesBegan(presses, with: event)
+        // Keyboard input belongs to the game. Forwarding a handled key can
+        // invoke the presenting connection/menu controller behind this screen.
     }
     private var bindingContext:NativeGameBindings.Context {
         var mode:NativeGameBindings.Mode = .foot
@@ -159,6 +178,7 @@ final class NativeGameViewController: UIViewController {
                      melee:canGuard,guarding:canGuard && (touchMeleeGuard || keyboardAim || lastGamepadAim))
     }
     private func performBinding(_ action:NativeGameBindings.Action) {
+        if action == .pause {if canNavigateMenus {openPause()};return}
         guard acceptsHeldInput else{return}
         switch action {
         case .jump:jump()
@@ -174,7 +194,7 @@ final class NativeGameViewController: UIViewController {
         case .chat:openChat()
         case .map:openMap()
         case .animations:openAnimations()
-        case .camera:renderer?.cycleCameraView()
+        case .camera:cycleCameraPreference()
         case .lights:renderer?.vehicleLights.toggle()
         case .gear:toggleGear()
         case .radioPrevious:radio.previous();radioButton.setTitle(radio.stationName,for:.normal)
@@ -206,17 +226,20 @@ final class NativeGameViewController: UIViewController {
         for press in presses {
             if let code=press.key?.keyCode {
                 heldKeys.remove(code)
+                NativeMenuKeyLatch.release(Int(code.rawValue))
                 if code == .keyboardEscape {pauseEscapeHandoff?.release()}
             }
         }
         super.pressesEnded(presses, with: event)
     }
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        NativeMenuKeyLatch.reset()
         pauseEscapeHandoff?.release();resetControls(); super.pressesCancelled(presses, with: event)
     }
 
-    init(server: ServerAddress) {
+    init(server: ServerAddress, settings: NativeAppSettings = .shared) {
         self.server = server
+        self.appSettings = settings
         self.network = NativeMultiplayerClient(server: server)
         self.gameplay = NativeGameplayClient(server: server)
         self.radio = NativeVehicleRadio(server: server)
@@ -248,6 +271,12 @@ final class NativeGameViewController: UIViewController {
             status.text = "METAL IS UNAVAILABLE ON THIS DEVICE"
         }
         installHUD()
+        settingsObserver = NotificationCenter.default.addObserver(forName: NativeAppSettings.didChange,
+            object: nil, queue: .main) { [weak self] notification in
+                guard let self, notification.object as? NativeAppSettings === self.appSettings else { return }
+                self.applyAppSettings()
+            }
+        applyAppSettings()
         audio.prepare()
         renderer?.weatherAudio = audio.weather
         renderer?.onCollision = { [weak self] speed in self?.audio.collision(severity: speed) }
@@ -300,6 +329,7 @@ final class NativeGameViewController: UIViewController {
             return NativeMeleeTargeting.groundTarget(probe:probe,candidates:self.meleeCandidates,
                 visible:renderer.hasClearShot) != nil
         }
+        network.onConnectionState = { [weak self] state in self?.connectionChanged(state) }
         network.onStatus = { [weak self] text in self?.status.text = text }
         network.onPresence = { [weak self] count, names in
             self?.players.text = "\(count) PLAYER\(count == 1 ? "" : "S") ONLINE" +
@@ -383,10 +413,60 @@ final class NativeGameViewController: UIViewController {
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
         link.add(to: .main, forMode: .common)
         displayLink = link
+        applyAppSettings()
+    }
+
+    /// One complete snapshot applies to both display clocks and every live
+    /// presentation owner. Options changes never issue gameplay/server actions.
+    private func applyAppSettings() {
+        guard isViewLoaded else { return }
+        let snapshot = appSettings.snapshot
+        let maximumFPS = (view.window?.screen ?? UIScreen.main).maximumFramesPerSecond
+        let fps = snapshot.effectiveFrameRate(maximum: maximumFPS)
+        renderer?.applySettings(snapshot, maximumFPS: maximumFPS)
+        displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: Float(min(30, fps)),
+            maximum: Float(fps), preferred: Float(fps))
+        gameHUD.radar.isHidden = !snapshot.radarVisible
+        mapButton.isHidden = !snapshot.radarVisible
+        gameHUD.radar.circular = snapshot.radarCircular
+        gameHUD.radar.span = CGFloat(snapshot.radarSpan)
+        gameHUD.radar.showWorldMarkers = snapshot.radarWorldMarkers
+        audio.applySettings(snapshot)
+        radio.applySettings(snapshot)
+    }
+
+    private func cycleCameraPreference() {
+        guard let renderer else { return }
+        renderer.cycleCameraView()
+        appSettings.update {
+            $0.footView = renderer.footCameraView
+            $0.vehicleView = renderer.vehicleCameraView
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        if isBeingDismissed || isMovingFromParent || presentingViewController?.isBeingDismissed == true {stopGame()}
+    }
+    private func connectionChanged(_ state:NativeMultiplayerClient.ConnectionState) {
+        if state == .ready {
+            resetControls();gameplay.setConnectionReady(true)
+            lastNetwork=0;lastGameplay=0;gameplay.refresh()
+            return
+        }
+        gameplay.setConnectionReady(false)
+        for key in heldKeys {_ = NativeMenuKeyLatch.press(Int(key.rawValue))}
+        resetControls();previousAudioPosition=nil;lastAutomaticCheckpoint.removeAll()
+        renderer?.resetMultiplayerSession()
+        currentVehicle=nil;setDrivingControls(false)
+        vehicleButton.setTitle("ENTER CAR",for:.normal);gameHUD.updateVehicle(name:nil,speed:0)
+        gameHUD.radar.target=nil;renderer?.objective=nil
+        radio.stop()
+        players.text=state == .stopped ? "MULTIPLAYER DISCONNECTED":"RECONNECTING TO MULTIPLAYER"
+    }
+
+    private func stopGame() {
+        gameplay.setConnectionReady(false)
         resetControls(); frameClock.reset()
         displayLink?.invalidate()
         network.disconnect()
@@ -664,7 +744,7 @@ final class NativeGameViewController: UIViewController {
         return result
     }
 
-    @objc private func close() { dismiss(animated: true) }
+    @objc private func close() {stopGame();dismiss(animated:true)}
     @objc private func openPause() {
         guard presentedViewController == nil else { return }
         let escapeState=NativeModalKeyHandoff(pressed:heldKeys.contains(.keyboardEscape))
@@ -675,16 +755,24 @@ final class NativeGameViewController: UIViewController {
         panel.controlsHint=NativeGameBindings.legend(bindingContext)
         panel.cameraName = { [weak self] in self?.renderer?.cameraViewName ?? "middle" }
         panel.onJobs = { [weak self] in self?.openGameplay() }
-        panel.onCamera = { [weak self] in self?.renderer?.cycleCameraView() }
+        panel.onCamera = { [weak self] in self?.cycleCameraPreference() }
+        panel.onMap = { [weak self] in self?.openMap() }
+        panel.onOptions = { [weak self] in self?.openOptions() }
         panel.onAnimations = { [weak self] in self?.openAnimations() }
         panel.onRadio = { [weak self] in self?.nextRadioStation() }
         panel.onFlightGear = { [weak self] in self?.openFlightEquipment() }
         panel.weatherName = { [weak self] in self?.renderer?.weatherAuto == true ? "REGIONAL AUTO" : "SERVER" }
         panel.onWeather = { [weak self] in
-            guard let renderer = self?.renderer else { return };renderer.weatherAuto.toggle()
+            self?.appSettings.update { $0.regionalWeather.toggle() }
         }
         panel.onLeave = { [weak self] in self?.close() }
         panel.modalPresentationStyle = .overFullScreen;present(panel,animated:true)
+    }
+    @objc private func openOptions() {
+        guard presentedViewController == nil else { return }
+        let options = NativeOptionsViewController(settings: appSettings)
+        options.modalPresentationStyle = .overFullScreen
+        present(options, animated: true)
     }
     @objc private func openChat() {
         guard presentedViewController == nil else { return }
@@ -965,6 +1053,7 @@ final class NativeGameViewController: UIViewController {
     @objc private func releaseFire() { firePressed = false;hornPressed = false;bunnyHopPressed=false }
 
     @objc private func reload() {
+        guard acceptsHeldInput else{return}
         guard currentVehicle == nil,renderer?.isClimbing != true,renderer?.swimming != true,renderer?.isChuting != true else { return }
         if weapons.selected == 39 { network.detonateSatchels(); return }
         guard usingPistol else { return }
@@ -1131,6 +1220,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func toggleVehicle() {
+        guard acceptsHeldInput else{return}
         guard let renderer else { return }
         if renderer.isClimbing {renderer.letGoOfLedge();return}
         if renderer.canDropJetpack {network.sendChat("/dropjetpack");return}
@@ -1246,12 +1336,13 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func tick(_ link: CADisplayLink) {
+        network.tickConnection(now:ProcessInfo.processInfo.systemUptime)
         let active = applicationActive && view.window != nil
         let timing = frameClock.advance(timestamp: link.timestamp, active: active)
         if timing.discontinuity { resetControls() }
         let delta = Float(timing.delta)
         weapons.tick()
-        var acceptsInput = active && presentedViewController == nil
+        var acceptsInput = active && presentedViewController == nil && network.isReady
         if !acceptsInput && inputWasAvailable { resetControls() }
         inputWasAvailable = acceptsInput
         // Over-full-screen panels leave the game visible, so UIKit does not
@@ -1290,7 +1381,7 @@ final class NativeGameViewController: UIViewController {
             let pressed = [pad.buttonA,pad.buttonB,pad.buttonX,pad.buttonY,pad.leftShoulder,pad.rightShoulder,
                            pad.dpad.up,pad.dpad.down,pad.dpad.left,pad.dpad.right,pad.buttonMenu].contains { $0.isPressed } ||
                 pad.leftThumbstickButton?.isPressed == true || pad.rightThumbstickButton?.isPressed == true || pad.buttonOptions?.isPressed == true
-            controllerAllowed = controllerGate.accepts(active: acceptsInput,
+            controllerAllowed = controllerGate.accepts(active: active && presentedViewController == nil,
                 axes: [pad.leftThumbstick.xAxis.value,pad.leftThumbstick.yAxis.value,pad.rightThumbstick.xAxis.value,
                        pad.rightThumbstick.yAxis.value,pad.leftTrigger.value,pad.rightTrigger.value], pressed: pressed)
         } else { controllerGate.reset() }
@@ -1455,7 +1546,7 @@ final class NativeGameViewController: UIViewController {
                 }
             }
         }
-        if link.timestamp - lastNetwork > 0.2, let renderer {
+        if network.isReady, link.timestamp - lastNetwork > 0.2, let renderer {
             lastNetwork = link.timestamp
             network.sendPosition(currentVehicle == nil ? renderer.position : renderer.vehicleWirePosition, heading: renderer.direction, moving: walking,
                                  running: running,

@@ -43,6 +43,25 @@ zsh build_native.sh all
 zsh build_native.sh simulator --debug
 ```
 
+The [Definitive Edition menu](NATIVE_DE_MENU.md) optionally loads owner-provided
+art/fonts/sounds from ignored `local-only/menu-bundle/OwnerMenu`. Without that
+folder the source-only menu remains functional using text/color fallbacks.
+Original resources must remain separate from public source and build uploads.
+
+Use `build_native.sh` for either configuration. It selects `ios/project.yml`
+when no owner manifest exists, so a clean checkout has no missing resource
+reference. When `local-only/menu-bundle/OwnerMenu/manifest.json` exists, it selects
+`ios/project-owner-menu.yml`, which includes the base spec and adds the required
+local resource folder. An incomplete folder without a manifest uses the base
+spec. XcodeGen's `optional` source setting only relaxes path validation; it does
+not remove a resource reference from the generated project.
+
+For manual project generation, run `cd ios && xcodegen generate --spec project.yml`
+for the source-only configuration, or select `project-owner-menu.yml` after
+importing the owner bundle. Regenerate when switching configurations. Verify
+both isolated project-generation paths with `python3 smoke_native_project.py`;
+this does not build the app or change the checkout's generated Xcode project.
+
 The script regenerates XcodeGen, builds the required platform and prints the
 bundle path under ignored `local-only/native-build/`. It does not boot Simulator,
 install/launch an app or operate an attached device. `--derived-data PATH`

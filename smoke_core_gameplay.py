@@ -40,6 +40,9 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     before = hashes()
     cases = [(p.removesuffix('.py'), ['python3', p]) for p in [
+        'smoke_native_fixed_velocity.py', 'smoke_native_connection_recovery.py', 'smoke_native_recovery.py', 'smoke_native_connection_owners.py',
+        'smoke_native_settings.py', 'smoke_native_menu_layout.py', 'smoke_native_menu_profile.py',
+        'smoke_native_menu_keys.py', 'smoke_native_audio_settings.py', 'smoke_native_menu_sound.py',
         'smoke_native_heading_transitions.py', 'smoke_native_task_transitions.py',
         'smoke_native_shot_delivery.py', 'smoke_native_stream_shots.py', 'smoke_native_bindings.py',
         'smoke_native_melee.py', 'smoke_native_melee_delivery.py', 'smoke_native_weapon_attachment.py',

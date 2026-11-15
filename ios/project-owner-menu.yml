@@ -1,0 +1,8 @@
+include:
+  - project.yml
+targets:
+  ZGTASA:
+    sources:
+      - path: ../local-only/menu-bundle/OwnerMenu
+        type: folder
+        buildPhase: resources

@@ -29,7 +29,8 @@ def allowed(name):
     if any(part.startswith('.env') for part in path.parts):
         return False
     if path.suffix in ('.png', '.jpg', '.json'):
-        return str(path).startswith('ios/App/Assets.xcassets/')
+        return (str(path).startswith('ios/App/Assets.xcassets/') or
+                str(path) == 'test-fixtures/native-menu/core84-responder-handlers.json')
     if path.suffix == '.txt':
         return path.name == 'requirements-native.txt'
     return path.suffix in TEXT
@@ -59,7 +60,7 @@ def source_files(root):
         for path in sorted((root / 'ios').iterdir()):
             if path.is_file() and allowed(path.relative_to(root).as_posix()):
                 yield path
-    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', '.github'):
+    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-menu-codec', 'test-fixtures/native-menu', '.github'):
         base = root / directory
         if base.is_dir():
             for path in sorted(base.rglob('*')):
