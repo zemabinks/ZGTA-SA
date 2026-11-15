@@ -1,5 +1,17 @@
 # Community source release validation
 
+Latest core acceptance,15 November2026:85 Swift source files,34 core regression
+gates, matching optimized universal Simulator and unsigned ARM64 iPhone builds.
+The installed79 Simulator was used for city climbing/visibility, car controls,
+entry/exit and owner-radio station switching/download checks. Literal sphere
+queries pass all five Apple ABI targets and the real-city boundary corpus.
+Original radio import has separate actual-recording and native offline sample
+proofs. See `CORE_GAMEPLAY_JOURNAL.md`, `CORE_RETAIL_REFERENCE.md` and
+`RADIO_OWNER_IMPORT.md` for the exact evidence and unresolved differences.
+
+The following75-source checkpoint is historical; its broader old checks are
+not represented as new physical-device or original-runtime acceptance.
+
 Verified on 15 November 2026. This records the tested 75-Swift-source native
 boundary and the community hosting tools; it does not certify a full 1:1 port.
 

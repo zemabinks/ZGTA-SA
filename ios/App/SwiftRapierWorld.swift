@@ -412,6 +412,21 @@ final class SwiftRapierWorld {
             capacity = min(100000, capacity * 2)
         }
     }
+    func sphereIntersections(center: SIMD3<Float>, radius: Float,
+                       groups: UInt32? = nil, flags: UInt32 = 0,
+                       excludingColliders: Set<ColliderID> = [], excludingBodies: Set<BodyID> = []) -> [ColliderInfo] {
+        let ec = Array(excludingColliders), eb = Array(excludingBodies)
+        var capacity = 64
+        while true {
+            var ids = [UInt64](repeating: 0, count: capacity)
+            let count = zgtaphys_intersections_sphere(handle, [center.x, center.y, center.z], radius,
+                groups ?? 0, flags, groups == nil ? 0 : 1, ec, UInt32(ec.count), eb, UInt32(eb.count), &ids, UInt32(capacity))
+            if Int(count) < capacity || capacity == 100000 {
+                return ids.prefix(Int(count)).compactMap { colliderInfo($0) }
+            }
+            capacity = min(100000, capacity * 2)
+        }
+    }
     func contact(_ first: ColliderID, _ second: ColliderID, prediction: Float) -> Contact? {
         var data = [Float](repeating: 0, count: 10)
         guard zgtaphys_contact(handle, first, second, prediction, &data) != 0 else { return nil }

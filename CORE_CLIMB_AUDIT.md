@@ -145,3 +145,17 @@ comparisons, and no App/bridge change was made during this investigation.
 All raw collision inputs, bounded source extracts, query fixtures and detailed
 reports remain under ignored `local-only/research/climbing/`. This document
 contains only independently measured results and test coordinates.
+
+## Build78 literal sphere correction
+
+The clearance adapter now calls an explicit Rapier Ball C ABI. The unchanged
+ordinary motor capsule retains its original shape/query path. The exact same
+147-collider corpus passes all438 rays,211 sphere decisions and21 complete
+ledge probes, including the five previously failing grazing cases. The public
+source includes independent triangle-plane reproductions without game data.
+
+A live optimized77 Simulator test separately completed the three city fixtures
+above: stand, stable high hang/pull, let-go landing, and edge/vault traversal.
+It also found visible weapon attachment during climbing;78 suppresses hand
+weapons through traversal and exit blends. Native hand alignment and phase
+timing against an original retail runtime remain unverified.

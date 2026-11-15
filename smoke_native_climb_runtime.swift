@@ -26,6 +26,7 @@ final class ClimbRuntimeHarness {
     var footWeaponDefinitions:[Int:NativeFootWeaponAnimation]=[:],equippedWeapon=22,weaponTriggerHeld=false
     var footAnimationFrame:NativeFootAnimation.Frame?,ownClip="",ownClipTime=0.0
     var cameraPitch:Float=0
+    var camera=SIMD3<Float>.zero
     let sprintController=NativeSprintController()
     var stamina=NativeStamina(),pendingSprintTap=false
     var hasNativeFootWeaponTiming=false
@@ -77,6 +78,7 @@ final class ClimbRuntimeHarness {
         }
     }
 
+    func emitFootWeaponEventsForTest(_ frame:NativeFootAnimation.Frame,feet:SIMD3<Float>) {emitFootWeaponEvents(frame,feet:feet)}
     // ACTUAL_RENDERER_METHODS
 
     @discardableResult func frame(_ delta:Double,forward:Float=0,sideways:Float=0)->NativeCharacterController.Output {
@@ -182,6 +184,17 @@ final class ClimbRuntimeHarness {
     neutral.cancelGameplayInput();_ = neutral.frame(1/60)
     precondition(neutral.climb?.part == .hang && !neutral.jumpHeld && !neutral.pendingClimbPull && !neutral.pendingClimbDrop);checks += 2
     frames += neutral.displayFrames;physicsTicks += neutral.fixedSteps
+    // Actual Renderer emission must expose event-time physics position during
+    // every catch-up marker, then restore the ordinary display-pose fallback.
+    neutral.hasNativeFootWeaponTiming=true
+    neutral.camera=SIMD3(100,200,300)
+    let eventFeet=SIMD3<Float>(101,202,303)
+    var observed:[SIMD3<Float>]=[]
+    neutral.onFootWeaponShot={_,_ in observed.append(neutral.shotFeet);return true}
+    var eventFrame=neutral.footAnimationFrame!;eventFrame.shots=[false,true,false]
+    neutral.emitFootWeaponEventsForTest(eventFrame,feet:eventFeet)
+    precondition(observed==Array(repeating:eventFeet,count:3),"Catch-up shot used stale display coordinates")
+    precondition(neutral.shotFeet==neutral.camera,"Event snapshot leaked past synchronous emission");checks += 2
     // The actual airborne path probes every second qualifying fixed tick and
     // uses its1.1m stretch threshold rather than grounded1.4m.
     let airborne=try ClimbRuntimeHarness(root:root,top:3.2,depth:2)

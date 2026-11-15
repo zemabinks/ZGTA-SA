@@ -266,7 +266,6 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let waterWaves = NativeWaterWaves()
     private let gameCamera = NativeGameCamera()
     private var ownCameraVisibility=NativeCameraVisibility()
-    private var ownCameraHidden=false
     private var gameCameraFrame: NativeGameCamera.Frame?
     private var cameraVehicleDefinitions: [String:CameraVehicleDefinition] = [:]
     private var cameraWasDriving = false
@@ -609,6 +608,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var position: SIMD3<Float> { camera }
+    private var weaponEventFeet:SIMD3<Float>?
+    /// Animation markers can run inside several fixed steps before the display
+    /// pose is published. A shot must use that event's current physics feet.
+    var shotFeet:SIMD3<Float> {weaponEventFeet ?? camera}
     var direction: Float { driving ? heading : actorHeading }
     var cameraDirection: Float { gameCameraFrame?.heading ?? heading }
     var hasNearbyFire: Bool { weaponEffects.fires.contains { simd_distance($0.position,camera)<40 } }
@@ -1106,7 +1109,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             if health<=0 && !animator.dead {animator.die("koFront")}
             let frame=animator.update(delta:delta,input:animation)
-            footAnimationFrame=frame;emitFootWeaponEvents(frame)
+            footAnimationFrame=frame;emitFootWeaponEvents(frame,feet:state.feet)
         }
         footAirTime=0;footAirFall=0;footAirFell=false;footJumped=false;footLaunchRemaining=nil
         var motion=intended;motion.jump=0
@@ -1211,7 +1214,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footJumpMinimum = 0
         }
         let frame = animator.update(delta:delta,input:animation);footAnimationFrame = frame
-        emitFootWeaponEvents(frame)
+        emitFootWeaponEvents(frame,feet:state.feet)
         var travel = NativeFootLocomotion.worldTravel(frame.travel,heading:locomotion.heading)
         if airborne {
             if jumping {
@@ -1235,8 +1238,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return motion
     }
 
-    private func emitFootWeaponEvents(_ frame:NativeFootAnimation.Frame) {
+    private func emitFootWeaponEvents(_ frame:NativeFootAnimation.Frame,feet:SIMD3<Float>) {
         guard hasNativeFootWeaponTiming,health>0,!weaponReloading else{return}
+        weaponEventFeet=feet
+        defer {weaponEventFeet=nil}
         for left in frame.shots {
             guard weaponReady else{break}
             if onFootWeaponShot?(equippedWeapon,left) == true,[37,38,41,42].contains(equippedWeapon) {acceptedStreamShot=true}
@@ -1369,10 +1374,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         _ = footAnimator?.act(name,loop:looping,once:!looping,tag:wire)
     }
 
-    func hasClearShot(to target: SIMD3<Float>) -> Bool {
-        let start = camera + SIMD3<Float>(0, 0, 1.35)
-        let finish = target + SIMD3<Float>(0, 0, 1.15)
-        return collision?.lineOfSight(from: start, to: finish) ?? true
+    func hasClearShot(from start: SIMD3<Float>, to finish: SIMD3<Float>) -> Bool {
+        guard let vehicle=groundVehicle else { return false }
+        var excluded=driving ? vehicle.chassisColliders:Set<UInt64>()
+        if let queries=character?.queries { excluded.formUnion([queries.walker,queries.probe]) }
+        return NativeShotOcclusion.clear(from:start,to:finish,loaded:vehicle.isCellLoaded) { origin,direction,distance in
+            vehicle.world.raycast(origin:SwiftRapierWorld.gtaToRapier(origin),
+                direction:SwiftRapierWorld.gtaToRapier(direction),distance:distance,
+                excludingColliders:excluded,groups:0xffff0083)?.distance
+        }
     }
 
     func predictedVehicle(_ vehicle:RemoteVehicle)->RemoteVehicle {
@@ -1943,7 +1953,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         atmosphereAir = indoors ? 0 : eye.z < 900 ? min(1,atmosphereAir+delta) : max(0,atmosphereAir-delta)
         conditions = environment?.sample(weatherFrom: sampledWeatherFrom,to: sampledWeatherTo,blend: blend,hour: hour,altitude: eye.z)
         let planes = gameCamera.projection(air: atmosphereAir,farClip: conditions?.farClip ?? 25000)
-        ownCameraHidden=ownCameraVisibility.update(eye:eye,feet:camera,nearPlane:planes.near)
+        ownCameraVisibility.update(eye:eye,feet:camera,nearPlane:planes.near,
+            attachmentRadius:personalFlight.worn ? 0.2:0,presentationClearance:1)
         let projection=Self.perspective(aspect:aspect,verticalFov:gameCameraFrame?.verticalFov ?? 55.41293,near:planes.near,far:planes.far)
         let matrix=projection*viewMatrix
         night = NativeWorldEnvironment.nightShare(hour: hour)
@@ -2333,12 +2344,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     }
                 }
             }
-        } else if !scopedCameraHidesPlayer,!ownCameraHidden,let name = pedModels["7"] {
+        } else if !scopedCameraHidesPlayer,let name = pedModels["7"] {
             let original = footAnimationFrame != nil && skeletalActors[name] != nil
             let pose = skeletalActors[name].flatMap { actor in skeletalLibrary.flatMap { library in
                 footAnimationFrame.flatMap { actor.originalPose(blends:$0.blends,library:library,aim:$0.aim,hiddenBones:$0.hiddenBones,figurePitch:$0.figurePitch,figureRoll:$0.figureRoll,legBend:$0.legBend) }
             } }
-            appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,swimming ? 0:equippedWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own")
+            let handWeapon = swimming || climb != nil || footAnimationFrame?.handWeaponVisible == false ? 0:equippedWeapon
+            appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own")
         }
         for player in remotePlayers where simd_distance(player.position, camera) < 130 {
             // A passenger's public carText is still a pedestrian; draw its
@@ -2372,6 +2384,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 var pose:NativeSkeletalActor.Pose?
                 var original=false
                 var flight:NativeFlightAnimation.Frame?
+                var handWeapon=player.weapon
                 if let actor=skeletalActors[name],let library=skeletalLibrary,let definitions=footDefinitions {
                     let animator:NativeRemoteFootAnimation
                     if let cached=remoteFootAnimations[player.id],cached.0==name {animator=cached.1}
@@ -2384,13 +2397,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         weapon:player.weapon,aim:player.aim.map(Double.init),action:player.action,shots:player.shotCount,life:Double(player.life),
                         armour:Double(player.armour),down:player.down,paused:player.paused,pitch:Double(player.pitch),roll:Double(player.roll),script:player.scriptAnimation)
                     let frame=animator.update(delta:riderDelta,nowMilliseconds:riderTime*1000,snapshot:state)
+                    if !frame.handWeaponVisible { handWeapon=0 }
                     flight=frame.flight
                     if !animator.hasUnsupportedFlight {
                         pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)
                         original=true
                     }
                 }
-                appendPed(name,player.position,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,player.weapon,pose:pose,original:original,flight:flight,identity:player.id)
+                if (10...16).contains(player.action & 63) || (20...25).contains(player.action & 63) { handWeapon=0 }
+                appendPed(name,player.position,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id)
                 continue
             }
             modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0))
@@ -2498,6 +2513,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             var uniforms = Uniforms(viewProjection: matrix * transform,
                                     settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), night, 128))
             configureEnvironment(&uniforms)
+            let opacity:Float = queued?.identity == "own" ? ownCameraVisibility.opacity:1
+            uniforms.tintColor.w *= opacity
+            encoder.setDepthStencilState(opacity<1 ? markerDepth:depth)
             let locomotion = name == pedModels["7"] && position == camera && !driving && actionTimeRemaining > 0 &&
                 !swimming && health > 0 ? locomotionClip : nil
             let wire = clip.split(separator: "/")
@@ -2573,13 +2591,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                let hand = pose?.hand ?? actorAttachments[name]?.frame(clip: clip, elapsed: elapsed) {
                 encoder.setRenderPipelineState(pipeline)
                 draw(mesh: pistol, cellSize: 128, matrix: matrix * transform * hand,
-                     encoder: encoder)
+                     encoder: encoder,tint:SIMD4(1,1,1,opacity))
             } else if let weaponName = weaponModels[String(weapon)], weapon > 0 {
                 loadActor(weaponName)
             }
             if let flight=queued?.flight,let identity=queued?.identity,let pose,let actor=skeletalActors[name] {
-                drawFlightAttachments(flight,identity:identity,actor:actor,pose:pose,transform:transform,matrix:matrix,encoder:encoder)
+                drawFlightAttachments(flight,identity:identity,actor:actor,pose:pose,transform:transform,matrix:matrix,encoder:encoder,opacity:opacity)
             }
+            encoder.setDepthStencilState(depth)
         }
         let visible = Set(modelInstances.map { $0.0 } + modelInstances.compactMap { weaponModels[String($0.6)] })
         if actorMeshes.count > 32 {
@@ -2657,7 +2676,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawFlightAttachments(_ flight:NativeFlightAnimation.Frame,identity:String,actor:NativeSkeletalActor,pose:NativeSkeletalActor.Pose,
-                                       transform:simd_float4x4,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder) {
+                                       transform:simd_float4x4,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder,opacity:Float=1) {
         if flightCanopyMesh==nil || flightJetMesh==nil {loadFlightAssets()}
         if let canopy=flight.canopy,let mesh=flightCanopyMesh,let accessory=flightCanopyActor,let library=skeletalLibrary,let skeletalPipeline {
             let posed=accessory.canopyPose(clip:canopy.clip,time:canopy.time,easing:canopy.easing,pitch:canopy.pitch,roll:canopy.roll,library:library,previous:flightCanopyPoses[identity])
@@ -2668,7 +2687,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             var scale=matrix_identity_float4x4;scale.columns.0.x=Float(canopy.scale);scale.columns.1.y=Float(canopy.scale);scale.columns.2.z=Float(canopy.scale)
             if canopy.visible {
                 encoder.setRenderPipelineState(skeletalPipeline);accessory.bind(pose:posed,encoder:encoder)
-                draw(mesh:mesh,cellSize:128,matrix:matrix*parent*scale,encoder:encoder)
+                draw(mesh:mesh,cellSize:128,matrix:matrix*parent*scale,encoder:encoder,tint:SIMD4(1,1,1,canopy.landed ? 1:opacity))
             }
         } else {flightCanopyLanded[identity]=nil}
         if let jet=flight.jet,let mesh=flightJetMesh,let document=flightJetAssets,let spine=actor.transform(bone:3,in:pose) {
@@ -2685,6 +2704,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             encoder.setRenderPipelineState(pipeline)
             var uniforms=Uniforms(viewProjection:matrix*transform*spine,settings:SIMD4(Float(mesh.atlas.width),Float(mesh.atlas.height),night,128));configureEnvironment(&uniforms)
+            uniforms.tintColor.w *= opacity
             encoder.setVertexBuffer(mesh.vertices,offset:0,index:0);encoder.setFragmentTexture(mesh.atlas,index:0)
             for part in document.draws where part.visible && part.count>0 {
                 uniforms.viewProjection=matrix*transform*spine*matrices[part.node]

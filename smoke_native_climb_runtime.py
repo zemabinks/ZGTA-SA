@@ -27,6 +27,8 @@ def main():
  methods=['private func footMotion(','private func beginClimb(','private func climbingMotion(',
           'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(']
  extracted='\n\n'.join(function(renderer,marker) for marker in methods)
+ shot_feet=renderer[renderer.index('    private var weaponEventFeet:'):renderer.index('    var direction:',renderer.index('    private var weaponEventFeet:'))]
+ extracted=shot_feet+'\n'+extracted
  skeletal=(ROOT/'ios/App/NativeSkeletalActor.swift').read_text()
  library=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')
  aim=skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]

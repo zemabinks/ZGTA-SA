@@ -1117,6 +1117,61 @@ pub unsafe extern "C" fn zgtaphys_intersections_capsule(
     }
     count as u32
 }
+// Isolated candidate: exact Ball query shape; filtering/ABI semantics match capsule.
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_intersections_sphere(
+    ptr: *mut ZGTAPhysicsWorld,
+    position: *const f32,
+    radius: f32,
+    query_groups: u32,
+    query_flags: u32,
+    options: u32,
+    excluded_colliders: *const Id,
+    excluded_collider_count: u32,
+    excluded_bodies: *const Id,
+    excluded_body_count: u32,
+    out_colliders: *mut Id,
+    capacity: u32,
+) -> u32 {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(p) = floats(position, 3) else {
+        return 0;
+    };
+    let Some(ec) = ids(excluded_colliders, excluded_collider_count) else {
+        return 0;
+    };
+    let Some(eb) = ids(excluded_bodies, excluded_body_count) else {
+        return 0;
+    };
+    if capacity > 100000
+        || capacity > 0 && out_colliders.is_null()
+        || !radius.is_finite()
+        || radius <= 0.0
+    {
+        return 0;
+    }
+    w.bodies
+        .propagate_modified_body_positions_to_colliders(&mut w.colliders);
+    let shape = SharedShape::ball(radius);
+    let pose = Pose::from_translation(vector(p));
+    let mut count = 0;
+    for (_, co) in w.colliders.iter() {
+        if !accepts(w, co, query_groups, query_flags, options, ec, eb) {
+            continue;
+        }
+        if rapier3d::parry::query::intersection_test(&pose, &*shape, co.position(), co.shape())
+            .unwrap_or(false)
+        {
+            if count < capacity as usize {
+                *out_colliders.add(count) = co.user_data as Id;
+                count += 1
+            } else {
+                break;
+            }
+        }
+    }
+    count as u32
+}
 #[no_mangle]
 pub unsafe extern "C" fn zgtaphys_contact(
     ptr: *mut ZGTAPhysicsWorld,

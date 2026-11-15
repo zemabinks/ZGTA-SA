@@ -32,9 +32,8 @@ final class NativeRapierClimbQueries {
             }
             return nil
         },overlaps:{[unowned self] origin,radius,groups in
-            // Native zero-height capsule matched original Ball clearance in
-            // the controlled native/WASM fixtures; general grazing is untested.
-            world.intersections(center:f(origin),halfHeight:0,radius:Float(radius),groups:groups,excludingColliders:excluded)
+            // Isolated candidate: use the same literal Ball shape as WASM.
+            world.sphereIntersections(center:f(origin),radius:Float(radius),groups:groups,excludingColliders:excluded)
                 .filter{$0.material != 62}.map(collider)
         })
         return probe.find(feet:feet,heading:heading,extended:extended)

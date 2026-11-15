@@ -50,7 +50,11 @@ available; they do not obtain the publisher's private backend.
 
 Core movement, animation, camera, physics, vehicles and combat now take priority
 over advanced roleplay. See the [core parity checklist](CORE_GAMEPLAY_PARITY.md)
-and [audit journal](CORE_GAMEPLAY_JOURNAL.md) for verified fixes and remaining differences.
+and [audit journal](CORE_GAMEPLAY_JOURNAL.md) for tested fixes and remaining work.
+The [original-game reference ledger](CORE_RETAIL_REFERENCE.md) records direct
+data comparisons and unresolved engine differences.
+The [owner radio import guide](RADIO_OWNER_IMPORT.md) covers complete local
+recordings and the separate compatibility/full-recording programme choices.
 
 This is an in-progress reconstruction. The independent server uses its own
 mission/economy policies, and the native client still has gaps compared with

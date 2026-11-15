@@ -197,3 +197,85 @@ reconstruction and modified-binary observations remain explicitly qualified.
 No original data, binary, disassembly or converted game asset is source-release
 content. There is still no original-game runtime comparison or physical device
 acceptance. Advanced roleplay remains paused.
+
+## Core78/79 — collision precision and event geometry
+
+An independent source workspace and separate native library outputs preserve
+the accepted77 build. App, Rust/header and server files are frozen together for
+the34-gate acceptance run; both Apple application builds use matching bridges.
+
+- Literal sphere queries replace the zero-height-capsule approximation only
+  where a sphere is required. The ordinary motor capsule is unchanged. The
+  recorded real-city corpus now has no ray/sphere/probe disagreements. Public
+  game-data-free triangle-plane cases reproduce the old grazing-contact defect.
+- Local and remote weapon attachments are suppressed during nonzero climb and
+  swim blends, including exit blends. The selected inventory remains intact.
+- The first78 preview tried proximity transparency. Actual low-ceiling UI
+  testing exposed unsorted internal skeletal faces, so that effect was rejected.
+  Build79 uses binary body/weapon/pack visibility with spatial hysteresis and
+  a close-camera presentation clearance. Hidden local pack rendering still
+  updates audio/effect state. The clearance is a native visibility policy,
+  not a measured original-game camera constant.
+- Target cone, range, obstruction and emitted impact use one muzzle-to-torso
+  segment. Original feet-to-feet selection rejected accurately pitched close
+  shots. Targets behind unloaded collision cells fail closed; world queries
+  span crossed cells and exclude the local walker/probe/chassis.
+- Fixed-step animation shot markers expose their current physics feet during
+  synchronous emission, rather than the previous display pose. The event
+  snapshot clears after emission and never delays local input.
+
+Focused gates pass:239 target/packet checks,242 actual native obstruction/cell
+checks,6,630 visibility checks,2,383 task/input/presentation checks, and8,367
+actual Renderer/climb integration checks. The78 aggregate passed34/34 with unchanged production sources after two
+missing local reference catalogs were copied; first failures are preserved. Its
+optimized Simulator build succeeded. Its unsigned ARM64 iPhone build also succeeded, but the candidate was
+rejected for the observed camera transparency artifact. Final79 aggregate/build/UI results are
+recorded after they finish. See `CORE_RETAIL_REFERENCE.md` for the new direct
+reference evidence, unresolved handling candidates and original runtime plan.
+
+### Final79 acceptance
+
+- All34 core gates pass with unchanged121-file App/bridge/server manifest.
+  Optimized universal Simulator and unsigned ARM64 iPhone builds both pass.
+  Installed Simulator bundle79 matches the built executable SHA256.
+- The exact low-ceiling vault scene no longer renders translucent internal
+  faces. The body is hidden when obstructing the close camera, and an open-area
+  reset restores its ordinary opaque appearance. This validates the visibility
+  defect, not original camera clearance constants or every camera transition.
+- Entry, touch acceleration, reverse and exit were exercised in the original
+  city geometry. The recorded acceleration segment has176 distinct vehicle
+  packets and26.538m of travel. These are functional controls/handoff checks,
+  not original handling or performance certification.
+- City hang/pull UI tests in the preceding geometry-equivalent78 build
+  kept the pistol out of both hands during the climb; afterward a fire tap
+  consumed exactly one round. The scoped79 camera correction leaves those
+  mechanics unchanged and its full integration regressions pass again.
+
+### Original radio recordings and import repair
+
+The supplied PC image contains the missing station/emergency/advertisement
+packs. Thirteen packs totaling976,800,537 compressed bytes were extracted only
+under the ignored retail-reference directory. All1,731 original Ogg records
+have complete stereo32kHz boundaries. The lookup mixes header-inclusive and
+payload-only sizes; the existing reader truncated8,068 bytes from613 payloads.
+The independent reader now proves and normalizes the exact next-record span.
+
+The compatibility programme remains unchanged. A separate explicit
+full-recording variant uses complete end-granule lengths; original retail
+on-air cut/schedule policy is not inferred from those lengths. The importer
+creates a fresh output exclusively and protects existing inputs, aliases and
+other assets from overwrite.
+
+Real-file conversion decoded15 recordings and33,971,644 finite channel samples.
+The unchanged native programme/playback source passed45 PCM windows,752,000
+exact channel samples and a real AVAudioEngine offline transition. Synthetic
+mixed-layout/EOF/overlap/alias protection tests also pass on Node22 without game
+files. Source CI runs the independent bounds regression.
+
+On an isolated8776 world, the installed79 app spawned/entered a car, selected
+Bounce FM, switched to SF-UR and exited. Three complete PCM files appeared in
+the Mac cache and the app's own cache, confirming live UI/download integration.
+This is separate from the offline sample proof; physical listening is not
+claimed. Normal production registration remains absent, its compatibility
+programme unchanged, and no production server/saves were deployed or migrated.
+See `RADIO_OWNER_IMPORT.md` for the reproducible local import workflow.

@@ -28,6 +28,20 @@ import simd
   state.reset();check(state.update(eye:feet+SIMD3(0.6,0,1.5),feet:feet,nearPlane:0.15,attachmentRadius:0.2),"optional measured attachment extent supported")
   state.reset();check(state.update(eye:SIMD3(.nan,0,0),feet:feet,nearPlane:0.15),"invalid transform cannot expose clipped own geometry")
   state.reset();check(state.update(eye:feet+SIMD3(0.2,0,1.2),feet:feet,nearPlane:0.15,bodyBottom:1,bodyTop:1,radius:0.35),"zero-length capsule supported")
-  print("PASS: camera own-mesh visibility \(checks) checks at30/60/120Hz, all360 angles, collision clamp, near-plane clearance/hysteresis, attachment extent and reset")
+  for hz in [15,20,30,60,120,144] {
+   var close=NativeCameraVisibility()
+   for turn in 0..<360 {
+    let radians=Float(turn)*Float.pi/180
+    check(close.update(eye:feet+SIMD3(sin(radians)*0.9,cos(radians)*0.9,1.5),feet:feet,nearPlane:0.15,presentationClearance:1),"Close collision camera hides complete local mesh")
+    check(close.opacity==0,"Hidden body never exposes transparent internal triangles")
+   }
+   for frame in 0..<hz*2 {
+    let distance:Float=frame%2==0 ? 0.995:1.005
+    check(close.update(eye:feet+SIMD3(distance,0,1.5),feet:feet,nearPlane:0.15,presentationClearance:1),"Presentation boundary has spatial hysteresis")
+   }
+   check(!close.update(eye:feet+SIMD3(1.2,0,1.5),feet:feet,nearPlane:0.15,presentationClearance:1) && close.opacity==1,"Clear camera restores an opaque body")
+   close.reset();check(!close.hidden && close.opacity==1,"Reset restores visibility history")
+  }
+  print("PASS: camera own-mesh visibility \(checks) checks at15/20/30/60/120/144Hz, all360 angles, collision clamp, near-plane clearance/hysteresis, attachment extent and reset")
  }
 }

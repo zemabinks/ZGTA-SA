@@ -919,14 +919,14 @@ final class NativeGameViewController: UIViewController {
         // firing through the flight animation. Armed flight is capability-gated.
         guard !renderer.wearingJetpack else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastAttackTime >= weapons.current.interval,let ticket=network.reserveShot(),weapons.fire(ticket:ticket) else { return }
+        guard now - lastAttackTime >= weapons.current.interval,let ray=currentShotRay(),let ticket=network.reserveShot(),weapons.fire(ticket:ticket) else { return }
         lastAttackTime = now
         if usingPistol {
             updateWeaponHUD()
             let clips = NativeWeaponAnimation.forWeapon(weapons.selected)
             renderer.fireWeapon(clip: weapons.current.fireKind == "PROJECTILE" ? "grenade/weapon_throw/n/1" : renderer.crouching ? clips.crouchFire : clips.fire,
                                 duration: weapons.current.fireKind == "PROJECTILE" ? 0.8 : Float(weapons.current.interval))
-            emitWeaponShot(weapon: weapons.selected, left: false,ticket:ticket)
+            emitWeaponShot(weapon: weapons.selected, left: false,ticket:ticket,ray:ray)
             return
         }
         renderer.performFistAttack()
@@ -949,37 +949,40 @@ final class NativeGameViewController: UIViewController {
     private func consumeFootWeaponShot(weapon: Int, left: Bool)->Bool {
         guard let renderer, applicationActive, presentedViewController == nil, currentVehicle == nil,
               network.health > 0, !network.passive, !renderer.swimming, !renderer.isChuting,
-              renderer.hasNativeFootWeaponTiming, weapons.selected == weapon, usingPistol,let ticket=network.reserveShot() else { return false }
+              renderer.hasNativeFootWeaponTiming, weapons.selected == weapon, usingPistol,
+              let ray=currentShotRay(),let ticket=network.reserveShot() else { return false }
         return NativeWeaponShotDelivery.deliver(weapon: weapon, left: left,ticket:ticket, inventory: weapons,
             readiness: { renderer.weaponReady = $0 }, emission: { [self] weapon, left,ticket in
                 updateWeaponHUD()
-                emitWeaponShot(weapon: weapon, left: left,ticket:ticket)
+                emitWeaponShot(weapon: weapon, left: left,ticket:ticket,ray:ray)
             })
+    }
+
+    /// Freeze valid geometry before reserving/spending a ticket. Emission is
+    /// synchronous, so both hands retain their own event-time ray snapshot.
+    private func currentShotRay()->NativeShotTargeting.Ray? {
+        guard let renderer else{return nil}
+        return .init(origin:NativeShotTargeting.muzzle(feet:renderer.shotFeet),
+                     direction:renderer.aimDirection,range:weapons.current.range)
     }
 
     /// Shared effects/network emission. Animation-event firing never restarts a
     /// clip here. Muzzle position retains the existing body-offset approximation;
     /// `left` preserves event identity until actual per-hand muzzle data is wired.
-    private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket) {
+    private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket,ray:NativeShotTargeting.Ray) {
         guard let renderer, weapons.selected == weapon else { return }
-        let origin = renderer.position + SIMD3<Float>(0, 0, 1.35)
         if weapons.current.fireKind == "PROJECTILE" {
-            network.sendWeaponShot(weapon: weapon, from: origin,
-                to: origin + renderer.aimDirection * max(5, min(100, weapons.current.range)), player: nil,ticket:ticket)
+            network.sendWeaponShot(weapon: weapon, from: ray.origin,
+                to: ray.point(at:max(5,min(100,ray.range))), player: nil,ticket:ticket)
             return
         }
         audio.shot(weapon: weapon)
-        let facing = renderer.aimDirection
-        let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
-            let offset = player.position - renderer.position
-            let distance = simd_length(offset)
-            guard distance > 0.5, distance <= weapons.current.range,
-                  simd_dot(simd_normalize(offset), facing) >= (aiming ? 0.994 : 0.95),
-                  renderer.hasClearShot(to: player.position) else { return nil }
-            return (player, distance)
-        }.min { $0.1 < $1.1 }
-        let hit = target.map { $0.0.position + SIMD3<Float>(0, 0, 1.15) } ?? origin + facing * weapons.current.range
-        network.sendWeaponShot(weapon: weapon, from: origin, to: hit, player: target?.0.id,ticket:ticket)
+        let candidates=network.orderedPlayers.map {
+            NativeShotTargeting.Candidate(id:$0.id,point:NativeShotTargeting.torso(feet:$0.position))
+        }
+        let target=NativeShotTargeting.select(ray:ray,aiming:aiming,candidates:candidates,
+            visible:{renderer.hasClearShot(from:$0,to:$1)})
+        network.sendWeaponShot(weapon:weapon,from:ray.origin,to:target?.point ?? ray.end,player:target?.id,ticket:ticket)
     }
 
     @objc private func openGameplay() {

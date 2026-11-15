@@ -70,6 +70,22 @@ let inactive=presentation.update(delta:1/60,input:nil,position:SIMD3(0,14,30),he
 precondition(inactive.bend == .zero && inactive.jet==nil && !presentation.showing,"Inactive leg modifier remained latched")
 presentation.reset();let restarted=presentation.update(delta:1/60,input:.init(state:12),position:SIMD3(1000,1000,1000),heading:0)
 precondition(restarted.bend == .zero && restarted.velocity == .zero);checks += 3
+for hz in [15,30,60,120] {
+ for clip in ["ped/climb_jump","ped/climb_idle","ped/climb_pull","ped/climb_stand","ped/climb_jump_b","ped/climb_stand_finish","ped/climb_jump2fall"] {
+  let traversal=animator(22);_ = traversal.act(clip,loop:true,rooted:true)
+  for _ in 0..<hz {
+   let frame=traversal.update(delta:1/Double(hz))
+   precondition(!frame.handWeaponVisible,"Climbing reattached a weapon: \(clip)");checks += 1
+  }
+  precondition(traversal.armedWith==22,"Presentation must not change selected inventory");checks += 1
+  traversal.resetMovementTask()
+  for _ in 0..<hz { _ = traversal.update(delta:1/Double(hz)) }
+  precondition(traversal.update(delta:1/Double(hz)).handWeaponVisible,"Weapon did not return after traversal");checks += 1
+ }
+ let swimmer=animator(22);var swimming=NativeFootAnimation.Input();swimming.swimming=true;swimming.swim = .init(state:2)
+ for _ in 0..<hz {precondition(!swimmer.update(delta:1/Double(hz),input:swimming).handWeaponVisible);checks += 1}
+ swimmer.resetMovementTask();precondition(swimmer.update(delta:1/Double(hz)).handWeaponVisible);checks += 1
+}
 print("PASS task transitions:",checks,"checks; dual events",dual.shots,"continuous1s",ticks,"maxburst",burst,"real animation clips",library.clipCount)
 '''
 def main():

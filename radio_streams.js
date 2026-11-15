@@ -32,10 +32,26 @@ function catalog(directory) {
     packs.push({name, file, size: file ? fs.statSync(file).size : 0});
   }
   const tracks = [];
+  const records = [];
   for (let at = 0; at + 12 <= lookup.length; at += 12) {
     const pack = packs[lookup.readUInt8(at)], offset = lookup.readUInt32LE(at + 4), size = lookup.readUInt32LE(at + 8);
     if (!pack?.file || size <= HEADER || offset + size > pack.size) continue;
-    tracks.push({id: at / 12, pack: pack.name.toUpperCase(), file: pack.file, offset, size, seconds: null});
+    records.push({id: at / 12, pack, offset, lookupSize: size});
+  }
+  const boundaries = new Map();
+  for (const pack of packs) if (pack.file) {
+    const starts = [...new Set(records.filter(record => record.pack === pack).map(record => record.offset))].sort((a,b) => a-b);
+    boundaries.set(pack, new Map(starts.map((offset,index) => [offset, starts[index+1] ?? pack.size])));
+  }
+  for (const record of records) {
+    const {pack, offset, lookupSize, id} = record;
+    const end = boundaries.get(pack).get(offset), span = end - offset;
+    // Supplied PC radio lookup rows use both conventions: some sizes include
+    // their8068-byte stream header; others are payload-only. Add the header
+    // only where the next valid record/file boundary proves that exact span.
+    const size = span === lookupSize + HEADER ? span : lookupSize;
+    if (size > span) continue; // Never read into the next indexed track.
+    tracks.push({id, pack: pack.name.toUpperCase(), file: pack.file, offset, size, seconds: null});
   }
   const stations = [...PACKS, null].map(pack => pack ? tracks.filter(track => track.pack === pack) : []);
   const adverts = tracks.filter(track => track.pack === 'ADVERTS');

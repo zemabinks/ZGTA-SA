@@ -1,0 +1,80 @@
+# Original-game reference and acceptance
+
+Original GTA San Andreas remains the target. Archived browser regression,
+matching game data and an original-game playtest answer different questions.
+They must not be combined into an unsupported1:1 claim.
+
+## Available evidence
+
+The owner supplied a PC disc image described as1.0US. The installer readme
+identifiesV1.00. Inspection extracted26 selected reference files without running
+the installer or executable. The disc's loose modified executable was recorded
+separately from its original SecuROM-wrapped installer executable. That disc
+provenance does not independently establish a pristine US executable identity.
+
+| Comparison | Observed result | What it establishes |
+| --- | --- | --- |
+| Pedestrian animation archive | Exact byte identity with browser archive | Same source animation tracks |
+| Selected ranged/projectile/area weapon profiles |30 profiles,550 fields match their selected skill levels | Same checked static weapon inputs |
+| Vehicle handling catalog |212 model mappings,5,723/5,724 fields match; one decimal rounding difference | Same checked raw handling inputs |
+| Pedestrian heading/style/type |276 rows,828 fields match | Same checked pedestrian style inputs |
+| Tyre adhesion | Rubber-versus-ground values match | Same checked tyre surface inputs |
+| Original executable gameplay | Not executed or observed | No original runtime parity established |
+| Original iOS edition | Owner is preparing it | No iOS reference result yet |
+
+Original binaries, images, extracted files, derived catalogs, disassembly and
+private recorded fixtures remain local. The source release includes our own
+code, tests and audit conclusions.
+
+## Known engine differences beyond data identity
+
+- Native/browser drivetrain loading applies an additional acceleration factor
+  relative to a community reconstruction and the supplied modified executable.
+  The wrapped original function bodies do not directly corroborate it. Keep it
+  a candidate until a trustworthy original conversion or runtime test resolves
+  the difference; do not silently change the fleet from a guessed road speed.
+- High-speed suspension compression input is absent for affected models. Its
+  extra contact/depth response needs original comparison; ordinary spring
+  damping is a separate input and must not be substituted for it.
+- Muzzle and torso targeting offsets remain approximations. Full per-hand
+  bones, skill/spread, shotgun pellets, body parts and original damage response
+  are not established by the coherent-ray repair.
+- Static ledge climbing does not yet support moving entity-relative handholds.
+  Correct animation tracks do not establish correct hand placement or original
+  phase timing under every collision.
+- Close-camera body visibility is a native correction. Its clearance
+  envelope is not a measured original-game camera constant. An attempted
+  translucent-body effect was rejected after live skeletal rendering artifacts.
+- Complete original NPC decisions, melee, special vehicles and mission systems
+  remain gaps in the broader checklist. Multiplayer policies are independent
+  server behavior, not original single-player engine verification.
+
+## Runtime comparison procedure
+
+Record edition/executable identity, platform, active controller scheme, camera
+view, frame limiter, measured frame rate, relevant player/weapon skill and
+test location before recording. Use the same initial facing, movement mode,
+equipment, input duration and environment for original and native samples.
+
+1. Record idle → walk → run → sprint → stop and turn, including analog partial
+   input, reversal and collision-blocked travel. Measure travel, facing, clip
+   phase and stopping time separately.
+2. Record jump/fall/land, low wall, high hang/pull/drop and vault. Compare feet,
+   hands, capsule placement and root motion at phase boundaries.
+3. Record jetpack takeoff/hover/turn/descent/grounded removal and transitions
+   to water, parachute and death. Compare last flight and first foot heading.
+4. Record camera pitch/orbit/obstruction at walls, ceilings, corners and slopes,
+   then vehicle entry/exit. Compare target, eye path and visibility changes.
+5. Record straight acceleration/coast/brake/reverse, turning and curb impacts
+   for cars and bikes, then each boat/aircraft/special vehicle class. Keep
+   handling data, damage, weather, tyres and player skill controlled.
+6. Record aimed/hip shots, movement, reload cancellation, empty/held fire,
+   dual-hand events, pellets and melee. Compare both visible muzzle and actual
+   impact, then armour/body-part damage independently.
+7. Repeat the relevant cases at measured supported frame rates and with input
+   interruptions. Verify native/browser multiplayer only after local mechanics
+   pass; network agreement alone does not prove original accuracy.
+
+For each discrepancy, save the reproduction, reference observation, root cause,
+changed code, regression and remaining limits in the gameplay journal. A result
+is accepted only for the tested mechanic, scenario and platform.

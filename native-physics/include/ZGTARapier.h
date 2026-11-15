@@ -47,6 +47,8 @@ uint32_t zgtaphys_collider_translation(ZGTAPhysicsWorld*,uint64_t collider,const
 uint32_t zgtaphys_collider_info(ZGTAPhysicsWorld*,uint64_t collider,float *position,uint64_t *body,uint32_t *dynamic,int32_t *material);
 /* Query options bit1: groups supplied; bit2: require a parent body. Flags are Rapier QueryFilterFlags. */
 uint32_t zgtaphys_intersections_capsule(ZGTAPhysicsWorld*,const float *position,float half_height,float radius,uint32_t groups,uint32_t flags,uint32_t options,const uint64_t *excluded_colliders,uint32_t collider_count,const uint64_t *excluded_bodies,uint32_t body_count,uint64_t *colliders,uint32_t capacity);
+/* Literal Ball query, otherwise identical filtering and buffer contract. */
+uint32_t zgtaphys_intersections_sphere(ZGTAPhysicsWorld*,const float *position,float radius,uint32_t groups,uint32_t flags,uint32_t options,const uint64_t *excluded_colliders,uint32_t collider_count,const uint64_t *excluded_bodies,uint32_t body_count,uint64_t *colliders,uint32_t capacity);
 /* contact[10]: distance,normal2XYZ,point1XYZ,point2XYZ, in world coordinates. */
 uint32_t zgtaphys_contact(ZGTAPhysicsWorld*,uint64_t first,uint64_t second,float prediction,float *contact);
 uint32_t zgtaphys_project_point(ZGTAPhysicsWorld*,uint64_t collider,const float *point,uint32_t solid,float *projected);

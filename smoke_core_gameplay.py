@@ -19,7 +19,10 @@ OUT = ROOT / 'local-only/native-physics/tests/core-gameplay-gate'
 
 
 def hashes():
-    paths = [*sorted((ROOT / 'ios/App').glob('*.swift')),
+    paths = [*sorted(p for p in (ROOT / 'ios/App').rglob('*') if p.is_file()),
+             *sorted((ROOT / 'native-physics/src').rglob('*.rs')),
+             *sorted(p for p in (ROOT / 'native-physics/include').iterdir() if p.is_file()),
+             ROOT / 'native-physics/Cargo.toml', ROOT / 'native-physics/Cargo.lock',
              ROOT / 'weapon_inventory.js', ROOT / 'selfhost_backend.js', ROOT / 'local_projectiles.js']
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
@@ -27,11 +30,19 @@ def hashes():
 def main():
     if sys.platform != 'darwin':
         raise SystemExit('This gate requires the macOS Swift/Metal development host. Server tests also run independently with Node.')
+    required = [ROOT / 'local-only/selfhost/weapon-catalog.json',
+                ROOT / 'local-only/selfhost/client-catalog.json',
+                ROOT / 'local-only/site/game/native/foot-animation.json',
+                ROOT / 'local-only/site/game/native/models/animations.clips.bin']
+    missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
+    if missing:
+        raise SystemExit('Prepare the owner-provided local assets/catalogs before this gate. Missing: ' + ', '.join(missing))
     OUT.mkdir(parents=True, exist_ok=True)
     before = hashes()
     cases = [(p.removesuffix('.py'), ['python3', p]) for p in [
         'smoke_native_heading_transitions.py', 'smoke_native_task_transitions.py',
         'smoke_native_shot_delivery.py',
+        'smoke_native_shot_targeting.py', 'smoke_native_shot_occlusion.py',
         'smoke_native_climb.py', 'smoke_native_climb_runtime.py',
         'smoke_native_ammo_reconciliation.py', 'smoke_native_inventory_wire.py',
         'smoke_native_camera_visibility.py',
@@ -47,6 +58,7 @@ def main():
         'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js',
     ]]
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))
+    cases.append(('native_sphere', ['zsh', 'native-physics/test_sphere.sh']))
 
     def run(case):
         name, command = case

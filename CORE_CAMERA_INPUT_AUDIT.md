@@ -56,3 +56,18 @@ helper tests do not prove physical iPhone touch/controller behavior, retail
 camera equality, on-device performance, or complete combat parity. Camera
 substeps using a final display-frame body position also do not replace true
 physics/render interpolation.
+
+## Close-camera acceptance, builds77–79
+
+Live city testing found that a low ceiling could place the camera outside the
+physical near-plane guard while the local body filled the screen. Build78's
+trial transparency exposed unsorted internal skeletal triangles in live UI and
+was rejected despite passing numerical visibility tests. Build79 uses a separate
+1m presentation clearance, spatial hysteresis and binary visibility. Worn
+attachments use the same visibility result; hidden pack audio/effects remain
+updated. Ordinary distant views remain opaque. This is a native visibility
+policy pending original-runtime measurement, not retail camera parity.
+
+The focused gate checks6,630 cases including15/20/30/60/120/144Hz, all orbit
+angles, physical clipping, presentation clearance and reset/reappearance.
+Live final79 UI acceptance remains separate from that gate.

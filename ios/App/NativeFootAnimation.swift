@@ -94,6 +94,12 @@ final class NativeFootAnimation {
     }
     struct Frame {
         var blends: [NativeSkeletalBlend]
+        /// Keep selection/inventory intact while both hands belong to a
+        /// traversal pose, including its blend out and swim-to-ledge handoff.
+        var handWeaponVisible: Bool {
+            !blends.contains { $0.weight > 0 && ($0.clip.hasPrefix("ped/climb_") ||
+                $0.clip.hasPrefix("swim/") || $0.clip == "ped/swim_tread") }
+        }
         var travel: SIMD2<Double>
         var steps: [String]
         var look: Double
