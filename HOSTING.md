@@ -114,6 +114,8 @@ atlases, models, skeletons, animations, HUD, handling, vehicle rigs, effects and
 runtime catalogs under `local-only/site/game/native/`. Some missing public
 animation/flight files can be fetched by their preparation tools. Radio
 recordings are not bundled; see [NATIVE_RADIO.md](NATIVE_RADIO.md).
+When using owner-supplied radio streams, start the server with
+`local-only/venv/bin/python host.py serve` so its decoder uses that environment.
 
 Build the app with [NATIVE_BUILD.md](NATIVE_BUILD.md). In its server menu, use
 your Mac's LAN URL or the public HTTPS URL. `127.0.0.1` on a physical iPhone

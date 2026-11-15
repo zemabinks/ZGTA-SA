@@ -30,6 +30,8 @@ def allowed(name):
         return False
     if path.suffix in ('.png', '.jpg', '.json'):
         return str(path).startswith('ios/App/Assets.xcassets/')
+    if path.suffix == '.txt':
+        return path.name == 'requirements-native.txt'
     return path.suffix in TEXT
 
 

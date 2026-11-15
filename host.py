@@ -137,7 +137,7 @@ def serve(args):
                 'ZGTA_ALLOWED_HOSTS', 'ZGTA_DEBUG_SELFHOST', 'ZGTA_DEBUG_MISSING'):
         environment.pop(key, None)
     environment.update(ZGTA_SELFHOST='1', PORT=str(args.port), BIND_HOST=args.bind,
-                       ZGTA_ALLOWED_HOSTS=','.join(args.host))
+                       ZGTA_ALLOWED_HOSTS=','.join(args.host), ZGTA_PYTHON=sys.executable)
     if network or args.code_file:
         file = Path(args.code_file).expanduser().resolve() if args.code_file else LOCAL / 'selfhost/join-code.txt'
         file.parent.mkdir(parents=True, exist_ok=True)

@@ -19,7 +19,7 @@ if (SELFHOST && HOST !== '127.0.0.1' && HOST !== '::1' &&
     (!(process.env.ZGTA_JOIN_CODE || process.env.ZGTA_JOIN_CODE_FILE) || !process.env.ZGTA_ALLOWED_HOSTS))
   throw new Error('Network hosting requires a join code and ZGTA_ALLOWED_HOSTS.');
 const localGame = SELFHOST ? require('./selfhost_backend') : null;
-const nativeRadio = SELFHOST ? require('./native_radio_server').create() : null;
+const nativeRadio = SELFHOST ? require('./native_radio_server').create({python: process.env.ZGTA_PYTHON || 'python3'}) : null;
 const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
   ...(process.env.ZGTA_ALLOWED_HOSTS || '').split(',').map(host => host.trim()).filter(Boolean)]);
 const UPSTREAM = 'play.samp.directory';
@@ -51,12 +51,12 @@ const COMMUNITY_SCRIPT = `<script>
     const replacements = [
       ['Welcome to samp.directory', 'Welcome to ZGTA:SA'],
       ['San Andreas, in your browser, with everybody else.', 'San Andreas, in your browser, with players on this local server.'],
-      ['Log in with Discord to play: it keeps your money, levels and achievements.', 'No Discord login is needed. Your name, cash, cars, homes, and jobs are saved on this Mac.'],
+      ['Log in with Discord to play: it keeps your money, levels and achievements.', 'No Discord login is needed. Your name, cash, cars, homes, and jobs are saved on this server.'],
       ['Get a job', 'Local jobs'],
       ['The job centre is just below the Conference Center, right where you start: walk into the yellow arrow, or type /jobs. Every job has a tutorial whenever you want one: /tutorial.', 'Press F6 in the world to start a local job, see your progress, and claim its payout.'],
       ['Save for a car, then a home', 'Cars and homes'],
       ['Once you’ve looked at the jobs, the First steps card under your money shows the next goal, its price and where it is.', 'Earn cash from local jobs, buy a car or home in the F6 panel, and spawn an owned car nearby.'],
-      ['Everybody you see is another player. Press T to chat, and work a job side by side.', 'Press T to chat with other players connected to this Mac.'],
+      ['Everybody you see is another player. Press T to chat, and work a job side by side.', 'Press T to chat with other players connected to this server.'],
     ];
     const walker = document.createTreeWalker(welcome, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
