@@ -38,6 +38,42 @@ import simd
             check(fleet.otherVehicle(source.id)?.dynamic==false,authority+" failed to revoke parked physics ownership")
             check(simd_distance(fleet.otherVehicle(source.id)!.position,target.position)<1e-5,authority+" discarded authoritative pose")
         }
+        // Browser hear([], true) retains a promoted body, but an explicit
+        // gone(id) or disposed world removes it. Do not conflate those events.
+        for model in ["420","522","481","430","519","487","435"] {
+            let fleet=manager(),source=NativeOtherVehicles.Pose(id:"departed",code:model,position:SIMD3(3,0,2),heading:0,pitch:0,roll:0)
+            var packets=0;fleet.onOtherMove={_,_ in packets += 1}
+            fleet.synchronizeOtherVehicles([source],excluding:nil,near:.zero,promoteNear:source.position,delta:1/60)
+            let old=fleet.otherColliders
+            precondition(fleet.otherVehicle(source.id)?.dynamic==true && !old.isEmpty)
+            let body=old.first.flatMap{fleet.world.colliderInfo($0)?.body}!
+            fleet.world.setVelocities(body,linear:SIMD3(3,0,0),angular:SIMD3(0,0.5,0))
+            fleet.synchronizeOtherVehicles([],excluding:nil,near:.zero,delta:1/60)
+            check(fleet.otherVehicle(source.id)?.dynamic==true,model+" ordinary omission incorrectly revoked local prediction")
+            fleet.shoveOtherVehicle(body:body,direction:SIMD2(1,0),point:SIMD3(3,2,0),speed:4)
+            check(fleet.removeOtherVehicle(id:source.id),model+" explicit disappearance was ignored")
+            check(!fleet.removeOtherVehicle(id:source.id),model+" disappearance was not idempotent")
+            check(fleet.otherVehicle(source.id)==nil && fleet.otherColliders.isEmpty,model+" disappeared vehicle retained prediction/colliders")
+            check(fleet.world.bodyState(body)==nil && old.allSatisfy{fleet.world.colliderInfo($0)==nil},model+" disappeared vehicle retained native handles")
+            let before=packets
+            for _ in 0..<4 {fleet.synchronizeOtherVehicles([],excluding:nil,near:.zero,delta:1/60);fleet.world.step()}
+            check(packets==before,model+" queued shove/step emitted a packet after disappearance")
+            fleet.synchronizeOtherVehicles([source],excluding:nil,near:.zero,promoteNear:source.position,delta:1/60)
+            check(fleet.otherVehicle(source.id)?.dynamic==true,model+" same-id replacement failed to initialize")
+            check(old.isDisjoint(with:fleet.otherColliders),model+" replacement reused stale native handles")
+            fleet.clearOtherVehicles()
+            check(fleet.otherVehicle(source.id)==nil && fleet.otherColliders.isEmpty,model+" session/world teardown retained parked body")
+            let afterClear=packets
+            for _ in 0..<4 {fleet.synchronizeOtherVehicles([],excluding:nil,near:.zero,delta:1/60);fleet.world.step()}
+            check(packets==afterClear,model+" cleared world emitted old movement")
+        }
+        do {
+            let fleet=manager();precondition(fleet.enter(model:"420",modelPosition:SIMD3(0,0,2),heading:0))
+            let owned=fleet.chassisColliders
+            check(!fleet.removeOtherVehicle(id:"owned"),"Explicit parked removal touched a missing/owned entry")
+            fleet.clearOtherVehicles()
+            check(fleet.active && owned==fleet.chassisColliders && owned.allSatisfy{fleet.world.colliderInfo($0) != nil},"Parked teardown removed active owned chassis")
+        }
         // Invalid requested entry must leave the existing body/damage intact.
         do {
             let car=manager();precondition(car.enter(model:"420",modelPosition:SIMD3(0,0,8),heading:0))
@@ -70,6 +106,6 @@ import simd
             if model=="487" {check(driven.rotorTurning<rotor,"zero-health helicopter rotor kept running")}
         }
         precondition(failures.isEmpty,"Vehicle lifecycle regressions: \(failures.joined(separator:", "))")
-        print("PASS: \(checks) native vehicle lifecycle checks: promoted exclusion, external authority, invalid entry preservation, zero-health car/bike/plane/helicopter coasting")
+        print("PASS: \(checks) native vehicle lifecycle checks: promoted exclusion, explicit disappearance/world teardown, replacement, external authority, invalid entry preservation, zero-health coasting")
     }
 }

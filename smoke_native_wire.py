@@ -21,15 +21,15 @@ function received(m){
  if(m.t==='me'&&m.driving){assert(Math.abs(m.heading+.75)<1e-6);assert(Math.abs(m.steer+.3)<1e-6);assert.equal(m.pitch,.25);assert.equal(m.roll,.125);assert.equal(m.health,645);assert.equal(m.damage,damage);assert.equal(m.horn,3);assert.equal(m.act,1);assert.equal(m.lights,true);driven=true}
  if(m.t==='me'&&m.walking&&!m.parked&&m.act===28){assert.equal(m.move,2.13);assert.equal(m.anim,null);assert.equal(m.aim,.24);assert.equal(m.act,28);assert.equal(m.air,true);assert.equal(m.crouch,true);assert.equal(m.paused,true);assert.deepEqual([m.vx,m.vy,m.vz],[1.2,-2.3,.4]);assert.deepEqual([m.wx,m.wy,m.wz],[.1,.2,.3]);assert(Number.isFinite(m.clock));foot=true}
  if(m.t==='me'&&m.act>=50&&m.act<=62){assert.equal(m.pitch,-.23);assert.equal(m.roll,.46);if(m.act===60){assert.equal(m.move,2.13);assert.equal(m.air,true);assert.equal(m.crouch,true)}else{assert.equal(m.move,0);assert.equal(m.air,false);assert.equal(m.crouch,false)}assert.equal(m.aim,m.act===54?null:.24);flights++}
- if(m.t==='me'&&m.walking&&m.parked){assert(driven&&foot&&moved&&used&&flights===3&&shotSequence===2&&boundHit&&meleeBound&&meleeMarkers===3);assert.equal(m.parked.damage,damage);assert.equal(m.parked.health,645);assert(Math.abs(m.parked.heading+.75)<1e-6);assert.equal(m.parked.roll,.125);parked=true;send({t:'cars',c:[]});send({t:'note',text:'WIRE COMPLETE'})}
+ if(m.t==='me'&&m.walking&&m.parked){assert(driven&&foot&&moved&&used&&flights===3&&shotSequence===2&&boundHit&&meleeBound&&meleeMarkers===3);assert.equal(m.parked.damage,damage);assert.equal(m.parked.health,645);assert(Math.abs(m.parked.heading+.75)<1e-6);assert.equal(m.parked.roll,.125);parked=true;send({t:'all',you:'Native wire',cash:0,chat:[],vehicles:[],cars:[]});send({t:'note',text:'WIRE OMITTED'});send({t:'vgone',id:'car-fixture'});send({t:'vgone',id:'car-fixture'});send({t:'vgone',id:'absent-dynamic'});send({t:'note',text:'WIRE COMPLETE'})}
 }
 const server=http.createServer();server.on('upgrade',(req,s)=>{socket=s;s.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')+'\r\n\r\n');let pending=Buffer.alloc(0);s.on('data',chunk=>{pending=Buffer.concat([pending,chunk]);while(pending.length>=2){let length=pending[1]&127,start=2;if(length===126){if(pending.length<4)return;length=pending.readUInt16BE(2);start=4}if(length===127)throw Error('Unexpected huge test packet');const masked=!!(pending[1]&128),mask=masked?pending.subarray(start,start+4):null;if(masked)start+=4;if(pending.length<start+length)return;const opcode=pending[0]&15,payload=Buffer.from(pending.subarray(start,start+length));pending=pending.subarray(start+length);if(masked)for(let i=0;i<length;i++)payload[i]^=mask[i%4];if(opcode===1)received(JSON.parse(payload));else if(opcode===8){s.end();return}}})});
-server.listen(0,'127.0.0.1',()=>{child=spawn(process.argv[2],['http://127.0.0.1:'+server.address().port],{stdio:'inherit'});child.on('exit',code=>{assert.equal(code,0);assert(driven&&parked);done=true;socket?.destroy();server.close();console.log('PASS actual native WebSocket client: fractional spawn, browser yaw/roll, full foot/flight and parked vehicle state, equipment, damage/lights/horn and empty snapshot')})});
+server.listen(0,'127.0.0.1',()=>{child=spawn(process.argv[2],['http://127.0.0.1:'+server.address().port],{stdio:'inherit'});child.on('exit',code=>{assert.equal(code,0);assert(driven&&parked);done=true;socket?.destroy();server.close();console.log('PASS actual native WebSocket client: fractional spawn, browser yaw/roll, full foot/flight and parked vehicle state, equipment, damage/lights/horn, streamed omission and explicit repeated despawn')})});
 const timer=setTimeout(()=>{if(!done){child?.kill();socket?.destroy();server.close();throw Error('Native wire timed out')}},20000);timer.unref();
 '''
 SWIFT=r'''
 let client=NativeMultiplayerClient(server:ServerAddress(CommandLine.arguments[1])!)
-var spawned=false,actors=false,cleared=false,sent=false,finished=false,vehicleUpdated=false,gear=false
+var spawned=false,actors=false,cleared=false,sent=false,finished=false,vehicleUpdated=false,gear=false,removedIDs:[String]=[]
 let damage="3434012122110101201"
 client.onTeleport={p,h in precondition(abs(p.x-1684.7612)<0.0002 && abs(p.y+2101.9894)<0.0003 && abs(p.z-12.85125)<0.00001);precondition(abs(h!+0.75)<1e-6);spawned=true}
 client.onFlightGear={parachute,jetpack in precondition(parachute&&jetpack);gear=true}
@@ -40,6 +40,10 @@ client.onPlayers={players in
  precondition(p.ridingVehicleID=="passenger-car" && p.ridingSeat==2 && p.supportVehicleID=="trailer" && p.supportOffset==SIMD3<Float>(0.1,0.2,0.3))
  precondition(p.kit==[0.2,0.4,1,0.8,-0.2] && p.packetReceivedAt>0 && p.packetClockMilliseconds==123456 && abs(p.latencyMilliseconds-23.4)<1e-5);actors=true}
  else if actors{cleared=true}
+}
+client.onVehicleRemoved={id in
+ precondition(client.vehicles[id]==nil,"Explicit deletion callback ran before row removal")
+ removedIDs.append(id)
 }
 client.onVehicles={vehicles in
  if let changed=vehicles.first,changed.work==321{precondition(changed.health==623 && changed.heading == -0.4 && changed.roll==0.2);vehicleUpdated=true}
@@ -69,7 +73,8 @@ func sendIfReady(){
 client.onConnectionState={state in if state == .ready {sendIfReady()}}
 client.onInventoryConnection={nonce in if nonce != nil {precondition(!client.isReady && client.reserveShot()==nil,"Hello alone unlocked gameplay")}}
 client.onInventory={_ in if !client.isReady {precondition(client.reserveShot()==nil,"Inventory before all unlocked gameplay")}}
-client.onStatus={text in if text=="WIRE COMPLETE"{precondition(spawned&&actors&&cleared&&vehicleUpdated&&gear);finished=true;client.disconnect()}}
+client.onStatus={text in if text=="WIRE OMITTED"{precondition(client.orderedVehicles.isEmpty && removedIDs.isEmpty,"Stream omission was treated as explicit despawn")}
+ if text=="WIRE COMPLETE"{precondition(removedIDs==["car-fixture","car-fixture","absent-dynamic"],"Explicit despawns lost the retained-physics routing event");precondition(spawned&&actors&&cleared&&vehicleUpdated&&gear);finished=true;client.disconnect()}}
 client.connect();let deadline=Date().addingTimeInterval(15)
 while !finished && Date()<deadline{RunLoop.main.run(until:Date().addingTimeInterval(0.02))}
 precondition(finished,"Swift wire checks timed out")

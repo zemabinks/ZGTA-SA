@@ -32,6 +32,7 @@ final class NativeWeaponState {
     private let allowLegacySnapshots: Bool
     private let prediction: NativeInventoryPrediction
     private var serverReloading = false
+    private var serverReloadEnd: Double?
     private var reloadRequest: String?
     private var reloadRequestStarted: Double?
     private var resyncNotified = false
@@ -80,7 +81,7 @@ final class NativeWeaponState {
         guard nonce != prediction.connection else { return }
         if let nonce, !nonce.isEmpty { prediction.connected(nonce) } else { prediction.disconnected() }
         selected = 0; owned = [0]; ammunition = [:]; revision = -1
-        reloadUntil = 0; serverReloading = false; reloadRequest = nil; reloadRequestStarted = nil
+        reloadUntil = 0; serverReloading = false; serverReloadEnd = nil; reloadRequest = nil; reloadRequestStarted = nil
         resyncNotified = false; reloadRefreshKey = nil; lastShot = -.infinity
         onChange?()
     }
@@ -93,6 +94,14 @@ final class NativeWeaponState {
     /// mode was selected by a test. They never overwrite sequenced truth.
     @discardableResult func apply(_ inventory: [String: Any]) -> Bool {
         guard let parsed = Self.parse(inventory) else { return false }
+        // The same authoritative reload can arrive through both HTTP and WS,
+        // including a later unrelated inventory revision or rejected-shot ACK.
+        // Its countdown is not a new reload just because the packet is late.
+        let continuingReload: Bool
+        if serverReloading, parsed.reloading, selected == parsed.selected {
+            if let old = serverReloadEnd, let next = parsed.reloadEnd { continuingReload = old == next }
+            else { continuingReload = revision == parsed.revision }
+        } else { continuingReload = false }
         if let ack = inventory["ack"] as? [String: Any] {
             guard let connection = ack["connection"] as? String,
                   let processed = Self.integer(ack["processedShot"]), prediction.connection == connection else { return false }
@@ -109,7 +118,9 @@ final class NativeWeaponState {
             ammunition = Dictionary(uniqueKeysWithValues: parsed.weapons.map { (String($0.key), [$0.value.clip,$0.value.reserve]) })
         }
         serverReloading = parsed.reloading
-        reloadUntil = parsed.reloading ? clock() + parsed.remaining / 1000 : 0
+        let deadline = parsed.reloading ? clock() + parsed.remaining / 1000 : 0
+        reloadUntil = continuingReload ? min(reloadUntil, deadline) : deadline
+        serverReloadEnd = parsed.reloading ? parsed.reloadEnd ?? (continuingReload ? serverReloadEnd : nil) : nil
         if !serverReloading { reloadRefreshKey = nil }
         onChange?(); tick()
         return true
@@ -175,6 +186,7 @@ final class NativeWeaponState {
         let weapons: [Int: NativeInventoryPrediction.Rounds]
         let reloading: Bool
         let remaining: Double
+        let reloadEnd: Double?
     }
     private static func integer(_ value: Any?) -> Int? {
         guard let n = value as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(),
@@ -200,6 +212,11 @@ final class NativeWeaponState {
         if let reloadWeapon = reload?["weapon"] {
             guard integer(reloadWeapon) == selected, selected != 0 else { return nil }
         }
-        return Parsed(revision: revision, selected: selected, weapons: weapons, reloading: reloading, remaining: remaining)
+        // `until` is an existing server identity, not a clock conversion. Older
+        // snapshots without it still use the same-revision duplicate rule.
+        var reloadEnd: Double?
+        if let value = reload?["until"] as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(),
+           value.doubleValue.isFinite, value.doubleValue > 0 { reloadEnd = value.doubleValue }
+        return Parsed(revision: revision, selected: selected, weapons: weapons, reloading: reloading, remaining: remaining, reloadEnd: reloadEnd)
     }
 }

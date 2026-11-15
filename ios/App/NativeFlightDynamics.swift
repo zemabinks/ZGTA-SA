@@ -43,8 +43,13 @@ final class NativeFlightDynamics {
     }
     private static func clamp(_ v:Double,_ low:Double,_ high:Double)->Double { min(high,max(low,v)) }
     private func stopTurning(_ amount:Double,_ step:Double)->Double {
-        if kind=="heli" { return max(0,min(amount,0.22)-0.00055*step) }
-        let limited=min(amount,0.34);return max(0,limited-(limited>0.18 ? 0.003:0.001)*step)
+        Self.stoppedTurning(kind:kind,amount:amount,ticks:step)
+    }
+    /// Original89888.s2 is shared by a physical aircraft and its demoted
+    /// parked visual state. Ticks are normalized50Hz steps, not seconds.
+    static func stoppedTurning(kind:String,amount:Double,ticks:Double)->Double {
+        if kind=="heli" { return max(0,min(amount,0.22)-0.00055*ticks) }
+        let limited=min(amount,0.34);return max(0,limited-(limited>0.18 ? 0.003:0.001)*ticks)
     }
     private func dampAxes(_ body:NativeVehicleForces,_ step:Double,_ speed:Double,_ values:Parameters) {
         let axes=[body.right,body.forward,body.up], components=axes.map { simd_dot(body.turn,$0) }

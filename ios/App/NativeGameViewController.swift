@@ -346,6 +346,7 @@ final class NativeGameViewController: UIViewController {
             self?.chatPanel?.update(lines)
         }
         network.onVehicles = { [weak self] vehicles in self?.renderer?.remoteVehicles = vehicles }
+        network.onVehicleRemoved = { [weak self] id in self?.vehicleRemoved(id) }
         network.onEnter = { [weak self] id, okay in
             guard let self else { return }
             guard okay, let vehicle = self.network.vehicles[id] else {
@@ -382,6 +383,7 @@ final class NativeGameViewController: UIViewController {
             self?.attackButton.setTitle(health == 0 ? "RESPAWN" :
                                           (self?.usingPistol == true ? "FIRE" : "HIT"), for: .normal)
         }
+        network.onRespawn = { [weak self] in self?.finishRespawn() }
         gameplay.onState = { [weak self] state in
             guard let self else { return }
             self.network.syncVitals(from: state)
@@ -463,6 +465,16 @@ final class NativeGameViewController: UIViewController {
         gameHUD.radar.target=nil;renderer?.objective=nil
         radio.stop()
         players.text=state == .stopped ? "MULTIPLAYER DISCONNECTED":"RECONNECTING TO MULTIPLAYER"
+    }
+
+    private func vehicleRemoved(_ id:String) {
+        guard renderer?.removeVehicle(id:id) == true else{return}
+        currentVehicle=nil
+        resetControls();previousAudioPosition=nil
+        setDrivingControls(false)
+        vehicleButton.setTitle("ENTER CAR",for:.normal)
+        gameHUD.updateVehicle(name:nil,speed:0)
+        radio.stop()
     }
 
     private func stopGame() {
@@ -1060,12 +1072,18 @@ final class NativeGameViewController: UIViewController {
         guard !weapons.reloading, magazine < weapons.current.capacity, reserve > 0 else { return }
         let requestID=weapons.beginReloadRequest()
         let connection=network.inventoryConnection
+        var dispatchReturned=false,synchronouslyRejected=false
         gameplay.perform("weapon.reload") { [weak self] result in
             guard let self else{return}
             guard self.network.inventoryConnection==connection else{return}
             self.weapons.finishReloadRequest(id:requestID,succeeded:result)
-            if result == false {self.renderer?.cancelReloadAnimation()}
+            if result == false {
+                if !dispatchReturned {synchronouslyRejected=true}
+                self.renderer?.cancelReloadAnimation()
+            }
         }
+        dispatchReturned=true
+        guard !synchronouslyRejected,acceptsHeldInput,network.inventoryConnection==connection else{return}
         let clips = NativeWeaponAnimation.forWeapon(weapons.selected)
         renderer?.fireWeapon(clip: renderer?.crouching == true ? clips.crouchReload : clips.reload, duration: 1.8)
         audio.reload(weapon: weapons.selected)
@@ -1079,16 +1097,8 @@ final class NativeGameViewController: UIViewController {
         if renderer.isChuting {renderer.openParachute();return}
         if currentVehicle != nil && network.health > 0 { return }
         if network.health == 0 {
+            status.text = "RESPAWN REQUESTED"
             network.respawn()
-            if currentVehicle != nil {
-                currentVehicle = nil
-                renderer.exitVehicle()
-                vehicleButton.setTitle("ENTER CAR", for: .normal)
-                setDrivingControls(false)
-                radio.stop()
-            }
-            renderer.teleport(x: 1480, y: -1738, z: 13)
-            status.text = "RESPAWNED AT THE CITY CENTRE"
             return
         }
         guard currentVehicle == nil else { status.text = "EXIT THE VEHICLE TO FIGHT"; return }
@@ -1126,6 +1136,18 @@ final class NativeGameViewController: UIViewController {
             .init(id:$0.id,feet:$0.position,heading:$0.heading,crouching:$0.crouching,
                 down:$0.down != 0,dead:$0.life <= 0)
         }
+    }
+
+    private func finishRespawn() {
+        resetControls()
+        if currentVehicle != nil {
+            currentVehicle=nil
+            renderer?.exitVehicle()
+            vehicleButton.setTitle("ENTER CAR",for:.normal)
+            setDrivingControls(false);radio.stop()
+        }
+        renderer?.teleport(x:1480,y:-1738,z:13)
+        status.text="RESPAWNED AT THE CITY CENTRE"
     }
 
     private func consumeFootMeleeHit(_ event:NativeMeleeEvent)->Bool {

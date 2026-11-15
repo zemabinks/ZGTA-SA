@@ -340,6 +340,14 @@ final class NativeFootAnimation {
         guard weapon?.reloads == true, let clip = reloadClip, death == nil else { return 0 }
         gunState = .reload; gunTime = 0; return duration(clip) * twinCount
     }
+    /// Native inventory reload takes ownership of the pending gun request.
+    /// Keep raw reload() compatible with the animation API, but never let its
+    /// suspended pre-muzzle trigger fire later when server readiness returns.
+    /// This also cancels pending fire when no dedicated reload clip exists.
+    @discardableResult func beginReload() -> Double {
+        cancelInput()
+        return reload()
+    }
     func cancelReload() {if gunState == .reload {gunState = .aim;gunTime = .infinity}}
     func cancelFire() {
         if usesGunCycle { if let config = gunConfiguration { gunCycle.cancel(config) };return }

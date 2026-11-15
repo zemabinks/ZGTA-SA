@@ -952,6 +952,43 @@ class LocalGame {
     return peer;
   }
 
+  healthState(peer) {
+    if (!peer?.healthAckEnabled || !peer.inventoryAckEnabled || !peer.ready || peer.closed || !this.peers.has(peer)) return {};
+    const view=[peer.player.health,peer.player.armour,peer.processedHealthSequence || 0];
+    if (!peer.healthView) peer.healthRevision=0;
+    else if (view.some((value,index)=>value!==peer.healthView[index])) peer.healthRevision=(peer.healthRevision || 0)+1;
+    peer.healthView=view;
+    return {health:peer.player.health,armour:peer.player.armour,
+      healthAck:{connection:peer.inventoryConnection,processed:peer.processedHealthSequence || 0,
+        revision:peer.healthRevision,respawned:peer.lastRespawnSequence || 0}};
+  }
+
+  applySelfHealth(peer,message) {
+    if (!peer.ready || !peer.healthAckEnabled || message.c!==peer.inventoryConnection ||
+        !Number.isSafeInteger(message.s) || message.s<=0) return;
+    const reply=()=>peer.send({t:'vitals',...this.healthState(peer)});
+    const processed=peer.processedHealthSequence || 0;
+    if (message.s<=processed) return reply();
+    if (message.s!==processed+1) return reply();
+    peer.processedHealthSequence=message.s;
+    let changed=false;
+    if (message.kind==='hurt' && Number.isInteger(message.damage) && message.damage>0 &&
+        message.damage<=100 && peer.player.health>0) {
+      peer.player.health=Math.max(0,peer.player.health-message.damage);changed=true;
+      if (peer.player.health===0) {
+        peer.player.deaths=money(peer.player.deaths+1);peer.player.lastDeath=Date.now();
+        this.abortHeist(peer.player,'you were defeated');
+      }
+    } else if (message.kind==='respawn' && peer.player.health===0 &&
+               Date.now()-(peer.player.lastDeath || 0)>2000) {
+      peer.player.health=100;peer.player.armour=0;
+      peer.lastRespawnSequence=message.s;
+      peer.nativeOxygen=1150;peer.nativeDrownFraction=0;peer.nativeOxygenTime=0;changed=true;
+    }
+    if (changed) this.save();
+    reply();
+  }
+
   gameplayState(player,inventoryPeer=null) {
     const pos = this.position(player);
     const nearHangar = nearestHangar(pos);
@@ -1105,7 +1142,7 @@ class LocalGame {
       heistCooldown: Math.max(0, Math.ceil(((player.heistCooldownUntil || 0) -
         Date.now()) / 1000)),
       racesFinished: player.racesFinished || 0, racesWon: player.racesWon || 0,
-      health: player.health, armour: player.armour, wanted: player.wanted,
+      health: player.health, armour: player.armour,...this.healthState(inventoryPeer), wanted: player.wanted,
       passive: player.passive, passiveWait: Math.max(0,
         Math.ceil((player.passiveWaitUntil - Date.now()) / 1000)),
       kills: player.kills, deaths: player.deaths, arrests: player.arrests,
@@ -2613,6 +2650,7 @@ class LocalGame {
       return;
     }
     if (message.t === 'vmove') {this.updateUnattendedVehicle(peer,message);return;}
+    if (message.t === 'selfHealth') {this.applySelfHealth(peer,message);return;}
     if (message.t === 'detonate' && peer.ready && peer.inventoryEnabled) {
       this.projectiles.detonate(String(peer.player.number)); return;
     }
@@ -2624,11 +2662,14 @@ class LocalGame {
         peer.inventoryConnection ||= crypto.randomBytes(18).toString('base64url');
         peer.processedShotSequence ??= 0;
       }
+      if (peer.inventoryAckEnabled && message.healthAck===1) {
+        peer.healthAckEnabled=true;peer.processedHealthSequence ??= 0;
+      }
       peer.ready = true;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
         spot: [1480, -1738, 13, 0],
-        life: [peer.player.health, peer.player.armour], out: [1480, -1738],
+        life: [peer.player.health, peer.player.armour],...this.healthState(peer), out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0,
         ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {})});
       peer.send(this.fullState(peer));
@@ -2749,7 +2790,7 @@ class LocalGame {
       }
       const reportedHealth = message.walking === true ? message.health :
         message.driving === true ? message.life : null;
-      if (Number.isFinite(reportedHealth) && reportedHealth >= 0 && reportedHealth <= 100) {
+      if (!peer.healthAckEnabled && Number.isFinite(reportedHealth) && reportedHealth >= 0 && reportedHealth <= 100) {
         const health = Math.round(reportedHealth);
         if (health < peer.player.health) {
           peer.player.health = health;
@@ -3103,6 +3144,8 @@ class Peer {
 
   send(message) {
     if (this.closed) return;
+    if (this.healthAckEnabled && (message.t==='vitals' || message.t==='hit'))
+      message={...message,...this.game.healthState(this)};
     const data = Buffer.from(JSON.stringify(message));
     let header;
     if (data.length < 126) header = Buffer.from([0x81, data.length]);

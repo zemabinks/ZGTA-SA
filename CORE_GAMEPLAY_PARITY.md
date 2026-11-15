@@ -45,17 +45,17 @@ platform, never for the entire original mechanic by inference.
 | Crouch | Stand/crouch transitions, strafe, roll, restricted clearance, aim/fire | Archived motor/native movement use fixed walker/probe shapes. Retail stance clearance and transition feel remain unmeasured; no shorter capsule is assumed | audit |
 | Turning | Idle turn, moving turn, shortest arc across ±π, camera-independent facing, idle after special modes | Final flight/swim facing is handed to foot once; rotated landing wire trace has0° heading jump; retail turning feel unverified | audit |
 | Jump | Launch animation marker, speed carry, short/long jump, ceiling hit, air control, double-request prevention | Browser/motor fixtures; original-game jump height/timing not measured | audit |
-| Fall/land | Ledge fall, hard/soft landing, slope contact, repeated tiny ground contacts, damage, death | Held-root release resets obsolete fall/contact history; native frame schedules15–144Hz agree. Original hard/soft landing thresholds and damage remain unmeasured | audit |
+| Fall/land | Ledge fall, hard/soft landing, slope contact, repeated tiny ground contacts, damage, death | Held-root release resets obsolete fall/contact history; native frame schedules15–144Hz agree. Regular native landing now applies the checked browser damage/death policy once; original hard/soft landing thresholds and damage remain unmeasured | audit |
 | Climb/vault | Height bands, clearance, hanging, pull-up, cancel/drop, obstacle traversal | Six static-ledge phases implemented; real Renderer/animation/native-world integration gate passes8,365 checks. Moving carriers, retail hand alignment and original phase timing remain unverified | audit |
-| Swimming | Entry from walking/falling/flight, breast/crawl/dive, underwater pitch/turn, breath/drown, shore/ledge exit | Swim steering/heading handoff corrected; native/browser fixtures pass, original shore and underwater behavior unverified | audit |
+| Swimming | Entry from walking/falling/flight, breast/crawl/dive, underwater pitch/turn, breath/drown, shore/ledge exit | Swim steering/heading handoff and duplicate animation update on water exit corrected; native/browser fixtures pass, original shore and underwater behavior unverified | audit |
 | Animation | Correct IFP clips, root motion, timing, blending, reverse/strafe, arm/spine aim, hit/death, motion-mode priority | Real assets and browser fixtures; full retail blend/edge coverage outstanding | audit |
-| Camera foot | Follow distance, orbit sensitivity, pitch limits, collision, recenter, scoped aiming | Normal camera golden remains unchanged; temporary reverse view preserves follow/aim history across2,016 reference frames. Close-camera/unknown-geometry policies are explicit; original feel unverified | audit |
+| Camera foot | Follow distance, orbit sensitivity, pitch limits, collision, recenter, scoped aiming | Fixed-step motion now owns crouch-camera stance across15–144Hz; normal camera golden remains unchanged; temporary reverse view preserves follow/aim history across2,016 reference frames. Close-camera/unknown-geometry policies are explicit; original feel unverified | audit |
 | Camera vehicle | Enter/exit, reverse/look-back, roof/wall collision, bike/boat/aircraft, first-person | Browser camera fixtures pass; vehicle/foot/teleport histories reset together; original and physical-controller validation outstanding | audit |
 | Collision | Terrain, walls/corners, slopes, stairs, floor seams, dynamic bodies, ceilings, unloaded cells | Held feet and capsule synchronize; literal spheres remove five grazing-query differences. Ordered whole-world camera/weapon rays fail closed at missing cells and exclude own capsules; original contact comparison remains outstanding | audit |
 | Gravity/momentum | Original unit scaling, fixed-step integration, damping, jump/flight/swim handoffs | Avoid replacing original per-tick units with unrelated SI defaults; test accumulated time | audit |
 | Reposition/reset | Teleport, respawn, interior transfer, vehicle reset, death/revival | Hard reset clears transient tasks, collision/solver and camera history; state transition regressions pass, full original edge coverage remains | audit |
 | Jetpack takeoff | Ground request, equipped state, thrust, initial facing, collision | Test same heading and rotated takeoff at multiple rates | audit |
-| Jetpack flight | Hover, lateral thrust, speed damping, pitch/bank, thrust up/down, stop, death/water | Browser dynamics fixtures; retail force/feel still unmeasured | audit |
+| Jetpack flight | Hover, lateral thrust, speed damping, pitch/bank, thrust up/down, stop, death/water | Browser dynamics fixtures; stale landed-canopy phase is cleared on jetpack takeover; retail force/feel still unmeasured | audit |
 | Jetpack landing | Ground detection, preserve final heading, one landing event, foot animation continuity | Stale-cache overwrite and touchdown early return fixed. Simulator wire trace:195.569° flight turn followed by0° touchdown heading jump. Grounded removal is server-validated | audit |
 | Parachute | Freefall, deploy, glide, turn, landing, collapse/death, water, consume once | Browser flight fixture; original timing/attachment coverage incomplete | audit |
 | Car dynamics | Engine gears, torque, braking/reverse, steering, grip/slip, suspension, drag, collision impulse |212 model configs and browser fixtures; full original handling validation outstanding | audit |
@@ -64,16 +64,16 @@ platform, never for the entire original mechanic by inference.
 | Bikes/bicycles | Lean, steering, wheel contacts, pedaling, reverse limits, fall-off, rider root synchronization | Brake/hop ownership, charged cancellation and shared stamina pass335 native checks; full fall-off and physical controller tests remain missing | audit |
 | Boats | Water plane, buoyancy, wave pitch/roll, thrust/drag, shore collision, exit to swim | 17,339 water-surface reference queries match exactly; buoyancy/boat browser fixtures exist. Original runtime comparison remains outstanding | audit |
 | Aircraft | Fixed-wing and helicopter lift/drag, surfaces/rotors, landing gear, ground contacts, stall, cameras | Native specialized solvers exist; fallback assists are approximations, not original parity | gap |
-| Trains/trailers/tools | Track constraints, coupling, towing, hydraulics, vehicle-specific controls | Full original special vehicle and tool behaviors incomplete | gap |
+| Trains/trailers/tools | Track constraints, coupling, towing, hydraulics, vehicle-specific controls | Train consists now render consistently for owned, remote and parked locomotives; trailer/tow coupling, working-vehicle parts and full special behavior remain incomplete | gap |
 | Combat aim | Hip/arm/whole-body aim, camera-relative yaw/pitch, moving aim, crouch, target line/occlusion | Shortest-arc gun yaw fixed; coherent event-time muzzle/target/LOS repair passes245 checks; actual per-hand muzzle replay adds600 frames/5,415 checks. Original aim feel and skeletal victim hitboxes remain unverified | audit |
-| Combat fire/reload | Weapon cadence, reload cancel, empty clip, held trigger, weapon switch, recoil, projectile and hit events | Animation-owned emission and atomic ACK prediction integrated;3200 delayed frames and actual Swift HTTP/WS tests pass. Held-fire automatic reload verified in diagnostic Simulator; server reload/damage policies and precise recoil still differ/unverified | audit |
+| Combat fire/reload | Weapon cadence, reload cancel, empty clip, held trigger, weapon switch, recoil, projectile and hit events | Animation-owned emission and atomic ACK prediction integrated;3200 delayed frames and actual Swift HTTP/WS tests pass. Reload ACK duplicates no longer restart the same countdown; released pre-muzzle input is cancelled at native reload boundaries; server reload/damage policies and precise recoil still differ/unverified | audit |
 | Melee/damage | Combo timing, hit range/line, block, knockdown, hit reaction, death/revive | Animation-marker melee, guard/block and source-based reach are integrated. Special moves, fighting-style acquisition, weapons1–15 acquisition, damage policy for10–15 and full original victim/AI behavior remain gaps | gap |
 | Weapon attachment | Hands/spine, dual wield, parachute/jetpack, vehicle drive-by | Event-time hand24/34 muzzle transforms match600 archived rig frames;53 original weapon/skill offset rows match; weapon46 spine placement and consistent carried/wire selection are covered by real-rig tests. Full utility-slot behavior and drive-by remain incomplete | gap |
 | Touch | Safe-area geometry, multitouch, release/cancel, context buttons, overlays, keyboard | Central cancellation clears held gameplay controls across overlays/lifecycle; actual multitouch/device acceptance remains outstanding | audit |
 | Controller | Dead zones, press edges, disconnect, release-to-rearm, camera sensitivity | Context bindings/dispatch pass3,619 checks; disconnect/menu gates require neutral before rearming. Modern triggers are an explicit adaptation; physical controller tests remain required | audit |
 | Keyboard/mouse | Held-key focus loss, mouse look, bindings, modifier and device-switch edges | Original PC defaults and context dispatch are audited; slot-ordered cycling and Alt walk are covered. Original-PC bicycle hop and pause key handoff are covered. Full original targeting and hardware acceptance remain gaps | audit |
 | Timing |15/30/60/120Hz plus jitter, slow frame, foreground resume, fixed-step catchup | Slow frames retain elapsed time with bounded updates; suspension uses a separate policy; frame-schedule regressions pass, device performance unmeasured | audit |
-| Multiplayer | Local input immediate, remote angle shortest arc, foot/flight/vehicle packet state, enter/exit authority | Wire and independent server tests exist; cross-client transition replay still required | audit |
+| Multiplayer | Local input immediate, remote angle shortest arc, foot/flight/vehicle packet state, enter/exit authority | Wire/independent-server tests cover explicit despawn, fresh-world cleanup and acknowledged environmental damage/respawn; full cross-client transition replay still required | audit |
 | Player attributes and damage | Stamina, breath, health/armour, fall/fire/drown response, weapon skill, body/stat modifiers | Several controllers exist; complete original stat effects, body-part damage and original damage policies are not established | gap |
 | World context | Ground materials, streaming seams, interiors, doors, pickups, NPC/traffic interactions and activity interruption | Audit each interaction against the original; missing geometry must not be treated as a clear shot | audit |
 | Other fundamentals | HUD/radar/map, interactions/interiors, collision materials, radio and effects, objects/NPCs/mission context | Existing modules remain partial. Owner-imported original radio recordings now work locally; full original mission/NPC systems remain absent | gap |
@@ -112,10 +112,20 @@ data. Of5,724 checked handling fields across212 mapped models, one boat's
 turn-mass value differs only in decimal rounding. These are data comparisons,
 not evidence that the independent simulation reproduces the original engine.
 All reference images, binaries, extracted data and disassembly stay local.
-Original runtime behavior and the forthcoming iOS reference remain open gates.
+The supplied iOS Definitive Edition package establishes static menu resources,
+not a running original gameplay reference. Original runtime behavior remains open.
 
 Core84 adds fixed-step-owned foot velocity and explicit queued-intent cancellation
 (see CORE_FIXED_STEP_VELOCITY_AUDIT.md), plus fresh-baseline connection recovery
 (see CORE_CONNECTION_RECOVERY.md). These fix specific demonstrated transition
 failures. Passing regression counts do not upgrade the remaining retail-runtime
 rows to verified1:1 parity.
+
+Core86 adds water/flight/fall task corrections, stable camera stance over fixed
+poses, versioned environmental-health synchronization, reload ownership fixes,
+explicit vehicle despawn/session cleanup, parked aircraft equipment retention
+and remote/parked train consists. See CORE_TASK_HANDOFF_AUDIT.md,
+CORE_FALL_DAMAGE.md, CORE_CAMERA_MOTION_AUDIT.md,
+CORE_HEALTH_SYNCHRONIZATION.md, CORE_COMBAT_TRANSITIONS_86.md,
+CORE_VEHICLE_DEPARTURE.md and CORE_TRAIN_LAYOUT.md. These are bounded native
+correctness/browser-compatibility results; unmeasured retail rows stay open.

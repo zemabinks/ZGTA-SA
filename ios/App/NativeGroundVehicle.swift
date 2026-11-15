@@ -122,6 +122,10 @@ final class NativeGroundVehicle {
     }
     func otherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.snapshot(id)}
     func takeOtherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.take(id)}
+    /// Explicit disappearance differs from omission in a streamed full list.
+    /// It must revoke even a moving/pushed parked hull immediately.
+    @discardableResult func removeOtherVehicle(id:String)->Bool {trainLayouts.removeValue(forKey:id);return others.remove(id)}
+    func clearOtherVehicles() {others.clear();trainLayouts.removeAll()}
     func shoveOtherVehicle(body:UInt64,direction:SIMD2<Double>,point:SIMD3<Double>,speed:Double){
         others.shove(body:body,direction:direction,point:point,speed:speed)
     }
@@ -160,6 +164,7 @@ final class NativeGroundVehicle {
     private var bikeDynamics: NativeBikeDynamics?
     private var trainDynamics: NativeTrainDynamics?
     private var tracks: NativeTrainTracks?
+    private var trainLayouts:[String:NativeTrainDynamics] = [:]
     struct Carriage { let model:String;let transform:simd_float4x4;let position:SIMD3<Float> }
     private(set) var carriages:[Carriage] = []
     private var accumulator = 0.0
@@ -284,6 +289,7 @@ final class NativeGroundVehicle {
         guard let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rows = document["models"] as? [String: [String: Any]] else { return 0 }
         definitions = rows.compactMapValues { Definition($0) }
+        trainLayouts.removeAll()
         audioTopCache.removeAll()
         others.load(rows.compactMapValues { row in var value=row;value["solverSupported"]=true;return Definition(value) })
         let classes = document["materialClasses"] as? [Int] ?? []
@@ -303,7 +309,35 @@ final class NativeGroundVehicle {
         }
         return definitions.count
     }
-    @discardableResult func loadTracks(_ data:Data)->Bool {guard let tracks=NativeTrainTracks(data:data) else{return false};self.tracks=tracks;return true}
+    @discardableResult func loadTracks(_ data:Data)->Bool {guard let tracks=NativeTrainTracks(data:data) else{return false};self.tracks=tracks;trainLayouts.removeAll();return true}
+    /// Original91584.wY is a model-layout operation for every locomotive,
+    /// independent of whether this player currently owns its physical motor.
+    func trainCarriages(id:String,model:String,bodyPosition:SIMD3<Float>,heading:Float,pitch:Float=0,roll:Float=0,
+                        bodyPose:NativeUnattendedVehicle.Pose?=nil)->[Carriage] {
+        guard let configuration=definitions[model]?.trainConfiguration,!configuration.carriages.isEmpty,let tracks else {
+            trainLayouts.removeValue(forKey:id);return []
+        }
+        let position=bodyPose?.position ?? SIMD3<Double>(SwiftRapierWorld.gtaToRapier(bodyPosition))
+        let q=bodyPose?.rotation ?? NativeUnattendedVehicle.quaternion(Self.rotation(heading:heading,pitch:pitch,roll:roll))
+        guard position.x.isFinite,position.y.isFinite,position.z.isFinite,q.vector.x.isFinite,q.vector.y.isFinite,
+              q.vector.z.isFinite,q.vector.w.isFinite else {return []}
+        let layout:NativeTrainDynamics
+        if let cached=trainLayouts[id],cached.configuration.model==configuration.model, cached.tracks === tracks {layout=cached}
+        else {
+            guard let created=NativeTrainDynamics(configuration:configuration,tracks:tracks,position:position,heading:0) else{return []}
+            trainLayouts[id]=created;layout=created
+        }
+        let configurations=configuration.carriages.compactMap{definitions[String($0)]?.trainConfiguration}
+        return makeCarriages(configurations:configurations,poses:layout.carriages(body:.init(position:position,rotation:q),configurations:configurations))
+    }
+    func retainTrainCarriageLayouts(_ ids:Set<String>) {trainLayouts=trainLayouts.filter{ids.contains($0.key)}}
+    var trainCarriageLayoutCount:Int {trainLayouts.count}
+    private func makeCarriages(configurations:[NativeTrainDynamics.Configuration],poses:[NativeTrainDynamics.Pose])->[Carriage] {
+        zip(configurations,poses).map { configuration,pose in
+            let transform=Self.transform(position:pose.position,rotation:pose.rotation,origin:configuration.origin)
+            return Carriage(model:String(configuration.model),transform:transform,position:SIMD3(transform[3].x,transform[3].y,transform[3].z))
+        }
+    }
     func supports(_ model: String) -> Bool { guard let definition=definitions[model] else{return false};return definition.trainConfiguration == nil || tracks != nil }
     func modelOrigin(_ model: String) -> Float? { definitions[model].map { Float($0.configuration.origin) } }
     func modelFlags(_ model:String)->Int {definitions[model]?.configuration.table.modelFlags ?? 0}
@@ -602,10 +636,7 @@ final class NativeGroundVehicle {
         if let trainDynamics {
             let configurations=trainDynamics.configuration.carriages.compactMap{definitions[String($0)]?.trainConfiguration}
             let poses=trainDynamics.carriages(body:.init(position:SIMD3<Double>(state.position),rotation:rotation),configurations:configurations)
-            carriages=zip(configurations,poses).map { configuration,pose in
-                let transform=Self.transform(position:pose.position,rotation:pose.rotation,origin:configuration.origin)
-                return Carriage(model:String(configuration.model),transform:transform,position:SIMD3(transform[3].x,transform[3].y,transform[3].z))
-            }
+            carriages=makeCarriages(configurations:configurations,poses:poses)
         }
     }
     static func transform(position:SIMD3<Double>,rotation:simd_quatd,origin:Double)->simd_float4x4 {

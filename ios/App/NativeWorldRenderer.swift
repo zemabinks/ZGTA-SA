@@ -696,8 +696,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               aiming || weaponTriggerHeld || footAnimator?.gunUp == true else{return nil}
         return aiming ? Double(cameraPitch):0
     }
+    private var currentFootVelocity:SIMD3<Double> {character?.currentVelocity ?? lastFootVelocity}
     var currentWireVelocity:SIMD3<Float> {
-        driving ? groundVehicle?.nativeLinearVelocity ?? .zero:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(lastFootVelocity))
+        driving ? groundVehicle?.nativeLinearVelocity ?? .zero:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(currentFootVelocity))
     }
     var currentWireAngularVelocity:SIMD3<Float> {driving ? groundVehicle?.nativeAngularVelocity ?? .zero:.zero}
     func vehicleWireKit(tuck:Double)->[Double]? {driving ? groundVehicle?.wireKit(tuck:tuck):nil}
@@ -1192,6 +1193,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let jumping = pendingSwimJump;pendingSwimJump = false
         let result = swimController.step(delta:delta,depth:depth,grounded:state.grounded,heading:-Double(actorHeading),
             feet:feet,jump:jumping,ledge:{ [weak self] in self?.swimmingLedge(feet:feet,heading:-Double(self?.actorHeading ?? 0),surface:feet.y+(depth ?? 0)) },dead:health <= 0)
+        if pace < 1 || swimController.under {
+            stamina.rest(50*delta*(swimController.state == .breast ? 0.25 : 0.5))
+        }
+        if swimController.consumeSplash() { onSplash?() }
+        guard let result else { return intended }
+        // The outgoing swim task advances animation only when it owns this
+        // tick. A nil result hands the same tick to foot/flight animation.
         if let animator = footAnimator {
             animator.arm(nil)
             if health <= 0 && !animator.dead { animator.die("drown") }
@@ -1201,11 +1209,6 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             animation.swim = .init(state:swimController.on ? swimController.state.rawValue : 0,rate:swimController.ratio,pace:swimController.pace,pitch:swimController.pitch)
             footAnimationFrame = animator.update(delta:delta,input:animation)
         }
-        if pace < 1 || swimController.under {
-            stamina.rest(50*delta*(swimController.state == .breast ? 0.25 : 0.5))
-        }
-        if swimController.consumeSplash() { onSplash?() }
-        guard let result else { return intended }
         if delta>0 {footAirVelocity=SIMD2(result.move.x/delta,-result.move.z/delta)}
         var input = intended
         input.displacement = SwiftRapierWorld.rapierToGTA(SIMD3<Float>(result.move))
@@ -1293,7 +1296,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         animator.arm(definition)
         if health <= 0 && !animator.dead { animator.die() }
         else if health > 0 && animator.dead { animator.revive() }
-        if weaponReloading && !footReloadWasActive && !footReloadRequested { _ = animator.reload() }
+        if weaponReloading && !footReloadWasActive && !footReloadRequested { _ = animator.beginReload() }
         footReloadWasActive = weaponReloading;footReloadRequested = false
         let effectiveAim = definition?.aims == true && (aiming || animator.gunUp || weaponTriggerHeld)
         let meleeFrame=meleeControls(delta:delta,grounded:state.grounded)
@@ -1360,6 +1363,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         } else {
             if footAirTime > 0 && (footJumped || footAirTime > 0.35) {
                 animation.land = footAirFell ? (footAirFall > 20 ? "koSkidBack" : "collapse") : locomotion.ratio > 1.5 && locomotion.pushing ? "land" : "fallLand"
+                // The prior task's requested horizontal speed matches the
+                // archived landing input; committed speed is already stopped
+                // by this tick's grounded collision and is not that input.
+                let damage=NativeFallDamage.amount(fastest:footAirFall,horizontal:simd_length(footAirVelocity))
+                let nextHealth=NativeFallDamage.health(after:damage,current:health)
+                if nextHealth<health {
+                    health=nextHealth;onLocalHealth?(health)
+                    if health<=0 {animator.die()}
+                }
             }
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footJumpMinimum = 0
         }
@@ -1508,7 +1520,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pedestrian.perform(clip, duration: Double(duration))
         if let animator = footAnimator {
             animator.arm(footWeaponDefinitions[equippedWeapon])
-            if clip.lowercased().contains("load") { _ = animator.reload();footReloadRequested = true }
+            if clip.lowercased().contains("load") { _ = animator.beginReload();footReloadRequested = true }
             else { _ = animator.fire(held:false) }
         }
     }
@@ -1679,18 +1691,49 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         cameraWasDriving=false
     }
 
-    /// A new server peer owns a new world baseline. Discard the previous
-    /// owned vehicle without an exit animation, parking packet or side offset.
-    /// The subsequent hello applies the self-hosted server's spawn policy.
-    func resetMultiplayerSession() {
+    /// Despawning/losing ownership must not manufacture a parked body or play
+    /// a queued exit after the old vehicle has already ceased to exist.
+    private func discardOwnedVehicle() {
         groundVehicle?.exit()
         driving=false;currentVehicleID=nil;drivingSpeed=0;flightVerticalSpeed=0
         vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleBodyPose=nil
         activeVehicleModel="";activeHandling=nil;vehicleKind="car"
         pendingVehicleExit=nil;ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
         riderDoorHolds.removeAll()
+    }
+
+    @discardableResult func removeVehicle(id:String)->Bool {
+        groundVehicle?.removeOtherVehicle(id:id)
+        remoteVehicles.removeAll{$0.id==id}
+        guard currentVehicleID==id else{return false}
+        discardOwnedVehicle()
+        actorHeading=heading
+        let resumed=gameCamera.resumeFoot(from:gameCameraFrame,fallbackHeading:heading,fallbackPitch:cameraPitch)
+        heading=resumed.x;cameraPitch=resumed.y;cameraWasDriving=false
+        teleport(x:camera.x,y:camera.y,z:camera.z)
+        return true
+    }
+
+    private func clearMultiplayerPresentation() {
+        vehicleRigStates.removeAll();vehicleRigTimes.removeAll();vehicleRigSpins.removeAll()
+        remoteRiderPlayback.removeAll();remoteRiderActions.removeAll()
+        remoteRiderCapture.removeAll();remoteRiderPrevious.removeAll();remoteRiderAnimations.removeAll()
+        remoteFootAnimations.removeAll();remoteBikeAnimations.removeAll()
+        remoteBikeSamples.removeAll();remoteBikeFrames.removeAll()
+        flightCanopyPoses.removeAll();flightCanopyLanded.removeAll();flightAudioVoices.removeAll()
+        lastRiderDraw=0;remoteServerTimeOffsetMilliseconds=nil
+        weaponEffects.clear();particleEffects?.clear();blasts.removeAll();gameCamera.cancelShake()
+    }
+
+    /// A new server peer owns a new world baseline. Discard the previous
+    /// owned vehicle without an exit animation, parking packet or side offset.
+    /// The subsequent hello applies the self-hosted server's spawn policy.
+    func resetMultiplayerSession() {
+        discardOwnedVehicle()
+        groundVehicle?.clearOtherVehicles()
         remotePlayers=[];remoteVehicles=[]
         synchronizeProjectiles([])
+        clearMultiplayerPresentation()
         personalFlight.wear(false);hasParachute=false
         cancelReloadAnimation()
         teleport(x:camera.x,y:camera.y,z:camera.z)
@@ -2144,7 +2187,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 gameCamera.setDirection(heading:heading,pitch:cameraPitch)
                 gameCameraFrame=gameCamera.followFoot(.init(position:camera,actorHeading:actorHeading,weapon:equippedWeapon,
                     aiming:aiming,crouching:crouching,holdingLedge:climb != nil || swimController.hauled != nil,parachuting:personalFlight.chuting,
-                    sight:aiming ? gameCamera.sightForWeapon(equippedWeapon):nil),delta:Float(step),look:cameraLookDirection)
+                    sight:aiming ? gameCamera.sightForWeapon(equippedWeapon):nil,
+                    planarSpeed:Float(hypot(currentFootVelocity.x,currentFootVelocity.z))),delta:Float(step),look:cameraLookDirection)
             } else {gameCameraFrame=nil}
         }
         let defaultDistance: Float = driving ? 11 : 4.5
@@ -2683,22 +2727,46 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0))
         }
         var parkedTransforms:[String:simd_float4x4] = [:]
+        var parkedTrainCandidates:[RemoteVehicle] = []
         for source in remoteVehicles where source.id != currentVehicleID && !drivenVehicleIDs.contains(source.id) {
             let vehicle=predictedVehicle(source)
             guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
             modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0))
+            parkedTrainCandidates.append(vehicle)
             if let exact=groundVehicle?.otherVehicle(vehicle.id)?.transform{parkedTransforms[key(name,vehicle.position)]=exact}
         }
         var carriageTransforms:[String:simd_float4x4] = [:]
         var carriageIdentifiers:[String:String] = [:]
-        if driving,let carriages=groundVehicle?.carriages {
+        var trainLayoutIDs:Set<String> = []
+        func appendCarriages(_ carriages:[NativeGroundVehicle.Carriage],identity:String) {
             for (index,carriage) in carriages.enumerated() {
                 guard let name=actorName(code:carriage.model) else{continue}
                 modelInstances.append((name,carriage.position,0,0,"",0,0))
                 let token=key(name,carriage.position)
-                carriageTransforms[token]=carriage.transform;carriageIdentifiers[token]="carriage:\(index):\(name)"
+                carriageTransforms[token]=carriage.transform
+                carriageIdentifiers[token]=identity=="own" ? "carriage:\(index):\(name)":"carriage:\(identity):\(index):\(name)"
             }
         }
+        if driving,let carriages=groundVehicle?.carriages {
+            appendCarriages(carriages,identity:"own")
+            if let currentVehicleID {trainLayoutIDs.insert(currentVehicleID)}
+        }
+        for vehicle in parkedTrainCandidates {
+            let model=String(vehicle.code.split(separator:".").first ?? "")
+            trainLayoutIDs.insert(vehicle.id)
+            let carriages=groundVehicle?.trainCarriages(id:vehicle.id,model:model,bodyPosition:vehicle.position,
+                heading:vehicle.heading,pitch:vehicle.pitch,roll:vehicle.roll,bodyPose:groundVehicle?.otherVehicle(vehicle.id)?.physicalPose) ?? []
+            appendCarriages(carriages,identity:vehicle.id)
+        }
+        for player in remotePlayers {
+            guard let id=player.vehicleID,id != currentVehicleID,!trainLayoutIDs.contains(id) else{continue}
+            trainLayoutIDs.insert(id)
+            let model=String(player.code.split(separator:".").first ?? "")
+            let carriages=groundVehicle?.trainCarriages(id:id,model:model,bodyPosition:player.position,
+                heading:player.heading,pitch:player.pitch,roll:player.roll) ?? []
+            appendCarriages(carriages,identity:id)
+        }
+        groundVehicle?.retainTrainCarriageLayouts(trainLayoutIDs)
         for (name, position, angle, pitch, clip, elapsed, weapon) in modelInstances {
             let token=key(name,position),offset=actorOverrideOffsets[key(name,position),default:0]
             let queued=actorOverrides[token].flatMap { $0.indices.contains(offset) ? $0[offset]:nil }
@@ -2984,8 +3052,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 if kit.indices.contains(5),rig.document.id != 520,((groundVehicle?.handlingFlags(String(rig.document.id)) ?? 0)&64) != 0 {input.rearSteering=Double(kit[5])}
                 input.gearUp=kit.indices.contains(6) && kit[6] != 0
             }
-            if let parked,let frame=groundVehicle?.otherVehicle(parked.id),frame.dynamic {
-                input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin;input.offsets=frame.offsets
+            if player==nil,let parked,let frame=groundVehicle?.otherVehicle(parked.id) {
+                input.rotor=frame.rotor;input.gearUp=frame.gearUp
+                if frame.dynamic {
+                    input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin;input.offsets=frame.offsets
+                }
             }
             let text=player?.vehicleDamage ?? parked?.damage ?? ""
             if let decoded=NativeVehicleDamage.decode(text) {

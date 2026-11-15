@@ -20,7 +20,12 @@ provenance does not independently establish a pristine US executable identity.
 | Pedestrian heading/style/type |276 rows,828 fields match | Same checked pedestrian style inputs |
 | Tyre adhesion | Rubber-versus-ground values match | Same checked tyre surface inputs |
 | Original executable gameplay | Not executed or observed | No original runtime parity established |
-| Original iOS edition | Owner is preparing it | No iOS reference result yet |
+| Supplied iOS Definitive Edition1.86 IPA | Menu resources inspected statically; no original app execution | Menu asset/layout evidence only, no original gameplay-runtime acceptance |
+
+The supplied mobile package is the Definitive Edition, distinct from the original
+mobile renderer/gameplay revision. No running unmodified retail installation or
+controlled retail gameplay recording has yet been established for side-by-side
+mechanics measurements. A request for a runnable reference remains open.
 
 Original binaries, images, extracted files, derived catalogs, disassembly and
 private recorded fixtures remain local. The source release includes our own
@@ -78,3 +83,23 @@ equipment, input duration and environment for original and native samples.
 For each discrepancy, save the reproduction, reference observation, root cause,
 changed code, regression and remaining limits in the gameplay journal. A result
 is accepted only for the tested mechanic, scenario and platform.
+
+The supplied DE executable was additionally inspected without execution: its
+only architecture isARM64, its build platform is iPhoneOS (minimumiOS16/A12),
+and it contains no Simulator slice. Binary signing metadata alone does not
+establish a trusted App Store installation or a pristine gameplay build.
+Selected metadata/binary extraction and full retained evidence remain local.
+A compatible running device reference is still needed for gameplay recordings;
+no original app was installed, launched, re-signed or decrypted in this audit.
+
+The owner confirmed that only the IPA is currently available. Apple Simulator
+requires a build for its platform; the supplied iPhoneOS binary is not such a
+build. Re-signing or editing bundle metadata does not supply the missing
+Simulator executable and dependencies. See Apple's
+[device/Simulator binary guidance](https://developer.apple.com/documentation/technotes/tn3117-resolving-build-errors-for-apple-silicon).
+A genuine running iPhone/iPad installation remains the practical mobile
+reference. PlayCover is a separate Apple Silicon compatibility route, not a
+Simulator build or an established compatible runtime for this package; its
+[published requirements](https://docs.playcover.io/getting_started/download_playcover)
+exclude Intel Macs. No PlayCover installation or original-game execution was
+attempted. Our Simulator builds come from our independent app source.

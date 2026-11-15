@@ -23,6 +23,11 @@ final class NativeGameCamera {
         var holdingLedge = false
         var parachuting = false
         var sight: String?
+        /// Committed horizontal motor speed in world units/second. Fixed-step
+        /// poses may repeat between display frames or camera substeps; their
+        /// render-time difference cannot establish whether the ped is moving.
+        /// Nil retains the archived variable-step camera contract.
+        var planarSpeed: Float?
     }
     struct Bounds {
         var maxX: Float
@@ -250,7 +255,9 @@ final class NativeGameCamera {
         }
         ledgeClock = input.holdingLedge ? 0.6 : max(0,ledgeClock-dt)
         feetAnchor = ledgeClock > 0 && dt > 0 ? feetAnchor+(feet-feetAnchor)*min(1,9*dt) : feet
-        let moving = dt > 0 && simd_length_squared(previousFeet-feet) > pow(0.05*dt,2)
+        let moving = input.planarSpeed.flatMap { value -> Bool? in
+            value.isFinite && value >= 0 ? value > 0.05 : nil
+        } ?? (dt > 0 && simd_length_squared(previousFeet-feet) > pow(0.05*dt,2))
         previousFeet = feet
         let drop: Double = input.crouching ? (moving ? 0.2 : 0.7) : 0,aimCrouch: Double = input.crouching ? 0.35 : 0
         if footAim != oldFootAim || dt <= 0 {
@@ -326,6 +333,7 @@ final class NativeGameCamera {
     }
 
     /// Exact blast/collision camera shake envelope from the vehicle wrapper.
+    func cancelShake() {shakeGain=0;shakeSince=0}
     func shake(at point: SIMD3<Float>,strength: Float,nowMilliseconds: Double = ProcessInfo.processInfo.systemUptime*1000) {
         let remaining = shakeGain*exp(-2.5*(nowMilliseconds-shakeSince)/1000)
         shakeGain = max(remaining,Double(strength)*max(0,1-simd_distance(lastSource,Self.double(point))/100))

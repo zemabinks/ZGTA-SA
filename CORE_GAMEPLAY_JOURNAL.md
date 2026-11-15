@@ -431,7 +431,7 @@ The optimized universal Simulator application built successfully, and the
 installed executable SHA256 matched the built bundle. Native and actual Safari
 browser players connected to the isolated8777 city. In826 native samples, the
 W/Shift+W trial moved12.433m forward, reachedZ13.2913m, retained health100 and
-heading0. Separate200ms Q/E presses visibly switched Colt45→fists→Colt45 with
+heading0. Separate200ms Q/E presses visibly switched Colt 45→fists→Colt 45 with
 17loaded/67reserve. A held Escape opened pause once. The first subsequent
 Escape was swallowed and the following press dismissed it: this is a reproduced
 modal key-release handoff defect, queued forCore82 rather than counted as a
@@ -500,7 +500,7 @@ Original retail runtime timing/feel, physical iPhone/controller behavior,
 fighting styles, special/stealth tasks, utility-slot selection and the broader
 parity-ledger gaps remain open. The owner identified the forthcoming iOS file as
 Definitive Edition; no file path has arrived or been inspected at this entry.
-Production8766, its saves and the stable LAN deployment remain unchanged.
+Production 8766, its saves and the stable LAN deployment remain unchanged.
 
 ### Frozen82 regression result
 
@@ -680,3 +680,82 @@ The display and camera settings were visually checked at the large size.
 Repeated capture sometimes returned blank; rotating/rebinding recovered actual
 rendered menu and Options images. This does not extend acceptance to a physical
 phone or prove original runtime animation timing.
+
+### Core86 — core task, camera, damage and vehicle audit
+
+Water-exit simulation was advancing the pedestrian animation twice in one
+physical tick. Four real controller/CLP exit paths now match a single-update
+reference. A landed parachute could also leave state10 active during jetpack
+takeoff; the new task clears obsolete canopy-phase ownership. Available current
+velocity is separated from retained committed momentum, so streaming suspension
+does not export motion or destroy a later water/parachute handoff.
+
+The actual fixed motor/camera integration reproduced moving crouch-camera
+heights of1.01–1.16m at15/30/120/144Hz versus1.40m at60Hz. Repeated body poses
+were mistaken for stopping. An optional committed planar-speed input now keeps
+the existing moving stance across display rates while preserving the default
+archived camera contract and its separate golden. See camera-motion audit.
+
+Regular foot falls previously selected collapse/skid animations without health
+loss. Actual native-floor drops now apply the observed browser policy once,
+bypass armour, and enter fatal animation on the landing tick when appropriate.
+The pre-round below-one-health death threshold is preserved. Controlled3/10/30m
+drops agree across30/60/120/uneven cadence. These constants are browser evidence,
+not newly verified original retail-runtime values.
+
+The new damage work also reproduced an old multiplayer race: local100→60HP
+could be overwritten by an earlier90HP server snapshot. A clamp alone would
+lose separate server damage. Optional nonce/sequence/revision health ACKs compose
+these losses as50HP, reject stale HTTP/hello state, accept actual server healing,
+and resolve death/respawn after authority. Duplicate hello must neither clear
+pending damage nor teleport. A lost accepted reply settles from the fresh peer
+baseline without replay. Legacy servers keep their previous compatibility path.
+
+Reload snapshots identified by the same server deadline no longer extend the
+local estimate when duplicated or accompanied by an unrelated inventory
+revision. Native reload begin cancels unconsumed trigger intent without changing
+the raw archived animation method. Synchronous HTTP busy/offline rejection no
+longer starts feedback after cancellation. Real-CLP and extracted dispatch gates
+retain historical negative controls from the accepted prior source.
+
+Explicit vehicle disappearance now differs from distance-list omission: parked
+prediction bodies, colliders and pending shoves are removed only for explicit
+despawn or world teardown. Removed local ownership cannot leave a delayed exit
+or manufacture a parked hull. Fresh worlds also clear old animation/gear/effect
+caches and camera shake. Original effect definitions remain loaded and reusable.
+Parked aircraft retain rotor/gear through demotion/re-promotion, with real
+Renderer glue and remote-player kit precedence checked. Existing train placement
+now supplies carriage consists for remote and parked locomotives as well as the
+local driver; curve/reverse/exit/streaming cases reuse the same placement math.
+
+All original fixtures, extracted resources and retained evidence stay local.
+No acceleration/suspension constants, short crouch capsule, original skill
+curves, towing joint ABI or full NPC behavior were guessed into place. Retail
+execution, physical controls and remaining large engine systems remain open.
+The frozen application source passed both Release builds: universal Simulator
+and unsigned ARM64 iPhone. All 132 App files and the six engine/backend inputs
+matched the recorded snapshot afterward. The complete regression run passed
+72/72 gates with unchanged sources. A later, separate respawn-dispatch gate
+passed 37 checks and is now included in the runner for subsequent full runs.
+Archived camera and particle goldens also passed, as did host/join-code/origin,
+mocked optional Discord and generated-project matrix checks. These are distinct
+from retail runtime verification and physical iPhone performance tests.
+
+Integrated UI acceptance used an isolated loopback server on 8780 and its own
+saves. Production 8766 and the prior 8778 QA instance were untouched. Native and
+Chrome guests joined without Discord; both occupied the same world, and the
+native HUD listed both guests. A real city-floor drop reduced native/server
+health to 82; a higher drop produced death, and accepted server respawn restored
+100 HP at the city centre. The live sloped-city result is not substituted for
+the controlled flat-floor fall fixtures. After a deliberate QA-server restart,
+native recovery retained the guest account, received a fresh nonce/baseline and
+accepted crouched movement. A test Colt 45 loadout fired 17→14 rounds and reload
+completed 17/65. UI capture was intermittent; Simulator's own Save Screen action
+retained rendered acceptance views locally.
+
+Held-fire UI testing also surfaced a server interval rejection during normal
+animation-driven fire. Successful ammo/reload transitions do not close that
+cadence issue. A separate receive-jitter reproduction is in progress; the
+frozen candidate's existing rate limits have not been relaxed without evidence.
+No original-game runtime, physical controller, device FPS or 1:1 gameplay claim
+is made by this batch. All screenshots and fixture assets remain local-only.

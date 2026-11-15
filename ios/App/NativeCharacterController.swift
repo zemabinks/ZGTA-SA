@@ -32,6 +32,11 @@ final class NativeCharacterController {
     /// Last committed fixed-step velocity, in Rapier axes and world units/s.
     /// Retain it between display frames that do not advance the motor.
     private(set) var stepVelocity = SIMD3<Double>.zero
+    /// Observable motion is unavailable while this owner is inactive, its
+    /// clock is suspended or the required collision cells are missing. Keep
+    /// the committed velocity separately for subsequent physical handoffs.
+    private(set) var movementAvailable = false
+    var currentVelocity: SIMD3<Double> { movementAvailable ? stepVelocity : .zero }
     /// Original walker press routing occurs after motor motion and before
     /// CQ.beforeStep applies the queued impulse to promoted parked vehicles.
     var onPress:(([NativeCharacterMotor.Press])->Void)?
@@ -51,13 +56,13 @@ final class NativeCharacterController {
         guard Self.finite(feet) else { return }
         let p = SwiftRapierWorld.gtaToRapier(feet)
         head = SIMD3(Double(p.x), Double(p.y) + 1.7, Double(p.z))
-        clearPendingMotion(); rootHeld = false; stepVelocity = .zero
+        clearPendingMotion(); rootHeld = false; stepVelocity = .zero; movementAvailable = false
         self.active = active; motor.setActive(active)
         queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
         if grounded { motor.stand() }
     }
     func setActive(_ active: Bool) {
-        self.active = active; clearPendingMotion(); rootHeld = false; stepVelocity = .zero
+        self.active = active; clearPendingMotion(); rootHeld = false; stepVelocity = .zero; movementAvailable = false
         motor.setActive(active)
     }
     private static func finite(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite }
@@ -77,6 +82,7 @@ final class NativeCharacterController {
                 held: Bool = false, verticalOverride: Double? = nil, carrying: UInt64? = nil,
                 geometryReady: Bool,
                 motion: ((Double,Output,Motion) -> Motion)? = nil) -> Output {
+        movementAvailable = false
         guard active else { return state }
         // Match the outer frame clock: retain ordinary low-FPS elapsed time,
         // but treat a suspension/invalid clock sample as a discontinuity.
@@ -87,6 +93,9 @@ final class NativeCharacterController {
         guard geometryReady else {
             clearPendingMotion(); motor.clearContactEvents(); return state
         }
+        // A normal high-refresh frame can have no motor tick. Its last
+        // committed speed is still the current available physical snapshot.
+        movementAvailable = true
         let p = SwiftRapierWorld.gtaToRapier(displacement)
         pendingTravel += SIMD3(Double(p.x),0,Double(p.z))
         accumulator += delta
@@ -101,7 +110,8 @@ final class NativeCharacterController {
             guard Self.finite(input.displacement), input.jump.isFinite,
                   input.verticalOverride?.isFinite != false,
                   input.heldFeet.map(Self.finite) != false else {
-                pendingJump = 0; stepVelocity = .zero; motor.clearContactEvents(); world.step(); continue
+                pendingJump = 0; stepVelocity = .zero; movementAvailable = false
+                motor.clearContactEvents(); world.step(); continue
             }
             if let feet = input.heldFeet {
                 // Animation roots own translation while hanging/hauling. A
@@ -126,6 +136,7 @@ final class NativeCharacterController {
             // Use the same published Float feet boundary as the renderer's
             // prior 60-Hz measurement, with the tick that actually moved it.
             stepVelocity = SIMD3<Double>(SwiftRapierWorld.gtaToRapier((state.feet-previousFeet)/Float(Self.fixed)))
+            movementAvailable = true
         }
         return state
     }

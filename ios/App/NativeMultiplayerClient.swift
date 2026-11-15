@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import CoreFoundation
 
 struct RemotePlayer {
     let id: String
@@ -76,6 +77,53 @@ struct RemoteVehicle {
     }
 }
 
+/// Sequence local environmental damage separately from authoritative damage.
+/// A delayed server hit/HTTP snapshot rebases pending losses instead of
+/// restoring lost health or applying the same fall twice.
+struct NativeHealthPrediction {
+    struct Request {let sequence:Int;let connection:String;let kind:String;let damage:Int}
+    private(set) var connection:String?
+    private(set) var issued=0,processed=0,revision=0
+    private var baseHealth=100,baseArmour=0
+    private var losses:[Int:Int]=[:]
+    private var respawnSequence:Int?
+    var health:Int {max(0,baseHealth-losses.values.reduce(0,+))}
+    var armour:Int {baseArmour}
+    var active:Bool {connection != nil}
+    var pendingRespawn:Int? {respawnSequence}
+    mutating func disconnect(){self=NativeHealthPrediction()}
+    mutating func begin(connection:String,health:Int,armour:Int,revision:Int,processed:Int){
+        disconnect();self.connection=connection;baseHealth=health;baseArmour=armour
+        self.revision=revision;self.processed=processed;issued=processed
+    }
+    mutating func hurt(to value:Int)->Request? {
+        guard let connection,issued<9_007_199_254_740_991,losses.count<128 else{return nil}
+        let damage=health-max(0,min(health,value))
+        guard damage>0 else{return nil}
+        issued+=1;losses[issued]=damage
+        return Request(sequence:issued,connection:connection,kind:"hurt",damage:damage)
+    }
+    mutating func respawn()->Request? {
+        guard let connection,health==0,respawnSequence==nil,issued<9_007_199_254_740_991 else{return nil}
+        issued+=1;respawnSequence=issued
+        return Request(sequence:issued,connection:connection,kind:"respawn",damage:0)
+    }
+    mutating func apply(health:Int,armour:Int,connection:String,processed:Int,revision:Int)->Bool {
+        guard self.connection==connection,(0...100).contains(health),(0...100).contains(armour),
+              processed>=self.processed,processed<=issued,revision>=self.revision,
+              revision != self.revision || (processed==self.processed && health==baseHealth && armour==baseArmour) else{return false}
+        self.processed=processed;self.revision=revision;baseHealth=health;baseArmour=armour
+        losses=losses.filter{$0.key>processed}
+        if let sequence=respawnSequence,sequence<=processed {respawnSequence=nil}
+        return true
+    }
+    static func integer(_ value:Any?)->Int? {
+        guard let n=value as? NSNumber,CFGetTypeID(n) != CFBooleanGetTypeID(),n.doubleValue.isFinite,
+              n.doubleValue>=0,n.doubleValue<=9_007_199_254_740_991,n.doubleValue.rounded(.down)==n.doubleValue else{return nil}
+        return n.intValue
+    }
+}
+
 /// Speaks the existing local server's WebSocket protocol without Discord.
 /// Browser heading/roll are Three Y-yaw/Z-roll. GTA native controls use the
 /// opposite signs for those two angles; convert once at this wire boundary.
@@ -102,6 +150,8 @@ final class NativeMultiplayerClient {
     private var shots = 0
     private let shotSequence = NativeShotSequence()
     private let streamShotClaims = NativeStreamShotClaims()
+    private var healthPrediction=NativeHealthPrediction()
+    private var deliveredRespawnSequence=0
     private var resynchronizingInventory = false
     private var announcedInventoryConnection: String?
     var inventoryConnection: String? { shotSequence.connection }
@@ -120,6 +170,8 @@ final class NativeMultiplayerClient {
     var onPlayers: (([RemotePlayer]) -> Void)?
     var onPresence: ((Int, [String]) -> Void)?
     var onVehicles: (([RemoteVehicle]) -> Void)?
+    /// Explicit despawn differs from omission in a streamed vehicle list.
+    var onVehicleRemoved: ((String) -> Void)?
     var onEnter: ((String, Bool) -> Void)?
     var onTeleport: ((SIMD3<Float>, Float?) -> Void)?
     var onEnvironment: ((Int?, Double?, Double?) -> Void)?
@@ -128,6 +180,7 @@ final class NativeMultiplayerClient {
     var onBlast: ((Int, SIMD3<Float>) -> Void)?
     var onWeaponSound: ((Int) -> Void)?
     var onVitals: ((Int, Int) -> Void)?
+    var onRespawn: (() -> Void)?
     var onFlightGear: ((Bool,Bool) -> Void)?
     var onChat: (([String]) -> Void)?
 
@@ -194,13 +247,15 @@ final class NativeMultiplayerClient {
         guard let url = parts.url else { failTransport(generation: generation, reason: "INVALID MULTIPLAYER ADDRESS"); return }
         let task = session.webSocketTask(with: url)
         socket = task; task.resume()
-        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1], allowBeforeReady: true)
+        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1,"healthAck":1], allowBeforeReady: true)
         receive()
     }
     private func closeSocket() {
         let old = socket; socket = nil
         old?.cancel(with: .normalClosure, reason: nil)
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
+        healthPrediction.disconnect()
+        deliveredRespawnSequence=0
         onInventoryConnection?(nil)
         // A fresh peer has a fresh row/clock/shot namespace. Never carry a
         // previous driver, remote actor, projectile or queued command into it.
@@ -372,12 +427,18 @@ final class NativeMultiplayerClient {
 
     func respawn() {
         guard health == 0 else { return }
+        if healthPrediction.active {
+            guard isReady,let request=healthPrediction.respawn() else{return}
+            sendHealthRequest(request);return
+        }
         health = 100
         armour = 0
         onVitals?(health, armour)
+        onRespawn?()
     }
 
     func syncVitals(from state: [String: Any]) {
+        if healthPrediction.active {_=applyAcknowledgedVitals(state);return}
         guard let current = state["health"] as? NSNumber,
               let protected = state["armour"] as? NSNumber else { return }
         let nextHealth = max(0, min(100, current.intValue))
@@ -389,7 +450,33 @@ final class NativeMultiplayerClient {
     }
 
     func reportLocalHealth(_ value:Int) {
+        if healthPrediction.active {
+            guard isReady,let request=healthPrediction.hurt(to:value) else{return}
+            health=healthPrediction.health;armour=healthPrediction.armour;onVitals?(health,armour)
+            sendHealthRequest(request);return
+        }
         health=max(0,min(health,value));onVitals?(health,armour)
+    }
+
+    private func sendHealthRequest(_ request:NativeHealthPrediction.Request) {
+        send(["t":"selfHealth","c":request.connection,"s":request.sequence,
+              "kind":request.kind,"damage":request.damage])
+    }
+    @discardableResult private func applyAcknowledgedVitals(_ state:[String:Any])->Bool {
+        let pendingRespawn=healthPrediction.pendingRespawn
+        let epoch=transportGeneration
+        guard let ack=state["healthAck"] as? [String:Any],let connection=ack["connection"] as? String,
+              let processed=NativeHealthPrediction.integer(ack["processed"]),
+              let revision=NativeHealthPrediction.integer(ack["revision"]),
+              let hp=NativeHealthPrediction.integer(state["health"]),let armour=NativeHealthPrediction.integer(state["armour"]),
+              healthPrediction.apply(health:hp,armour:armour,connection:connection,processed:processed,revision:revision) else{return false}
+        health=healthPrediction.health;self.armour=healthPrediction.armour;onVitals?(health,self.armour)
+        if let sequence=pendingRespawn,processed>=sequence,health>0,isReady,transportGeneration==epoch,
+           healthPrediction.connection==connection,
+           NativeHealthPrediction.integer(ack["respawned"])==sequence,sequence>deliveredRespawnSequence {
+            deliveredRespawnSequence=sequence;onRespawn?()
+        }
+        return true
     }
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
@@ -473,21 +560,41 @@ final class NativeMultiplayerClient {
                   shotSequence.negotiate(nonce) else {
                 onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING"); return
             }
-            if announcedInventoryConnection != nonce { announcedInventoryConnection = nonce; onInventoryConnection?(nonce) }
+            let freshHello=announcedInventoryConnection != nonce
+            if freshHello { announcedInventoryConnection = nonce; onInventoryConnection?(nonce) }
+            guard transportGeneration==generation,socket != nil else{return}
             if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
-            if let spot = message["spot"] as? [NSNumber], spot.count >= 3 {
+            if freshHello,let spot = message["spot"] as? [NSNumber], spot.count >= 3 {
                 onTeleport?(SIMD3(spot[0].floatValue,spot[1].floatValue,spot[2].floatValue),
                             spot.count > 3 ? -spot[3].floatValue : nil)
             }
+            guard transportGeneration==generation,socket != nil else{return}
             let day = message["day"] as? [String: Any]
             onEnvironment?((message["weather"] as? NSNumber)?.intValue,
                            (day?["shift"] as? NSNumber)?.doubleValue,
                            (day?["hold"] as? NSNumber)?.doubleValue)
+            guard transportGeneration==generation,socket != nil else{return}
             if let life = message["life"] as? [NSNumber], life.count >= 2 {
-                health = max(0, min(100, life[0].intValue))
-                armour = max(0, min(100, life[1].intValue))
-                onVitals?(health, armour)
+                let hp=max(0,min(100,life[0].intValue)),protected=max(0,min(100,life[1].intValue))
+                var published=false
+                if let ack=message["healthAck"] as? [String:Any],
+                   let connection=ack["connection"] as? String,connection==inventoryConnection,
+                   let processed=NativeHealthPrediction.integer(ack["processed"]),
+                   let revision=NativeHealthPrediction.integer(ack["revision"]) {
+                    if healthPrediction.connection==connection {
+                        published=applyAcknowledgedVitals(["health":hp,"armour":protected,"healthAck":ack])
+                        guard transportGeneration==generation,socket != nil else{return}
+                    } else {
+                        healthPrediction.begin(connection:connection,health:hp,armour:protected,revision:revision,processed:processed)
+                        deliveredRespawnSequence=processed
+                    }
+                    health=healthPrediction.health;armour=healthPrediction.armour
+                } else if healthPrediction.connection != nonce {
+                    healthPrediction.disconnect();health=hp;armour=protected
+                }
+                if !published {onVitals?(health, armour)}
             }
+            guard transportGeneration==generation,socket != nil else{return}
             recovery.received(.hello, generation: generation, now: clock()); publishState()
             send(["t": "board"], allowBeforeReady: true)
         case "weather":
@@ -543,10 +650,17 @@ final class NativeMultiplayerClient {
         case "flightgear":
             onFlightGear?(message["parachute"] as? Bool == true,message["jetpack"] as? Bool == true)
         case "vitals":
+            if healthPrediction.active {_=applyAcknowledgedVitals(message);break}
             if let value = message["health"] as? Int { health = max(0, min(100,value)) }
             if let value = message["armour"] as? Int { armour = max(0,min(100,value)) }
             onVitals?(health, armour)
         case "hit":
+            if healthPrediction.active {
+                if applyAcknowledgedVitals(message),isReady {
+                    onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE":"HIT — \(health) HEALTH REMAINING")
+                }
+                break
+            }
             let damage = max(0, (message["d"] as? NSNumber)?.intValue ?? 0)
             let absorbed = min(armour, damage)
             armour -= absorbed
@@ -563,7 +677,9 @@ final class NativeMultiplayerClient {
         case "vgone":
             if let id = message["id"] as? String {
                 vehicles.removeValue(forKey: id)
-                vehicleOrder.removeAll{$0==id};onVehicles?(orderedVehicles)
+                vehicleOrder.removeAll{$0==id}
+                onVehicleRemoved?(id)
+                onVehicles?(orderedVehicles)
             }
         case "enter":
             if let id = message["v"] as? String { onEnter?(id, message["ok"] as? Bool == true) }

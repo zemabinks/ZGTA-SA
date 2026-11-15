@@ -34,7 +34,13 @@ final class NativePersonalFlightController {
         self.velocity=V(velocity.x,0,velocity.z);open=false
     }
     var lifts:Bool {worn && !flying && !chuting && (up || y != 0)}
-    func takeOff(heading:Double,velocity:V? = nil) {flying=true;self.heading=heading;self.velocity=velocity ?? .zero}
+    func takeOff(heading:Double,velocity:V? = nil) {
+        // A landed canopy is a presentation tail of the previous task, not
+        // the phase of a newly started jetpack. Keep current pilot input and
+        // the explicitly supplied momentum while transferring ownership.
+        chute=0;lean=0;chuteRoll=0;forward=0;rise=0;elapsed=0;maximumFall=0;opening=nil
+        flying=true;self.heading=heading;self.velocity=velocity ?? .zero
+    }
     /// Clear pending controls without interrupting physical flight or changing
     /// its momentum, equipment, phase or facing.
     func cancelInput() {x=0;y=0;open=false;up=false;down=false;brake=false}

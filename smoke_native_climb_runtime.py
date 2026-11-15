@@ -36,7 +36,7 @@ def main():
  aim=skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]
  source=library+'\nfinal class NativeSkeletalActor {\n'+aim+'}\n'
  names=['NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativePersonalFlightController',
-        'NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController','NativeMelee','NativeMeleeInput']
+        'NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController','NativeMelee','NativeMeleeInput','NativeFallDamage']
  for name in names:source+='\n'+(ROOT/'ios/App'/f'{name}.swift').read_text()
  source+='\n'+(ROOT/'smoke_native_climb_runtime.swift').read_text().replace('// ACTUAL_RENDERER_METHODS',extracted)
  evidence_directory=ROOT/'local-only/research/climbing'

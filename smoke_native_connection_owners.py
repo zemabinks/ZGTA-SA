@@ -18,21 +18,36 @@ vc,renderer=inputs[paths[0]],inputs[paths[1]]
 code=r'''
 import Foundation
 import simd
-final class Body {var active=true;var exits=0;func exit(){active=false;exits+=1}}
+final class Body {
+ var active=true,otherIDs:Set<String>=["old-car","parked"];var exits=0,clears=0
+ func exit(){active=false;exits+=1}
+ @discardableResult func removeOtherVehicle(id:String)->Bool {otherIDs.remove(id) != nil}
+ func clearOtherVehicles(){otherIDs=[];clears+=1}
+}
 final class Flight {var worn=true;func wear(_ value:Bool){worn=value}}
+struct Vehicle {let id:String}
+final class Camera {var shakeCancels=0;func cancelShake(){shakeCancels+=1};func resumeFoot(from:Int?,fallbackHeading:Float,fallbackPitch:Float)->SIMD2<Float>{SIMD2(fallbackHeading,fallbackPitch)}}
+final class Effects {var clears=0;func clear(){clears+=1}}
 final class Renderer {
  let groundVehicle:Body?=Body(),personalFlight=Flight()
  var driving=true,currentVehicleID:String?="old-car",drivingSpeed:Float=25,flightVerticalSpeed:Float=4
  var vehiclePitch:Float=0.2,vehicleFallbackRoll:Float=0.1,activeModelOrigin:Float=1
  var pendingVehicleBodyPose:Int?=1,activeVehicleModel="410",activeHandling:Int?=1,vehicleKind="car"
  var pendingVehicleExit:(()->Void)?={},ownRiderPlayback:Int?=1,ownRiderPrevious:Int?=1,ownRiderCapture:Int?=1,ownRiderFeet:Int?=1
- var riderDoorHolds=["old-car":1],remotePlayers=[1],remoteVehicles=[2],hasParachute=true
+ var riderDoorHolds=["old-car":1],remotePlayers=[1],remoteVehicles=[Vehicle(id:"old-car"),Vehicle(id:"parked")],hasParachute=true
  var camera=SIMD3<Float>(12,34,56),objective:SIMD2<Float>?=SIMD2(1,2)
+ let gameCamera=Camera();var gameCameraFrame:Int?=1,heading:Float=1.2,actorHeading:Float=0.3,cameraPitch:Float=0.2,cameraWasDriving=true
  var projectileRows=[1],reloadCancelled=false,resets=0
+ let weaponEffects=Effects();var particleEffects:Effects?=Effects(),blasts=[1]
+ var vehicleRigStates=["old":1],vehicleRigTimes=["old":1],vehicleRigSpins=["old":1]
+ var remoteRiderPlayback=["old":1],remoteRiderActions=["old":1],remoteRiderCapture=["old":1],remoteRiderPrevious=["old":1],remoteRiderAnimations=["old":1]
+ var remoteFootAnimations=["old":1],remoteBikeAnimations=["old":1],remoteBikeSamples=["old":1],remoteBikeFrames=["old":1]
+ var flightCanopyPoses=["own":1],flightCanopyLanded=["own":1],flightAudioVoices=[1]
+ var lastRiderDraw:Double=123,remoteServerTimeOffsetMilliseconds:Double?=456
  func synchronizeProjectiles(_ rows:[Int]){projectileRows=rows}
  func cancelReloadAnimation(){reloadCancelled=true}
  func teleport(x:Float,y:Float,z:Float){camera=SIMD3(x,y,z);resets+=1}
-'''+method(renderer,'    func resetMultiplayerSession()')+r'''
+'''+method(renderer,'    private func discardOwnedVehicle()')+method(renderer,'    @discardableResult func removeVehicle(')+method(renderer,'    private func clearMultiplayerPresentation()')+method(renderer,'    func resetMultiplayerSession()')+r'''
 }
 struct RawKey:Hashable {let rawValue:Int}
 final class Text {var text=""}
@@ -57,7 +72,7 @@ final class Game:Parent {
  var isBeingDismissed=false,isMovingFromParent=false,presentingViewController:Presenter?=Presenter()
  func resetControls(){heldKeys=[];controlResets+=1}
  func setDrivingControls(_ value:Bool){drivingControls=value}
-'''+method(vc,'    private func connectionChanged(')+method(vc,'    private func stopGame()')+method(vc,'    override func viewWillDisappear(')+r'''
+'''+method(vc,'    private func connectionChanged(')+method(vc,'    private func vehicleRemoved(')+method(vc,'    private func stopGame()')+method(vc,'    override func viewWillDisappear(')+r'''
 }
 var checks=0
 func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}
@@ -68,8 +83,17 @@ game.connectionChanged(.reconnecting)
 check(!game.gameplay.ready && game.currentVehicle==nil && !game.drivingControls,"loss clears gameplay/driver ownership")
 check(game.renderer!.camera==oldPosition,"loss manufactured a car-exit offset")
 check(!game.renderer!.driving && game.renderer!.currentVehicleID==nil && !game.renderer!.groundVehicle!.active,"old body is discarded before welcome")
+check(game.renderer!.groundVehicle!.otherIDs.isEmpty && game.renderer!.groundVehicle!.clears==1,"old session retains promoted parked bodies")
 check(game.renderer!.pendingVehicleExit==nil && !delayedExit,"queued old rider exit survives")
 check(game.renderer!.remotePlayers.isEmpty && game.renderer!.remoteVehicles.isEmpty && game.renderer!.projectileRows.isEmpty,"old remote/projectile world survives")
+let world=game.renderer!
+check(world.vehicleRigStates.isEmpty && world.vehicleRigTimes.isEmpty && world.vehicleRigSpins.isEmpty,"old vehicle presentation survives new peer")
+check(world.remoteRiderPlayback.isEmpty && world.remoteRiderActions.isEmpty && world.remoteRiderCapture.isEmpty && world.remoteRiderPrevious.isEmpty && world.remoteRiderAnimations.isEmpty,"same-id rider reused an old session task/pose")
+check(world.remoteFootAnimations.isEmpty && world.remoteBikeAnimations.isEmpty && world.remoteBikeSamples.isEmpty && world.remoteBikeFrames.isEmpty,"same-id remote ped reused old animation samples")
+check(world.flightCanopyPoses.isEmpty && world.flightCanopyLanded.isEmpty && world.flightAudioVoices.isEmpty,"own landed canopy or old flight audio survives new world")
+check(world.lastRiderDraw==0 && world.remoteServerTimeOffsetMilliseconds==nil,"old animation/server clock survives")
+check(world.weaponEffects.clears==1 && world.particleEffects!.clears==1 && world.blasts.isEmpty,"old fires, particles, stream or blasts survive new world")
+check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")
 check(game.gameHUD.vehicle==nil && game.gameHUD.radar.target==nil && game.renderer!.objective==nil,"old HUD/objective survives")
 check(game.previousAudioPosition==nil && game.lastAutomaticCheckpoint.isEmpty && game.radio.stops==1,"loss retains stale timing/effects")
@@ -85,6 +109,22 @@ game.viewWillDisappear(true)
 check(game.network.stops==0 && !game.displayLink!.invalidated && game.gameplay.ready,"temporary fullscreen presentation stopped live world")
 game.isBeingDismissed=true;game.viewWillDisappear(true)
 check(game.network.stops==1 && game.displayLink!.invalidated && !game.gameplay.ready && game.audio.stops==1,"permanent exit did not dispose owners")
+let gone=Game(),beforeGone=gone.renderer!.camera
+gone.gameplay.setConnectionReady(true)
+gone.vehicleRemoved("parked")
+check(gone.currentVehicle != nil && gone.renderer!.driving && gone.renderer!.groundVehicle!.active,"parked deletion revoked unrelated local driver")
+check(gone.renderer!.groundVehicle!.otherIDs==["old-car"] && gone.renderer!.remoteVehicles.count==1,"explicit deletion failed to remove parked prediction")
+check(gone.radio.stops==0 && gone.controlResets==0,"parked deletion reset local input/audio")
+gone.vehicleRemoved("old-car")
+check(gone.currentVehicle==nil && !gone.renderer!.driving && gone.renderer!.currentVehicleID==nil,"despawn retained local ownership")
+check(gone.renderer!.groundVehicle!.exits==1 && !gone.renderer!.groundVehicle!.active,"despawn retained owned body")
+check(gone.renderer!.camera==beforeGone && gone.renderer!.actorHeading==Float(1.2),"despawn manufactured exit displacement or stale actor facing")
+check(gone.renderer!.pendingVehicleExit==nil && gone.renderer!.ownRiderPlayback==nil,"despawn retained delayed rider task")
+check(gone.renderer!.remotePlayers==[1] && gone.renderer!.projectileRows==[1] && gone.renderer!.hasParachute,"one despawn cleared unrelated live world")
+check(gone.renderer!.weaponEffects.clears==0 && !gone.renderer!.remoteRiderAnimations.isEmpty,"single despawn cleared unrelated effects/animations")
+check(gone.gameplay.ready && gone.network.stops==0 && gone.radio.stops==1 && gone.gameHUD.vehicle==nil && !gone.drivingControls,"despawn failed to retain connection/reset vehicle UI")
+gone.vehicleRemoved("old-car")
+check(gone.renderer!.groundVehicle!.exits==1 && gone.radio.stops==1,"repeated despawn repeated owned exit")
 print("PASS connection owners: \(checks) actual extracted controller/renderer lifecycle checks (non-UI spies)")
 '''
 with tempfile.TemporaryDirectory(prefix='zgta-connection-owners-') as directory:

@@ -25,6 +25,7 @@ final class FixedVelocityHarness {
     var ticks=0,water=false,waterEdge:Float=1481,events:[[String:Any]]=[]
     var traces:[[Double]]=[],poses:[[String:Any]]=[],mode="",landed=false
     var samples:[Double]=[]
+    var currentFootVelocity:SIMD3<Double> { character?.currentVelocity ?? lastFootVelocity }
     let startX:Float=1480
     func clearAction(){footAnimator?.rest()}
     func cancelWeaponInput(){weaponTriggerHeld=false;footAnimator?.cancelInput()}

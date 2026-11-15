@@ -83,6 +83,15 @@ final class NativeParticleEffects {
     private var ordinary=0,flat=0
     private var playing:[Playing]=[]
     var shown:[Particle]{particles.filter(\.on)}
+    /// A new multiplayer world must not retain emitters or anchors from its
+    /// previous peer. Keep loaded system definitions/textures reusable.
+    func clear() {
+        playing.removeAll();ordinary=0;flat=0
+        for index in particles.indices {
+            let isFlat=particles[index].flat
+            particles[index]=Particle(flat:isFlat,across:isFlat ? 0:0.5,up:isFlat ? 0:0.5)
+        }
+    }
     init(data:Data,textures:Set<String>,random:@escaping()->Double={Double.random(in:0..<1)})throws {
         self.random=random
         particles=(0..<1120).map{let flat=$0>=1024;return Particle(flat:flat,across:flat ? 0:0.5,up:flat ? 0:0.5)}
