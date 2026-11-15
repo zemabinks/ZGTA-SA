@@ -41,24 +41,29 @@ def main():
     before = hashes()
     cases = [(p.removesuffix('.py'), ['python3', p]) for p in [
         'smoke_native_heading_transitions.py', 'smoke_native_task_transitions.py',
-        'smoke_native_shot_delivery.py',
+        'smoke_native_shot_delivery.py', 'smoke_native_stream_shots.py', 'smoke_native_bindings.py',
+        'smoke_native_melee.py', 'smoke_native_melee_delivery.py', 'smoke_native_weapon_attachment.py',
+        'smoke_native_remote_melee.py',
         'smoke_native_shot_targeting.py', 'smoke_native_shot_occlusion.py',
+        'smoke_native_world_queries.py', 'smoke_native_character_transitions.py', 'smoke_native_weapon_muzzle.py',
         'smoke_native_climb.py', 'smoke_native_climb_runtime.py',
         'smoke_native_ammo_reconciliation.py', 'smoke_native_inventory_wire.py',
         'smoke_native_camera_visibility.py',
         'smoke_native_controls.py', 'smoke_native_horn.py', 'smoke_native_wire.py',
         'smoke_native_foot_locomotion.py', 'smoke_native_foot_animation.py',
         'smoke_native_gun_animation.py', 'smoke_native_swim_animation.py',
-        'smoke_native_swim_sprint.py', 'smoke_native_personal_flight.py',
-        'smoke_native_flight_animation.py', 'smoke_native_camera.py',
-        'smoke_native_remote_foot.py', 'smoke_native_rider_playback.py',
-        'smoke_native_weapon_effects.py',
+        'smoke_native_swim_sprint.py', 'smoke_native_world_water.py', 'smoke_native_personal_flight.py',
+        'smoke_native_flight_animation.py', 'smoke_native_camera.py', 'smoke_native_foot_look_behind.py',
+        'smoke_native_remote_foot.py', 'smoke_native_rider_playback.py', 'smoke_native_rider_cancellation.py',
+        'smoke_native_weapon_effects.py', 'smoke_bicycle_input.py',
     ]]
     cases += [(p.removesuffix('.js'), ['node', p]) for p in [
         'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js',
+        'smoke_native_melee_server.js', 'smoke_native_melee_assets.js',
     ]]
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))
     cases.append(('native_sphere', ['zsh', 'native-physics/test_sphere.sh']))
+    cases.append(('vehicle_lifecycle',['zsh','smoke_vehicle_lifecycle.sh']))
 
     def run(case):
         name, command = case

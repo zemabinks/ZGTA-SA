@@ -25,8 +25,8 @@ var largest:Float=0
 for item in cases {
  let x=(item["x"] as! NSNumber).floatValue,y=(item["y"] as! NSNumber).floatValue,z=(item["z"] as! NSNumber).floatValue
  let actual=water.height(x:x,y:y,z:z)
- if let expected=item["expected"] as? NSNumber {let error=abs(actual!-expected.floatValue);largest=max(largest,error);assert(error<0.0001,"water mismatch at \(x),\(y),\(z): \(String(describing:actual)) != \(expected)")}
- else {assert(actual==nil,"unexpected water at \(x),\(y),\(z)")}
+ if let expected=item["expected"] as? NSNumber {let error=abs(actual!-expected.floatValue);largest=max(largest,error);precondition(error<0.0001,"water mismatch at \(x),\(y),\(z): \(String(describing:actual)) != \(expected)")}
+ else {precondition(actual==nil,"unexpected water at \(x),\(y),\(z)")}
 }
 let began=Date().timeIntervalSinceReferenceDate
 var count=0

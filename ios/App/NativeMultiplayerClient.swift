@@ -90,6 +90,7 @@ final class NativeMultiplayerClient {
     private var remoteAnimationTimes: [String: (String, Double)] = [:]
     private var shots = 0
     private let shotSequence = NativeShotSequence()
+    private let streamShotClaims = NativeStreamShotClaims()
     private var resynchronizingInventory = false
     private var announcedInventoryConnection: String?
     var inventoryConnection: String? { shotSequence.connection }
@@ -138,7 +139,7 @@ final class NativeMultiplayerClient {
     private func closeSocket() {
         let old = socket; socket = nil
         old?.cancel(with: .normalClosure, reason: nil)
-        shotSequence.reset(); announcedInventoryConnection = nil; onInventoryConnection?(nil)
+        shotSequence.reset();streamShotClaims.reset(); announcedInventoryConnection = nil; onInventoryConnection?(nil)
     }
     func disconnect() { resynchronizingInventory = false; closeSocket() }
 
@@ -248,10 +249,19 @@ final class NativeMultiplayerClient {
     func usedParachute() {send(["t":"usedParachute"])}
     func detonateSatchels() { send(["t":"detonate"]) }
 
-    func sendMeleeHit(to player: String) {
-        guard health > 0, !passive, let connection = inventoryConnection else { return }
-        send(["t": "hit", "to": player, "w": 0, "c": connection])
+    /// Public strike counter animates remote misses as well as damaging hits.
+    /// It is independent of gun ammunition sequences and victim selection.
+    @discardableResult func recordMeleeStrike(weapon: Int) -> Bool {
+        guard socket != nil,health>0,!passive,(0...15).contains(weapon),inventoryConnection != nil else{return false}
         shots += 1
+        return true
+    }
+
+    @discardableResult func sendMeleeHit(to player: String, weapon: Int = 0) -> Bool {
+        guard socket != nil, health > 0, !passive, (0...15).contains(weapon),
+              let connection = inventoryConnection else { return false }
+        send(["t": "hit", "to": player, "w": weapon, "c": connection])
+        return true
     }
 
     @discardableResult func sendPistolShot(from origin: SIMD3<Float>, to hit: SIMD3<Float>,
@@ -260,9 +270,10 @@ final class NativeMultiplayerClient {
     }
 
     @discardableResult func sendWeaponShot(weapon: Int, from origin: SIMD3<Float>, to hit: SIMD3<Float>,
-                        player: String?, ticket: NativeShotTicket? = nil) -> Bool {
+                        player: String?, ticket: NativeShotTicket? = nil,streamPlayers:[String]=[]) -> Bool {
         guard let task = socket, health > 0, !passive, let ticket,
               ticket.connection == inventoryConnection, shotSequence.claim(ticket) else { return false }
+        let effectTargets=NativeStreamShotClaims.normalized(streamPlayers)
         shots += 1
         let shot: [String: Any] = ["t": "shot", "w": weapon, "s": ticket.sequence, "c": ticket.connection,
                                    "o": [Double(origin.x), Double(origin.y), Double(origin.z)],
@@ -274,7 +285,11 @@ final class NativeMultiplayerClient {
             DispatchQueue.main.async {
                 guard let self, self.socket === task, self.inventoryConnection == ticket.connection else { return }
                 if error != nil { self.requestInventoryResync(); return }
-                if let player { self.send(["t": "hit", "to": player, "w": weapon, "s": ticket.sequence, "c": ticket.connection]) }
+                if NativeStreamShotTargets.weapons.contains(weapon) {
+                    let targets=self.streamShotClaims.take(weapon:weapon,connection:ticket.connection,players:effectTargets,
+                        milliseconds:ProcessInfo.processInfo.systemUptime*1000)
+                    for target in targets {self.send(["t":"hit","to":target,"w":weapon,"s":ticket.sequence,"c":ticket.connection])}
+                } else if let player { self.send(["t": "hit", "to": player, "w": weapon, "s": ticket.sequence, "c": ticket.connection]) }
             }
         }
         return true

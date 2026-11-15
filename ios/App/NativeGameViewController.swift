@@ -41,6 +41,8 @@ final class NativeGameViewController: UIViewController {
     private var displayLink: CADisplayLink?
     private var frameClock = NativeGameFrameClock()
     private var controllerGate = NativeControllerInputGate()
+    private var previousPad = NativeGameBindings.Pad()
+    private let weaponCycle = NativeWeaponCycleQueue()
     private var applicationActive = true
     private var inputWasAvailable = false
     private var lastNetwork: CFTimeInterval = 0
@@ -55,6 +57,7 @@ final class NativeGameViewController: UIViewController {
     private var handbrakePressed = false
     private var flightBrakePressed=false
     private var hornPressed = false
+    private var bunnyHopPressed=false
     private var nozzleUpPressed = false
     private var nozzleDownPressed = false
     private var lastGearButton = false
@@ -65,9 +68,13 @@ final class NativeGameViewController: UIViewController {
     private var lastReloadButton = false
     private var lastAttackTime: CFTimeInterval = 0
     private var usingPistol: Bool { weapons.current.isGun }
+    private var usingMelee:Bool {weapons.current.fireKind == "MELEE"}
     private var magazine: Int { weapons.rounds }
     private var reserve: Int { weapons.reserve }
     private var aiming = false
+    private var touchMeleeGuard=false
+    private var guardWeapon:Int?
+    private var pauseEscapeHandoff:NativeModalKeyHandoff?
     private var firePressed = false
     private var lastCrouchButton = false
     private var lastGamepadAim = false
@@ -92,6 +99,7 @@ final class NativeGameViewController: UIViewController {
         super.viewSafeAreaInsetsDidChange(); stick.reset(); lookStick.reset()
     }
     @objc private func applicationResigned() {
+        pauseEscapeHandoff?.release()
         applicationActive = false; frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
     @objc private func applicationReturned() {
@@ -99,14 +107,19 @@ final class NativeGameViewController: UIViewController {
     }
     private func resetControls() {
         heldKeys.removeAll(); stick.reset(); lookStick.reset(); controllerGate.reset()
+        previousPad = .init(); weaponCycle.cancel()
+        touchMeleeGuard=false
+        renderer?.meleeGuardHeld=false;renderer?.meleeBlockHeld=false
         run = false; gasPressed = false; brakePressed = false; handbrakePressed = false
         autoReloadWeapon=nil
-        flightBrakePressed = false; hornPressed = false; nozzleUpPressed = false; nozzleDownPressed = false; firePressed = false
+        flightBrakePressed = false; hornPressed = false; bunnyHopPressed=false; nozzleUpPressed = false; nozzleDownPressed = false; firePressed = false
         lastVehicleButton = false; lastJobsButton = false; lastGearButton = false; lastLightsButton = false
         lastJumpButton = false; lastAttackButton = false; lastWeaponButton = false; lastReloadButton = false
         lastCrouchButton = false; lastGamepadAim = false; lastCameraButton = false
         setAiming(false)
         runButton.layer.borderWidth = 1; runButton.layer.borderColor = UIColor.white.withAlphaComponent(0.3).cgColor
+        renderer?.walkHeld = false
+        renderer?.vehicleHop=false
         renderer?.weaponTriggerHeld = false; renderer?.vehicleHandbrake = false; renderer?.vehicleHorn = false
         renderer?.vehicleJetControl = 0; renderer?.personalFlightDown = false; renderer?.personalFlightBrake = false
         renderer?.cancelCameraInput(); renderer?.cancelGameplayInput(); renderer?.streamWeapon(nil, delta: 0)
@@ -115,34 +128,91 @@ final class NativeGameViewController: UIViewController {
     }
     override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
         guard applicationActive, presentedViewController == nil else { return }
+        if presses.contains(where:{$0.key?.keyCode == .keyboardEscape}) {
+            if heldKeys.insert(.keyboardEscape).inserted {performBinding(.pause)}
+            super.pressesBegan(presses,with:event);return
+        }
+        var firstKeys:[UIKeyboardHIDUsage]=[]
         for press in presses {
-            guard let code = press.key?.keyCode else { continue }
-            let first = heldKeys.insert(code).inserted
-            guard first else { continue }
-            switch code {
-            case .keyboardSpacebar: jump()
-            case .keyboardC: toggleCrouch()
-            case .keyboardE: toggleVehicle()
-            case .keyboardR: if currentVehicle != nil { toggleGear() } else { reload() }
-            case .keyboardTab: toggleWeapon()
-            case .keyboardQ: toggleAim()
-            case .keyboardT: openChat()
-            case .keyboardM: openMap()
-            case .keyboardF: openGameplay()
-            case .keyboardG: openAnimations()
-            case .keyboardV: renderer?.cycleCameraView()
-            case .keyboardL: if currentVehicle != nil { renderer?.vehicleLights.toggle() }
-            default: break
-            }
+            guard let code=press.key?.keyCode else {continue}
+            if heldKeys.insert(code).inserted {firstKeys.append(code)}
+        }
+        // All simultaneous modifiers must be visible before jump/enter edges.
+        // Otherwise an unordered Shift+aim batch can jump instead of blocking.
+        let context=bindingContext
+        for code in firstKeys {
+            if let action=NativeGameBindings.keyAction(Int(code.rawValue),context:context) {performBinding(action)}
+            if presentedViewController != nil {break}
         }
         super.pressesBegan(presses, with: event)
     }
+    private var bindingContext:NativeGameBindings.Context {
+        var mode:NativeGameBindings.Mode = .foot
+        if currentVehicle != nil {mode = .vehicle(renderer?.vehicleKind ?? "car")}
+        else if renderer?.isClimbing == true {mode = .climb}
+        else if renderer?.swimming == true {mode = .swim}
+        else if renderer?.isChuting == true {mode = .parachute}
+        else if renderer?.wearingJetpack == true {mode = .jetpack}
+        let canGuard=usingMelee && renderer?.canNativeFootMeleeGuard == true && network.health>0 && !network.passive
+        let keyboardAim=heldKeys.contains { [NativeGameBindings.Key.delete.rawValue,NativeGameBindings.Key.caps.rawValue].contains(Int($0.rawValue)) }
+        return .init(mode:mode,landingGear:renderer?.hasLandingGear == true,nozzle:renderer?.hasJetNozzle == true,
+                     melee:canGuard,guarding:canGuard && (touchMeleeGuard || keyboardAim || lastGamepadAim))
+    }
+    private func performBinding(_ action:NativeGameBindings.Action) {
+        guard acceptsHeldInput else{return}
+        switch action {
+        case .jump:jump()
+        case .crouch,.dive:toggleCrouch()
+        case .enter:toggleVehicle()
+        case .meleeAlternate:
+            if renderer?.requestFootMeleeAttack(alternate:true) != true {status.text="SPECIAL MELEE ATTACK IS NOT AVAILABLE FOR THIS PROFILE"}
+        case .weaponPrevious:cycleWeapon(-1)
+        case .weaponNext:cycleWeapon(1)
+        case .reload:reload()
+        case .action:performNearbyMissionAction()
+        case .jobs:openGameplay()
+        case .chat:openChat()
+        case .map:openMap()
+        case .animations:openAnimations()
+        case .camera:renderer?.cycleCameraView()
+        case .lights:renderer?.vehicleLights.toggle()
+        case .gear:toggleGear()
+        case .radioPrevious:radio.previous();radioButton.setTitle(radio.stationName,for:.normal)
+        case .radioNext:nextRadioStation()
+        case .pause:openPause()
+        case .attack:attack()
+        }
+    }
+    private func cycleWeapon(_ direction:Int) {
+        guard currentVehicle==nil,renderer?.isClimbing != true,renderer?.swimming != true,renderer?.isChuting != true,
+              weapons.synchronized else{return}
+        let rows=(gameplay.state["weaponInventory"] as? [String:Any])?["weapons"] as? [[String:Any]] ?? []
+        let order=NativeGameBindings.weaponOrder(rows,owned:weapons.weapons.map(\.id))
+        if let request=weaponCycle.request(direction:direction,owned:order,selected:weapons.selected) {
+            sendWeaponSelection(request)
+        }
+    }
+    private func sendWeaponSelection(_ request:NativeWeaponCycleQueue.Request) {
+        renderer?.cancelWeaponInput()
+        let connection=network.inventoryConnection
+        gameplay.perform("weapon.select",payload:["weapon":request.weapon]) { [weak self] result in
+            guard let self,self.network.inventoryConnection==connection else{return}
+            let next=self.weaponCycle.complete(request.id,succeeded:result)
+            if result==nil {self.network.requestInventoryResync()}
+            if let next {self.sendWeaponSelection(next)}
+        }
+    }
     override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        for press in presses { if let code = press.key?.keyCode { heldKeys.remove(code) } }
+        for press in presses {
+            if let code=press.key?.keyCode {
+                heldKeys.remove(code)
+                if code == .keyboardEscape {pauseEscapeHandoff?.release()}
+            }
+        }
         super.pressesEnded(presses, with: event)
     }
     override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        resetControls(); super.pressesCancelled(presses, with: event)
+        pauseEscapeHandoff?.release();resetControls(); super.pressesCancelled(presses, with: event)
     }
 
     init(server: ServerAddress) {
@@ -198,6 +268,7 @@ final class NativeGameViewController: UIViewController {
         network.onFlightGear = { [weak self] parachute,jetpack in self?.renderer?.setFlightGear(parachute:parachute,jetpack:jetpack) }
         weapons.onChange = { [weak self] in
             guard let self else { return }
+            if self.guardWeapon != self.weapons.selected {self.guardWeapon=self.weapons.selected;self.touchMeleeGuard=false}
             self.renderer?.equippedWeapon = self.weapons.selected
             self.updateWeaponHUD()
         }
@@ -205,6 +276,7 @@ final class NativeGameViewController: UIViewController {
         weapons.onNeedsResync = { [weak self] in self?.network.requestInventoryResync() }
         network.onInventoryConnection = { [weak self] nonce in
             guard let self else{return}
+            self.weaponCycle.disconnected()
             self.gameplay.inventoryConnection=nonce
             self.weapons.setConnection(nonce)
             self.renderer?.cancelWeaponInput();self.renderer?.cancelReloadAnimation()
@@ -220,6 +292,13 @@ final class NativeGameViewController: UIViewController {
         renderer?.equippedWeapon = weapons.selected
         renderer?.onFootWeaponShot = { [weak self] weapon, left in
             self?.consumeFootWeaponShot(weapon: weapon, left: left) ?? false
+        }
+        renderer?.onMeleeSwing = { [weak self] _ in self?.audio.swing() }
+        renderer?.onFootMeleeHit = { [weak self] event in self?.consumeFootMeleeHit(event) ?? false }
+        renderer?.onMeleeGroundTarget = { [weak self] probe in
+            guard let self,let renderer=self.renderer else{return false}
+            return NativeMeleeTargeting.groundTarget(probe:probe,candidates:self.meleeCandidates,
+                visible:renderer.hasClearShot) != nil
         }
         network.onStatus = { [weak self] text in self?.status.text = text }
         network.onPresence = { [weak self] count, names in
@@ -588,9 +667,14 @@ final class NativeGameViewController: UIViewController {
     @objc private func close() { dismiss(animated: true) }
     @objc private func openPause() {
         guard presentedViewController == nil else { return }
+        let escapeState=NativeModalKeyHandoff(pressed:heldKeys.contains(.keyboardEscape))
+        pauseEscapeHandoff=escapeState
         heldKeys.removeAll();firePressed = false;handbrakePressed = false
         let panel = NativePausePanel();panel.driving = currentVehicle != nil
+        panel.escapeHandoff=escapeState
+        panel.controlsHint=NativeGameBindings.legend(bindingContext)
         panel.cameraName = { [weak self] in self?.renderer?.cameraViewName ?? "middle" }
+        panel.onJobs = { [weak self] in self?.openGameplay() }
         panel.onCamera = { [weak self] in self?.renderer?.cycleCameraView() }
         panel.onAnimations = { [weak self] in self?.openAnimations() }
         panel.onRadio = { [weak self] in self?.nextRadioStation() }
@@ -648,7 +732,10 @@ final class NativeGameViewController: UIViewController {
                                        UIColor.white.withAlphaComponent(0.3)).cgColor
         runButton.layer.borderWidth = run ? 2.5 : 1
     }
-    @objc private func jump() { renderer?.jump() }
+    @objc private func jump() {
+        guard !(bindingContext.melee && bindingContext.guarding) else{return}
+        renderer?.jump()
+    }
     @objc private func pressGas() { if acceptsHeldInput { gasPressed = true } }
     @objc private func releaseGas() { gasPressed = false }
     @objc private func pressHandbrake() { if acceptsHeldInput { handbrakePressed = true } }
@@ -752,7 +839,7 @@ final class NativeGameViewController: UIViewController {
         reloadButton.isHidden = currentVehicle != nil || !usingPistol ||
             (weapons.selected != 39 && (magazine >= weapons.current.capacity || reserve == 0))
         reloadButton.accessibilityLabel = weapons.selected == 39 ? "Detonate planted satchels" : "Reload"
-        aimButton.isHidden = currentVehicle != nil || !usingPistol
+        aimButton.isHidden = currentVehicle != nil || ((!usingPistol || usingMelee) && renderer?.canNativeFootMeleeGuard != true)
         ammoLabel.text = weapons.reloading ? "RELOADING" : "\(weapons.current.name.uppercased()) · \(magazine) / \(reserve)"
         gameHUD.updateWeapon(id: weapons.selected, name: weapons.current.name, magazine: magazine, reserve: reserve)
         gameHUD.loadWeaponIcon(server: server, weapon: weapons.selected)
@@ -786,15 +873,16 @@ final class NativeGameViewController: UIViewController {
                      accessibility: helicopter ? "Descend" : "Brake or reverse")
         let nozzle = driving && renderer?.hasJetNozzle == true
         weaponButton.isHidden = driving && !nozzle
-        attackButton.isHidden = driving && renderer?.hasVehicleHorn != true
+        let bicycle=driving && renderer?.vehicleKind == "bicycle"
+        attackButton.isHidden = driving && !bicycle && renderer?.hasVehicleHorn != true
         reloadButton.isHidden = driving ? !nozzle : !usingPistol ||
             (weapons.selected != 39 && (magazine >= weapons.current.capacity || reserve == 0))
-        aimButton.isHidden = driving ? renderer?.vehicleKind == "bicycle" : !usingPistol
+        aimButton.isHidden = driving ? renderer?.vehicleKind == "bicycle" : ((!usingPistol || usingMelee) && renderer?.canNativeFootMeleeGuard != true)
         crouchButton.isHidden = driving && renderer?.hasLandingGear != true
         styleControl(crouchButton,icon:nil,fallback:driving ? "airplane.circle" : "arrow.down.to.line",accessibility:driving ? "Toggle landing gear" : "Toggle crouch")
         styleControl(aimButton,icon:nil,fallback:driving ? "light.max" : "viewfinder",accessibility:driving ? "Toggle vehicle lights" : "Toggle aim")
         if driving {
-            styleControl(attackButton,icon:nil,fallback:"speaker.wave.2.fill",accessibility:"Hold horn")
+            styleControl(attackButton,icon:nil,fallback:bicycle ? "arrow.up.circle.fill":"speaker.wave.2.fill",accessibility:bicycle ? "Hold and release bunny hop":"Hold horn")
             if nozzle {
                 styleControl(weaponButton,icon:nil,fallback:"arrow.up.right",accessibility:"Hold to rotate jets forward")
                 styleControl(reloadButton,icon:nil,fallback:"arrow.down",accessibility:"Hold to rotate jets downward")
@@ -845,7 +933,10 @@ final class NativeGameViewController: UIViewController {
 
     @objc private func toggleAim() {
         if currentVehicle != nil { renderer?.vehicleLights.toggle();return }
-        setAiming(!aiming)
+        if renderer?.canNativeFootMeleeGuard == true {
+            touchMeleeGuard.toggle();setAiming(false)
+            aimButton.backgroundColor=UIColor.black.withAlphaComponent(touchMeleeGuard ? 0.7:0.3)
+        } else {setAiming(usingMelee ? false:!aiming)}
     }
     @objc private func toggleGear() { if renderer?.hasLandingGear == true { renderer?.toggleLandingGear() } }
     @objc private func pressNozzleUp() { if acceptsHeldInput && currentVehicle != nil && renderer?.hasJetNozzle == true { nozzleUpPressed = true } }
@@ -858,17 +949,20 @@ final class NativeGameViewController: UIViewController {
         crouchButton.backgroundColor = UIColor.black.withAlphaComponent(renderer.crouching ? 0.7 : 0.3)
     }
     private func setAiming(_ value: Bool) {
-        aiming = value && usingPistol && currentVehicle == nil && renderer?.isClimbing != true && renderer?.swimming != true && renderer?.isChuting != true
+        aiming = value && usingPistol && !usingMelee && currentVehicle == nil && renderer?.isClimbing != true && renderer?.swimming != true && renderer?.isChuting != true
         renderer?.aiming = aiming
         gameHUD.setAiming(aiming, scoped: weapons.selected == 34)
         aimButton.backgroundColor = UIColor.black.withAlphaComponent(aiming ? 0.7 : 0.3)
     }
     @objc private func pressFire() {
         guard acceptsHeldInput else { return }
-        if currentVehicle != nil { hornPressed = true;return }
+        if currentVehicle != nil {
+            if renderer?.vehicleKind == "bicycle" {bunnyHopPressed=true}else{hornPressed = true}
+            return
+        }
         firePressed = true;attack()
     }
-    @objc private func releaseFire() { firePressed = false;hornPressed = false }
+    @objc private func releaseFire() { firePressed = false;hornPressed = false;bunnyHopPressed=false }
 
     @objc private func reload() {
         guard currentVehicle == nil,renderer?.isClimbing != true,renderer?.swimming != true,renderer?.isChuting != true else { return }
@@ -891,7 +985,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func attack() {
-        guard acceptsHeldInput else { return }
+        guard acceptsHeldInput, !weaponCycle.busy else { return }
         guard let renderer else { return }
         if renderer.isChuting {renderer.openParachute();return}
         if currentVehicle != nil && network.health > 0 { return }
@@ -915,11 +1009,18 @@ final class NativeGameViewController: UIViewController {
             _ = renderer.requestFootWeaponFire()
             return
         }
+        if weapons.current.isMelee {
+            // Damage belongs to the accepted animation's hit marker. A rejected
+            // request, missing definition or a buffered press cannot hit early.
+            guard weapons.canFire,renderer.hasNativeFootMeleeTiming else{return}
+            _ = renderer.requestFootMeleeAttack()
+            return
+        }
         // Unsupported jetpack weapon types must not fall back to wall-clock
         // firing through the flight animation. Armed flight is capability-gated.
         guard !renderer.wearingJetpack else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastAttackTime >= weapons.current.interval,let ray=currentShotRay(),let ticket=network.reserveShot(),weapons.fire(ticket:ticket) else { return }
+        guard now - lastAttackTime >= weapons.current.interval,let ray=currentShotRay(weapon:weapons.selected,left:false),let ticket=network.reserveShot(),weapons.fire(ticket:ticket) else { return }
         lastAttackTime = now
         if usingPistol {
             updateWeaponHUD()
@@ -929,28 +1030,34 @@ final class NativeGameViewController: UIViewController {
             emitWeaponShot(weapon: weapons.selected, left: false,ticket:ticket,ray:ray)
             return
         }
-        renderer.performFistAttack()
-        audio.swing()
-        let origin = renderer.position
-        let facing = SIMD2<Float>(sin(renderer.direction), cos(renderer.direction))
-        let target = network.players.values.compactMap { player -> (RemotePlayer, Float)? in
-            let offset = player.position - origin
-            let distance = hypot(offset.x, offset.y)
-            guard distance > 0.1, distance <= 3.5, abs(offset.z) <= 2.5,
-                  simd_dot(SIMD2(offset.x, offset.y) / distance, facing) >= 0.25 else { return nil }
-            return (player, distance)
-        }.min { $0.1 < $1.1 }
-        guard let target else { status.text = "NO PLAYER IN MELEE REACH"; return }
-        network.sendMeleeHit(to: target.0.id)
+    }
+
+    private var meleeCandidates:[NativeMeleeTargeting.Candidate] {
+        network.orderedPlayers.filter {$0.code.hasPrefix("s") && $0.ridingVehicleID == nil}.map {
+            .init(id:$0.id,feet:$0.position,heading:$0.heading,crouching:$0.crouching,
+                down:$0.down != 0,dead:$0.life <= 0)
+        }
+    }
+
+    private func consumeFootMeleeHit(_ event:NativeMeleeEvent)->Bool {
+        guard let renderer,applicationActive,presentedViewController == nil,currentVehicle == nil,!weaponCycle.busy,
+              network.health>0,!network.passive,!renderer.swimming,!renderer.isChuting,
+              renderer.hasNativeFootMeleeTiming,weapons.selected==event.weapon,weapons.current.isMelee,weapons.canFire,
+              network.recordMeleeStrike(weapon:event.weapon) else{return false}
+        // A valid miss still advances the remote animation counter. Damage
+        // remains conditional on a selected visible victim and live transport.
+        guard let target=NativeMeleeTargeting.select(event:event,candidates:meleeCandidates,visible:renderer.hasClearShot),
+              network.sendMeleeHit(to:target.id,weapon:event.weapon) else{return true}
         audio.meleeHit()
-        status.text = "FIST ATTACK ON \(target.0.name.uppercased())"
+        status.text="MELEE ATTACK ON \(network.players[target.id]?.name.uppercased() ?? "PLAYER")"
+        return true
     }
 
     private func consumeFootWeaponShot(weapon: Int, left: Bool)->Bool {
-        guard let renderer, applicationActive, presentedViewController == nil, currentVehicle == nil,
+        guard let renderer, applicationActive, presentedViewController == nil, currentVehicle == nil, !weaponCycle.busy,
               network.health > 0, !network.passive, !renderer.swimming, !renderer.isChuting,
               renderer.hasNativeFootWeaponTiming, weapons.selected == weapon, usingPistol,
-              let ray=currentShotRay(),let ticket=network.reserveShot() else { return false }
+              let ray=currentShotRay(weapon:weapon,left:left),let ticket=network.reserveShot() else { return false }
         return NativeWeaponShotDelivery.deliver(weapon: weapon, left: left,ticket:ticket, inventory: weapons,
             readiness: { renderer.weaponReady = $0 }, emission: { [self] weapon, left,ticket in
                 updateWeaponHUD()
@@ -960,23 +1067,37 @@ final class NativeGameViewController: UIViewController {
 
     /// Freeze valid geometry before reserving/spending a ticket. Emission is
     /// synchronous, so both hands retain their own event-time ray snapshot.
-    private func currentShotRay()->NativeShotTargeting.Ray? {
-        guard let renderer else{return nil}
-        return .init(origin:NativeShotTargeting.muzzle(feet:renderer.shotFeet),
+    private func currentShotRay(weapon:Int,left:Bool)->NativeShotTargeting.Ray? {
+        guard let renderer,let muzzle=renderer.weaponMuzzle(weapon:weapon,left:left) else{return nil}
+        // Do not spawn a shot past a wall merely because an extended barrel
+        // crossed it. Retain the existing safe body origin in that case.
+        let clear=simd_distance(muzzle.safetyOrigin,muzzle.origin)<0.0001 ||
+            renderer.hasClearShot(from:muzzle.safetyOrigin,to:muzzle.origin)
+        return .init(origin:clear ? muzzle.origin:muzzle.safetyOrigin,
                      direction:renderer.aimDirection,range:weapons.current.range)
     }
 
-    /// Shared effects/network emission. Animation-event firing never restarts a
-    /// clip here. Muzzle position retains the existing body-offset approximation;
-    /// `left` preserves event identity until actual per-hand muzzle data is wired.
+    /// Shared effects/network emission uses the captured event-time hand muzzle.
+    /// Unavailable or wall-obstructed poses retain the safe body-origin fallback.
+    /// Animation-event firing never restarts a clip here.
     private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket,ray:NativeShotTargeting.Ray) {
         guard let renderer, weapons.selected == weapon else { return }
+        renderer.recordWeaponShot(weapon:weapon,origin:ray.origin,direction:ray.direction)
         if weapons.current.fireKind == "PROJECTILE" {
             network.sendWeaponShot(weapon: weapon, from: ray.origin,
                 to: ray.point(at:max(5,min(100,ray.range))), player: nil,ticket:ticket)
             return
         }
         audio.shot(weapon: weapon)
+        if NativeStreamShotTargets.weapons.contains(weapon) {
+            let candidates=network.orderedPlayers.map {
+                NativeShotTargeting.Candidate(id:$0.id,point:$0.position+SIMD3(0,0,0.9))
+            }
+            let targets=NativeStreamShotTargets.players(ray:ray,candidates:candidates,
+                visible:{renderer.hasClearShot(from:$0,to:$1)})
+            network.sendWeaponShot(weapon:weapon,from:ray.origin,to:ray.end,player:nil,ticket:ticket,streamPlayers:targets)
+            return
+        }
         let candidates=network.orderedPlayers.map {
             NativeShotTargeting.Candidate(id:$0.id,point:NativeShotTargeting.torso(feet:$0.position))
         }
@@ -1136,7 +1257,7 @@ final class NativeGameViewController: UIViewController {
         // Over-full-screen panels leave the game visible, so UIKit does not
         // always repeat viewDidAppear when keyboard input should resume.
         if acceptsInput,view.window != nil,!isFirstResponder { becomeFirstResponder() }
-        if acceptsInput && firePressed && renderer?.hasNativeFootWeaponTiming != true { attack() }
+        if acceptsInput && firePressed && renderer?.hasNativeFootWeaponTiming != true && renderer?.hasNativeFootMeleeTiming != true { attack() }
         var forward = Float(-stick.value.y)
         var sideways = Float(stick.value.x)
         var steering = Float(lookStick.value.x)
@@ -1147,23 +1268,22 @@ final class NativeGameViewController: UIViewController {
             steering = sideways;lookVertical = forward;forward = 0
         }
         var lift: Float = 0
-        var horn = currentVehicle != nil && (hornPressed || heldKeys.contains(.keyboardH) || heldKeys.contains(.keyboardCapsLock))
+        let context=bindingContext
+        let keyboard=NativeGameBindings.keyboard(Set(heldKeys.map {Int($0.rawValue)}),context:context)
+        var horn = currentVehicle != nil && (hornPressed || keyboard.horn)
         var jets: Float = (nozzleUpPressed ? 1:0)-(nozzleDownPressed ? 1:0)
-        if heldKeys.contains(.keyboardW) { forward = 1 }
-        if heldKeys.contains(.keyboardS) { forward = -1 }
-        if heldKeys.contains(.keyboardA) { sideways = -1 }
-        if heldKeys.contains(.keyboardD) { sideways = 1 }
-        if currentVehicle != nil && (heldKeys.contains(.keyboardA) || heldKeys.contains(.keyboardD)) { steering = sideways }
-        if heldKeys.contains(.keyboardLeftArrow) { if currentVehicle != nil { cameraLookX = -1 } else { steering = -1 } }
-        if heldKeys.contains(.keyboardRightArrow) { if currentVehicle != nil { cameraLookX = 1 } else { steering = 1 } }
-        if heldKeys.contains(.keyboardUpArrow) { if currentVehicle != nil { cameraLookY = 1 } else { lookVertical = 1 } }
-        if heldKeys.contains(.keyboardDownArrow) { if currentVehicle != nil { cameraLookY = -1 } else { lookVertical = -1 } }
+        if keyboard.moving {forward=keyboard.forward;if currentVehicle==nil {sideways=keyboard.sideways}}
+        if context.aircraft {sideways=keyboard.sideways}
+        if keyboard.steeringKeys {steering=keyboard.steering}
+        if keyboard.pitchKeys {lookVertical=keyboard.pitch}
+        if context.nozzle,keyboard.nozzle != 0 {jets=keyboard.nozzle}
+        renderer?.cameraLookDirection=keyboard.look
         let helicopter = currentVehicle != nil && renderer?.vehicleKind == "helicopter"
+        if helicopter && keyboard.moving {lift=keyboard.forward;forward=0}
         var gamepadRunning = false
+        var gamepadHop=false
         var gamepadJumping = false
-        var gamepadAttacking = false
-        var gamepadWeapon = false
-        var gamepadReload = false
+        var gamepadAttacking = keyboard.attack
         let controller = GCController.controllers().compactMap(\.extendedGamepad).first
         var controllerAllowed = false
         if let pad = controller {
@@ -1175,9 +1295,16 @@ final class NativeGameViewController: UIViewController {
                        pad.rightThumbstick.yAxis.value,pad.leftTrigger.value,pad.rightTrigger.value], pressed: pressed)
         } else { controllerGate.reset() }
         if controllerAllowed, let pad = controller {
-            let crouch = pad.leftThumbstickButton?.isPressed == true
-            if currentVehicle == nil && crouch && !lastCrouchButton { toggleCrouch() }
-            lastCrouchButton = crouch
+            let buttons=NativeGameBindings.Pad(a:pad.buttonA.isPressed,b:pad.buttonB.isPressed,x:pad.buttonX.isPressed,y:pad.buttonY.isPressed,
+                lb:pad.leftShoulder.isPressed,rb:pad.rightShoulder.isPressed,leftClick:pad.leftThumbstickButton?.isPressed == true,
+                rightClick:pad.rightThumbstickButton?.isPressed == true,menu:pad.buttonMenu.isPressed,options:pad.buttonOptions?.isPressed == true,
+                up:pad.dpad.up.isPressed,down:pad.dpad.down.isPressed,left:pad.dpad.left.isPressed,right:pad.dpad.right.isPressed)
+            var padContext=context
+            padContext.guarding=context.melee && (touchMeleeGuard || keyboard.aim || pad.leftTrigger.isPressed)
+            let actions=NativeGameBindings.padActions(buttons,previous:previousPad,context:padContext)
+            previousPad=buttons
+            for action in actions {performBinding(action);if presentedViewController != nil {break}}
+            if let direction=NativeGameBindings.padLook(buttons,context:context) {renderer?.cameraLookDirection=direction}
             let left = NativeInputMath.stick(x: pad.leftThumbstick.xAxis.value, y: pad.leftThumbstick.yAxis.value)
             let lx = left.x, ly = left.y
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
@@ -1186,20 +1313,15 @@ final class NativeGameViewController: UIViewController {
             if abs(rx) > 0.05 { if currentVehicle != nil { cameraLookX = rx } else { steering = rx } }
             let ry = right.y
             if abs(ry) > 0.05 { if currentVehicle != nil { cameraLookY = ry } else { lookVertical = ry } }
-            gamepadRunning = pad.buttonA.isPressed
-            gamepadJumping = pad.buttonB.isPressed
+            gamepadRunning = pad.buttonA.isPressed && context.mode != .vehicle("bicycle")
+            gamepadHop = pad.buttonA.isPressed && context.mode == .vehicle("bicycle")
+            gamepadJumping = pad.buttonX.isPressed
             if currentVehicle != nil {
-                lookVertical = ly;steering = lx
-                sideways = (pad.rightShoulder.isPressed ? 1 : 0)-(pad.leftShoulder.isPressed ? 1 : 0)
-                renderer?.cameraLookDirection = pad.rightThumbstickButton?.isPressed == true ? "behind" : nil
-                let cameraButton = pad.buttonOptions?.isPressed == true
-                if cameraButton && !lastCameraButton { renderer?.cycleCameraView() }
-                lastCameraButton = cameraButton
-                horn = horn || pad.leftThumbstickButton?.isPressed == true
-                let gear = pad.dpad.up.isPressed,lights = pad.dpad.right.isPressed
-                if gear && !lastGearButton { toggleGear() }
-                if lights && !lastLightsButton { renderer?.vehicleLights.toggle() }
-                lastGearButton = gear;lastLightsButton = lights
+                if abs(ly)>0.05 || !keyboard.pitchKeys {lookVertical=ly}
+                if abs(lx)>0.05 || !keyboard.steeringKeys {steering=lx}
+                let rudder:Float=(pad.rightShoulder.isPressed ? 1:0)-(pad.leftShoulder.isPressed ? 1:0)
+                if rudder != 0 || keyboard.sideways==0 {sideways=rudder}
+                horn = horn || (buttons.leftClick && !context.landingGear)
                 if renderer?.hasJetNozzle == true { jets = (pad.dpad.left.isPressed ? 1:0)-(pad.dpad.down.isPressed ? 1:0) }
                 let throttle = pad.rightTrigger.value
                 let braking = pad.leftTrigger.value
@@ -1207,39 +1329,38 @@ final class NativeGameViewController: UIViewController {
                     if throttle > 0.05 || braking > 0.05 { lift = throttle - braking }
                 } else {
                     if throttle > 0.05 || braking > 0.05 { forward = throttle - braking }
-                    else { forward = 0 }
+                    else if !keyboard.moving { forward = 0 }
                 }
             } else {
-                gamepadAttacking = pad.rightTrigger.isPressed
-                let aim = pad.leftTrigger.isPressed
-                if usingPistol && aim != lastGamepadAim { setAiming(aim) }
-                lastGamepadAim = aim
+                gamepadAttacking = gamepadAttacking || pad.rightTrigger.isPressed || (pad.buttonB.isPressed && context.mode != .swim && context.mode != .climb)
             }
-            gamepadWeapon = currentVehicle == nil && pad.leftShoulder.isPressed
-            gamepadReload = currentVehicle == nil && pad.rightShoulder.isPressed
-            if pad.buttonX.isPressed && !lastVehicleButton { toggleVehicle() }
-            if pad.buttonY.isPressed && !lastJobsButton && presentedViewController == nil { openGameplay() }
-            lastVehicleButton = pad.buttonX.isPressed
-            lastJobsButton = pad.buttonY.isPressed
         }
+        acceptsInput = acceptsInput && presentedViewController == nil
+        let heldAim=acceptsInput && (keyboard.aim || (controllerAllowed && controller?.leftTrigger.isPressed == true))
+        let guardHeld=acceptsInput && context.melee && (touchMeleeGuard || heldAim)
+        renderer?.meleeGuardHeld=guardHeld
+        renderer?.meleeBlockHeld=guardHeld && (handbrakePressed || gamepadJumping || keyboard.jump) && !(firePressed || gamepadAttacking)
+        if let cameraAim=NativeGameBindings.cameraAimUpdate(held:heldAim,previousHeld:lastGamepadAim,melee:usingMelee,current:aiming) {setAiming(cameraAim)}
+        if guardHeld {aimButton.backgroundColor=UIColor.black.withAlphaComponent(0.7)}
+        lastGamepadAim=heldAim
+
         // Opening a panel from a controller during this frame must suppress the
         // same frame's remaining jump/fire/movement commands too.
         acceptsInput = acceptsInput && presentedViewController == nil
         if !acceptsInput {
-            gamepadJumping = false; gamepadAttacking = false; gamepadWeapon = false; gamepadReload = false
+            gamepadJumping = false; gamepadAttacking = false;gamepadHop=false
+            renderer?.cameraLookDirection=nil
         }
-        if gamepadJumping && !lastJumpButton { renderer?.jump() }
+        // Pad jump edges are dispatched by padActions; keyboard edges by pressesBegan.
         lastJumpButton = gamepadJumping
         let hornState=audio.vehicleHornInput(model:currentVehicle.flatMap{Int($0.code.split(separator:".").first ?? "")},
             identity:currentVehicle?.id,pressed:acceptsInput && horn && renderer?.hasVehicleHorn == true,milliseconds:link.timestamp*1000)
         renderer?.vehicleHorn=hornState.horn;renderer?.vehicleSiren=hornState.siren
         renderer?.vehicleJetControl = acceptsInput ? jets:0
-        if gamepadAttacking && (renderer?.hasNativeFootWeaponTiming != true || !lastAttackButton) { attack() }
+        renderer?.vehicleHop = acceptsInput && context.mode == .vehicle("bicycle") && (bunnyHopPressed || gamepadHop || keyboard.hop)
+        if NativeGameBindings.shouldRequestAttack(held:gamepadAttacking,wasHeld:lastAttackButton,
+            nativeGun:renderer?.hasNativeFootWeaponTiming == true,nativeMelee:renderer?.hasNativeFootMeleeTiming == true) {attack()}
         lastAttackButton = gamepadAttacking
-        if gamepadWeapon && !lastWeaponButton { toggleWeapon() }
-        lastWeaponButton = gamepadWeapon
-        if gamepadReload && !lastReloadButton { reload() }
-        lastReloadButton = gamepadReload
         if currentVehicle != nil {
             if helicopter {
                 if gasPressed { lift = 1 }
@@ -1253,22 +1374,23 @@ final class NativeGameViewController: UIViewController {
             forward = 0;sideways = 0;steering = 0;lookVertical = 0;lift = 0;cameraLookX = 0;cameraLookY = 0
         }
         let walking = abs(forward) + abs(sideways) > 0.05
-        let running = acceptsInput && (run || gamepadRunning || heldKeys.contains(.keyboardLeftShift))
+        let running = acceptsInput && (run || gamepadRunning || keyboard.sprint)
+        renderer?.walkHeld = acceptsInput && currentVehicle == nil && keyboard.walk
         if currentVehicle != nil { renderer?.lookCamera(x:cameraLookX,y:cameraLookY,delta:delta) }
         renderer?.vehicleHandbrake = acceptsInput && currentVehicle != nil &&
-            (handbrakePressed || gamepadJumping || heldKeys.contains(.keyboardSpacebar))
+            (handbrakePressed || gamepadJumping || keyboard.handbrake)
         renderer?.vehicleControllerInput = GCController.controllers().contains { $0.extendedGamepad != nil }
-        renderer?.personalFlightDown=acceptsInput && (handbrakePressed || gamepadJumping || heldKeys.contains(.keyboardSpacebar))
-        renderer?.jumpHeld=acceptsInput && (handbrakePressed || gamepadJumping || heldKeys.contains(.keyboardSpacebar))
-        renderer?.personalFlightBrake=acceptsInput && (flightBrakePressed || gamepadReload || heldKeys.contains(.keyboardC))
+        renderer?.personalFlightDown=acceptsInput && (handbrakePressed || gamepadJumping || keyboard.jump)
+        renderer?.jumpHeld=acceptsInput && (handbrakePressed || gamepadJumping || keyboard.jump)
+        renderer?.personalFlightBrake=acceptsInput && (flightBrakePressed || keyboard.flightBrake)
         if renderer?.isClimbing == true && aiming {setAiming(false)}
-        let canFight = acceptsInput && currentVehicle == nil && renderer?.isClimbing != true && network.health > 0 && !network.passive &&
+        let canFight = acceptsInput && !weaponCycle.busy && currentVehicle == nil && renderer?.isClimbing != true && network.health > 0 && !network.passive &&
             renderer?.swimming != true && renderer?.isChuting != true &&
-            (renderer?.wearingJetpack != true || renderer?.hasNativeFootWeaponTiming == true)
+            (renderer?.wearingJetpack != true || renderer?.hasNativeFootWeaponTiming == true || renderer?.hasNativeFootMeleeTiming == true)
         if !canFight { renderer?.cancelWeaponInput() }
         renderer?.weaponTriggerHeld = canFight && (firePressed || gamepadAttacking)
         renderer?.weaponReloading = weapons.reloading
-        renderer?.weaponReady = weapons.canFire
+        renderer?.weaponReady = weapons.canFire && !weaponCycle.busy
         renderer?.beginGameplayFrame()
         for step in timing.steps {
             renderer?.move(forward: forward, sideways: sideways,
@@ -1317,6 +1439,8 @@ final class NativeGameViewController: UIViewController {
             gameHUD.updateClock(hour: renderer.gameHour)
             gameHUD.updateBreath(renderer.swimmingBreath)
             if currentVehicle == nil {
+                aimButton.isHidden = (!usingPistol || usingMelee) && !renderer.canNativeFootMeleeGuard
+                aimButton.accessibilityLabel=renderer.canNativeFootMeleeGuard ? "Toggle melee guard":"Toggle aim"
                 let climbing=renderer.isClimbing
                 let dropping=renderer.canDropJetpack
                 let context=climbing ? "climb":dropping ? "drop":"enter"
@@ -1341,7 +1465,7 @@ final class NativeGameViewController: UIViewController {
                                  roll:currentVehicle == nil ? renderer.personalFlightRoll:renderer.vehicleRoll,
                                  vehicleHealth: renderer.vehicleHealth,
                                  vehicleDamage:renderer.vehicleDamage,lights:renderer.vehicleLights,horn:renderer.vehicleHorn,siren:renderer.vehicleSiren,
-                                 airborne: renderer.footWireAirborne, weapon:renderer.isChuting ? 46:weapons.selected,
+                                 airborne: renderer.footWireAirborne, weapon:renderer.effectiveWireWeapon,
                                  firing: renderer.isFiring, animation: renderer.footWireAnimation,
                                  crouching: renderer.crouching,swimState: renderer.swimmingState,
                                  swimPitch: renderer.swimmingPitch,swimRatio: renderer.swimmingRatio,

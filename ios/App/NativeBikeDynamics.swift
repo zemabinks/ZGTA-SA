@@ -57,6 +57,9 @@ final class NativeBikeDynamics {
     private(set) var pedal = 0
     private(set) var crank = 0.0
     var hop:Double {hopTime>0 ? -1:min(1,hopCharge/25)}
+    /// Losing input ownership cancels a pending gesture, rather than releasing
+    /// it as a new jump. An already launched hop keeps its timer and momentum.
+    func cancelPendingHop() {hopCharge=0}
     private var bicycleLean = 0.0, hopCharge = 0.0, hopTime = 0.0, previouslyPedalling = false, sprintPedal = false
     private var pedalCounter = 0.0, pedalCooldown = 0.0, pedalHeld = -1.0
     var breathLeft = 1.0

@@ -85,8 +85,11 @@ final class NativeRiderPlayback {
         transition=min(1,transition+dt/0.25)
         let target=phase==nil && state == .inside ? definition.seats[configuration.seat].turn ?? 0:0
         turn+=(target-turn)*min(1,dt/0.25*2)
+        // Original bA's door getter hides its cached part after a forced sit.
+        // Remote action cancellation must release the renderer's door override.
+        let holdingDoor=state == .entering || state == .leaving
         let frame=Frame(sample:sample ?? Sample(pose:.init(base:"ped/idle_stance"),anchor:anchor),turn:turn,capture:capture,captureSerial:serial,
-            transition:smooth(transition,0,1),transitioning:transitioning,doorPart:part,doorOpen:opening,releasedDoor:released,state:state)
+            transition:smooth(transition,0,1),transitioning:transitioning,doorPart:holdingDoor ? part:nil,doorOpen:opening,releasedDoor:released,state:state)
         capture=nil
         return frame
     }

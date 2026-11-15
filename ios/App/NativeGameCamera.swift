@@ -62,6 +62,9 @@ final class NativeGameCamera {
     private var table: Document?
     private var request: URLSessionDataTask?
     var trace: ((SIMD3<Float>,SIMD3<Float>,Float) -> Float?)?
+    /// Streaming boundaries are not solid surfaces. They may be closer than
+    /// the original solid-wall minimum and must never be crossed by that clamp.
+    var unavailableDistance: ((SIMD3<Float>,SIMD3<Float>,Float) -> Float?)?
     private(set) var heading: Float = 0
     private(set) var pitch: Float = -0.15
     private(set) var footZoom = 2
@@ -204,7 +207,39 @@ final class NativeGameCamera {
         sightTarget[sight] = Self.clamp((sightTarget[sight] ?? config.first)*(delta < 0 ? 1/factor : factor),config.least,config.most)
     }
 
-    func followFoot(_ input: Foot,delta: Float) -> Frame? {
+    /// Main9737's held look-behind is a render-time override after normal
+    /// follow, restored before the next update. Keep chase/aim and input yaw
+    /// advancing normally; never feed the returned reverse heading into them.
+    func followFoot(_ input: Foot,delta: Float,look: String? = nil) -> Frame? {
+        guard let normal=processFoot(input,delta:delta) else{return nil}
+        guard look == "behind",!input.aiming else{return normal}
+        let focus=Self.double(input.position)+SIMD3(0,0,1.4)
+        var direction=focus-lastSource;direction.z=0
+        let distance=simd_length(direction)
+        guard distance>0.05 else{return normal}
+        direction /= distance
+        let hit=collision(focus,direction,distance)
+        let contact=hit.flatMap{$0.isFinite && $0>=0 && $0<=distance ? $0:nil}
+        // The archived solid-wall minimum is .6m. Missing streamed geometry
+        // remains a boundary and may shorten that minimum, as in normal follow.
+        let reach=availableReach(focus,direction,max(0.6,(contact ?? distance)-0.3),padding:0.3)
+        var source=focus+direction*reach;source.z=lastSource.z
+        let displaySource=Self.float(source),displayTarget=Self.float(focus)
+        // An unavailable boundary can reduce reach below the archived .6m
+        // minimum. At equal view/focus heights Float conversion may then make
+        // eye==target; retain the ordinary view rather than return a frame
+        // that needs the renderer's generic direction fallback.
+        guard Self.finite(displaySource),Self.finite(displayTarget),
+              simd_length_squared(displayTarget-displaySource)>0 else{return normal}
+        let facing=Self.normalized(focus-source)
+        // Do not call frame(): lastSource belongs to normal follow, just as the
+        // original wrapper restores its saved camera after drawing this view.
+        return Frame(source:displaySource,target:displayTarget,verticalFov:normal.verticalFov,
+            heading:Float(atan2(facing.x,facing.y)),pitch:Float(asin(Self.clamp(facing.z,-1,1))),
+            hidesPlayer:normal.hidesPlayer,aimSource:normal.aimSource)
+    }
+
+    private func processFoot(_ input: Foot,delta: Float) -> Frame? {
         guard let table, delta.isFinite, delta >= 0, Self.finite(input.position), input.actorHeading.isFinite else { return nil }
         let dt = footNeedsReset ? 0 : Double(delta), feet = Self.double(input.position), speed = 50 * dt
         footNeedsReset = false
@@ -278,13 +313,14 @@ final class NativeGameCamera {
             let aimedDistance = 1+1.6*cos(asin(Self.clamp(back.z,-1,1)))
             if footAim {
                 let aimHit = collision(aimPoint,back,aimedDistance+0.25)
-                footAimSource = aimPoint+back*(aimHit.map{max(0.4,$0-0.25)} ?? aimedDistance)
+                let actual = aimHit.map{max(0.4,$0-0.25)} ?? aimedDistance
+                footAimSource = aimPoint+back*availableReach(aimPoint,back,actual,padding:0.25)
             }
             focus += (aimPoint-focus)*aimShare
             reach = follow+(aimedDistance-follow)*aimShare
         }
         let hit = collision(focus,back,reach+0.25)
-        let actual = hit.map {max(0.4,$0-0.25)} ?? reach
+        let actual = availableReach(focus,back,hit.map {max(0.4,$0-0.25)} ?? reach,padding:0.25)
         let source = focus+back*actual
         return frame(source: source,target: source+forward*10,fov: fov,hidesPlayer: false,aimSource: footAimSource)
     }
@@ -470,6 +506,11 @@ final class NativeGameCamera {
 
     private func collision(_ origin: SIMD3<Double>,_ direction: SIMD3<Double>,_ distance: Double) -> Double? {
         trace?(Self.float(origin),Self.float(direction),Float(distance)).map(Double.init)
+    }
+    private func availableReach(_ origin: SIMD3<Double>,_ direction: SIMD3<Double>,_ distance: Double,padding: Double) -> Double {
+        guard let missing=unavailableDistance?(Self.float(origin),Self.float(direction),Float(distance+padding)),
+              missing.isFinite,missing>=0 else {return distance}
+        return min(distance,max(0,Double(missing)-padding))
     }
     private func frame(source: SIMD3<Double>,target: SIMD3<Double>,fov: Double,hidesPlayer: Bool = false,aimSource: SIMD3<Double>? = nil) -> Frame {
         let direction = Self.normalized(target-source)

@@ -14,7 +14,10 @@ final class NativeWeaponState {
         let interval: Double
         let animation: String
         let fireKind: String
-        var isGun: Bool { id != 0 }
+        var isMelee: Bool { id == 0 || fireKind.uppercased() == "MELEE" }
+        // Existing callers use this for ammunition-driven attacks, including
+        // throwables/streams. A nonzero melee weapon must not spend a round.
+        var isGun: Bool { !isMelee }
     }
     private var catalog: [Weapon] = [Weapon(id: 0, name: "Fists", model: "", range: 1.6,
         capacity: 0, interval: 0.35, animation: "unarmed", fireKind: "MELEE")]

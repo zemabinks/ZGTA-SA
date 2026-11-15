@@ -79,6 +79,10 @@ final class NativeOtherVehicles {
     }
     func synchronize(_ poses:[Pose],excluding:String?,near viewer:SIMD3<Float>,promoteNear:SIMD3<Float>? = nil,delta:Double=0,now:Double=ProcessInfo.processInfo.systemUptime*1000){
         self.now=now
+        // Local ownership revokes parked prediction even when that entry has
+        // already been promoted. Distance streaming may retain a dynamic body;
+        // excluding the driven vehicle must never retain its duplicate hull.
+        if let excluding {remove(excluding)}
         var wanted:Set<String> = []
         for source in poses where source.id != excluding {
             let model=String(source.code.split(separator:".").first ?? "")
@@ -96,7 +100,7 @@ final class NativeOtherVehicles {
                 // occupied pose. Demoting afterwards overwrote that target
                 // with the old parked position; a stationary remote driver
                 // then never supplied another changed packet to correct it.
-                if entry.rig != nil && source.occupied { demote(entry) }
+                if entry.rig != nil && (source.occupied || source.kept || source.foreignAI) { demote(entry) }
                 if changed {
                     entry.health=source.health;entry.damage=source.damage;entry.work=source.work
                     if let rig=entry.rig {

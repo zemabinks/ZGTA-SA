@@ -21,11 +21,17 @@ final class FixtureRenderer {
     var position=SIMD3<Float>.zero,aimDirection=SIMD3<Float>(0,1,0)
     var eventFeet:SIMD3<Float>?
     var shotFeet:SIMD3<Float> {eventFeet ?? position}
+    var muzzleOverride:NativeWeaponMuzzle.Sample?
+    var recordedRays:[(Int,SIMD3<Float>,SIMD3<Float>)]=[]
     var geometry:WorldCollision?=collision(rectangles:[])
     var visibilityCalls:[(SIMD3<Float>,SIMD3<Float>)]=[]
     func hasClearShot(from:SIMD3<Float>,to:SIMD3<Float>)->Bool {
         visibilityCalls.append((from,to));return geometry?.lineOfSight(from:from,to:to) ?? false
     }
+    func weaponMuzzle(weapon:Int,left:Bool)->NativeWeaponMuzzle.Sample? {
+        muzzleOverride ?? NativeWeaponMuzzle.sample(weapon:weapon,left:left,feet:shotFeet,definition:nil,pose:nil)
+    }
+    func recordWeaponShot(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>) {recordedRays.append((weapon,origin,direction))}
 }
 final class FixtureWeapons {
     struct Weapon {var range:Float=35;var fireKind="INSTANT_HIT"}
@@ -33,14 +39,14 @@ final class FixtureWeapons {
 }
 final class FixtureAudio {var count=0;func shot(weapon:Int){count += 1}}
 final class FixtureNetwork {
-    struct Shot {let weapon:Int;let origin:SIMD3<Float>;let end:SIMD3<Float>;let player:String?;let ticket:NativeShotTicket}
+    struct Shot {let weapon:Int;let origin:SIMD3<Float>;let end:SIMD3<Float>;let player:String?;let ticket:NativeShotTicket;let streamPlayers:[String]}
     let sequence=NativeShotSequence()
     var orderedPlayers:[FixturePlayer]=[],shots:[Shot]=[]
     init(){precondition(sequence.negotiate("target-geometry-fixture"))}
     func reserveShot()->NativeShotTicket? {sequence.reserve()}
-    @discardableResult func sendWeaponShot(weapon:Int,from:SIMD3<Float>,to:SIMD3<Float>,player:String?,ticket:NativeShotTicket)->Bool {
+    @discardableResult func sendWeaponShot(weapon:Int,from:SIMD3<Float>,to:SIMD3<Float>,player:String?,ticket:NativeShotTicket,streamPlayers:[String]=[])->Bool {
         guard sequence.claim(ticket) else{return false}
-        shots.append(.init(weapon:weapon,origin:from,end:to,player:player,ticket:ticket));return true
+        shots.append(.init(weapon:weapon,origin:from,end:to,player:player,ticket:ticket,streamPlayers:streamPlayers));return true
     }
 }
 final class ShotEmissionHarness {
@@ -49,7 +55,7 @@ final class ShotEmissionHarness {
     var aiming=true
     // ACTUAL_EMISSION_METHODS
     @discardableResult func fire(left:Bool=false)->Bool {
-        guard let ray=currentShotRay(),let ticket=network.reserveShot() else{return false}
+        guard let ray=currentShotRay(weapon:weapons.selected,left:left),let ticket=network.reserveShot() else{return false}
         emitWeaponShot(weapon:weapons.selected,left:left,ticket:ticket,ray:ray)
         return true
     }
@@ -156,6 +162,20 @@ final class ShotEmissionHarness {
     eventRenderer.aimDirection=T.torso(feet:eventTarget)-T.muzzle(feet:eventRenderer.position)
     precondition(event.fire() && event.network.shots[1].origin==T.muzzle(feet:eventRenderer.position) && event.network.shots[1].ticket.sequence==2,"Outside an animation event the existing display-feet fallback must remain")
     checks += 4
+    let blocked=ShotEmissionHarness(),blockedRenderer=blocked.renderer!
+    blockedRenderer.muzzleOverride = .init(weapon:22,skill:1,origin:SIMD3(0,1,1.35),safetyOrigin:SIMD3(0,0,1.35),handOrigin:SIMD3(0,0.6,1.35),requestedLeft:false,usedLeft:false,fallbackReason:nil)
+    blockedRenderer.geometry=collision(rectangles:[(-2,2,0.5,0,3)])
+    blocked.network.orderedPlayers=[.init(id:"behind-wall",position:SIMD3(0,5,0))]
+    precondition(blocked.fire());let safeShot=blocked.network.shots[0]
+    precondition(safeShot.origin==SIMD3(0,0,1.35) && safeShot.player==nil,"A barrel crossing a wall cannot create a shot past it")
+    precondition(blockedRenderer.recordedRays.last!.1==safeShot.origin);checks += 3
+    let stream=ShotEmissionHarness(),streamRenderer=stream.renderer!
+    stream.weapons.selected=37;stream.weapons.current.range=5.1;stream.weapons.current.fireKind="AREA_EFFECT"
+    streamRenderer.aimDirection=SIMD3(0,1,0)
+    stream.network.orderedPlayers=[.init(id:"side-a",position:SIMD3(0.7,2,0.45)),.init(id:"side-b",position:SIMD3(-0.7,2,0.45)),.init(id:"outside",position:SIMD3(0.81,2,0.45))]
+    precondition(stream.fire());let streamShot=stream.network.shots[0]
+    precondition(streamShot.player==nil && streamShot.streamPlayers==["side-a","side-b"],"Stream must use all eligible cylinder targets, not the aim cone")
+    precondition(streamShot.end==streamShot.origin+SIMD3(0,5.1,0) && streamRenderer.recordedRays.last!.1==streamShot.origin);checks += 3
 
     let report:[String:Any]=["checks":checks,"baseline":baseline,"evidence":"Actual selection helper, current extracted VC emission methods, real triangle LOS and real shot-sequence tickets; no retail parity claim",
       "limits":["Muzzle1.35m and torso1.15m offsets remain body approximations","No per-hand or bone-derived hitboxes","Renderer native cross-cell occlusion gate is tested separately","No UIKit, GPU or live multiplayer playtest"]]

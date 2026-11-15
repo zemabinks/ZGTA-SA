@@ -13,17 +13,25 @@ final class ClimbRuntimeHarness {
     var footAnimator:NativeFootAnimation?
     let footLocomotion=NativeFootLocomotion(),headingContinuity=NativeHeadingContinuity()
     var climb:NativeClimbController?,climbPhase:NativeClimbController.Part?
-    var pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0,jumpHeld=false
+    var pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0,jumpHeld=false,walkHeld=false
     lazy var climbQueries=character.map{NativeRapierClimbQueries(world:$0.world,excluded:[$0.queries.walker,$0.queries.probe])}
     var health=100,driving=false,crouching=false,manualAnimation=false,aiming=false
     struct InactiveSwim {var on=false}
     var swimController=InactiveSwim()
     let personalFlight=NativePersonalFlightController()
+    final class VehicleInputOwner {var cancellations=0;func cancelPendingInput(){cancellations += 1}}
+    let groundVehicle:VehicleInputOwner?=VehicleInputOwner()
+    var vehicleHop=false
     var actorHeading:Float=0,heading:Float=0
     var footAirTime=0.0,footAirFall=0.0,footJumpMinimum=0.0,footAirFell=false,footJumped=false
     var footLaunchRemaining:Double?,footAirVelocity=SIMD2<Double>.zero,footSprintPace=0.0
     var footReloadWasActive=false,footReloadRequested=false,weaponReloading=false,weaponReady=true
     var footWeaponDefinitions:[Int:NativeFootWeaponAnimation]=[:],equippedWeapon=22,weaponTriggerHeld=false
+    var meleeDefinitions:NativeMeleeDefinitions?
+    let meleeInput=NativeMeleeInput()
+    var meleeClock:Double=0,meleeGuardHeld=false,meleeBlockHeld=false
+    var swimming:Bool {swimController.on}
+    var onMeleeGroundTarget:((NativeMeleeProbe)->Bool)?,onMeleeSwing:((Int)->Void)?,onFootMeleeHit:((NativeMeleeEvent)->Bool)?
     var footAnimationFrame:NativeFootAnimation.Frame?,ownClip="",ownClipTime=0.0
     var cameraPitch:Float=0
     var camera=SIMD3<Float>.zero
@@ -32,6 +40,7 @@ final class ClimbRuntimeHarness {
     var hasNativeFootWeaponTiming=false
     var onFootWeaponShot:((Int,Bool)->Bool)?
     var acceptedStreamShot=false,pendingNativeJump=0.0,pendingSwimJump=false,pendingDive=false
+    var acceptedStreamRay:(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>)?
     var pendingParachuteOpen=false,sprintWasHeld=false,personalFlightDown=false,personalFlightBrake=false
     var personalFlightAnimationInput:NativeFlightAnimation.Input? {nil}
     var fixedSteps=0,heldSteps=0,footCalls=0,firstTickCount=0,checks=0,displayFrames=0
@@ -180,9 +189,10 @@ final class ClimbRuntimeHarness {
     let neutral=try ClimbRuntimeHarness(root:root,top:2.7,depth:2)
     for _ in 0..<90 {_ = neutral.frame(1/60)}
     precondition(neutral.climb?.part == .hang)
-    neutral.pendingClimbPull=true;neutral.pendingClimbDrop=true;neutral.jumpHeld=true
+    neutral.pendingClimbPull=true;neutral.pendingClimbDrop=true;neutral.jumpHeld=true;neutral.walkHeld=true;neutral.vehicleHop=true
     neutral.cancelGameplayInput();_ = neutral.frame(1/60)
-    precondition(neutral.climb?.part == .hang && !neutral.jumpHeld && !neutral.pendingClimbPull && !neutral.pendingClimbDrop);checks += 2
+    precondition(neutral.climb?.part == .hang && !neutral.jumpHeld && !neutral.walkHeld && !neutral.vehicleHop && !neutral.pendingClimbPull && !neutral.pendingClimbDrop)
+    precondition(neutral.groundVehicle?.cancellations==1,"Focus cancellation must discard an unlaunched vehicle action");checks += 4
     frames += neutral.displayFrames;physicsTicks += neutral.fixedSteps
     // Actual Renderer emission must expose event-time physics position during
     // every catch-up marker, then restore the ordinary display-pose fallback.

@@ -1,10 +1,12 @@
 import UIKit
+import GameController
 
 /// Compact native in-game menu. The multiplayer world keeps running while
 /// the presenting controller suppresses gameplay input behind this overlay.
 final class NativePausePanel: UIViewController {
     var cameraName: (() -> String)?
     var onCamera: (() -> Void)?
+    var onJobs: (() -> Void)?
     var onAnimations: (() -> Void)?
     var onRadio: (() -> Void)?
     var onFlightGear: (() -> Void)?
@@ -12,8 +14,48 @@ final class NativePausePanel: UIViewController {
     var weatherName: (() -> String)?
     var onWeather: (() -> Void)?
     var driving = false
+    var controlsHint:String?
+    var escapeHandoff=NativeModalKeyHandoff()
     private var cameraButton: NativeHUDButton?
     private var weatherButton: NativeHUDButton?
+    private var menuHandlers:[(GCControllerButtonInput,GCControllerButtonValueChangedHandler?)]=[]
+    private var connectionObserver:NSObjectProtocol?
+    override var canBecomeFirstResponder:Bool {true}
+    override func viewDidAppear(_ animated:Bool) {
+        super.viewDidAppear(animated);becomeFirstResponder()
+        installMenuHandlers()
+        connectionObserver=NotificationCenter.default.addObserver(forName:.GCControllerDidConnect,object:nil,queue:.main) { [weak self] _ in self?.installMenuHandlers() }
+    }
+    override func viewDidDisappear(_ animated:Bool) {
+        super.viewDidDisappear(animated)
+        for (button,handler) in menuHandlers {button.pressedChangedHandler=handler}
+        menuHandlers=[]
+        if let connectionObserver {NotificationCenter.default.removeObserver(connectionObserver)}
+        connectionObserver=nil
+    }
+    private func installMenuHandlers() {
+        for controller in GCController.controllers() {
+            guard let button=controller.extendedGamepad?.buttonMenu,!menuHandlers.contains(where:{$0.0===button}) else {continue}
+            menuHandlers.append((button,button.pressedChangedHandler))
+            var menuEdge=NativeReleaseEdge(pressed:button.isPressed)
+            button.pressedChangedHandler = { [weak self] _,_,pressed in
+                DispatchQueue.main.async {
+                    if menuEdge.update(pressed:pressed) {self?.dismiss(animated:true)}
+                }
+            }
+        }
+    }
+    override func pressesBegan(_ presses:Set<UIPress>,with event:UIPressesEvent?) {
+        if presses.contains(where:{$0.key?.keyCode == .keyboardEscape}) {
+            if escapeHandoff.press() {dismiss(animated:true)}
+            return
+        }
+        super.pressesBegan(presses,with:event)
+    }
+    override func pressesEnded(_ presses:Set<UIPress>,with event:UIPressesEvent?) {
+        if presses.contains(where:{$0.key?.keyCode == .keyboardEscape}) {escapeHandoff.release()}
+        super.pressesEnded(presses,with:event)
+    }
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor.black.withAlphaComponent(0.78)
@@ -46,6 +88,7 @@ final class NativePausePanel: UIViewController {
             stack.addArrangedSubview(result);return result
         }
         _ = button("RESUME") { [weak self] in self?.dismiss(animated:true) }
+        _ = button("JOBS / GARAGE") { [weak self] in self?.dismiss(animated:true,completion:self?.onJobs) }
         _ = button("PROJECT SOURCE · AGPL") {
             if let url = URL(string:"https://github.com/zemabinks/ZGTA-SA") {
                 UIApplication.shared.open(url)
@@ -63,8 +106,9 @@ final class NativePausePanel: UIViewController {
             self.weatherButton?.setTitle("WEATHER: \(self.weatherName?().uppercased() ?? "SERVER")",for:.normal)
         }
         _ = button("RETURN TO MAIN MENU") { [weak self] in self?.dismiss(animated:true,completion:self?.onLeave) }
-        let hint = NativeHUDTextLabel();hint.text = "V: CAMERA VIEW    WASD: MOVE    ARROWS: LOOK"
+        let hint = NativeHUDTextLabel();hint.text = controlsHint ?? NativeGameBindings.legend(.init(mode:driving ? .vehicle("car"):.foot))
+        hint.numberOfLines=0
         hint.font = .systemFont(ofSize:13);hint.textColor = .white;hint.textAlignment = .center
-        hint.heightAnchor.constraint(equalToConstant:22).isActive = true;stack.addArrangedSubview(hint)
+        hint.heightAnchor.constraint(greaterThanOrEqualToConstant:60).isActive = true;stack.addArrangedSubview(hint)
     }
 }

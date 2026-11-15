@@ -7,6 +7,7 @@ import simd
 final class NativeFootLocomotion {
     struct Input {
         var stick = SIMD2<Double>.zero
+        var walking = false
         var cameraHeading: Double = 0
         var aiming = false
         var crouching = false
@@ -56,7 +57,7 @@ final class NativeFootLocomotion {
             (crouchedAim && input.isGun && input.attackHeld) || (input.aiming && input.isGun && !input.movingAim)
         var target: Double = forbidden ? 0 : push * (128.0 / 60)
         let freeArm = input.aiming && input.armAim && !input.crouching
-        if (input.aiming && !freeArm) || input.crouching || input.guardStance { target = min(1,target) }
+        if input.walking || (input.aiming && !freeArm) || input.crouching || input.guardStance { target = min(1,target) }
         var wanted = wantedHeading
         if !wholeBodyAim {
             if input.stunned { requestedRatio = max(0,requestedRatio - 7 * dt) }

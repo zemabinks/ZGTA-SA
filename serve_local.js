@@ -269,6 +269,23 @@ function serve(req, res) {
   if (nativeRadio && (pathname === '/game/radio/native/index' || /^\/game\/radio\/native\/track\/\d+\.wav$/.test(pathname))) {
     void nativeRadio.handle(req,res,pathname);return;
   }
+  // Extracted owner data lives in its own overlay. Preparing melee metadata
+  // must never modify a shared archived site or publish original game data.
+  if (SELFHOST && pathname === '/game/native/melee.json') {
+    if (!['GET','HEAD'].includes(req.method)) {
+      res.writeHead(405, {Allow:'GET, HEAD'});return res.end();
+    }
+    const metadata = path.join(LOCAL_ONLY,'native','melee.json');
+    fs.stat(metadata,(error,stat)=>{
+      if (error || !stat.isFile()) {res.writeHead(404);return res.end('Prepare native melee data on the Mac.');}
+      res.writeHead(200, {'Content-Type':'application/json; charset=utf-8',
+        'Content-Length':stat.size,'Cache-Control':'no-cache'});
+      if (req.method==='HEAD') return res.end();
+      const stream=fs.createReadStream(metadata);
+      stream.on('error',()=>res.destroy());stream.pipe(res);
+    });
+    return;
+  }
   // The game document needs its cookie before JavaScript opens the socket.
   // Assets are fetched concurrently and must not each create an account.
   if (SELFHOST && req.method === 'GET' &&

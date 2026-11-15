@@ -12,6 +12,6 @@ def main():
  with tempfile.TemporaryDirectory(prefix='zgtasa-shot-targets-') as temporary:
   work=Path(temporary);(work/'verify.swift').write_text(source)
   subprocess.run(['swiftc','-parse-as-library','-whole-module-optimization','-Onone','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',
-    str(ROOT/'ios/App/NativeShotTargeting.swift'),str(ROOT/'ios/App/WorldCollision.swift'),str(ROOT/'ios/App/NativeInventoryPrediction.swift'),str(work/'verify.swift'),'-o',str(work/'verify')],check=True)
+    str(ROOT/'ios/App/NativeShotTargeting.swift'),str(ROOT/'ios/App/NativeWeaponMuzzle.swift'),str(ROOT/'ios/App/NativeStreamShotClaims.swift'),str(ROOT/'ios/App/WorldCollision.swift'),str(ROOT/'ios/App/NativeInventoryPrediction.swift'),str(work/'verify.swift'),'-o',str(work/'verify')],check=True)
   subprocess.run([str(work/'verify'),str(ROOT)],check=True)
 if __name__=='__main__':main()

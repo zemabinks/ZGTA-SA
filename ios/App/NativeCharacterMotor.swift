@@ -87,9 +87,22 @@ final class NativeCharacterMotor {
     }
     func setActive(_ active: Bool) {
         world.setEnabled(world.walker, active)
+        resetMotion()
+    }
+    /// A new walking task must not inherit a prior surface normal, carrying
+    /// exclusions or contact event. Continuous streaming pauses use the
+    /// narrower clearContactEvents() operation instead, preserving momentum.
+    func resetMotion() {
         rising = 0; grounded = false; propped = false
         wedgedFrames = 0; easing = 0; previousEasing = 0; pressed = []
+        normal = V(0,1,0); barrier = .zero; carryingBody = nil
+        ignoredBodies.removeAll(); avoidedColliders.removeAll()
+        current = .zero; desired = .zero; lastNormals.removeAll()
+        contactDirection = .zero; delta = 0
     }
+    /// These results belong to the most recent actual movement tick. They
+    /// cannot be re-published while an external root or absent cells pause it.
+    func clearContactEvents() { pressed.removeAll(); propped = false; barrier = .zero }
     func stand() { grounded = true; rising = 0 }
     func eased(_ alpha: Double = 1) -> Double { previousEasing + (easing-previousEasing)*alpha }
     func barred(_ angle: Double) -> Bool {
@@ -186,7 +199,11 @@ final class NativeCharacterMotor {
     /// supplies 6.07 for the standard jump, or another positive impulse.
     func step(position: inout V,displacement: V,jump: Double,delta dt: Double,
               held: Bool,verticalOverride: Double? = nil,carrying: UInt64? = nil) {
-        guard dt > 0,dt.isFinite else { return }
+        guard dt > 0,dt.isFinite,position.x.isFinite,position.y.isFinite,position.z.isFinite,
+              displacement.x.isFinite,displacement.y.isFinite,displacement.z.isFinite,
+              jump.isFinite,verticalOverride?.isFinite != false else {
+            clearContactEvents(); return
+        }
         current = position-V(0,0.8,0)
         world.setTranslation(world.walker,current)
         let overridden = verticalOverride != nil

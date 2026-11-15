@@ -25,16 +25,18 @@ def function(source,marker):
 def main():
  renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
  methods=['private func footMotion(','private func beginClimb(','private func climbingMotion(',
-          'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(']
+          'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(',
+          'private var activeMeleeDefinition:','var hasNativeFootMeleeTiming:','var canNativeFootMeleeGuard:',
+          'private func meleeControls(','private func advanceMelee(']
  extracted='\n\n'.join(function(renderer,marker) for marker in methods)
- shot_feet=renderer[renderer.index('    private var weaponEventFeet:'):renderer.index('    var direction:',renderer.index('    private var weaponEventFeet:'))]
+ shot_feet=renderer[renderer.index('    private var weaponEventFeet:'):renderer.index('    func weaponMuzzle(',renderer.index('    private var weaponEventFeet:'))]
  extracted=shot_feet+'\n'+extracted
  skeletal=(ROOT/'ios/App/NativeSkeletalActor.swift').read_text()
  library=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')
  aim=skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]
  source=library+'\nfinal class NativeSkeletalActor {\n'+aim+'}\n'
  names=['NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativePersonalFlightController',
-        'NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController']
+        'NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController','NativeMelee','NativeMeleeInput']
  for name in names:source+='\n'+(ROOT/'ios/App'/f'{name}.swift').read_text()
  source+='\n'+(ROOT/'smoke_native_climb_runtime.swift').read_text().replace('// ACTUAL_RENDERER_METHODS',extracted)
  evidence_directory=ROOT/'local-only/research/climbing'

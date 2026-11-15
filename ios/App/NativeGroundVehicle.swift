@@ -151,6 +151,11 @@ final class NativeGroundVehicle {
     /// Original Rapier Y-up surface-query boundary, separated base/wave parts.
     var waterLevel: ((SIMD3<Double>) -> Double?)?
     var waterWave: ((SIMD3<Double>) -> NativeVehicleBuoyancy.Wave)?
+    /// The owned bicycle shares the player's existing50Hz stamina budget.
+    /// Nil callbacks retain the standalone/unattended solver's original defaults.
+    var staminaLeft:(()->Double)?
+    var takeStamina:((Double)->Bool)?
+    var restStamina:((Double)->Void)?
     private var dynamics: NativeVehicleDynamics?
     private var bikeDynamics: NativeBikeDynamics?
     private var trainDynamics: NativeTrainDynamics?
@@ -187,6 +192,7 @@ final class NativeGroundVehicle {
     var bicyclePedal: Int { bikeDynamics?.pedal ?? 0 }
     var bicycleCrank: Float { Float(bikeDynamics?.crank ?? 0) }
     var bicycleHop: Float { Float(bikeDynamics?.hop ?? 0) }
+    func cancelPendingInput() {bikeDynamics?.cancelPendingHop()}
     var bikeFullLean: Float { Float(definitions[model]?.bikeConfiguration?.parameters["fullAnimLean"] ?? 0) }
     var rotorTurning: Float { Float(dynamics?.flight?.turning ?? 0) }
     var aircraftNozzle: Float? {
@@ -374,13 +380,23 @@ final class NativeGroundVehicle {
     }
     @discardableResult func enter(model: String, modelPosition: SIMD3<Float>, heading: Float, pitch: Float = 0, roll: Float = 0,
                                   bodyPose:NativeUnattendedVehicle.Pose?=nil) -> Bool {
-        guard let definition = definitions[model] else { return false }
+        guard let definition = definitions[model],
+              modelPosition.x.isFinite,modelPosition.y.isFinite,modelPosition.z.isFinite,
+              heading.isFinite,pitch.isFinite,roll.isFinite else { return false }
         let rotation = bodyPose.map{simd_quatf(vector:SIMD4<Float>($0.rotation.vector))} ?? Self.rotation(heading:heading,pitch:pitch,roll:roll)
         let position = bodyPose.map{SIMD3<Float>($0.position)} ?? (SwiftRapierWorld.gtaToRapier(modelPosition) - rotation.act(SIMD3(0,Float(definition.configuration.origin),0)))
+        let quaternion=rotation.vector,norm=simd_length_squared(quaternion)
+        guard position.x.isFinite,position.y.isFinite,position.z.isFinite,
+              quaternion.x.isFinite,quaternion.y.isFinite,quaternion.z.isFinite,quaternion.w.isFinite,
+              norm.isFinite,norm>=0.000001 else {return false}
         let train:NativeTrainDynamics? = definition.trainConfiguration.flatMap { configuration in tracks.flatMap { NativeTrainDynamics(configuration:configuration,tracks:$0,position:SIMD3<Double>(position),heading:-Double(heading)) } }
         let bike = definition.bikeConfiguration.flatMap { NativeBikeDynamics(configuration: $0) }
         let dynamics = bike == nil && train == nil ? NativeVehicleDynamics(configuration: definition.configuration) : nil
         guard train != nil || bike != nil || dynamics != nil else { return false }
+        if let bike {
+            bike.takeBreath = {[weak self] amount in self?.takeStamina?(amount) ?? true}
+            bike.restBreath = {[weak self] amount in self?.restStamina?(amount)}
+        }
         if let dynamics {
             if let parameters = definition.flightParameters {
                 dynamics.flight = NativeFlightDynamics(parameters:parameters,kind:definition.configuration.kind,
@@ -498,7 +514,7 @@ final class NativeGroundVehicle {
         while accumulator + 1e-12 >= fixed {
             guard let body = world.bodyState(rigid) else { exit(); return }
             if let trainDynamics {
-                let wrecked=damageController?.state.wrecked ?? false
+                let wrecked=damageController.map{$0.state.wrecked || $0.state.health<=0} ?? false
                 let result=trainDynamics.step(delta:fixed,throttle:wrecked ? 0:input.throttle,handbrake:input.handbrake || wrecked)
                 world.setBodyState(.init(position:SIMD3<Float>(result.pose.position),rotation:simd_quatf(vector:SIMD4<Float>(result.pose.rotation.vector)),
                     linearVelocity:SIMD3<Float>(result.linearVelocity),angularVelocity:SIMD3<Float>(result.angularVelocity)),for:rigid)
@@ -521,9 +537,14 @@ final class NativeGroundVehicle {
             }
             let result: NativeVehicleDynamics.Output
             var controls = input
+            if let bikeDynamics,let staminaLeft {bikeDynamics.breathLeft=staminaLeft()}
             if let damage = damageController?.state {
                 dynamics?.setTyres(damage.wheels);bikeDynamics?.setTyres(damage.wheels)
-                if damage.wrecked {controls = .init();controls.handbrake=true;controls.nobody=input.nobody}
+                if damage.wrecked || damage.health<=0 {
+                    cancelPendingInput()
+                    controls = .init();controls.handbrake=true
+                    controls.nobody=input.nobody || damage.health<=0
+                }
             }
             if input.drive != nil {
                 if definitions[model]?.configuration.kind=="heli" {controls.drive = .init(throttle:0,steer:0,handbrake:true)}

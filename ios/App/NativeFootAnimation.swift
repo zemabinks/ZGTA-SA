@@ -350,6 +350,13 @@ final class NativeFootAnimation {
         if usesGunCycle,let config=gunConfiguration {gunCycle.cancelInput(config)}
         else {cancelFire()}
     }
+    /// A lost input/task cannot retain an unconsumed melee hit marker. Preserve
+    /// equipment and allow the existing pose blend to fade out normally.
+    func cancelMeleeInput() {
+        guard weapon?.use=="melee" else{return}
+        gunState = .aim;gunTime = .infinity;gunSpare=0;gunFired=false;leftFired=false
+        fireHeld=false;gunControl=nil;swingTime = .infinity;swingAside=nil;parryTime=nil
+    }
     func resetFlight() {flightAnimation.reset()}
     /// Hard task discontinuity. Keep equipment/style and death state, but do
     /// not replay an old jump, landing, aim/trigger or water/flight modifier.
@@ -389,6 +396,9 @@ final class NativeFootAnimation {
         return duration(clip)
     }
     @discardableResult func launch() -> Double { min(0.5, start(phase < 0.5 ? "launch" : "launchR")) }
+    func cancelQueuedLaunch() {
+        if action?.kind=="launch" || action?.kind=="launchR" {action=nil}
+    }
     @discardableResult func roll(_ side: Double) -> Bool { death == nil && !rolling && start(side > 0 ? "rollR" : "rollL") > 0 }
     @discardableResult func rollOut(_ side: Double) -> Double {
         guard death == nil else { return 0 }

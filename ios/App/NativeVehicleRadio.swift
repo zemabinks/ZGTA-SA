@@ -81,10 +81,13 @@ final class NativeVehicleRadio {
             }
         ]
     }
-    func next() {
+    func next() { cycle(1) }
+    func previous() { cycle(-1) }
+    func cycle(_ direction: Int) {
+        guard direction != 0 else { return }
         guard vehicleType == 0 || vehicleType == 2 else { return }
         let choices = following ? Array(1...11) + [13] : tracks.isEmpty && !songs.isEmpty ? [12, 13] : Array(1...13)
-        let selected = choices[((choices.firstIndex(of: stationID) ?? 0) + 1) % choices.count]
+        guard let selected = NativeRadioSelection.cycle(stationID, choices: choices, direction: direction) else { return }
         specialStation = nil
         index = selected == 13 ? -1 : selected - 1
         UserDefaults.standard.set(index, forKey: preferenceKey)

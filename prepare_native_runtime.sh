@@ -16,5 +16,6 @@ node "$project_dir/prepare_native_physics.js"
 node "$project_dir/prepare_native_vehicle_rigs.js" --all --if-needed
 python3 "$project_dir/prepare_native_riders.py"
 node "$project_dir/prepare_native_foot_animation.js"
+node "$project_dir/prepare_native_melee.js"
 node "$project_dir/prepare_native_flight_assets.js" --archive-missing
 node "$project_dir/prepare_native_radio.js"

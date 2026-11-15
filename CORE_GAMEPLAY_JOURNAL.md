@@ -279,3 +279,274 @@ This is separate from the offline sample proof; physical listening is not
 claimed. Normal production registration remains absent, its compatibility
 programme unchanged, and no production server/saves were deployed or migrated.
 See `RADIO_OWNER_IMPORT.md` for the reproducible local import workflow.
+
+
+## Core80 — core state, authority and query integration
+
+This pass keeps advanced roleplay paused. The App/bridge/server boundary is
+frozen as 124 files before optimized Simulator and unsigned iPhone builds.
+No Rust/C ABI or frozen native library was changed.
+
+- Movement resets now clear obsolete fall, slope, step-easing, carrying and
+  contact/exclusion history. Animation-owned held roots reset that history
+  once on entry and retain the actual capsule at the held root. A streaming
+  pause preserves physical momentum but discards pending input/contact debt.
+  Positive elapsed samples through 0.5 s retain their time at fixed 1/60 ticks;
+  suspension remains a separate pause policy.
+- Vehicle authority handoff removes both promoted dynamic and parked static
+  duplicates. External kept/AI poses revoke local parked prediction. Invalid
+  entry leaves the existing chassis and damage owner intact. Zero health
+  disables propulsion/control channels while the hull coasts, including
+  helicopter lift/rotor behavior. Cancelled boarding no longer exports a
+  stale door hold.
+- Camera and weapon queries use ordered coverage of crossed collision cells,
+  with own walker/probe/chassis exclusions. Missing cells fail closed and
+  request collision data separately from GPU meshes. At most eight additional
+  query cells are retained for two seconds. Camera streaming boundaries can
+  be closer than the ordinary solid-wall minimum; only that unknown-geometry
+  case bypasses the minimum. Loaded-wall camera behavior remains unchanged.
+- Projectile prediction has a fixed 1/60 clock independent of display cadence.
+  Unknown geometry pauses local prediction rather than fabricating a clear
+  path or impact; server snapshots remain authoritative. Duplicate/nonfinite
+  projectile snapshots are rejected. Area effects check the actual victim
+  segment, and extinguishers cannot erase flames through a solid wall.
+- Paid firing events sample original hand 24/34 transforms with selected weapon
+  offsets and the left attachment convention. The chosen event ray also owns
+  subsequent stream effects. Hidden traversal weapons do not emit. A barrel
+  beyond a near wall falls back to the safe body origin. This is a documented
+  native obstruction policy, not a measured original-game constant.
+- Continuous weapon claims use the existing server's cylinder instead of a
+  single gun cone. Multiple eligible players share the exact accepted shot
+  ticket; per-victim 300 ms cadence and connection ownership remain enforced.
+  Server damage/cadence policy has not been redefined as original retail.
+
+Focused results already executed: 39,068 movement checks with 12,960 identical
+native frame comparisons; 20 vehicle lifecycle checks; 7,200 interrupted rider
+frames; 39 integrated world/prediction checks; 8,334 camera comparisons; 8,367
+current Renderer/climb checks. Full frozen aggregate/build/installed-bundle
+acceptance is recorded below after completion.
+
+Crouch still does not resize the collision capsule. Full original vehicle
+handling, drive-by, melee, NPC/traffic reactions, hitboxes and retail feel are
+not established. The supplied PC data and browser replays support bounded
+claims; original runtime and physical iPhone/controller acceptance remain open.
+
+
+### Frozen Core80 regression result
+
+All 40 core gameplay gates passed against the same 124-file App/bridge/server
+manifest; the source remained unchanged throughout. Separately, the optimized
+water reference gate passed 17,339 actual archived-factory queries with zero
+height differences, including triangle tolerances, degenerate polygons and
+depth limits. Its checks now remain enabled in optimized test binaries. The
+water gate is included in subsequent aggregate runs.
+
+The actual Ko/R6 muzzle replay passed 600 frames and 5,415 checks, with maximum
+world-space difference 0.173 mm. All 53 original installer weapon/skill offset
+rows match. Continuous-weapon testing passed 57 geometry/cadence/real-wire and
+async callback checks, including failed or replaced transports.
+
+Desktop Safari loaded the isolated 8777 city and entered on-foot play. Held
+walking input moved 11.844 m from the initial position; the final feet packet
+was 1484.0063,-1726.8538,12.5669. IAB connected but its on-foot activation was
+not established. Native80/browser visible parity and optimized installed-bundle
+acceptance remain pending. No production server or save deployment occurred.
+
+
+## Core81 — input contexts, reverse view and bicycle ownership
+
+The next pass continues the core foundation. It does not resume advanced
+roleplay. App/bridge/server sources are frozen as 127 files for the expanded
+44-gate run and optimized Simulator/unsigned iPhone builds.
+
+- Keyboard and controller commands now pass through context-aware bindings.
+  The main PC sprint/jump, vehicle entry, movement and weapon-selection defaults
+  follow the original manual. Console face-button actions are distinguished
+  from the retained modern trigger adaptation. Menus cancel gameplay input;
+  held Menu/Escape cannot immediately reopen or dismiss a new pause panel.
+- Weapon cycling uses authoritative owned inventory slots and serializes rapid
+  selection requests. Failed, cancelled and stale-connection completions cannot
+  advance a newer selection queue. Radio previous/next uses the actual station
+  ring, including off and restricted vehicle modes.
+- Alt walk selects the existing walk phase without adding a speed constant.
+  A 5,600-frame replay exercises the actual archived walk-modifier clause and
+  preserves acceleration, facing and strafe behavior. Sprint effort remains a
+  separately owned input, matching that reference.
+- On-foot look-behind is a temporary presentation returned after normal follow.
+  It preserves persistent camera yaw/pitch, actor facing and follow/aim history.
+  The actual archived wrapper and collision margins are replayed over 2,016
+  frames. A directionless Float result at a missing boundary retains the
+  ordinary frame. This avoids an arbitrary fallback view direction; the
+  renderer already guards degenerate look-at vectors.
+- Bicycle brake and charged hop are separate inputs. Cancelling input discards
+  an unlaunched charge while preserving an already launched physical hop.
+  Boarding and wreck transitions clear pending charge before neutral stepping.
+  A shared ownership gate retains passive solver data, neutralizes drive
+  controls and applies a holding brake until the rider owns control. This is
+  an explicit native policy; the browser additionally supports some analog
+  boarding-cancellation behavior.
+- Owned bicycle pedal effort now uses the same player stamina pool as walking
+  and swimming. Original 50 Hz costs flow through NativeStamina.take without
+  applying its existing division twice. Pedal/breath algorithms and retail
+  handling constants remain unchanged.
+
+Focused results: 3,619 binding/dispatch/queue checks; 335 real bicycle/body,
+ownership, cancellation and shared-stamina checks; 32,083 look-behind checks;
+5,600 locomotion frames; and 8,334 ordinary camera comparisons all pass.
+The frozen full-run/build/installed build 81 results are recorded after completion.
+
+### Installed build 80 baseline used during this pass
+
+Both optimized build 80 application builds passed; installed Simulator executable
+SHA256 matches the built bundle. On the isolated port 8777 world, the native app
+showed the actual browser player. One touch fire tap consumed one round;
+keyboard R reloaded it to 17 loaded/67 reserve. Grounded pack removal succeeded.
+A successful touch trial recorded 991 native samples: 3.651 m forward travel,
+height 12.4028–13.4747 m, health 100 and unchanged heading 0 through landing.
+An earlier automation timeout recorded no activated movement and is retained
+as an incomplete trial, not a gameplay pass. Production port 8766 and saves remain
+untouched. This is functional native/browser evidence, not retail equivalence.
+
+Primary control references:
+
+- [Rockstar PC manual supplied through Steam](https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/12120/manuals/GTASA_PC_MANUAL_FINAL.pdf).
+- [Rockstar PS3 manual](https://media.rockstargames.com/rockstargames-newsite/img/manuals/en_us/GTA_SA_PS3_MANUAL_ENG.pdf).
+
+Physical controller behavior, the PC bicycle-hop binding, original lock-on and
+full vehicle weapon/submission controls remain unverified or incomplete. Retail
+runtime movement, damage, handling and feel still require direct comparison.
+
+
+### Frozen81 regression result
+
+The complete44-gate run passed against the unchanged127-file App/bridge/server
+manifest, including bindings, temporary reverse view, bicycle input ownership,
+shared stamina, original animation/rig fixtures, camera, world queries,
+projectiles and actual local WebSocket/inventory traffic. Optimized application
+builds and installed81 acceptance are still pending at this entry.
+
+### Installed81 movement/input acceptance
+
+The optimized universal Simulator application built successfully, and the
+installed executable SHA256 matched the built bundle. Native and actual Safari
+browser players connected to the isolated8777 city. In826 native samples, the
+W/Shift+W trial moved12.433m forward, reachedZ13.2913m, retained health100 and
+heading0. Separate200ms Q/E presses visibly switched Colt45→fists→Colt45 with
+17loaded/67reserve. A held Escape opened pause once. The first subsequent
+Escape was swallowed and the following press dismissed it: this is a reproduced
+modal key-release handoff defect, queued forCore82 rather than counted as a
+pass. The optimized unsigned iPhone application is still building. No original
+retail runtime or physical controller/device parity is inferred.
+
+Both optimized build81 targets subsequently passed: universal ARM64/x86_64
+Simulator and unsigned ARM64 iPhone. The frozen127-file App/bridge/server
+manifest remained unchanged. Simulator movement/selection observations above
+remain separate from physical-device and original-retail-runtime acceptance.
+
+## Core82 — animation-owned melee, input handoffs and equipment
+
+This pass continues the core-first override. The frozen candidate contains 131
+App/physics-bridge/server files. The expanded 50-gate regression and both optimized
+application builds subsequently passed; installed acceptance is recorded below.
+Roleplay expansion remains paused.
+
+Melee requests now enter a source-derived edge buffer and the real R6 animation
+task. Damage is considered at its hit marker, with event-time feet, heading,
+weapon and combo/run/ground identity. Rejected or cancelled requests cause no
+hit and reserve no ammunition sequence. The previous immediate3.5m wall-clock
+fist branch is removed. Actual original PC data agrees across403 checked melee
+fields; playable-attack flags and clip-capped chain markers are validated too.
+
+Guard/block and simultaneous aim-plus-jump use the original tutorial semantics.
+They do not enter gun camera aim or leak an ordinary jump. The distinct special
+attack intent stays unsupported while its authentic clip/task mapping is unknown.
+Held keyboard/pad/touch input no longer re-buffers a punch every display frame.
+Owned nonzero melee metadata no longer requires ammunition readiness.
+
+Every valid melee hit marker advances the public strike counter, including
+misses and blocked targets; victim damage messages do not count it twice. This
+restores remote missed-punch playback. Remote ground-strike visuals now infer
+nearby floored/dead walking people using the actual wrapper's horizontal rule.
+That inference is separate from actual hit targeting and server damage checks.
+
+Native targeting uses the archived reach/radius, height, facing and nearest/
+prone selection rules. World visibility fails closed for a chosen victim. The
+independent server also rejects fists through blocked/missing geometry, retains
+selected-weapon/connection authority and no longer requires a prior gun shot
+for owned nonzero melee. Existing local damage/cadence policies are explicit;
+unsupported damage/acquisition for melee10–15 is not invented.
+
+The folded parachute now follows animated spine3 with its evidenced model-local
+transform. Native model/cache and wire agree on effective equipment, including
+swimming and airborne jetpack arm restrictions. Grounded worn-pack combat uses
+the same melee capability gate throughout the frame. Native parachute utility
+selection remains a documented bridge policy, not full browser inventory parity.
+
+The installed81 acceptance exposed a lost opening-Escape release across modal
+presentation. A shared handoff records release in either presenter or panel,
+without reseeding on appearance. Original PC tutorial data also identifies the
+bicycle-hop secondary-fire action; LeftCtrl/keypad0 now charge/release hop,
+separate from braking. No guessed crouch collider or movement constant was added.
+
+Focused evidence before the full frozen run:5,040 actual melee/R6 frames and
+31,275 checks;3,798 binding/dispatch/lifecycle checks;8,369 integrated climb checks;
+480 actual holder/rig frames,5,320 bag-vertex comparisons and maximum0.173mm error;
+plus2,325 remote ground-context cases and4,659 checks. Synthetic server/HTTP tests
+cover wall/missing-world rejection, owned/unowned melee, ticketless-gun rejection,
+metadata GET/HEAD, join/origin gates and private-data separation. Actual Swift
+WebSocket and inventory/cadence regressions also pass their focused runs.
+
+Original retail runtime timing/feel, physical iPhone/controller behavior,
+fighting styles, special/stealth tasks, utility-slot selection and the broader
+parity-ledger gaps remain open. The owner identified the forthcoming iOS file as
+Definitive Edition; no file path has arrived or been inspected at this entry.
+Production8766, its saves and the stable LAN deployment remain unchanged.
+
+### Frozen82 regression result
+
+All50 core regression gates pass against the unchanged131-file App/bridge/server
+manifest. The initial aggregate was49/50 because the new wire fixture attempted
+to inspect a private counter. That fixture now verifies the actual outgoing
+WebSocket counter values3,4,4 for hit, miss and rejected gun-on-melee requests,
+and the focused rerun passed. The original failed report and corrected run are
+both retained privately; no App change was needed. Host, optional Discord and
+radio-import release checks also pass. Both optimized application builds and
+the bounded installed82 acceptance below subsequently completed.
+
+### Optimized 82 builds and installed acceptance
+
+Release build 82 passed for the universal ARM64/x86_64 Simulator application and
+the unsigned ARM64 iPhone application. The installed Simulator executable
+matched its built SHA-256:
+`4a2eacc68d007c2172c84431895a4048eedf686c8b305ab337d893c01f21b579`.
+The iPhone build executable SHA-256 was
+`65d05e58e9b6811359332724dbe578027b64b2af783f2055aa456231c206ac17`.
+The frozen 131-file App/bridge/server manifest remained unchanged. An iPhone
+build is not physical-device execution or controller acceptance.
+
+The native Simulator and actual browser connected to the isolated 8777 world.
+A fresh Escape correctly resumed from pause, exercising the modal release
+handoff that failed in the installed 81 trial. One native punch reduced the
+browser player's server armour from 25 to 17 and advanced the native strike
+counter to 1. A separate 1.6-second held-miss trial produced one further strike
+counter increment to 2 and left the browser player's armour at 25. This verifies
+bounded hit/miss and held-input behavior, not retail damage equivalence.
+
+The guard/block trial captured 509 samples with actions 0, 28 and 36. Player Z
+remained 12.5668745 throughout, so the tested block input did not leak a jump.
+Car entry, W acceleration, braking and F exit worked, with native health 100
+and vehicle health 1000 in the captured packets. That initial fixture contained
+overlapping nearby parked spawns: the result is functional contact/transition
+evidence and must not be counted as clean handling parity.
+
+A clean BMX brake recheck captured 415 samples at constant Z 12.4015999. The
+separate touch-hop trial captured 423 samples, starting at Z 12.4015999 and
+reaching 13.345336, with native health 100 and vehicle health 1000. It demonstrates
+the tested brake/hop distinction without claiming every bicycle input context.
+
+Build identities, the initial and resolved gate reports, and the live packet/
+sample summaries remain in ignored local acceptance evidence. No physical
+iPhone/controller or original retail-runtime parity is inferred. Production
+port 8766, its saves and the stable LAN deployment were unchanged. The supplied
+Definitive Edition IPA and its menu are a separate next reference/design pass;
+this release does not claim an original story Singleplayer runtime.

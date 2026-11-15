@@ -825,8 +825,11 @@ class LocalGame {
     if (!area && !damage) return;
     const distance = Math.hypot(from.x - to.x, from.y - to.y);
     const gun = weapon >= 22;
+    const melee = weapon >= 0 && weapon <= 15;
     if (peer.inventoryEnabled && !gun && weaponInventory.ensure(peer.player).selected !== weapon) return;
-    if (peer.inventoryEnabled && !gun && weapon !== 0 && peer.lastWeapon !== weapon) return;
+    // Melee has no ammunition emission. Ownership/current selection above,
+    // visibility and the existing melee cadence validate its independent path.
+    if (peer.inventoryEnabled && !gun && !melee && peer.lastWeapon !== weapon) return;
     const now = Date.now();
     const authorized = peer.inventoryEnabled && gun ? [...(peer.acceptedShots || [])].reverse().find(record=>
       !record.used && record.weapon===weapon && now-record.at>=0 && now-record.at<=(area ? AREA_EVIDENCE_MS:2000) &&
@@ -849,7 +852,12 @@ class LocalGame {
       if (!worldCollision.lineOfSight(authorized.origin,centre)) return;
       if (!damage) return;
     }
-    if (!area && gun && peer.inventoryEnabled && !worldCollision.lineOfSight([from.x,from.y,from.z+1.35],[to.x,to.y,to.z+1.15])) return;
+    // Independent-server collision policy: a close punch must not pass through
+    // a wall merely because it has no ammunition/shot ticket. This is not a
+    // claim about the original retail game's damage or hit-box rules.
+    const meleeHeight = target.state?.down ? 0.25 : target.state?.crouch ? 0.8 : 1.2;
+    if (!area && !worldCollision.lineOfSight([from.x,from.y,from.z+(melee ? 1:1.35)],
+      [to.x,to.y,to.z+(melee ? meleeHeight:1.15)])) return;
     const range = peer.inventoryEnabled && gun ?
       Math.min(200,weaponInventory.catalog.items.find(item => item.id === weapon)?.stats?.range || 90) : gun ? 90 : 4;
     if (!area && (distance > range ||

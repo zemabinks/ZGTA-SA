@@ -28,6 +28,7 @@ final class NativeCharacterController {
     private var pendingTravel = SIMD3<Double>.zero
     private var pendingJump = 0.0
     private var active = false
+    private var rootHeld = false
     /// Original walker press routing occurs after motor motion and before
     /// CQ.beforeStep applies the queued impulse to promoted parked vehicles.
     var onPress:(([NativeCharacterMotor.Press])->Void)?
@@ -44,17 +45,20 @@ final class NativeCharacterController {
     }
     /// Resets pending movement for teleports and transitions into/out of cars.
     func reset(feet: SIMD3<Float>, active: Bool = true, grounded: Bool = false) {
+        guard Self.finite(feet) else { return }
         let p = SwiftRapierWorld.gtaToRapier(feet)
         head = SIMD3(Double(p.x), Double(p.y) + 1.7, Double(p.z))
-        accumulator = 0; pendingTravel = .zero; pendingJump = 0
+        clearPendingMotion(); rootHeld = false
         self.active = active; motor.setActive(active)
         queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
         if grounded { motor.stand() }
     }
     func setActive(_ active: Bool) {
-        self.active = active; accumulator = 0; pendingTravel = .zero; pendingJump = 0
+        self.active = active; clearPendingMotion(); rootHeld = false
         motor.setActive(active)
     }
+    private static func finite(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite }
+    private func clearPendingMotion() { accumulator = 0; pendingTravel = .zero; pendingJump = 0 }
     var state: Output {
         let p = SIMD3<Float>(Float(head.x), Float(head.y - 1.7), Float(head.z))
         return Output(feet: SwiftRapierWorld.rapierToGTA(p), grounded: motor.grounded,
@@ -67,15 +71,19 @@ final class NativeCharacterController {
                 held: Bool = false, verticalOverride: Double? = nil, carrying: UInt64? = nil,
                 geometryReady: Bool,
                 motion: ((Double,Output,Motion) -> Motion)? = nil) -> Output {
-        guard active, delta.isFinite, delta > 0, displacement.x.isFinite,
-              displacement.y.isFinite, displacement.z.isFinite else { return state }
-        guard geometryReady else {
-            accumulator = 0; pendingTravel = .zero; pendingJump = 0; return state
+        guard active else { return state }
+        // Match the outer frame clock: retain ordinary low-FPS elapsed time,
+        // but treat a suspension/invalid clock sample as a discontinuity.
+        // At most 30 fixed ticks can run; no old displacement/jump is replayed.
+        guard delta.isFinite, delta > 0, delta <= 0.5, Self.finite(displacement) else {
+            clearPendingMotion(); motor.clearContactEvents(); return state
         }
-        let dt = min(delta, 0.1), scale = dt / delta
+        guard geometryReady else {
+            clearPendingMotion(); motor.clearContactEvents(); return state
+        }
         let p = SwiftRapierWorld.gtaToRapier(displacement)
-        pendingTravel += SIMD3(Double(p.x),0,Double(p.z)) * scale
-        accumulator += dt
+        pendingTravel += SIMD3(Double(p.x),0,Double(p.z))
+        accumulator += delta
         if jump.isFinite, jump > 0 { pendingJump = jump }
         while accumulator + 1e-10 >= Self.fixed {
             let travel = pendingTravel * (Self.fixed / accumulator)
@@ -83,7 +91,16 @@ final class NativeCharacterController {
             let intended = Motion(displacement: SwiftRapierWorld.rapierToGTA(SIMD3<Float>(travel)),
                                   jump: pendingJump,held: held,verticalOverride: verticalOverride)
             let input = motion?(Self.fixed,state,intended) ?? intended
+            guard Self.finite(input.displacement), input.jump.isFinite,
+                  input.verticalOverride?.isFinite != false,
+                  input.heldFeet.map(Self.finite) != false else {
+                pendingJump = 0; motor.clearContactEvents(); world.step(); continue
+            }
             if let feet = input.heldFeet {
+                // Animation roots own translation while hanging/hauling. A
+                // stale walking contact/fall is not a velocity for that task.
+                if !rootHeld { motor.resetMotion() }
+                rootHeld = true
                 let point = SwiftRapierWorld.gtaToRapier(feet)
                 head = SIMD3(Double(point.x),Double(point.y)+1.7,Double(point.z))
                 // A climb/attachment can place the actor without running the
@@ -91,6 +108,7 @@ final class NativeCharacterController {
                 // same location before the shared rigid-body world advances.
                 queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
             } else {
+                rootHeld = false
                 let point = SwiftRapierWorld.gtaToRapier(input.displacement)
                 motor.step(position: &head, displacement: SIMD3<Double>(point), jump: input.jump, delta: Self.fixed,
                            held: input.held, verticalOverride: input.verticalOverride, carrying: carrying)

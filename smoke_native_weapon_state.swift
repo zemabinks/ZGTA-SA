@@ -41,6 +41,17 @@ struct ServerAddress {func path(_ path:String)->URL{URL(string:"http://127.0.0.1
         unloaded.apply(["revision":1,"selected":22,"weapons":[["id":22,"clip":4,"rest":0]]])
         precondition(!unloaded.consumeAnimationShot(weapon:22),"Unknown weapon emitted before catalog arrived")
         precondition(!unloaded.fire(),"Fallback fired the fist catalog entry for an unloaded selected weapon")
+        for id in 1...15 {
+            let melee=NativeWeaponState.Weapon(id:id,name:"Melee fixture",model:"",range:1.6,capacity:0,interval:0.35,animation:"fixture",fireKind:"MELEE")
+            precondition(melee.isMelee && !melee.isGun,"Nonzero melee weapon misclassified as ammunition-driven")
+            let equipped=NativeWeaponState(catalog:[melee],allowLegacySnapshots:true,clock:{time})
+            equipped.apply(["revision":1,"selected":id,"weapons":[["id":id,"clip":0,"rest":0]]])
+            precondition(equipped.canFire && equipped.consumeAnimationShot(weapon:id) && equipped.rounds==0,"Melee required or spent ammunition")
+        }
+        for (id,kind) in [(16,"PROJECTILE"),(22,"INSTANT_HIT"),(37,"AREA_EFFECT")] {
+            let armed=NativeWeaponState.Weapon(id:id,name:"Ammunition fixture",model:"",range:40,capacity:1,interval:0.3,animation:"fixture",fireKind:kind)
+            precondition(!armed.isMelee && armed.isGun,"Ammunition-driven attack misclassified as melee")
+        }
         print("PASS: exact animation emission consumption, twin/catch-up rounds, empty clip, selection/reload transitions, stale inventory rejection, monotonic fallback cadence")
     }
 }

@@ -75,6 +75,9 @@ final class NativeWeaponEffects {
     /// Return the closest solid contact along a normalized ray. A native
     /// triangle raycast preserves bounce normals and rocket impact locations.
     var trace: ((SIMD3<Float>, SIMD3<Float>, Float) -> Contact?)?
+    /// Missing streamed geometry is not a clear path. Prediction waits for
+    /// collision data; authoritative snapshots/blasts still reconcile it.
+    var geometryAvailable: ((SIMD3<Float>, SIMD3<Float>, Float) -> Bool)?
     /// Used to place the six seeded molotov fires, matching the 4 m down ray.
     var groundHeight: ((Float, Float, Float) -> Float?)?
     var onDetonation: ((Detonation) -> Void)?
@@ -91,22 +94,40 @@ final class NativeWeaponEffects {
     private var streamHeld: [Int: Float] = [:]
     private var streamTimers: [Int: Float] = [:]
     private var nextID: UInt64 = 1
+    private var simulationRemainder:Double=0
+
+    /// Gameplay uses one fixed prediction clock at all display rates. The raw
+    /// update method below remains a single-step solver/reference boundary.
+    func advance(delta:Double,people:[Target]=[],vehicles:[Target]=[]) {
+        guard delta.isFinite,delta>0,delta<=0.5 else {simulationRemainder=0;return}
+        let fixed=1.0/60
+        simulationRemainder += delta
+        while simulationRemainder+1e-10>=fixed {
+            simulationRemainder=max(0,simulationRemainder-fixed)
+            update(delta:Float(fixed),people:people,vehicles:vehicles)
+        }
+    }
 
     /// Reconcile to the Mac's authoritative snapshots, then simulate between
     /// updates with the same public-client equations used by the server.
     func synchronizeServer(_ rows: [[String: Any]]) {
         let prior = Dictionary(uniqueKeysWithValues: projectiles.map { ($0.id,$0) })
+        var seen=Set<UInt64>()
         projectiles = rows.prefix(256).compactMap { row in
             guard let text = row["id"] as? String,
-                  let id = UInt64(text.split(separator: "-").last ?? ""),
+                  let id = UInt64(text.split(separator: "-").last ?? ""),id>0,!seen.contains(id),
                   let weapon = row["weapon"] as? Int, let model = Self.model(for: weapon),
                   let p = row["position"] as? [NSNumber], p.count == 3,
                   let v = row["velocity"] as? [NSNumber], v.count == 3 else { return nil }
             let velocity = SIMD3<Float>(v[0].floatValue,v[1].floatValue,v[2].floatValue)
+            let position=SIMD3<Float>(p[0].floatValue,p[1].floatValue,p[2].floatValue)
+            let age=(row["age"] as? NSNumber)?.floatValue ?? 0
+            let lifetime=(row["lifetime"] as? NSNumber)?.floatValue ?? 2
+            guard Self.valid(position),Self.valid(velocity),simd_length(velocity).isFinite,
+                  age.isFinite,age>=0,lifetime.isFinite,lifetime>0,lifetime<=120 else{return nil}
+            seen.insert(id)
             return Projectile(id: id, weapon: weapon, model: model, owner: row["owner"] as? String,
-                position: SIMD3(p[0].floatValue,p[1].floatValue,p[2].floatValue), velocity: velocity,
-                age: (row["age"] as? NSNumber)?.floatValue ?? 0,
-                lifetime: (row["lifetime"] as? NSNumber)?.floatValue ?? 2,
+                position:position,velocity:velocity,age:age,lifetime:lifetime,
                 rocket: row["rocket"] as? Bool == true, seeking: weapon == 20 || weapon == 36,
                 speed: simd_length(velocity), targetID: nil,
                 stuck: row["stuck"] as? Bool == true, lying: row["lying"] as? Bool == true,
@@ -193,7 +214,7 @@ final class NativeWeaponEffects {
                 let along = simd_dot(offset, direction)
                 guard along >= 0, along <= range,
                       simd_length(offset - direction * along) <= 0.8,
-                      trace?(origin, direction, along) == nil else { continue }
+                      clearSegment(from:origin,to:target.position+SIMD3(0,0,0.9)) else { continue }
                 onStreamHit?(target.id, weapon)
             }
         }
@@ -232,6 +253,16 @@ final class NativeWeaponEffects {
         for fire in fires {for flame in fire.flames where flame.strength>0{onFlames?(flame.position,delta*min(1,fire.remaining))}}
         var retained: [Projectile] = []
         for var projectile in projectiles {
+            var proposed=projectile
+            if !projectile.stuck && !projectile.lying {
+                if proposed.rocket {
+                    if proposed.seeking {steer(&proposed,vehicles:vehicles,delta:delta)}
+                } else {proposed.velocity.z -= Self.gravity*delta;proposed.rotation += proposed.spin*delta}
+                let speed=simd_length(proposed.velocity)
+                if speed>0.0001,geometryAvailable?(projectile.position,proposed.velocity/speed,speed*delta+0.05)==false {
+                    retained.append(projectile);continue
+                }
+            }
             projectile.age += delta
             if projectile.age >= projectile.lifetime {
                 if projectile.weapon != 17 && projectile.weapon != 39 { detonate(projectile) }
@@ -239,12 +270,10 @@ final class NativeWeaponEffects {
             }
             if projectile.weapon==17 && projectile.lying{onGas?(projectile.position,delta)}
             if projectile.stuck || projectile.lying { retained.append(projectile); continue }
+            projectile.velocity=proposed.velocity;projectile.rotation=proposed.rotation
             if projectile.rocket {
-                if projectile.seeking { steer(&projectile, vehicles: vehicles, delta: delta) }
                 onTrail?(projectile.position,delta,false)
             } else {
-                projectile.velocity.z -= Self.gravity * delta
-                projectile.rotation += projectile.spin * delta
                 if projectile.weapon==18{onTrail?(projectile.position,delta,true)}
             }
             let speed = simd_length(projectile.velocity)
@@ -301,7 +330,7 @@ final class NativeWeaponEffects {
     }
 
     func clear() {
-        projectiles.removeAll(); fires.removeAll(); endStream()
+        projectiles.removeAll(); fires.removeAll(); endStream();simulationRemainder=0
     }
 
     private func allocateID() -> UInt64 { defer { nextID &+= 1 }; return nextID }
@@ -372,10 +401,20 @@ final class NativeWeaponEffects {
         for fire in fires.indices { for flame in fires[fire].flames.indices {
             let offset = fires[fire].flames[flame].position - origin
             let along = simd_dot(offset, direction)
-            if along >= 0 && along <= range && simd_length(offset - direction * along) <= 1 {
+            if along >= 0 && along <= range && simd_length(offset - direction * along) <= 1 &&
+                clearSegment(from:origin,to:fires[fire].flames[flame].position) {
                 fires[fire].flames[flame].strength -= 2 * delta
             }
         } }
+    }
+
+    private func clearSegment(from start:SIMD3<Float>,to end:SIMD3<Float>)->Bool {
+        let offset=end-start,distance=simd_length(offset)
+        guard Self.valid(start),Self.valid(end),distance.isFinite else{return false}
+        if distance<=0.0001 {return true}
+        let direction=offset/distance
+        guard geometryAvailable?(start,direction,distance) != false else{return false}
+        return trace?(start,direction,distance)==nil
     }
 
     private static func valid(_ vector: SIMD3<Float>) -> Bool {
@@ -383,6 +422,6 @@ final class NativeWeaponEffects {
     }
     private static func unit(_ vector: SIMD3<Float>) -> SIMD3<Float>? {
         let length = simd_length(vector)
-        return valid(vector) && length > 0.0001 ? vector / length : nil
+        return valid(vector) && length.isFinite && length > 0.0001 ? vector / length : nil
     }
 }
