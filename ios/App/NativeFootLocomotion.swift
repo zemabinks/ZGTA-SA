@@ -37,13 +37,36 @@ final class NativeFootLocomotion {
     private var easedStrafe = SIMD2<Double>.zero
     private var wholeBodyAim = false
     private var wantedHeading: Double = 0
+    private var knockMomentum:SIMD2<Double>?
     var heading: Double = 0
     var requestedMovementRatio: Double { requestedRatio }
     var reportedRatio: Double { wholeBodyAim ? min(1,simd_length(easedStrafe)) : smoothedRatio }
     func reset(heading: Double) {
         self.heading = heading; requestedRatio = 0; remainder = 0; smoothedRatio = 0
         wantedHeading = heading
-        easedStrafe = .zero; wholeBodyAim = false
+        easedStrafe = .zero; wholeBodyAim = false;knockMomentum=nil
+    }
+    func turn(by angle:Double) {
+        guard angle.isFinite else{return}
+        heading=wrap(heading+angle);wantedHeading=wrap(wantedHeading+angle)
+    }
+    func setKnockMomentum(_ velocity:SIMD3<Double>) {
+        guard velocity.x.isFinite,velocity.y.isFinite,velocity.z.isFinite else{return}
+        knockMomentum=SIMD2(velocity.x,-velocity.z)
+    }
+    /// The original external knock momentum advances only on grounded foot
+    /// motion. Air movement keeps its separately owned launch velocity.
+    func groundMomentum(delta:Double)->SIMD3<Float> {
+        guard delta.isFinite,delta>0,let velocity=knockMomentum else{return .zero}
+        let travel=velocity*delta,next=velocity*pow(0.96,50*delta)
+        knockMomentum=simd_length_squared(next)<0.09 ? nil:next
+        return SIMD3(Float(travel.x),Float(travel.y),0)
+    }
+    static func supportKnockSide(velocity:SIMD3<Double>,heading:Double)->Int {
+        let raw=atan2(velocity.x,velocity.z)+heading,tau=2*Double.pi
+        let remainder=(raw+Double.pi).truncatingRemainder(dividingBy:tau)
+        let angle=(remainder+tau).truncatingRemainder(dividingBy:tau)-Double.pi
+        return abs(angle)<Double.pi/4 ? 0:abs(angle)>3*Double.pi/4 ? 2:angle>0 ? 1:3
     }
     func update(delta dt: Double,input: Input) -> Frame {
         let wasWholeBodyAim = wholeBodyAim

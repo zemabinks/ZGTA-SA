@@ -1332,7 +1332,7 @@ final class NativeGameViewController: UIViewController {
                                  movement:renderer.footWireMovementRatio,aim:renderer.footWireAim,
                                  action:currentVehicle != nil ? renderer.riderWireAction:renderer.footWireAction,
                                  velocity:renderer.currentWireVelocity,angularVelocity:renderer.currentWireAngularVelocity,
-                                 kit:renderer.vehicleWireKit(tuck:tuck),vehicleWork:renderer.vehicleWorkingValue,paused:paused)
+                                 kit:renderer.vehicleWireKit(tuck:tuck),vehicleWork:renderer.vehicleWorkingValue,paused:paused,support:renderer.footWireSupport)
     }
 
     private func requestVehicleCoupling(_ request:NativeVehicleCoupling.Request)->Bool {

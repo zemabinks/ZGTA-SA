@@ -340,7 +340,8 @@ final class NativeMultiplayerClient {
                       swimState: Int = 0,swimPitch: Float = 0,swimRatio: Float = 0,
                       movement:Double? = nil,aim:Double? = nil,action:Int = 0,
                       velocity:SIMD3<Float> = .zero,angularVelocity:SIMD3<Float> = .zero,
-                      kit:[Double]? = nil,vehicleWork:Int? = nil,paused:Bool = false) {
+                      kit:[Double]? = nil,vehicleWork:Int? = nil,paused:Bool = false,
+                      support:(id:String,offset:SIMD3<Float>)? = nil) {
         guard isReady else { return }
         func rounded(_ value:Double)->Double {value.isFinite ? floor(value*100+0.5)/100:0}
         let motion:[String:Any] = ["vx":rounded(Double(velocity.x)),"vy":rounded(Double(velocity.y)),"vz":rounded(Double(velocity.z)),
@@ -373,6 +374,10 @@ final class NativeMultiplayerClient {
               "aim":aim.map{rounded($0)} ?? NSNull(),
               "anim":animation.flatMap{$0.isEmpty ? nil:NativePedestrianMotion.wireAnimation(for:$0)} ?? NSNull()]
         packet.merge(motion){_,new in new}
+        if let support,!support.id.isEmpty,support.id.utf8.count<=64,
+           [support.offset.x,support.offset.y,support.offset.z].allSatisfy({$0.isFinite && abs($0)<=100}) {
+            packet["on"]=["v":support.id,"x":rounded(Double(support.offset.x)),"y":rounded(Double(support.offset.y)),"z":rounded(Double(support.offset.z))]
+        }else{packet["on"]=NSNull()}
         if (50...62).contains(action&63),health>0 {
             packet["pitch"]=rounded(Double(pitch));packet["roll"]=rounded(Double(roll))
             if (50...58).contains(action&63) || (61...62).contains(action&63) {

@@ -271,11 +271,11 @@ function serve(req, res) {
   }
   // Extracted owner data lives in its own overlay. Preparing melee metadata
   // must never modify a shared archived site or publish original game data.
-  if (SELFHOST && ['/game/native/melee.json','/game/native/vehicle-coupling.json'].includes(pathname)) {
+  if (SELFHOST && ['/game/native/melee.json','/game/native/vehicle-coupling.json','/game/native/vehicle-treads.json'].includes(pathname)) {
     if (!['GET','HEAD'].includes(req.method)) {
       res.writeHead(405, {Allow:'GET, HEAD'});return res.end();
     }
-    const metadata = pathname.endsWith('/vehicle-coupling.json') ?
+    const metadata = pathname.endsWith('/vehicle-treads.json') ? path.join(LOCAL_ONLY,'selfhost','tread-catalog.json'):pathname.endsWith('/vehicle-coupling.json') ?
       path.join(LOCAL_ONLY,'selfhost','coupling-catalog.json'):path.join(LOCAL_ONLY,'native','melee.json');
     fs.stat(metadata,(error,stat)=>{
       if (error || !stat.isFile()) {res.writeHead(404);return res.end('Prepare the native metadata on the Mac.');}

@@ -192,12 +192,14 @@ import simd
   check(towing.applyTopology([tow],revision:1,connection:"tow-A",nowMilliseconds:2),"Tow topology rejected")
   check(towing.activeJointCount==0,"Tow topology created a joint without its moving anchor")
   towing.update(nowMilliseconds:3,towAnchor:bar,canAcquireTow:true);check(towing.activeJointCount==1 && truck.otherCouplingVehicle(id:"car")?.hauled==true,"Confirmed tow joint missing")
+  let hauledCarBody=truck.otherCouplingVehicle(id:"car")!.body!
+  check(hauledCarBody != carBody && truck.world.bodyState(carBody)==nil,"Tow acquisition retained the ordinary parked solver")
   let raised=bar+SIMD3<Double>(0,0.25,0);towing.update(nowMilliseconds:4,towAnchor:raised,canAcquireTow:false)
   check(towing.activeJointCount==1,"Moving tow anchor broke a close vehicle")
   towing.update(nowMilliseconds:5,towAnchor:SIMD3(.nan,0,0));check(towing.activeJointCount==1,"Invalid anchor poisoned an existing joint")
   var acceptDetach=false;let detachCount=towRequests.count
   towing.onRequest={towRequests.append($0);return $0.trailer != nil || acceptDetach}
-  _=truck.world.setBodyState(.init(position:SIMD3<Float>(carAt+SIMD3(3.1,0,0)),rotation:simd_quatf(angle:0,axis:SIMD3(0,1,0))),for:carBody)
+  check(truck.world.setBodyState(.init(position:SIMD3<Float>(carAt+SIMD3(3.1,0,0)),rotation:simd_quatf(angle:0,axis:SIMD3(0,1,0))),for:hauledCarBody),"Separation fixture did not move the current held body")
   towing.update(nowMilliseconds:6,towAnchor:raised);check(towing.activeJointCount==0 && truck.otherCouplingVehicle(id:"car")?.hauled==false,"Tow separation did not release its solver pin")
   check(matches(towRequests.last,parent:"truck",trailer:nil,kind:.tow),"Broken tow did not request authoritative detach")
   check(towRequests.count==detachCount+1,"Broken constraint sent duplicate cleanup in one fixed step")
@@ -216,7 +218,7 @@ import simd
   check(!phase.frame(towDefinition,towed:false)!.canAcquireTow,"Dropped tow instantly reattached at the same bar height")
   phase.update(delta:1/60,pad:1,towed:false,configuration:towDefinition.working!);phase.update(delta:1/60,pad:-1,towed:false,configuration:towDefinition.working!)
   check(phase.frame(towDefinition,towed:false)!.canAcquireTow,"Raised/lowered tow never rearmed")
-  _=truck.world.setBodyState(.init(position:SIMD3<Float>(carAt),rotation:simd_quatf(angle:0,axis:SIMD3(0,1,0))),for:carBody)
+  check(truck.world.setBodyState(.init(position:SIMD3<Float>(carAt),rotation:simd_quatf(angle:0,axis:SIMD3(0,1,0))),for:truck.otherCouplingVehicle(id:"car")!.body!),"Retry fixture did not restore the current released body")
   for hz in [15,30,60,120,144] {
    let retry=NativeVehicleCoupling(ground:truck);retry.reset(connection:"retry");retry.setOwnedVehicle("truck")
    var attempts:[Double]=[],time=0.0,last:NativeVehicleCoupling.Request?

@@ -143,6 +143,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var pedestrianAnchors: [String: [String: [Float]]] = [:]
     private var seating: NativeVehicleSeating?
     private lazy var character = groundVehicle.flatMap { NativeCharacterController(world: $0.world) }
+    private lazy var supportScene=groundVehicle.map{NativeVehicleSupportScene(world:$0.world)}
+    private lazy var movingSupport=supportScene.map{NativeMovingSupport(scene:$0)}
     private var characterActive = false
     private var pendingNativeJump: Double = 0
     private let swimController = NativeSwimController()
@@ -589,6 +591,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.markerDepth = markerDepth
         textureLoader = MTKTextureLoader(device: device)
         super.init()
+        configureMovingSupport()
         groundVehicle?.onOtherMove = {[weak self] id,state in self?.onVehicleMove?(id,state)}
         groundVehicle?.onCouplingStep = {[weak self] _ in self?.updateVehicleCoupling()}
         groundVehicle?.onOtherCollidersChanged = {[weak self] in
@@ -746,6 +749,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         driving ? groundVehicle?.nativeLinearVelocity ?? .zero:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(currentFootVelocity))
     }
     var currentWireAngularVelocity:SIMD3<Float> {driving ? groundVehicle?.nativeAngularVelocity ?? .zero:.zero}
+    var footWireSupport:(id:String,offset:SIMD3<Float>)? {
+        guard !driving,health>0,!swimController.on,!personalFlight.on,climb==nil,
+              let attachment=movingSupport?.attachment,let id=attachment.id else{return nil}
+        return (id,SIMD3<Float>(attachment.at))
+    }
     func vehicleWireKit(tuck:Double)->[Double]? {driving ? groundVehicle?.wireKit(tuck:tuck):nil}
     var isAirborne: Bool { verticalSpeed != 0 }
     var animationName: String { ownClip }
@@ -1091,7 +1099,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     if let flight=personalFlightMotion(delta:step,state:state,intended:water,forward:forward,sideways:sideways,running:running) {return flight}
                     return footMotion(delta:step,state:state,intended:water,forward:forward,sideways:sideways,running:running)
                 })
-            pendingNativeJump = 0; characterOutput = result; next = result.feet
+            pendingNativeJump = 0; characterOutput = result; next = character.supportFeet ?? result.feet
         } else if characterActive {
             character?.setActive(false); characterActive = false; pendingNativeJump = 0
         }
@@ -1211,6 +1219,60 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         character?.otherColliders = groundVehicle.otherColliders
     }
 
+    private func synchronizeMovingSupport() {
+        guard let groundVehicle,let supportScene else{return}
+        var drivers:[String:NativeVehicleSupportScene.Driver]=[:]
+        for player in remotePlayers {
+            guard let id=player.vehicleID else{continue}
+            drivers[id] = .init(id:player.id,velocity:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(player.velocity)),
+                spin:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(player.angularVelocity)))
+        }
+        supportScene.otherColliders=groundVehicle.otherColliders
+        supportScene.synchronize(groundVehicle.supportFrames(),drivers:drivers)
+    }
+    private func configureMovingSupport() {
+        guard let character else{return}
+        func actor(_ motor:NativeCharacterMotor)->NativeMovingSupport.Actor {
+            .init(grounded:motor.grounded,rising:motor.rising,
+                fits:{motor.fits($0,excludingBody:$1)},stand:{motor.stand()})
+        }
+        character.resetSupport = {[weak self] in self?.movingSupport?.drop()}
+        character.carrySupport = {[weak self] delta,motor,head in
+            guard let self,let support=self.movingSupport,self.health>0,!self.driving,self.climb==nil,
+                  !self.swimController.on,!self.personalFlight.on else {
+                self?.movingSupport?.drop();return .init()
+            }
+            self.synchronizeMovingSupport()
+            let value=support.carry(delta:delta,actor:actor(motor),head:&head)
+            self.character?.supportAfloat=support.afloat
+            return .init(displacement:value.move,body:support.through,yaw:value.yaw,thrown:value.thrown)
+        }
+        character.onSupportMotion = {[weak self] yaw,thrown in
+            guard let self else{return}
+            self.footLocomotion.turn(by:-yaw)
+            self.actorHeading=Float(NativeHeadingContinuity.canonical(Double(self.actorHeading)-yaw))
+            if let thrown,self.health>0,let animator=self.footAnimator,!animator.floored {
+                let side=NativeFootLocomotion.supportKnockSide(velocity:thrown,heading:Double(self.actorHeading))
+                self.footLocomotion.setKnockMomentum(thrown);self.crouching=false
+                _ = animator.knock(["koSkidBack","koSpinR","koSkidFront","koSpinL"][side])
+            }
+        }
+        character.settleSupport = {[weak self] _,motor,head,input in
+            guard let self,let support=self.movingSupport,self.health>0,!self.driving,self.climb==nil,
+                  !self.swimController.on,!self.personalFlight.on,input.heldFeet==nil else {
+                self?.movingSupport?.drop();return
+            }
+            support.settle(actor:actor(motor),head:&head,jumping:input.jump>0 || (input.verticalOverride ?? 0)>0,
+                moving:simd_length_squared(input.displacement)>0)
+        }
+        character.afterSupportUpdate = {[weak self] in
+            guard let self else{return}
+            self.synchronizeMovingSupport()
+            self.character?.supportAfloat=self.movingSupport?.afloat ?? false
+            self.character?.supportFeet=self.movingSupport?.drawnAt.map{SwiftRapierWorld.rapierToGTA(SIMD3<Float>($0))}
+        }
+    }
+
     func jump() {
         guard !driving, health > 0 else { return }
         if climb != nil {pendingClimbPull=true;return}
@@ -1243,7 +1305,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func swimmingMotion(delta: Double,state: NativeCharacterController.Output,
                                 intended: NativeCharacterController.Motion,push: Double,running: Bool) -> NativeCharacterController.Motion {
-        let depth = waterSurface(at:state.feet).map { Double($0.height-state.feet.z) }
+        let depth = character?.supportAfloat == true ? nil:waterSurface(at:state.feet).map { Double($0.height-state.feet.z) }
         if !swimController.on && swimController.enters(depth) {
             let velocity=personalFlight.on ? personalFlight.linearVelocity:lastFootVelocity
             let rising=personalFlight.on ? velocity.y:state.rising
@@ -1482,7 +1544,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let magnitude = sqrt(simd_length_squared(footAirVelocity)+state.rising*state.rising)
             footAirVelocity *= pow(max(0,1-magnitude/8750),50*delta)
             travel = SIMD3(Float(footAirVelocity.x*delta),Float(footAirVelocity.y*delta),0)
-        } else if delta > 0 { footAirVelocity = SIMD2(Double(travel.x)/delta,Double(travel.y)/delta) }
+        } else if delta > 0 {
+            travel += footLocomotion.groundMomentum(delta:delta)
+            footAirVelocity = SIMD2(Double(travel.x)/delta,Double(travel.y)/delta)
+        }
         motion.displacement = travel
         if let prominent = frame.blends.last(where: { $0.weight > 0.5 && !$0.clip.isEmpty }) {
             ownClip = prominent.clip + "/l/1";ownClipTime = prominent.time
@@ -2101,8 +2166,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 guard let self else{return}
                 self.vehicleCoupling?.reset(connection:self.couplingConnection)
                 self.groundVehicle?.loadDefinitions(data);self.cameraVehicleDefinitions = cameraDefinitions
+                self.supportScene?.clear()
                 if let snapshot=self.couplingSnapshot {self.applyVehicleCouplings(snapshot.links,revision:snapshot.revision,connection:snapshot.connection)}
                 self.loadVehicleCouplingDefinitions()
+                self.loadVehicleTreads()
             }
         }.resume()
         URLSession.shared.dataTask(with:server.path("game/native/trains.json")) { [weak self] data,response,_ in
@@ -2118,9 +2185,28 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             DispatchQueue.main.async {
                 guard let self else{return}
                 self.groundVehicle?.loadCouplingDefinitions(data)
+                self.supportScene?.invalidatePoses()
                 if self.driving {self.groundVehicle?.setWorkingValue(self.remoteVehicles.first{$0.id==self.currentVehicleID}?.work ?? 0)}
             }
         }.resume()
+    }
+
+    private func loadVehicleTreads() {
+        guard let server else{return}
+        URLSession.shared.dataTask(with:server.path("game/native/vehicle-treads.json")) { [weak self] data,response,_ in
+            guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
+            DispatchQueue.main.async { _ = self?.supportScene?.load(data) }
+        }.resume()
+    }
+
+    private func remoteSupportPosition(_ player:RemotePlayer)->SIMD3<Float>? {
+        guard player.vehicleID==nil,player.ridingVehicleID==nil,let id=player.supportVehicleID else{return nil}
+        let transform:simd_float4x4?
+        if driving,currentVehicleID==id,groundVehicle?.active==true {transform=groundVehicle?.modelTransform}
+        else{transform=groundVehicle?.otherVehicle(id)?.transform}
+        guard let transform else{return nil}
+        let at=transform*SIMD4(player.supportOffset,1)
+        return SIMD3(at.x,at.y,at.z)
     }
 
     private func actorName(code: String) -> String? {
@@ -2754,6 +2840,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             guard let name=actorName(code:player.code) else {continue}
             if player.vehicleID == nil {
+                let footPosition=remoteSupportPosition(player) ?? player.position
                 var pose:NativeSkeletalActor.Pose?
                 var original=false
                 var flight:NativeFlightAnimation.Frame?
@@ -2772,7 +2859,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         people:remotePlayers.map{.init(id:$0.id,position:SIMD3<Double>($0.position),
                             walking:$0.vehicleID == nil && $0.ridingVehicleID == nil && $0.code.hasPrefix("s"),
                             down:$0.down != 0,life:Double($0.life))})
-                    let state=NativeRemoteFootAnimation.Snapshot(position:SIMD3<Double>(player.position),heading:Double(player.heading),
+                    let state=NativeRemoteFootAnimation.Snapshot(position:SIMD3<Double>(footPosition),heading:Double(player.heading),
                         velocity:SIMD3<Double>(player.velocity),movement:Double(player.movementRatio),airborne:player.airborne,crouching:player.crouching,
                         weapon:player.weapon,aim:player.aim.map(Double.init),action:player.action,shots:player.shotCount,life:Double(player.life),
                         armour:Double(player.armour),down:player.down,paused:player.paused,pitch:Double(player.pitch),roll:Double(player.roll),script:player.scriptAnimation,
@@ -2786,7 +2873,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     }
                 }
                 if (10...16).contains(player.action & 63) || (20...25).contains(player.action & 63) { handWeapon=0 }
-                appendPed(name,player.position,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id)
+                appendPed(name,footPosition,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id)
                 continue
             }
             modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0))

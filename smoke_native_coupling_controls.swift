@@ -11,10 +11,11 @@ final class Network {
  var order:[String]=[],pending:[(Bool)->Void]=[],requestResult=true,onMove:(()->Void)?
  var sentPosition=SIMD3<Float>.zero,sentWork:Int?,sentKit:[Double]?,sentHealth=0,sentDamage="",sentHeading:Float=0,sentPitch:Float=0,sentRoll:Float=0
  var sentVelocity=SIMD3<Float>.zero,sentAngular=SIMD3<Float>.zero,sentPaused=true
+ var sentSupport:(id:String,offset:SIMD3<Float>)?
  var exitWork:Int?,exitHealth=0,exitDamage="",exitFeet=SIMD3<Float>.zero,exitParked=SIMD3<Float>.zero
  // ACTUAL_POSITION_SIGNATURE
  {order.append("driver");sentPosition=position;sentWork=vehicleWork;sentKit=kit;sentHealth=vehicleHealth;sentDamage=vehicleDamage
-  sentHeading=heading;sentPitch=pitch;sentRoll=roll;sentVelocity=velocity;sentAngular=angularVelocity;sentPaused=paused}
+  sentHeading=heading;sentPitch=pitch;sentRoll=roll;sentVelocity=velocity;sentAngular=angularVelocity;sentPaused=paused;sentSupport=support}
  // ACTUAL_EXIT_SIGNATURE
  {order.append("exit");exitWork=vehicleWork;exitHealth=vehicleHealth;exitDamage=vehicleDamage;exitFeet=feet;exitParked=position}
  func sendVehicleMove(_ id:String,state:[String:Any]){order.append("move:\(id)");onMove?()}
@@ -36,6 +37,7 @@ final class Renderer {
  var vehicleHealth=876,vehicleDamage="retained",vehicleLights=true,vehicleHorn=true,vehicleSiren=true
  var personalFlightPitch:Float=0,personalFlightRoll:Float=0,footWireAirborne=false,effectiveWireWeapon=0,isFiring=false,footWireAnimation:String?=nil,crouching=false
  var swimmingState=0,swimmingPitch:Float=0,swimmingRatio:Float=0,footWireMovementRatio:Double=0,footWireAim:Double?=nil
+ var footWireSupport:(id:String,offset:SIMD3<Float>)?
  var riderWireAction=1,footWireAction=0,currentWireVelocity=SIMD3<Float>(1,2,3),currentWireAngularVelocity=SIMD3<Float>(4,5,6)
  func vehicleWireKit(tuck:Double)->[Double]?{[tuck,2,3]}
  func vehicleCouplingMovePacket(_ id:String)->[String:Any]?{packets[id]}
@@ -73,6 +75,7 @@ final class Game {
   // ACTUAL_AXIS
  }
  func select(_ id:Int){revision+=1;_ = weapons.apply(["revision":revision,"selected":id,"weapons":id==0 ? []:[["id":id,"clip":3,"rest":10]]])}
+ func publishSupport(){sendCurrentPosition(moving:false,running:false,tuck:0,paused:false)}
  func install(){
   // ACTUAL_CALLBACKS
  }
@@ -80,6 +83,9 @@ final class Game {
 }
 var checks=0
 func check(_ v:Bool,_ m:String){checks+=1;precondition(v,m)}
+let walker=Game();walker.currentVehicle=nil;walker.renderer!.footWireSupport=("platform",SIMD3(1,2,3));walker.publishSupport()
+check(walker.network.sentSupport?.id=="platform" && walker.network.sentSupport?.offset==SIMD3(1,2,3),"Actual position dispatch omitted support attachment")
+walker.renderer!.footWireSupport=nil;walker.publishSupport();check(walker.network.sentSupport==nil,"Actual position dispatch retained detached support")
 let request=NativeVehicleCoupling.Request(parent:"middle",trailer:"tail",kind:.trailer,generation:12345)
 let g=Game();g.install()
 check(g.renderer!.onCouplingRequest?(request)==true,"Actual callback did not queue")

@@ -52,6 +52,12 @@ final class NativeGroundVehicle {
         let pose:NativeUnattendedVehicle.Pose
         let health:Int,occupied:Bool,claimed:Bool,dynamic:Bool,hauled:Bool
     }
+    struct SupportFrame {
+        let id:String,model:String,body:SwiftRapierWorld.BodyID
+        let position:SIMD3<Double>,rotation:simd_quatd,origin:Double,kind:String,work:Double
+        let configuration:CouplingDefinition?
+    }
+    func supportFrames()->[SupportFrame]{others.supportFrames(configurations:couplingDefinitions)}
     struct WorkingFrame {
         let value:Int,preciseValue:Double,kitValue:Double,localTowAnchor:SIMD3<Double>?,canAcquireTow:Bool,dropRequested:Bool
     }
@@ -266,6 +272,7 @@ final class NativeGroundVehicle {
                     for id in workingPlateColliders{world.removeCollider(id)};workingPlateColliders=[];return
                 }
                 world.setColliderGroups(collider,collision:first.collisionGroups,solver:first.solverGroups)
+                world.setColliderFrictionCombine(collider,.average)
                 world.setColliderSurface(collider,surface:2,material:63);workingPlateColliders.insert(collider)
             }
         }

@@ -20,6 +20,19 @@ final class NativeCharacterController {
         var verticalOverride: Double? = nil
         var heldFeet: SIMD3<Float>? = nil
     }
+    struct SupportMotion {
+        var displacement=SIMD3<Double>.zero
+        var body:UInt64?
+        var yaw=0.0
+        var thrown:SIMD3<Double>?
+    }
+    var carrySupport:((Double,NativeCharacterMotor,inout SIMD3<Double>)->SupportMotion)?
+    var settleSupport:((Double,NativeCharacterMotor,inout SIMD3<Double>,Motion)->Void)?
+    var resetSupport:(()->Void)?
+    var onSupportMotion:((Double,SIMD3<Double>?)->Void)?
+    var afterSupportUpdate:(()->Void)?
+    var supportAfloat=false
+    var supportFeet:SIMD3<Float>?
     let world: SwiftRapierWorld
     let queries: NativeRapierCharacterQueries
     let motor: NativeCharacterMotor
@@ -57,6 +70,8 @@ final class NativeCharacterController {
         let p = SwiftRapierWorld.gtaToRapier(feet)
         head = SIMD3(Double(p.x), Double(p.y) + 1.7, Double(p.z))
         clearPendingMotion(); rootHeld = false; stepVelocity = .zero; movementAvailable = false
+        resetSupport?()
+        supportAfloat=false;supportFeet=nil
         self.active = active; motor.setActive(active)
         queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
         if grounded { motor.stand() }
@@ -64,6 +79,8 @@ final class NativeCharacterController {
     func setActive(_ active: Bool) {
         self.active = active; clearPendingMotion(); rootHeld = false; stepVelocity = .zero; movementAvailable = false
         motor.setActive(active)
+        resetSupport?()
+        supportAfloat=false;supportFeet=nil
     }
     private static func finite(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite }
     private func clearPendingMotion() { accumulator = 0; pendingTravel = .zero; pendingJump = 0 }
@@ -82,6 +99,9 @@ final class NativeCharacterController {
                 held: Bool = false, verticalOverride: Double? = nil, carrying: UInt64? = nil,
                 geometryReady: Bool,
                 motion: ((Double,Output,Motion) -> Motion)? = nil) -> Output {
+        // Presentation follows live vehicle poses even on display frames
+        // that do not advance the fixed motor clock.
+        defer {afterSupportUpdate?()}
         movementAvailable = false
         guard active else { return state }
         // Match the outer frame clock: retain ordinary low-FPS elapsed time,
@@ -104,6 +124,8 @@ final class NativeCharacterController {
             let previousFeet = state.feet
             let travel = pendingTravel * (Self.fixed / accumulator)
             pendingTravel -= travel; accumulator = max(0, accumulator - Self.fixed)
+            let supported=carrySupport?(Self.fixed,motor,&head) ?? SupportMotion()
+            onSupportMotion?(supported.yaw,supported.thrown)
             let intended = Motion(displacement: SwiftRapierWorld.rapierToGTA(SIMD3<Float>(travel)),
                                   jump: pendingJump,held: held,verticalOverride: verticalOverride)
             let input = motion?(Self.fixed,state,intended) ?? intended
@@ -127,11 +149,13 @@ final class NativeCharacterController {
             } else {
                 rootHeld = false
                 let point = SwiftRapierWorld.gtaToRapier(input.displacement)
-                motor.step(position: &head, displacement: SIMD3<Double>(point), jump: input.jump, delta: Self.fixed,
-                           held: input.held, verticalOverride: input.verticalOverride, carrying: carrying)
+                motor.step(position: &head, displacement: SIMD3<Double>(point)+supported.displacement, jump: input.jump, delta: Self.fixed,
+                           held: input.held, verticalOverride: input.verticalOverride, carrying: carrying ?? supported.body)
             }
             pendingJump = 0
             if input.heldFeet == nil {onPress?(motor.pressed)}
+            settleSupport?(Self.fixed,motor,&head,input)
+            if settleSupport != nil {queries.setTranslation(queries.walker,head-SIMD3(0,0.8,0))}
             world.step()
             // Use the same published Float feet boundary as the renderer's
             // prior 60-Hz measurement, with the tick that actually moved it.

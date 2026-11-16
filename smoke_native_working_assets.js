@@ -47,19 +47,21 @@ async function main(){
     response=await fetch(url(suffix),{headers:{'X-Forwarded-For':'192.0.2.1'}});equal(response.status,401,'Working overlay bypassed join gate');
     response=await fetch(url(suffix),{headers:{Origin:'https://unrelated.invalid'}});equal(response.status,403,'Working overlay bypassed origin gate');
   }
-  const metadata=origin+'/game/native/vehicle-coupling.json';
+  for(const [endpoint,filename] of [['vehicle-coupling.json','coupling-catalog.json'],['vehicle-treads.json','tread-catalog.json']]) {
+  const metadata=origin+'/game/native/'+endpoint;
   equal((await fetch(metadata)).status,404);
-  const bytes=Buffer.from(JSON.stringify({version:1,models:{synthetic:true}}));fs.writeFileSync(catalog,bytes);
+  const bytes=Buffer.from(JSON.stringify({version:1,models:{synthetic:true}}));fs.writeFileSync(path.join(local,'selfhost',filename),bytes);
   let response=await fetch(metadata);equal(response.status,200);equal(Buffer.from(await response.arrayBuffer()),bytes);
   equal(response.headers.get('content-type'),'application/json; charset=utf-8');
   response=await fetch(metadata,{method:'HEAD'});equal(response.status,200);equal(await response.text(),'');equal(response.headers.get('content-length'),String(bytes.length));
   equal((await fetch(metadata,{method:'POST'})).status,405);
   equal((await fetch(metadata,{headers:{'X-Forwarded-For':'192.0.2.1'}})).status,401);
   equal((await fetch(metadata,{headers:{Origin:'https://unrelated.invalid'}})).status,403);
+  }
   for(const suffix of suffixes)equal(fs.readFileSync(path.join(archive,'synthetic'+suffix)),old,'Archive was modified');
   // Encoded separators cannot turn an allowed model name into a private path.
   fs.writeFileSync(path.join(local,'private.rig.json'),'synthetic private canary');
-  response=await fetch(origin+'/game/native/models/%2e%2e%2f%2e%2e%2f%2e%2e%2fprivate.rig.json');
+  let response=await fetch(origin+'/game/native/models/%2e%2e%2f%2e%2e%2f%2e%2e%2fprivate.rig.json');
   equal(response.status,404);equal((await response.text()).includes('synthetic private canary'),false);
   console.log(`PASS: ${checks} actual HTTP working-family/metadata checks; complete-family overlay, partial-export rejection, archive fallback, GET/HEAD, access boundaries`);
 }

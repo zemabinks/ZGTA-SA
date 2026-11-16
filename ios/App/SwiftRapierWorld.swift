@@ -289,6 +289,7 @@ final class SwiftRapierWorld {
         let materials = mesh.materials.count == count ? mesh.materials : [Int32](repeating: -1, count: count)
         let id = zgtaphys_collider_trimesh(handle, points, UInt32(mesh.vertices.count), mesh.indices,
             UInt32(count), surfaces, materials)
+        if id != 0 { _ = setColliderFrictionCombine(id,.average) }
         return id == 0 ? nil : id
     }
     @discardableResult

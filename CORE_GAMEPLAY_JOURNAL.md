@@ -916,3 +916,40 @@ byte-identical to accepted Core88 apart from the bundle version; the already
 validated v2 physics libraries are reused as read-only dependencies. No
 original retail, physical input, rendered browser scene or iPhone performance
 claim is made by this follow-up.
+
+### Core90 — moving vehicle surfaces and physical support
+
+The audit found missing trailer support spheres and a terrain/plate friction
+combination inherited from chassis defaults. Actual archived/native body
+replays now cover the correct support lifecycle and friction. The hauling
+transition recreates the physical solver; release retains its current momentum.
+Existing coupling fixtures now follow the current hauled body, rather than
+asserting separation against a disposed pre-haul handle.
+
+A separate pedestrian tread importer, Float32 query mesh, carry coordinator
+and live native scene adapter now connect support to the fixed foot motor,
+locomotion facing, knock momentum, boat water suppression, post-step display
+and browser-shaped attachment packets. The actual native/server/legacy peer
+regression verifies both attachment and detach. Original assets and reference
+fixtures stay local.
+
+[Core90 evidence and remaining limits](CORE_MOVING_SUPPORT_90.md) distinguish
+controlled coordinator queries, physical/native integration, protocol tests
+and the outstanding original retail/device/rendered-scene acceptance. Three
+exact knock-direction threshold samples have documented adjacent-bin numerical
+ambiguities; no bitwise or1:1 gameplay accuracy is claimed.
+
+The first aggregate run found an outdated dispatch test double and a real
+local/remote presentation mismatch. The corrected adapter uses the live visual
+entry pose independently of physical body queries; presentation also refreshes
+on display frames with no motor tick. The expanded actual native runtime gate
+then passes3,253 checks, including matching remote attachment transforms. The
+initial92/94 run was not accepted. Final frozen-source acceptance is recorded
+separately after rerunning the full suite.
+
+Core90 final acceptance passes **94/94 gates** with captured sources unchanged.
+Release Simulator and unsigned generic iPhone bundles both report build90 and
+all five Apple Swift/C/Rust ABI links pass. The six new/expanded support gates
+retain their own reference, source and runtime limits. No original game data
+is included in the public source release; original retail, rendered scenes,
+physical input and iPhone performance still require separate acceptance.

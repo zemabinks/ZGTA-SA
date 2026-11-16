@@ -99,6 +99,7 @@ def setup(args):
             ('prepare_native_effects.py',), ('prepare_native_particle_effects.js',),
             ('prepare_native_physics.js',),
             ('prepare_native_vehicle_coupling.js',),
+            ('prepare_native_vehicle_treads.js',),
             ('prepare_native_vehicle_rigs.js', '--all', '--if-needed'),
             ('prepare_native_working_vehicles.js',),
             ('prepare_native_riders.py',), ('prepare_native_seating.py',),
