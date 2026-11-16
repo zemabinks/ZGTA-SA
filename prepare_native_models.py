@@ -348,6 +348,49 @@ def convert(source, destination, pedestrian=False):
     return len(vertices), len(indices) // 3
 
 
+
+def canonical_pedestrian_rows(source):
+    """Read explicit skin IDs from the owner browser's actual model catalogue.
+
+    world/peds.json is an animation/style array with compact positions; its
+    array positions are not skin IDs on the browser multiplayer wire.
+    """
+    import extract_client_catalog as catalog
+    marker = source.index('80799:')
+    rows = catalog.json_literal(source[marker:], "exports=JSON.parse('", "')")
+    if not isinstance(rows, list) or not 0 < len(rows) <= 512:
+        raise ValueError('Invalid browser pedestrian catalogue')
+    seen_ids = set()
+    model_textures = {}
+    result = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError('Invalid pedestrian row')
+        identifier = row.get('id')
+        model = row.get('model')
+        txd = row.get('txd')
+        if (isinstance(identifier, bool) or not isinstance(identifier, int)
+                or not 0 <= identifier <= 311 or identifier in seen_ids
+                or not isinstance(model, str) or not isinstance(txd, str)):
+            raise ValueError('Invalid/duplicate pedestrian skin ID')
+        model, txd = model.lower(), txd.lower()
+        if (not re.fullmatch(r'[a-z0-9_]{1,40}', model)
+                or not re.fullmatch(r'[a-z0-9_]{1,40}', txd)
+                or (model in model_textures and model_textures[model] != txd)):
+            raise ValueError('Invalid/ambiguous pedestrian model identity')
+        seen_ids.add(identifier)
+        # The shipped browser explicitly aliases 149/293 to the same OG Loc
+        # DFF/TXD. Preserve distinct wire IDs; never infer an ID from order.
+        model_textures[model] = txd
+        result.append({'id': identifier, 'model': model, 'txd': txd})
+    return result
+
+
+def pedestrian_model_index(peds, available):
+    return {str(row['id']): row['model'] for row in peds
+            if row['model'] != 'null' and row['model'] in available}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--all', action='store_true', help='Convert all archived vehicle and pedestrian models')
@@ -359,11 +402,12 @@ def main():
     vehicles = catalog.json_literal(js, "e.exports=JSON.parse('", "')")
     _, weapon_js = catalog.bundle_with('"WEAPON_COLT45"')
     weapons = catalog.json_literal(weapon_js, "e.exports=JSON.parse('", "')")
-    peds = json.loads((GAME / 'world' / 'peds.json').read_text())['peds']
-    ped_names = {item[0].lower() for item in peds}
+    _, pedestrian_js = catalog.bundle_with('80799:')
+    peds = canonical_pedestrian_rows(pedestrian_js)
+    ped_names = {item['model'] for item in peds if item['model'] != 'null'}
     if args.all:
         selected.update(item['model'].lower() for item in vehicles)
-        selected.update(item[0].lower() for item in peds)
+        selected.update(item['model'] for item in peds if item['model'] != 'null')
         selected.update(item['modelName'].lower() for item in weapons if item.get('modelName'))
     if not selected:
         selected = {'taxi', 'sultan', 'bmori'}
@@ -383,8 +427,7 @@ def main():
     model_index = {
         'vehicles': {str(item['id']): item['model'].lower() for item in vehicles
                      if item['model'].lower() in available},
-        'peds': {str(number): item[0].lower() for number, item in enumerate(peds)
-                 if item[0].lower() in available},
+        'peds': pedestrian_model_index(peds, available),
         'weapons': {str(item['id']): item['modelName'].lower() for item in weapons
                     if item.get('modelName') and item['modelName'].lower() in available},
     }

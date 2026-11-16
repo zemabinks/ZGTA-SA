@@ -20,8 +20,10 @@ verification ledger, not a claim that an independent engine is already 1:1.
    retail San Andreas accuracy.
 5. Native unit tests, integrated simulator observations, physical device tests,
    and browser/native multiplayer tests are recorded separately. Passing one
-   does not imply the others passed. No original retail runtime comparison or
-   physical device/controller verification has been established in this audit.
+   does not imply the others passed. Physical DE reference captures and native
+   iPhone movement/static-peer observations now exist; their limited scope is
+   recorded in `CORE_RETAIL_REFERENCE.md`. Physical controller acceptance and a
+   matched retail/native replay remain open.
 
 Reference sources checked on 2026-11-15:
 
@@ -40,6 +42,7 @@ platform, never for the entire original mechanic by inference.
 | Area | Required cases and transitions | Current evidence / remaining work | Status |
 | --- | --- | --- | --- |
 | Coordinates | GTA Z-up ↔ physics Y-up; handedness; heading sign; model root versus actor heading; wrapped angles | Core102 proves the legacy1m CPed root/feet distinction. Core103 calibrates all212 vehicle origins/full rotations and verifies actual037/DL driver, observer, final park and respawn conversion. Full retail coordinate/movement comparison remains open | audit |
+| Skin identity | Same network ID resolves to the intended character locally and remotely, independently of animation-list order | Core104 corrects the exporter, preserves265 model families and imports Maccer2. Actual lookup/network, desktop Metal and reciprocal physical iPhone/browser appearance plus short walk/release pass for wire7 and2. Browser/retail aliases,45 missing canonical IDs and128px atlas resampling remain explicit limits | audit |
 | Walk/run | Analog magnitude, walk/run thresholds, acceleration/deceleration, start/stop, side/back direction, root distance against actual collision travel | Actual walk-modifier, acceleration/turning/strafe replay passes5,600 frames; retail timing and blocked-foot sliding need comparison | audit |
 | Sprint | Held/tapped sprint, stamina, heavy weapons, crouch/aim restrictions, fatigue recovery | Core88 corrects underwater preparation, airborne/parachute recovery, dead-task guards and swimming control ordering against actual archived expressions; original stat curves and physical touch/controller timings remain unverified | audit |
 | Crouch | Stand/crouch transitions, strafe, roll, restricted clearance, aim/fire | Archived motor/native movement use fixed walker/probe shapes. Retail stance clearance and transition feel remain unmeasured; no shorter capsule is assumed | audit |
@@ -72,7 +75,8 @@ platform, never for the entire original mechanic by inference.
 | Combat fire/reload | Weapon cadence, reload cancel, empty clip, held trigger, weapon switch, recoil, projectile and hit events | Animation-owned emission and atomic ACK prediction integrated;3200 delayed frames and actual Swift HTTP/WS tests pass. Reload ACK duplicates no longer restart the same countdown; released pre-muzzle input is cancelled at native reload boundaries. Bounded receive-time credit now accepts 69,060 actual native animation events under the stated 15–144 Hz/20 ms jitter envelope; server reload/damage policies and precise recoil still differ/unverified | audit |
 | Melee/damage | Combo timing, hit range/line, block, knockdown, hit reaction, death/revive | Core92 connects accepted local hits to real directional flinch/stun/death responses and publishes knock/get-up tags. [Evidence/limits](CORE_LOCAL_HIT_92.md). Core93 makes front blocks prevent authoritative damage and delivers each unchanged-health parry through a separate hit sequence. [Evidence/limits](CORE_MELEE_PARRY_93.md). Animation-marker melee and source-based reach remain integrated. Special moves, fighting-style acquisition, weapons1–15 acquisition, damage policy for10–15 and full original victim/AI behavior remain gaps | gap |
 | Weapon attachment | Hands/spine, dual wield, parachute/jetpack, vehicle drive-by | Event-time hand24/34 muzzle transforms match600 archived rig frames;53 original weapon/skill offset rows match; weapon46 spine placement and consistent carried/wire selection are covered by real-rig tests. Core88 removes fake utility-slot attacks and retains actual detonator/deploy actions. Camera/binocular functionality and drive-by remain incomplete | gap |
-| Touch | Safe-area geometry, multitouch, release/cancel, context buttons, overlays, keyboard | Central cancellation clears held gameplay controls across overlays/lifecycle; actual multitouch/device acceptance remains outstanding | audit |
+| Touch | Safe-area geometry, multitouch, release/cancel, context buttons, overlays, keyboard | Physical iPhone12Pro walk/release, camera orbit/pitch and normal jetpack controls are captured. Jump/vehicle and simultaneous multitouch acceptance remain pending. A missed pause touch, successful Escape/menu scrolling and earlier input-service failures are preserved | audit |
+| Device lifecycle | Gameplay keeps the display awake; background, replacement and final exit restore the prior policy | Core104 adds a token-owned idle policy,886 pure checks and61 extracted owner/lifecycle checks. Actual warning disappearance and318.782s assertion-free foreground idle are captured. Background/resume reaches a stationary endpoint, but a later unexplained equipment/location change keeps complete continuity open | audit |
 | Controller | Dead zones, press edges, disconnect, release-to-rearm, camera sensitivity | Core88 context bindings/dispatch pass3,833 checks, preserving work tools, towing release, radio, nozzle and normal controls. Disconnect/menu gates require neutral before rearming. Modern triggers and some contextual actions are explicit adaptations; physical controller tests remain required | audit |
 | Keyboard/mouse | Held-key focus loss, mouse look, bindings, modifier and device-switch edges | Original PC defaults and context dispatch are audited; slot-ordered cycling and Alt walk are covered. Original-PC bicycle hop and pause key handoff are covered. Full original targeting and hardware acceptance remain gaps | audit |
 | Timing |15/30/60/120Hz plus jitter, slow frame, foreground resume, fixed-step catchup | Slow frames retain elapsed time with bounded updates; suspension uses a separate policy; frame-schedule regressions pass, device performance unmeasured | audit |
@@ -122,8 +126,11 @@ data. Of5,724 checked handling fields across212 mapped models, one boat's
 turn-mass value differs only in decimal rounding. These are data comparisons,
 not evidence that the independent simulation reproduces the original engine.
 All reference images, binaries, extracted data and disassembly stay local.
-The supplied iOS Definitive Edition package establishes static menu resources,
-not a running original gameplay reference. Original runtime behavior remains open.
+The supplied iOS Definitive Edition package establishes static menu resources.
+The owner's separately installed physical DE reference now provides menu,
+walk/release, turning, camera and bicycle entry/exit footage. A matched native
+replay and quantitative timing comparisons remain open; see
+[the reference ledger](CORE_RETAIL_REFERENCE.md).
 
 Core84 adds fixed-step-owned foot velocity and explicit queued-intent cancellation
 (see CORE_FIXED_STEP_VELOCITY_AUDIT.md), plus fresh-baseline connection recovery
@@ -149,7 +156,8 @@ CORE_COUPLING_SERVER_REVIEW_88.md. Browser reference goldens and CPU/transport
 tests remain distinct from original-game, GPU, physical input and live
 multiplayer acceptance. The owner's iPhone12Pro is now detected running iOS27.2 with Definitive
 Edition1.86.44544238. Screen/automation access awaits OS settings while the
-owner is away. No original runtime gameplay comparison has been completed.
+owner is away. Later physical reference capture is recorded separately above;
+it does not retroactively validate these earlier controlled fixtures.
 
 Core99 adds the source-matched driver exit placement and native collision/
 retry ownership in [CORE_VEHICLE_EXIT_99.md](CORE_VEHICLE_EXIT_99.md). Existing
@@ -158,4 +166,6 @@ SA-MP/open.mp server interoperability is assessed separately in
 
 Core100 corrects the first exit packet's actor/body/camera heading ownership in
 [CORE_EXIT_FACING_100.md](CORE_EXIT_FACING_100.md). Existing external server
-destinations remain explicit unimplemented targets.
+destinations remained explicit unimplemented targets at that checkpoint. The
+later bounded0.3.7/DL and original-world observations are recorded in
+`SERVER_COMPATIBILITY.md`; universal server compatibility is still incomplete.

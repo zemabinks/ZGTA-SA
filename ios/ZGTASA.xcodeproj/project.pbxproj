@@ -25,6 +25,7 @@
 		1A0F166303AE38FDE592B6F9 /* NativeParticleShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 06A86C8384D82A769D39DD92 /* NativeParticleShaders.metal */; };
 		1AB6343C1CFB81A132039ABA /* NativeFootstepAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5B14B7C08BDE3ABBD419EF0 /* NativeFootstepAudio.swift */; };
 		1E36E6BEA62D0B6A6469FAA5 /* NativeSAMPLocalVitals.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADDF0BB1D659CCDE20D6ABDE /* NativeSAMPLocalVitals.swift */; };
+		1E60B2666704C66F144AF596 /* NativeGameplayIdleTimer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08EEB36A34394868F8298F8A /* NativeGameplayIdleTimer.swift */; };
 		1EB0FE8F1B443455683C8E2B /* NativeSwimAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C1456168675138F8BEADDF /* NativeSwimAnimation.swift */; };
 		212739909D41C73DABA80E72 /* NativeAudioEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 969E34393B1C41FCC8822BC5 /* NativeAudioEnvelope.swift */; };
 		2168C9A791950DF3561798A1 /* NativeRapierCharacterQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68ECF76A29B2B319314833C7 /* NativeRapierCharacterQueries.swift */; };
@@ -179,6 +180,7 @@
 		070D9E11C0B5225BED868C3A /* NativeUnattendedVehicle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeUnattendedVehicle.swift; sourceTree = "<group>"; };
 		087E7CB2B5881BBC13A9B417 /* HomeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewController.swift; sourceTree = "<group>"; };
 		0889A4901123B34A2DD8C7E8 /* NativeVehicleTread.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleTread.swift; sourceTree = "<group>"; };
+		08EEB36A34394868F8298F8A /* NativeGameplayIdleTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameplayIdleTimer.swift; sourceTree = "<group>"; };
 		09716AFE34EB334F442D99A3 /* NativeVehicleAudioSpatial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleAudioSpatial.swift; sourceTree = "<group>"; };
 		099D18E9BA9F51B3794D4E0B /* NativeStreamShotClaims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStreamShotClaims.swift; sourceTree = "<group>"; };
 		0B1112A6AE905818CEBA6ECA /* NativeSAMPObjects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPObjects.swift; sourceTree = "<group>"; };
@@ -400,6 +402,7 @@
 				FE7334A48CDD530946D30BD0 /* NativeGameInput.swift */,
 				0D964C2804332F19C2A462E4 /* NativeGameManagementController.swift */,
 				770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */,
+				08EEB36A34394868F8298F8A /* NativeGameplayIdleTimer.swift */,
 				23A47E76CCEE38AC4EC0FE1F /* NativeGameplayPanel.swift */,
 				2326D5F1610E7F3B8859A41D /* NativeGameViewController.swift */,
 				59E67662C9B99A8DFB528F6E /* NativeGroundVehicle.swift */,
@@ -654,6 +657,7 @@
 				8E2971A26FB902E66D2C20A5 /* NativeGameManagementController.swift in Sources */,
 				ACD126EF6D1B8AB684EC440E /* NativeGameViewController.swift in Sources */,
 				4A9F4549E076D75780C75E9F /* NativeGameplayClient.swift in Sources */,
+				1E60B2666704C66F144AF596 /* NativeGameplayIdleTimer.swift in Sources */,
 				36C5754DD98547AC06A81754 /* NativeGameplayPanel.swift in Sources */,
 				F05CB721E90D6F0B069D1602 /* NativeGroundVehicle.swift in Sources */,
 				6DDF956AD596AC0C149DD77E /* NativeGunAnimation.swift in Sources */,

@@ -57,6 +57,8 @@ final class NativeGameViewController: UIViewController {
     private var previousPad = NativeGameBindings.Pad()
     private let weaponCycle = NativeWeaponCycleQueue()
     private var applicationActive = true
+    private let idleOwner=UUID()
+    private var gameStopped=false
     private var inputWasAvailable = false
     private var lastNetwork: CFTimeInterval = 0
     private var lastGameplay: CFTimeInterval = 0
@@ -105,6 +107,7 @@ final class NativeGameViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         applicationActive = UIApplication.shared.applicationState == .active
+        if !gameStopped{NativeGameplayIdleTimer.shared.claim(idleOwner,active:applicationActive)}
         applyAppSettings()
         network.setApplicationActive(applicationActive)
         becomeFirstResponder()
@@ -114,6 +117,8 @@ final class NativeGameViewController: UIViewController {
         renderer?.updateSettingsViewport()
     }
     deinit {
+        let token=idleOwner
+        DispatchQueue.main.async{NativeGameplayIdleTimer.shared.release(token)}
         if let settingsObserver { NotificationCenter.default.removeObserver(settingsObserver) }
         displayLink?.invalidate();network.disconnect();gameplay.setConnectionReady(false)
     }
@@ -125,10 +130,13 @@ final class NativeGameViewController: UIViewController {
         super.viewSafeAreaInsetsDidChange(); stick.reset(); lookStick.reset()
     }
     @objc private func applicationResigned() {
+        NativeGameplayIdleTimer.shared.setActive(idleOwner,false)
         pauseEscapeHandoff?.release()
         applicationActive = false;network.setApplicationActive(false); frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
     @objc private func applicationReturned() {
+        guard !gameStopped else{return}
+        NativeGameplayIdleTimer.shared.setActive(idleOwner,true)
         applicationActive = true;network.setApplicationActive(true); frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
     private func resetControls() {
@@ -552,6 +560,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     private func stopGame() {
+        gameStopped=true;NativeGameplayIdleTimer.shared.release(idleOwner)
         legacyArtwork?.cancel();legacyArtwork=nil;renderer?.clearLegacyWorld()
         gameplay.setConnectionReady(false)
         resetControls(); frameClock.reset()

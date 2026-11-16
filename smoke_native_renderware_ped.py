@@ -5,9 +5,11 @@
 Reads owner-local DFF/TXD/CLP1/SKN1 only. Fixtures, GPU readbacks and executables
 stay under local-only/research/runtime-ped. The actual Renderer is not modified.
 """
+import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 
 from smoke_native_renderware_skeleton import fixture
@@ -20,30 +22,49 @@ SOURCES = ['NativeRenderWareDFF','NativeRenderWareTXD','NativeRenderWareModel','
 
 
 def main():
-    OUT.mkdir(parents=True,exist_ok=True)
-    (OUT/'generated.dff').write_bytes(fixture())
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--extra-model',action='append',default=[])
+    parser.add_argument('--extra-skeleton-root',type=Path)
+    parser.add_argument('--out',type=Path,default=OUT)
+    args=parser.parse_args()
+    out=args.out.resolve()
+    assert (ROOT/'local-only').resolve() in out.parents,'GPU evidence must remain owner-local'
+    names=['bmori','army','wmopj']
+    for name in args.extra_model:
+        assert re.fullmatch(r'[a-z0-9_]{1,40}',name),'invalid owner model name'
+        assert name not in names,'duplicate owner model name'
+        names.append(name)
+    assert len(names)<=16,'bounded owner model count'
+    out.mkdir(parents=True,exist_ok=True)
+    (out/'generated.dff').write_bytes(fixture())
     paths = [ROOT/'ios/App'/(name+'.swift') for name in SOURCES]
-    frozen = {str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in paths}
+    tracked=paths+[ROOT/'smoke_native_renderware_ped.py',ROOT/'smoke_native_renderware_ped.swift',
+                   ROOT/'ios/App/NativeRenderWareModel.metal',ROOT/'ios/App/NativeRenderWarePedModel.metal']
+    frozen = {str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in tracked}
     game = ROOT/'local-only/site/game'
-    owned = [game/(name+suffix) for name in ['bmori','army','wmopj'] for suffix in ['.dff','.txd']]
+    skeletons={name:str((args.extra_skeleton_root/(name+'.skel.bin')).resolve()
+                       if name in args.extra_model and args.extra_skeleton_root else
+                       game/'native/models'/(name+'.skel.bin')) for name in names}
+    cases=out/'cases.json';cases.write_text(json.dumps({'models':names,'skeletons':skeletons}))
+    owned = [game/(name+suffix) for name in names for suffix in ['.dff','.txd']]
     owned += [game/'native/models/animations.clips.bin']
-    owned += [game/'native/models'/(name+'.skel.bin') for name in ['bmori','army','wmopj']]
+    owned += list(map(Path,skeletons.values()))
     hashes = {str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in owned}
-    binary = OUT/'ped-tests'
-    build = subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'module-cache'),
+    binary = out/'ped-tests'
+    build = subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(out/'module-cache'),
         *map(str,paths),str(ROOT/'smoke_native_renderware_ped.swift'),'-o',str(binary)],
         cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-    (OUT/'build.log').write_text(build.stdout)
+    (out/'build.log').write_text(build.stdout)
     assert build.returncode == 0,build.stdout
-    run = subprocess.run([str(binary),str(ROOT),str(OUT)],cwd=ROOT,
+    run = subprocess.run([str(binary),str(ROOT),str(out),str(cases)],cwd=ROOT,
         stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
-    (OUT/'run.log').write_text(run.stdout)
+    (out/'run.log').write_text(run.stdout)
     assert run.returncode == 0,run.stdout
     for path,digest in {**frozen,**hashes}.items():
         assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==digest,'input modified: '+path
-    report=json.loads((OUT/'report.json').read_text())
+    report=json.loads((out/'report.json').read_text())
     report.update(sourceFilesUnchanged=True,ownerSourcesUnchanged=True)
-    (OUT/'report.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+    (out/'report.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
     print(json.dumps(report,indent=2,sort_keys=True))
 
 

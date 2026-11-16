@@ -17,7 +17,7 @@ def main():
  harness=harness.replace(' func deferVehicleExit(_ retry:@escaping()->Void){pendingExitPlacement=retry}',function(renderer,'    func deferVehicleExit('))
  harness=harness.replace(' // ACTUAL_RENDERER_EXIT','\n'.join(function(renderer,m) for m in ['    func exitVehicle(','    private func dispatchOwnedVehicleExit(','    private func discardOwnedVehicle('])+'\n func discard(){discardOwnedVehicle()}')
  harness=harness.replace('// ACTUAL_CONTROLLER_EXIT',function(vc,'    private func completeVehicleExit('))
- harness=harness.replace('var direction:Float{driving ? heading:actorHeading}',function(renderer,'    var direction:'))
+ harness=harness.replace('var direction:Float{driving ? heading:actorHeading}',function(renderer,'    var direction:')).replace('var legacyVehicleQuaternion:SIMD4<Float>?{nil}',function(renderer,'    var legacyVehicleQuaternion:'))
  harness=harness.replace(' let collision:ExitCollision?=ExitCollision()', ''' var riderDefinitions:NativeRiderDefinitions?
  var geometryReady=true,missingCells=Set<String>(),requestedCells=Set<String>()
  var riderDoorHolds:[String:[Int:Double]]=[:]

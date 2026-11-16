@@ -13,7 +13,7 @@ def main():
     source=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')+'\nfinal class NativeSkeletalActor {\n'+skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]+'}\n'
     renderer=before['ios/App/NativeWorldRenderer.swift'].decode();vc=before['ios/App/NativeGameViewController.swift'].decode()
     source+='\nimport CoreFoundation\n'+function(before['ios/App/NativeMultiplayerClient.swift'].decode(),'struct NativeHealthPrediction {')
-    source+='\n'+before['smoke_native_bike_exit.swift'].decode().replace('// ACTUAL_RENDERER_EXIT',function(renderer,'    func exitVehicle(')+'\n'+function(renderer,'    private func dispatchOwnedVehicleExit(')).replace('// ACTUAL_CONTROLLER_EXIT',function(vc,'    private func completeVehicleExit(')).replace('var direction:Float{driving ? heading:actorHeading}',function(renderer,'    var direction:'))
+    source+='\n'+before['smoke_native_bike_exit.swift'].decode().replace('// ACTUAL_RENDERER_EXIT',function(renderer,'    func exitVehicle(')+'\n'+function(renderer,'    private func dispatchOwnedVehicleExit(')).replace('// ACTUAL_CONTROLLER_EXIT',function(vc,'    private func completeVehicleExit(')).replace('var direction:Float{driving ? heading:actorHeading}',function(renderer,'    var direction:')).replace('var legacyVehicleQuaternion:SIMD4<Float>?{nil}',function(renderer,'    var legacyVehicleQuaternion:'))
     with tempfile.TemporaryDirectory(prefix='snapshot-',dir=out) as temp:
         work=Path(temp);sources=[]
         for n in names:

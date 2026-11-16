@@ -13,9 +13,15 @@ private func reject(_ message: String, _ body: () throws -> Void) throws {
 }
 
 @main struct RenderWarePedSmoke {
+    private struct OwnerCases:Decodable{let models:[String];let skeletons:[String:String]}
     static func main() throws {
         let root = URL(fileURLWithPath: CommandLine.arguments[1]), out = URL(fileURLWithPath: CommandLine.arguments[2])
         let game = root.appendingPathComponent("local-only/site/game")
+        let ownerCases:OwnerCases
+        if CommandLine.arguments.count>3 {
+            ownerCases=try JSONDecoder().decode(OwnerCases.self,from:Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[3])))
+            try check(!ownerCases.models.isEmpty && ownerCases.models.count<=16 && Set(ownerCases.models).count==ownerCases.models.count,"bounded owner cases")
+        }else{ownerCases=OwnerCases(models:["bmori","army","wmopj"],skeletons:[:])}
         let generated = try NativeRenderWareDFF.decode(Data(contentsOf: out.appendingPathComponent("generated.dff")))
         let source = generated.geometries[0]
         let normals = [SIMD3<Float>](repeating: SIMD3(0,0,1), count: source.vertexCount)
@@ -79,7 +85,7 @@ private func reject(_ message: String, _ body: () throws -> Void) throws {
         var positionError: Float = 0, normalError: Float = 0, stockError: Float = 0, walkMotion: Float = 0, aimMotion: Float = 0
         var images = Set<Data>()
         var assets: [(String,NativeRenderWarePedModel.Plan)] = [("generated",plan)]
-        for name in ["bmori","army","wmopj"] {
+        for name in ownerCases.models {
             let dff = try NativeRenderWareDFF.decode(Data(contentsOf: game.appendingPathComponent(name + ".dff")))
             let txd = try NativeRenderWareTXD.decode(Data(contentsOf: game.appendingPathComponent(name + ".txd")))
             assets.append((name,try NativeRenderWarePedModel.prepare(dff: dff,txd: txd)))
@@ -107,7 +113,8 @@ private func reject(_ message: String, _ body: () throws -> Void) throws {
                 testedModels += 1
             }
             let stock: NativeSkeletalActor? = name == "generated" ? nil : NativeSkeletalActor(data:
-                try Data(contentsOf: game.appendingPathComponent("native/models/" + name + ".skel.bin")),vertexCount: count,device: device)
+                try Data(contentsOf:ownerCases.skeletons[name].map{URL(fileURLWithPath:$0)} ??
+                    game.appendingPathComponent("native/models/" + name + ".skel.bin")),vertexCount: count,device: device)
             for (label,pose) in selected {
                 let cpu = actor.positions(pose: pose)
                 if let stock, label.hasPrefix("walk-"), let time = Double(label.dropFirst(5)),
@@ -194,6 +201,7 @@ private func reject(_ message: String, _ body: () throws -> Void) throws {
         try check(positionError < 0.0001 && normalError < 0.0001 && stockError < 0.0001, "GPU/CPU/stock actor numerical parity")
         try check(walkMotion > 0.01 && aimMotion > 0.01 && images.count >= 8, "walking and aiming visibly animate")
         report.merge(["gpu": "passed","device": device.name,"ownerModels": testedModels,"actualActor": true,
+            "ownerModelNames":ownerCases.models,
             "gpuReadback":"explicit texture-to-shared-buffer blit; discrete GPU texture CPU mapping may be stale",
             "posesRendered": poses,"sampledVertices": sampled,"positionMaxError": Double(positionError),
             "normalMaxError": Double(normalError),"stockActorMaxError": Double(stockError),

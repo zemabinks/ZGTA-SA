@@ -56,7 +56,7 @@ def main():
     cases = [(p.removesuffix('.py'), ['python3', p]) for p in [
         'smoke_native_fixed_velocity.py', 'smoke_native_task_handoffs.py', 'smoke_native_fall_damage.py', 'smoke_native_health.py',
         'smoke_native_camera_motion.py', 'smoke_native_world_reset.py', 'smoke_vehicle_air_handoff.py', 'smoke_train_layout.py',
-        'smoke_native_combat_transitions.py', 'smoke_native_combat_animation.py', 'smoke_native_fire_arrival.py', 'smoke_native_reload_dispatch.py', 'smoke_native_respawn_dispatch.py', 'smoke_native_connection_recovery.py', 'smoke_native_recovery.py', 'smoke_native_connection_owners.py',
+        'smoke_native_combat_transitions.py', 'smoke_native_combat_animation.py', 'smoke_native_fire_arrival.py', 'smoke_native_reload_dispatch.py', 'smoke_native_respawn_dispatch.py', 'smoke_native_connection_recovery.py', 'smoke_native_recovery.py', 'smoke_native_connection_owners.py', 'smoke_native_gameplay_idle.py',
         'smoke_native_weapon_roles.py', 'smoke_native_combat_eligibility.py',
         'smoke_native_combat_interruptions.py', 'smoke_native_combat_dispatch.py',
         'smoke_native_effort_recovery.py', 'smoke_native_coupling_wire.py', 'smoke_native_coupling_controls.py',
@@ -94,6 +94,7 @@ def main():
         'test_native_renderware_txd.py', 'test_native_renderware_model.py', 'smoke_native_renderware_ped.py',
         'test_samp_artwork_session.py', 'test_samp_object_materials.py', 'test_samp_game_camera.py', 'test_samp_stock_models.py',
         'smoke_original_auth.py', 'smoke_samp_vehicle_coordinates.py', 'smoke_samp_combat_sync.py',
+        'test_native_skin_namespace.py', 'test_native_skin_network.py',
         'test_stock_asset_access.py', 'smoke_native_stock_collision.py', 'test_samp_stock_runtime.py',
         'test_stock_img_assets.py',
         'smoke_samp_controls.py', 'smoke_samp_vitals.py',

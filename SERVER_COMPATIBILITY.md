@@ -1,6 +1,6 @@
 # Existing SA-MP, open.mp and original browser servers
 
-Core103 is under integrated acceptance. It is an independent Swift/Metal
+Core104 continues the physical-device and asset-identity acceptance. It is an independent Swift/Metal
 client with separate adapters for our own HTTP/WebSocket server, legacy SA-MP
 UDP, and the original browser world's versioned WebSocket protocol. Full server
 playability and retail1:1 gameplay have not been established.
@@ -9,14 +9,14 @@ playability and retail1:1 gameplay have not been established.
 
 | Boundary | Evidence | Remaining |
 | --- | --- | --- |
-| Independent server | Core100 public baseline; Core101 frozen123/123 regression gates, optimized Simulator/iPhone builds and actual native stock037/DL test scenes | Physical input/performance, rendered browser peer transitions and retail parity |
+| Independent server | Core103 composite149/149 regression acceptance and both optimized SDK builds; actual iPhone LAN join/walk/release and reciprocal static browser/native peer presence/leave | Overlapping peer motion, broader physical controls/performance and retail parity |
 |0.3.7/DL profiles on official owned open.mp | Actual UDP join/class/spawn/chat, peer movement, key/axis/weapon states, freeze/spectator212, driver transitions, roster and respawn ownership | Standalone proprietary0.3.7/DL server binaries and full RPC/gameplay coverage |
 | DL download/import | Actual official nonempty/empty catalogs, CRC32/size HTTP validation, nativeCPU decode and Metal upload precede184/185 then spawn; Core102 actual UIKit scene passed custom Army skin, legible material text, authored collision and driving/exit/spectator transitions | Physical iPhone scene and large-server acceptance |
 | Runtime RenderWare | Owner584DFF/547TXD corpus audits, actual animated custom-ped GPU tests, object materials and authored COL physical contacts; Core103 four retail props pass the actual stock Renderer callback/HTTP/Metal/Rapier path | Complete stock/supplemental and animated-object coverage remains unverified; metadata availability is not render acceptance |
 | Vehicle coordinate ownership | Core103212-model/full-quaternion calibration plus raw114 and catalog128 actual UDP checks; two profiles, observer conversion, final parking and respawn | New-session164 only carries heading; absent parked pitch/roll cannot be reconstructed until real rotation sync arrives |
 | Server camera/control | Exact command fields/authority tests, actual owned server commands and83 pure camera checks | Integrated rendered following/interpolation/spec transitions; retail camera timings remain unverified |
 | Legacy local damage |7714 actual math/network checks across037/DL, exact fractional server seeds, environmentalRPC115, cause53/54 deaths and real respawn cache restoration | Complete incoming combat, hitboxes, weapon/skill/range and server policies |
-| Original browser world | Version/build-aware adapter, archived protocol and real local WebSocket regressions; current official Guest API implemented; native guest form verified in Simulator without loading the browser game | Actual app-owned Guest/Discord live gameplay remains unverified |
+| Original browser world | Version/build-aware adapter, archived protocol and real local WebSocket regressions; current official Guest API implemented; Simulator guest form followed by a native scene and live53-player roster | Full movement, interactions, combat and live mission acceptance remain unverified |
 
 The QA server is official open.mp1.6.7.3218, nonannouncing and loopback-only.
 Core101's accepted checkpoint is not a public release: Core102 corrects the
@@ -53,9 +53,29 @@ skin and weapon sidecars and [NATIVE_BUILD.md](NATIVE_BUILD.md) for Go/Rust/SDK
 requirements.
 
 Legacy skin IDs are mapped by original model names to the converted asset
-namespace; they are not interchangeable numeric IDs. The current owner archive
-provides265 mapped pedestrians and lacks11 referenced retail models, including
-CJ. Missing models are reported explicitly. Authoritative interior changes
+namespace; browser aliases and retail IDs are not assumed interchangeable.
+The Core103 owner archive provided265 mapped pedestrians. The later physical
+browser/native comparison exposed incorrect browser-wire IDs in the exporter:
+it had enumerated an animation/style list instead of the explicit model-ID
+table. Core104 corrects that boundary. A canonical skin-table audit identified46
+unresolved SA-MP IDs:11 null mappings plus35 IDs missing from the generated
+catalog entirely. The ten story-character slots need SA-MP's explicit names
+rather than retail special-slot placeholders. Thirty-three unresolved models
+have exact retail DFF/TXD pairs available locally; availability is not native
+conversion/registration. CJ needs its segmented player/clothing path, and the
+additional300–311 models need their separately supplied resources. Missing
+models are reported explicitly. Core104 separately converts and validates Maccer,
+bringing the available count to266 and the canonical unresolved count to45.
+The corrected266-model namespace has1148 Python,
+532 actual server-row/browser-lookup and1067 extracted native-setter checks.
+A separate actual NativeMultiplayerClient/backend WebSocket test passes32
+bidirectional foot/driver cases. A real Metal four-model test including Maccer
+passes30 animated draws. Fresh actual browser/iPhone scenes now agree on s7
+male01 and skin2 Maccer; overlapping recordings verify both directions of short
+walking and release. These bounded LAN results do not establish every transition
+or existing-server destination.
+See [character identity evidence and texture limits](CORE_SKIN_IDENTITY_104.md).
+Authoritative interior changes
 select interior streaming; a high outdoor aircraft position is not assumed to
 be an interior solely because of its altitude.
 
@@ -91,14 +111,16 @@ account and build verification, with no automatic resubmission. The Metal
 renderer continues to use converted owner-local assets from the Mac.
 
 The earlier Simulator Discord page was blank after WebKit processes crashed.
-The native Guest form is independently verified; that does not establish a
-successful live connection. XCTest automation initialization on the installed
-iPhone reference timed out before capture. Replacing older developer support
-with compatible Apple-personalized support enabled a real CoreDevice screenshot
-of its Definitive Edition menu. Gameplay measurements, classic-retail parity
-and our app's physical controls/performance remain separate open gates.
+The native Guest form is independently verified. A later Simulator observation
+shows the original world's native scene and53-player roster after the user's
+guest attempt. This is admission/presentation evidence, not full gameplay
+acceptance. XCTest initialization still timed out, but compatible
+Apple-personalized developer support enabled physical screenshots and normal
+visible controls. The owner's DE gameplay and our app's separate LAN scene were
+captured; see `CORE_RETAIL_REFERENCE.md` and `CORE_NATIVE_DEVICE_104.md`.
+Classic-retail parity and complete physical controls/performance remain open.
 
-Remaining original-world gaps include live authenticated acceptance,
+Remaining original-world gaps include complete live gameplay acceptance,
 server-specific UI/mission/extended-record mapping, remote projectile/effect
 rendering, locally owned projectile explosions/detonation, some fighting styles
 and complete hospital/arena/custom-map transitions. Controlled goldens establish

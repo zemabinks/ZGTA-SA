@@ -10,17 +10,21 @@ from pathlib import Path
 import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/native-physics/tests/connection-owners';OUT.mkdir(parents=True,exist_ok=True)
-paths=['ios/App/NativeGameViewController.swift','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameBindings.swift','ios/App/NativeConnectionRecovery.swift','ios/App/NativeOriginalWorldEffects.swift']
+paths=['ios/App/NativeGameViewController.swift','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameBindings.swift','ios/App/NativeConnectionRecovery.swift','ios/App/NativeOriginalWorldEffects.swift','ios/App/NativeGameplayIdleTimer.swift']
 inputs={p:(ROOT/p).read_text() for p in paths}
 def method(source,marker):
  start=source.index(marker);brace=source.index('{',start);depth=1;end=brace+1
  while depth:depth+=(source[end]=='{')-(source[end]=='}');end+=1
- return source[start:end].replace('private ','')+'\n'
+ return source[start:end].replace('private ','').replace('@objc ','')+'\n'
 vc,renderer=inputs[paths[0]],inputs[paths[1]]
 code=r'''
 import Foundation
 import simd
 var ownerCalls:[String]=[]
+var systemIdleDisabled=false
+extension NativeGameplayIdleTimer {
+ static let shared=NativeGameplayIdleTimer(read:{systemIdleDisabled},write:{systemIdleDisabled=$0})
+}
 final class Couplings {
  var owner:String?="old-car",connection:String?="old-connection",removed:[String]=[]
  func setOwnedVehicle(_ id:String?){owner=id;ownerCalls.append("coupling-owner")}
@@ -39,6 +43,8 @@ final class Camera {var shakeCancels=0;func cancelShake(){shakeCancels+=1};func 
 final class Effects {var clears=0;func clear(){clears+=1}}
 final class DamageOwner {var resets=0;func reset(){resets+=1}}
 final class Renderer {
+ var displayResets=0
+ func resetDisplayClock(){displayResets+=1}
  var legacyWorldClears=0
  func clearLegacyWorld(){legacyWorldClears+=1;ownerCalls.append("legacy-world-clear")}
  var networkInterior:Int?=3,actorEffectResets=0
@@ -74,11 +80,12 @@ enum ButtonState {case normal}
 final class Radar {var target:SIMD2<Float>?=SIMD2(1,2)}
 final class HUD {let radar=Radar();var vehicle:String?="OLD";func updateVehicle(name:String?,speed:Float){vehicle=name}}
 final class Gameplay {var ready=false,refreshes=0;func setConnectionReady(_ value:Bool){ready=value};func refresh(){precondition(ready);refreshes+=1}}
-final class Network {var legacy:AnyObject?;var stops=0;func disconnect(){stops+=1;ownerCalls.append("network-disconnect")}}
+final class Network {var legacy:AnyObject?;var stops=0,activities=[Bool]();func setApplicationActive(_ value:Bool){activities.append(value)};func disconnect(){stops+=1;ownerCalls.append("network-disconnect")}}
 final class Audio {var stops=0;func stop(){stops+=1}}
 final class Display {var invalidated=false;func invalidate(){invalidated=true;ownerCalls.append("display-invalidate")}}
 struct Clock {var resets=0;mutating func reset(){resets+=1}}
 final class Presenter {var isBeingDismissed=false}
+final class Handoff {var releases=0;func release(){releases+=1}}
 final class LegacyDialog {var invalidations=0;func invalidate(){invalidations+=1}}
 final class LegacyOverlay {var clears=0;func clear(){clears+=1}}
 final class Artwork {
@@ -90,6 +97,8 @@ final class Artwork {
 class Parent {func viewWillDisappear(_ animated:Bool){}}
 enum NativeMultiplayerClient {typealias ConnectionState=NativeConnectionRecovery.State}
 final class Game:Parent {
+ let idleOwner=UUID();var gameStopped=false
+ var applicationActive=true,pauseEscapeHandoff:Handoff?=Handoff()
  let originalEffects=NativeOriginalWorldEffects();var originalExitToken:UInt64?=17
  var legacyDialog:LegacyDialog?=LegacyDialog(),legacyOverlay:LegacyOverlay?=LegacyOverlay(),legacySelection=true
  var legacyArtwork:Artwork?=Artwork()
@@ -101,12 +110,13 @@ final class Game:Parent {
  var isBeingDismissed=false,isMovingFromParent=false,presentingViewController:Presenter?=Presenter()
  func resetControls(){heldKeys=[];controlResets+=1}
  func setDrivingControls(_ value:Bool){drivingControls=value}
-'''+method(vc,'    private func connectionChanged(')+method(vc,'    private func vehicleRemoved(')+method(vc,'    private func stopGame()')+method(vc,'    override func viewWillDisappear(')+r'''
+'''+method(vc,'    private func connectionChanged(')+method(vc,'    private func vehicleRemoved(')+method(vc,'    private func stopGame()')+method(vc,'    override func viewWillDisappear(')+method(vc,'    @objc private func applicationResigned()')+method(vc,'    @objc private func applicationReturned()')+r'''
 }
 var checks=0
 func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}
 NativeMenuKeyLatch.reset()
 let game=Game(),oldPosition=game.renderer!.camera
+NativeGameplayIdleTimer.shared.claim(game.idleOwner,active:true)
 let oldDialog=game.legacyDialog!,oldOverlay=game.legacyOverlay!
 var delayedExit=false;game.renderer!.pendingVehicleExit={delayedExit=true}
 var delayedPlacement=false;game.renderer!.deferVehicleExit{delayedPlacement=true};let queuedPlacement=game.renderer!.pendingExitPlacement
@@ -147,12 +157,14 @@ game.connectionChanged(.ready)
 check(game.gameplay.ready && game.gameplay.refreshes==1 && game.lastNetwork==0 && game.lastGameplay==0,"ready does not refresh/rebase clocks")
 check(game.renderer!.resets==resets && game.renderer!.camera==SIMD3(1480,-1738,13) && game.currentVehicle==nil,"ready resurrects old driver or moves fresh spawn")
 game.viewWillDisappear(true)
+check(systemIdleDisabled && !game.gameStopped,"temporary presentation released gameplay's display ownership")
 check(game.network.stops==0 && !game.displayLink!.invalidated && game.gameplay.ready,"temporary fullscreen presentation stopped live world")
 check(game.legacyArtwork != nil && game.renderer!.legacyWorldClears==0,"temporary fullscreen presentation disposed live artwork/world owners")
 let exitingArtworkID=game.legacyArtwork!.id
 weak var exitingArtwork=game.legacyArtwork
 let shutdownStart=ownerCalls.count
 game.isBeingDismissed=true;game.viewWillDisappear(true)
+check(!systemIdleDisabled && game.gameStopped,"permanent game exit failed to restore the previous display policy")
 check(game.network.stops==1 && game.displayLink!.invalidated && !game.gameplay.ready && game.audio.stops==1,"permanent exit did not dispose owners")
 let shutdownCalls=Array(ownerCalls.dropFirst(shutdownStart))
 check(Artwork.cancelled.contains(exitingArtworkID) && game.legacyArtwork==nil && exitingArtwork==nil,"permanent exit retained artwork or released it before cancellation")
@@ -179,11 +191,34 @@ check(gone.gameplay.ready && gone.network.stops==0 && gone.radio.stops==1 && gon
 gone.vehicleRemoved("old-car")
 check(gone.renderer!.groundVehicle!.exits==1 && gone.radio.stops==1,"repeated despawn repeated owned exit")
 check(game.renderer!.localHitReaction.resets>0 && game.renderer!.footDeathKind==nil && game.renderer!.pendingFootHit==nil,"session reset retained old damage response")
+let replacement=Game()
+NativeGameplayIdleTimer.shared.claim(replacement.idleOwner,active:true)
+game.stopGame()
+check(systemIdleDisabled && game.gameStopped,"old controller's repeated shutdown released the replacement game's display ownership")
+replacement.stopGame()
+check(!systemIdleDisabled && replacement.gameStopped,"replacement shutdown lost the original display policy")
+let lifecycle=Game()
+NativeGameplayIdleTimer.shared.claim(lifecycle.idleOwner,active:true)
+lifecycle.applicationResigned()
+check(!systemIdleDisabled && !lifecycle.applicationActive && lifecycle.network.activities==[false],"actual resign hook did not suspend display/network activity")
+check(lifecycle.pauseEscapeHandoff!.releases==1 && lifecycle.frameClock.resets==1 && lifecycle.renderer!.displayResets==1 && lifecycle.controlResets==1,"actual resign hook retained paused input or frame history")
+lifecycle.applicationReturned()
+check(systemIdleDisabled && lifecycle.applicationActive && lifecycle.network.activities==[false,true],"actual return hook did not reacquire foreground gameplay")
+check(lifecycle.frameClock.resets==2 && lifecycle.renderer!.displayResets==2 && lifecycle.controlResets==2,"actual return hook retained suspended clocks or held input")
+lifecycle.stopGame()
+let stoppedClock=lifecycle.frameClock.resets,stoppedControls=lifecycle.controlResets
+lifecycle.applicationReturned()
+check(!systemIdleDisabled && lifecycle.gameStopped && lifecycle.network.activities==[false,true],"late application notification revived a permanently stopped game")
+check(lifecycle.frameClock.resets==stoppedClock && lifecycle.controlResets==stoppedControls,"late return mutated a stopped game's input or clock")
+let finalOwner=Game();NativeGameplayIdleTimer.shared.claim(finalOwner.idleOwner,active:true)
+lifecycle.applicationResigned()
+check(systemIdleDisabled,"old controller's actual resign hook cleared the current game's display ownership")
+finalOwner.stopGame();check(!systemIdleDisabled,"final actual shutdown did not restore the original display policy")
 print("PASS connection owners: \(checks) actual extracted controller/renderer lifecycle checks (non-UI spies)")
 '''
 with tempfile.TemporaryDirectory(prefix='zgta-connection-owners-') as directory:
  root=Path(directory);source=root/'main.swift';binary=root/'verify'
- source.write_text(inputs[paths[2]]+'\n'+inputs[paths[3]]+'\n'+inputs[paths[4]]+'\n'+code)
+ source.write_text(inputs[paths[2]]+'\n'+inputs[paths[3]]+'\n'+inputs[paths[4]]+'\n'+inputs[paths[5]]+'\n'+code)
  subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'modules'),str(source),'-o',str(binary)],check=True)
  result=subprocess.run([str(binary)],check=True,capture_output=True,text=True);print(result.stdout,end='')
  (OUT/'report.json').write_text(json.dumps({'pass':True,'output':result.stdout,'scope':__doc__,'sources':{p:hashlib.sha256(value.encode()).hexdigest() for p,value in inputs.items()}},indent=2)+'\n')

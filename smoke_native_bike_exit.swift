@@ -30,11 +30,13 @@ final class BikeExitRenderer {
  var onLocalImpact:((Int)->Void)?
  var onLocalDamage:((Double,Int)->Void)?
  var onLocalHealth:((Int)->Void)?
+ var onLocalFatal:((Int)->Void)?
  let footLocomotion=NativeFootLocomotion(),headingContinuity=NativeHeadingContinuity(),personalFlight=NativePersonalFlightController()
  var footAnimator:NativeFootAnimation?
  var cancelled=false
  var position:SIMD3<Float>{camera}
  var vehicleWirePosition:SIMD3<Float>{groundVehicle!.bodyPosition}
+ var legacyVehicleQuaternion:SIMD4<Float>?{nil}
  var direction:Float{driving ? heading:actorHeading};var vehicleNose:Float{vehiclePitch};var vehicleRoll:Float{vehicleFallbackRoll}
  func prepareFootAnimation(){}
  func resolveVehicleExit(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement{.ready(wanted)}
@@ -54,10 +56,10 @@ final class BikeExitRenderer {
  // ACTUAL_RENDERER_EXIT
 }
 final class ExitNetwork {
- struct Packet {let feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float;let health:Int,damage:String,work:Int?;let footHeading:Float?}
+ struct Packet {let feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float;let health:Int,damage:String,work:Int?;let footHeading:Float?;let legacyRotation:SIMD4<Float>?}
  var packets:[Packet]=[]
- func sendExit(_ feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float,vehicle:ExitVehicle,vehicleHealth:Int,vehicleDamage:String,vehicleWork:Int?,footHeading:Float?=nil){
-  packets.append(.init(feet:feet,parked:parked,heading:heading,pitch:pitch,roll:roll,health:vehicleHealth,damage:vehicleDamage,work:vehicleWork,footHeading:footHeading))
+ func sendExit(_ feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float,vehicle:ExitVehicle,vehicleHealth:Int,vehicleDamage:String,vehicleWork:Int?,footHeading:Float?=nil,legacyRotation:SIMD4<Float>?=nil){
+  packets.append(.init(feet:feet,parked:parked,heading:heading,pitch:pitch,roll:roll,health:vehicleHealth,damage:vehicleDamage,work:vehicleWork,footHeading:footHeading,legacyRotation:legacyRotation))
  }
 }
 enum ExitButtonState {case normal}
@@ -164,3 +166,41 @@ for shield in [0,25,100]{for force in [100.0,1000,2500,5000]{
  if hp>0{check(app.footAnimator!.reportedDown>0,"Absorbed crash lost its directional knock")}
 }}
 print("PASS armour-aware real forced exit: \(checks) combined checks; one ordered prediction owner and correct knock/death")
+
+// The actual Renderer property reads the live owned chassis. Completion must
+// capture this full pitched/rolled orientation before exit deactivates it.
+for model in ["420","522","481"] {
+ let app=try BikeExitRenderer(root:root,model:model,library:library,profile:profiles[0]!)
+ let controller=BikeExitController();controller.renderer=app
+ let world=app.groundVehicle!.world
+ let body=app.groundVehicle!.chassisColliders.first.flatMap{world.colliderInfo($0)?.body}!
+ let state=world.bodyState(body)!,q=simd_quatf(angle:0.91,axis:simd_normalize(SIMD3<Float>(0.3,0.8,-0.4)))
+ world.setBodyState(.init(position:state.position,rotation:q,linearVelocity:state.linearVelocity,angularVelocity:state.angularVelocity),for:body)
+ let expected=SIMD4(q.real,q.imag.x,-q.imag.z,q.imag.y)
+ check(app.legacyVehicleQuaternion.map{simd_distance($0,expected)<0.000002} == true,"Actual live quaternion source lost pitch/roll or axis mapping")
+ controller.leave(nil)
+ check(app.legacyVehicleQuaternion==nil,"Exit retained an active legacy vehicle rotation")
+ check(controller.network.packets.count==1 && controller.network.packets[0].legacyRotation.map{simd_distance($0,expected)<0.000002} == true,"Exit failed to capture full quaternion before chassis reset")
+}
+print("PASS capture-before-reset: \(checks) combined checks; actual live Rapier rotation and explicit packet spy")
+
+// Fatal callback is the dedicated legacy death-report boundary. Keep the
+// health-only fallback and the already-dead path independently covered.
+for model in ["420","522","519"] {for dedicated in [false,true] {for alreadyDead in [false,true] {
+ let app=try BikeExitRenderer(root:root,model:model,library:library,profile:profiles[0]!)
+ let controller=BikeExitController();controller.renderer=app
+ var fatalities:[Int]=[],healthEvents:[Int]=[]
+ app.onLocalHealth={healthEvents.append($0)}
+ if dedicated {app.onLocalFatal={cause in
+  check(app.health==0 && !app.driving,"Fatal callback preceded committed zero-health foot handoff")
+  fatalities.append(cause)
+ }}
+ if alreadyDead {app.health=0;app.footDeathKind="koSpinL";app.footAnimator!.die("koSpinL")}
+ controller.wreck()
+ check(fatalities==(!alreadyDead && dedicated ? [51]:[]),"Completed wreck omitted, duplicated or changed fatal explosion cause 51")
+ check(healthEvents==(!alreadyDead && !dedicated ? [0]:[]),"Fatal reporter and health fallback both fired")
+ check(app.footAnimator!.dead && app.footDeathKind==(alreadyDead ? "koSpinL":"koFront"),"Wreck replaced an accepted death animation")
+ controller.wreck();app.dispatch()
+ check(controller.network.packets.count==1 && fatalities.count<=1 && healthEvents.count<=1,"Repeated fatal handoff replayed transport or damage")
+}}}
+print("PASS cause51 boundary: \(checks) combined checks; dedicated fatal reporter, fallback and existing-death preservation")

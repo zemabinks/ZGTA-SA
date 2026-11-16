@@ -1237,3 +1237,62 @@ coverage, raw stock/supplemental object assets, client extensions and proprietar
 server-binary acceptance. Original browser guest requests login; the legitimate
 app-owned authenticated live world still needs the user's sign-in. No retail,
 physical-phone, universal-server or full1:1 claim is made.
+
+##2026-11-16 — Core103 physical reference and regression checkpoint
+
+Both optimized SDK builds pass. The frozen149-check regression run completed
+with146 passes and unchanged captured sources. Two extracted exit carriers
+omitted newer production dependencies, and the server-UI SDK check inherited
+compiler caches from another candidate directory. The initial failures remain
+preserved. The exact carrier repairs now pass502 bike-exit and309 exit-runtime
+checks; the repaired server-UI host/iPhone/Simulator SDK check also passes.
+The composite acceptance therefore covers149/149 cases with unchanged App,
+transport and physics source. Only the three listed test-carrier files changed.
+These results are not relabeled as a single all-pass original run.
+
+Normal inputs and paired CoreDevice capture reached the owner's separately
+installed DE menu, live gameplay and nearby BMX. Walk/release, turning, camera
+orbit and bicycle entry/exit were captured. Jump was not established. No save
+files, private game process state or original executable modifications were
+used. See `CORE_RETAIL_REFERENCE.md` for edition and timing limitations.
+
+The actual native iPhone joined the isolated LAN server, rendered the city/HUD,
+walked and stopped. A separate browser showed the native peer; the phone showed
+the browser peer and its removal after that browser closed. This establishes
+reciprocal static presence/leave, not synchronized motion or combat acceptance.
+Input-service and XCTest initialization failures remain in the local evidence.
+The Simulator also displayed the original public world's roster and native
+scene after its own legitimate guest flow; complete original-server gameplay
+has not been verified.
+
+##2026-11-16 — Core104 device lifecycle and skin identity
+
+Direct phone capture identified the user's visible error as the missing
+`LSSupportsGameMode` Metal warning. Core104 includes that plist key and an owned
+foreground-gameplay idle policy after actual testing exposed unwanted display
+sleep.886 helper checks and61 extracted lifecycle checks pass. The complete
+iPhone Debug app compiles, signs, installs and opens its native main menu.
+Physical in-game capture now verifies the missing-key warning is gone with the
+Metal HUD still enabled and Game Mode On.389 camera access units show working
+horizontal orbit, up/down pitch, release and independent actor facing. A later
+530-frame trial captures jetpack rise/turn/descent/landing without reproducing
+the instant reversal.318.782 seconds of command-free/assertion-free idle retains
+the foreground game. Broader resume continuity, vehicles, precise retail timing
+and performance remain open; see `CORE_NATIVE_DEVICE_104.md`.
+
+The reciprocal browser/native test also exposed different characters for the
+same wire skin ID. The exporter had enumerated an animation/style array rather
+than the browser's explicit model-ID catalogue. Core104's converter now reads
+the explicit catalogue. The265-model migration retains all model bytes and
+keeps browser-wire IDs distinct from retail aliases. Maccer is separately decoded,
+converted and validated on real Metal, producing266 available models. Namespace,
+actual native WebSocket and1675 actual Renderer/animation/Rapier checks pass
+against the adopted metadata. Fresh iPhone/browser scenes show the same wire7
+male01 and wire2 Maccer, and overlapping recordings verify both directions of
+short walking/release. Known texture resampling,45 missing canonical IDs and
+unmeasured mechanics remain explicit in `CORE_SKIN_IDENTITY_104.md`.
+
+The updated registry contains152 cases; a single full152-case run is not claimed.
+Acceptance combines the preserved149-case baseline with repaired carriers,
+unchanged core sources, focused Core104 lifecycle/model/network checks, actual
+device observations and a successful optimized iPhone build.

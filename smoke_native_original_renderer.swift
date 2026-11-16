@@ -4,6 +4,9 @@ let root=URL(fileURLWithPath:CommandLine.arguments[1])
 var checks=0
 func check(_ condition:Bool,_ label:String){checks+=1;guard condition else{fatalError("Original Renderer: \(label)")}}
 let modelIndex=try JSONSerialization.jsonObject(with:Data(contentsOf:root.appendingPathComponent("local-only/site/game/native/models/index.json")))as![String:[String:String]]
+// This gate preserves animation/task state while changing concrete models.
+// Exact browser wire IDs are checked independently by test_native_skin_namespace.
+func skinID(_ model:String)->Int{Int(modelIndex["peds"]!.first{$0.value==model}!.key)!}
 let library=NativeSkeletalAnimationLibrary(data:try Data(contentsOf:root.appendingPathComponent("local-only/site/game/native/models/animations.clips.bin")))!
 let definitions=try NativeFootAnimationDefinitions(data:Data(contentsOf:root.appendingPathComponent("local-only/site/game/world/peds.json")))
 let weapons=try NativeFootWeaponAnimation.load(data:Data(contentsOf:root.appendingPathComponent("local-only/site/game/native/foot-animation.json")))
@@ -35,7 +38,7 @@ for scenario in ["walk","sprint","jump","fall","gun","reload","melee","swim","fl
  check(snapshot(animator) != initial,"\(scenario) scenario actually advanced state")
  if scenario=="reload"{check(animator.reloading,"active reload before skin")}
  if scenario=="death"{check(animator.dead,"active death before skin")}
- for skin in [264,1,7,104,7]{
+ for skin in [skinID("army"),skinID("male01"),skinID("bmori"),skinID("vla2"),skinID("bmori")]{
   let before=snapshot(animator),physical=motion(app),dead=animator.dead,reloading=animator.reloading
   check(app.setLocalSkin(skin),"converted skin \(skin)")
   check(app.footAnimator === animator,"\(scenario) kept animator owner")
@@ -45,18 +48,18 @@ for scenario in ["walk","sprint","jump","fall","gun","reload","melee","swim","fl
   check(app.localSkin==skin && app.loaded.last==modelIndex["peds"]![String(skin)],"actual selected model")
  }
  let count=app.loaded.count
- check(!app.setLocalSkin(0) && app.localSkin==7 && app.loaded.count==count,"unsupported CJ is not another skin")
+ check(!app.setLocalSkin(0) && app.localSkin==skinID("bmori") && app.loaded.count==count,"unsupported CJ is not another skin")
 }
-let pending=OriginalRenderer();check(!pending.setLocalSkin(264)&&pending.pendingLocalSkin==264&&pending.localSkin==7,"skin waits for catalogue")
-pending.pedModels=modelIndex["peds"]!;check(pending.setLocalSkin(pending.pendingLocalSkin!)&&pending.localSkin==264,"deferred mapped skin applied")
+let pending=OriginalRenderer();check(!pending.setLocalSkin(skinID("army"))&&pending.pendingLocalSkin==skinID("army")&&pending.localSkin==7,"skin waits for catalogue")
+pending.pedModels=modelIndex["peds"]!;check(pending.setLocalSkin(pending.pendingLocalSkin!)&&pending.localSkin==skinID("army"),"deferred mapped skin applied")
 check(!pending.setLocalSkin(-1) && !pending.setLocalSkin(65536),"skin ID bounds")
 let legacyData=try Data(contentsOf:root.appendingPathComponent("local-only/original-world-assets/game/native/samp-skins.json"))
 let legacyCatalog=try NativeSAMPSkinCatalog(data:legacyData)
-check(legacyCatalog.nativeSkin(forLegacy:287)==264 && legacyCatalog.model(forLegacy:287)=="army","retail Army maps by model, not ID offset")
+check(legacyCatalog.nativeSkin(forLegacy:287)==skinID("army") && legacyCatalog.model(forLegacy:287)=="army","retail Army maps by model, not ID offset")
 let legacyPending=OriginalRenderer();check(!legacyPending.setLegacySkin(287)&&legacyPending.pendingLegacySkin==287,"legacy skin queues before both catalogues")
 check(legacyPending.loadLegacySkinCatalog(legacyData)&&legacyPending.pendingLegacySkin==287,"legacy map waits for model catalogue")
-legacyPending.pedModels=modelIndex["peds"]!;check(legacyPending.setLegacySkin(287)&&legacyPending.localSkin==264&&legacyPending.localLegacySkin==287,"real legacy skin selects Army mesh")
-check(legacyPending.setLocalSkin(7)&&legacyPending.localLegacySkin==nil,"original browser skin keeps its own namespace")
+legacyPending.pedModels=modelIndex["peds"]!;check(legacyPending.setLegacySkin(287)&&legacyPending.localSkin==skinID("army")&&legacyPending.localLegacySkin==287,"real legacy skin selects Army mesh")
+check(legacyPending.setLocalSkin(7)&&legacyPending.localLegacySkin==nil,"direct skin selection clears legacy identity")
 check(!legacyPending.setLegacySkin(0)&&legacyPending.localSkin==7,"unconverted CJ is explicit gap")
 let customRenderer=setup();_=customRenderer.loadLegacySkinCatalog(legacyData)
 check(!customRenderer.setLegacySkin(20001)&&customRenderer.pendingLegacySkin==20001,"custom skin waits for a genuinely registered native GPU resource")
