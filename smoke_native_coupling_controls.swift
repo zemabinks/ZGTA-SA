@@ -49,7 +49,7 @@ final class Renderer {
  func releaseVehicleCoupling(secondOnly:Bool=false){released+=1}
  func cancelWeaponInput(){};func cancelReloadAnimation(){}
  func toggleCrouch(){crouches+=1}
- func exitVehicle(){exits+=1;position=SIMD3(99,98,97);vehicleWorkingValue=nil;vehicleHealth=0;vehicleDamage=""}
+ func exitVehicle(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false){exits+=1;position=SIMD3(99,98,97);vehicleWorkingValue=nil;vehicleHealth=0;vehicleDamage=""}
 }
 final class Game {
  let network=Network(),gameplay=Gameplay(),weaponCycle=NativeWeaponCycleQueue(),radio=Radio(),gameHUD=HUD(),status=Status()

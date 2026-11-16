@@ -31,6 +31,6 @@ def main(scenario='hit'):
         result=subprocess.run(['node',str(work/'fixture.js'),str(game),str(work/'client'),str(OUT/'server-report.json'),str(ROOT)],capture_output=True,text=True,env=environment,timeout=40)
         unchanged=all((ROOT/p).read_bytes()==v for p,v in before.items())
         report={'status':'PASS' if result.returncode==0 and unchanged else 'FAIL','sourceUnchanged':unchanged,'sourceHashes':{p:hashlib.sha256(v).hexdigest() for p,v in before.items()},'output':result.stdout+result.stderr,
-                'limits':['Synthetic floor/actors, actual unmodified hit authority with deliberate duplicate outgoing event delivery and snapshot ordering','No real rendered browser, phone input, retail executable or WAN evidence']}
+                'limits':['Synthetic floor/actors; actual current native transport/server with controlled duplicate and ordering fixtures','No real rendered browser, phone input, retail executable or WAN evidence']}
         (OUT/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(result.stdout+result.stderr,end='');result.check_returncode();assert unchanged
 if __name__=='__main__':main()

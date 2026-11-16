@@ -298,6 +298,7 @@ final class NativeGameViewController: UIViewController {
         renderer?.onVehicleExplosion = { [weak self] _ in self?.audio.explosion(weapon:51) }
         renderer?.onVehicleMove = { [weak self] id,state in self?.network.sendVehicleMove(id,state:state) }
         renderer?.onContactAudio = { [weak self] collisions,body in self?.audio.vehicleContacts(collisions,body:body) }
+        renderer?.onLocalImpact = { [weak self] value in self?.network.reportImpactDamage(value) }
         renderer?.onLocalHealth = { [weak self] value in self?.network.reportLocalHealth(value) }
         renderer?.onParachuteUsed = { [weak self] in self?.network.usedParachute() }
         network.onFlightGear = { [weak self] parachute,jetpack in self?.renderer?.setFlightGear(parachute:parachute,jetpack:jetpack) }
@@ -335,6 +336,9 @@ final class NativeGameViewController: UIViewController {
         renderer?.onFootWeaponShot = { [weak self] weapon, left in
             self?.consumeFootWeaponShot(weapon: weapon, left: left) ?? false
         }
+        renderer?.onVehicleLostInWater = { [weak self] in self?.completeVehicleExit(water:true) }
+        renderer?.onVehicleWrecked = { [weak self] in self?.completeVehicleExit(wrecked:true) }
+        renderer?.onBikeEjection = { [weak self] event in self?.completeVehicleExit(ejection:event) }
         renderer?.onMeleeSwing = { [weak self] _ in self?.audio.swing() }
         renderer?.onFootMeleeHit = { [weak self] event in self?.consumeFootMeleeHit(event) ?? false }
         renderer?.onMeleeGroundTarget = { [weak self] probe in
@@ -1364,12 +1368,12 @@ final class NativeGameViewController: UIViewController {
         }
     }
 
-    private func completeVehicleExit() {
+    private func completeVehicleExit(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false) {
         guard let renderer,currentVehicle != nil else{return}
         let parked = renderer.vehicleWirePosition, heading = renderer.direction
         let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
         let damage = renderer.vehicleDamage,work=renderer.vehicleWorkingValue,health=renderer.vehicleHealth
-        renderer.exitVehicle()
+        renderer.exitVehicle(ejection:ejection,wrecked:wrecked,water:water)
         if let currentVehicle {
             network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
                              vehicle: currentVehicle, vehicleHealth:health,vehicleDamage:damage,vehicleWork:work)

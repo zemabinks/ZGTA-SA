@@ -43,6 +43,24 @@ import CoreFoundation
   check(p.hurt(to:90)==nil,"issued an unrepresentable JS request sequence")
   p.begin(connection:"limit",health:0,armour:0,revision:0,processed:9_007_199_254_740_991)
   check(p.respawn()==nil,"issued an unrepresentable respawn sequence")
+  for shield in [0,25,100] {for damage in [1,5,25,99,100,125,200] {
+   var collision=NativeHealthPrediction();collision.begin(connection:"impact",health:100,armour:shield,revision:0,processed:0)
+   let event=collision.impact(damage)!,absorbed=min(shield,damage),hp=max(0,100-(damage-absorbed)),ap=shield-absorbed
+   check(event.kind=="impact" && collision.health==hp && collision.armour==ap,"Impact bypassed armour prediction")
+   check(collision.apply(health:hp,armour:ap,connection:"impact",processed:event.sequence,revision:1),"Impact acknowledgement rejected")
+   check(collision.health==hp && collision.armour==ap,"Impact ACK charged armour/health twice")
+  }}
+  var mixed=NativeHealthPrediction();mixed.begin(connection:"mixed",health:100,armour:25,revision:0,processed:0)
+  _=mixed.impact(20);_ = mixed.hurt(to:90);_ = mixed.impact(20)
+  check(mixed.health==75 && mixed.armour==0,"Mixed armour impact/fall ordering")
+  check(mixed.apply(health:90,armour:0,connection:"mixed",processed:0,revision:1),"Earlier authoritative gun hit rejected")
+  check(mixed.health==40 && mixed.armour==0,"Earlier gun hit did not rebase ordered impact/fall")
+  check(mixed.apply(health:70,armour:0,connection:"mixed",processed:1,revision:2) && mixed.health==40,"Partial impact acknowledgement lost later predictions")
+  check(mixed.apply(health:40,armour:0,connection:"mixed",processed:3,revision:3) && mixed.health==40,"Combined acknowledgement replayed damage")
+  for bad in [-1,0,201,Int.max]{check(mixed.impact(bad)==nil,"Invalid impact amount reserved a sequence")}
+  mixed.begin(connection:"bound",health:100,armour:100,revision:0,processed:0)
+  for _ in 0..<128{check(mixed.impact(1) != nil,"Bounded prediction was prematurely full")}
+  check(mixed.impact(1)==nil && mixed.hurt(to:0)==nil,"Impact/fall queues did not share their128-request bound")
   print("PASS health prediction: \(checks) actual production checks for concurrent server/local loss, armour, stale HTTP, heal, fatal/respawn and lost-ACK reconnect")
  }
 }

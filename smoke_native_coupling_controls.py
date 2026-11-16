@@ -5,7 +5,7 @@ import hashlib,json,subprocess,tempfile
 from smoke_native_climb_runtime import function
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/coupling-integration';OUT.mkdir(parents=True,exist_ok=True)
-FILES=['ios/App/NativeGameViewController.swift','ios/App/NativeGameBindings.swift','ios/App/NativeVehicleCoupling.swift','ios/App/NativeMultiplayerClient.swift','ios/App/ServerAddress.swift','ios/App/NativeInventoryPrediction.swift','ios/App/NativeWeaponState.swift','smoke_native_coupling_controls.py','smoke_native_coupling_controls.swift']
+FILES=['ios/App/NativeGameViewController.swift','ios/App/NativeGameBindings.swift','ios/App/NativeVehicleCoupling.swift','ios/App/NativeMultiplayerClient.swift','ios/App/ServerAddress.swift','ios/App/NativeInventoryPrediction.swift','ios/App/NativeWeaponState.swift','smoke_native_coupling_controls.py','smoke_native_coupling_controls.swift','ios/App/NativeVehicleDamageController.swift']
 def main():
  inputs={n:(ROOT/n).read_bytes() for n in FILES};vc=inputs[FILES[0]].decode();mp=inputs[FILES[3]].decode();coupling=inputs[FILES[2]].decode()
  markers=['private func requestVehicleCoupling(','private func sendCurrentPosition(','private func completeVehicleExit(',
@@ -19,6 +19,8 @@ def main():
  position=function(mp,'    func sendPosition(');position=position[:position.index('{')]
  exit_method=function(mp,'    func sendExit(');exit_method=exit_method[:exit_method.index('{')]
  types='\n'+function(mp,'struct RemoteVehicle {')+'\n'+function(mp,'struct NativeCouplingLink:')+'\nfinal class NativeVehicleCoupling {\n'+function(coupling,'    enum Kind:')+'\n'+function(coupling,'    struct Request:')+'\n}\n'
+ event=function(inputs['ios/App/NativeVehicleDamageController.swift'].decode(),'    struct Event {')
+ types+='\nenum NativeBikeEjection {typealias V=SIMD3<Double>;'+event+'}\n'
  source='import Foundation\nimport simd\n'+types
  source+='\n'+'\n'.join(inputs[n].decode() for n in ['ios/App/NativeGameBindings.swift','ios/App/ServerAddress.swift','ios/App/NativeInventoryPrediction.swift','ios/App/NativeWeaponState.swift'])
  source+='\n'+inputs['smoke_native_coupling_controls.swift'].decode().replace('// ACTUAL_METHODS',methods).replace('// ACTUAL_CALLBACKS',callbacks).replace('// ACTUAL_RESET_AUX',reset).replace('// ACTUAL_AXIS',axis)

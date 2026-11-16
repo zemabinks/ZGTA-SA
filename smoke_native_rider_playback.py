@@ -23,6 +23,7 @@ const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(
    root.position.set(Math.sin(frame*.007)*10,model.origin+.1*Math.sin(frame*.011),-frame*.01);root.rotation.set(.08*Math.sin(frame*.013),.2*Math.cos(frame*.009),.03*Math.sin(frame*.017),"YXZ");const delta=[1/60,1/50,1/75][frame%3],input={speed:Math.sin(frame*.009)*20,steer:Math.sin(frame*.019)*.61,lean:Math.sin(frame*.013)*.5,tuck:Math.cos(frame*.017)*.6,pedal:Math.floor(frame/60)%3,crank:frame*.017%1,hop:0};original.update(delta,input);world.updateMatrixWorld(true);
    const row={id,seat,side,frame,delta,input,method,state:original.state,debug:original.debug,door:original.door?{...original.door}:null};
    if(frame%7===0){const figure=original.figure.children[0].children[0].children[0];let mesh;figure.traverse(o=>{if(o.isSkinnedMesh)mesh=o});mesh.skeleton.update();row.vertices=[0,12,57,113,207,330,500,650,800,821].map(index=>{const v=new T.Pq0().fromBufferAttribute(mesh.geometry.attributes.position,order[index]);mesh.applyBoneTransform(order[index],v).applyMatrix4(mesh.matrixWorld);return[index,v.x,-v.z,v.y]});row.matrix=new T.kn4().set(1,0,0,0,0,0,-1,0,0,1,0,0,0,0,0,1).multiply(car.matrixWorld).toArray()}
+   const beside=original.beside(side,new T.Pq0);if(original.state==="in"&&beside)row.beside=[beside.x,-beside.z,beside.y];
    const stood=original.stood(new T.Pq0);if(stood)row.feet={position:[stood.feet.x,-stood.feet.z,stood.feet.y],heading:-stood.heading};rows.push(row);
   }
   original.dispose();
@@ -46,13 +47,14 @@ for row in rows{
  if let value=actual.capture{switch value{case .current:capture=previous;case .sample(let seed):capture=actor.riderPose(frame:seed.pose,library:library,figurePosition:SIMD3<Float>(seed.anchor))}}
  let pose=actor.riderPose(frame:actual.sample.pose,library:library,figurePosition:SIMD3<Float>(actual.sample.anchor),figureTurn:Float(actual.turn),previous:actual.transitioning ? capture:nil,transition:actual.transition);previous=pose
  if let expected=row["vertices"] as? [[NSNumber]]{let points=actor.positions(pose:pose),parent=matrix(row["matrix"] as! [NSNumber]);for vertex in expected{let p=parent*SIMD4(points[vertex[0].intValue],1),want=SIMD3(vertex[1].floatValue,vertex[2].floatValue,vertex[3].floatValue),error=simd_distance(SIMD3(p.x,p.y,p.z),want);largest=max(largest,error);assert(error<0.00008,"\(token) frame\(row["frame"]!) vertex\(vertex[0]) \(error)m");checks+=3}}
+ if let wanted=row["beside"] as? [NSNumber],let values=row["matrix"] as? [NSNumber]{let at=playback.beside(side:side,model:matrix(values))!,p=SIMD3(wanted[0].floatValue,wanted[1].floatValue,wanted[2].floatValue);assert(simd_distance(at,p)<0.00008,"Source beside placement \(token)");checks+=3}
  if let feet=row["feet"] as? [String:Any],let values=row["matrix"] as? [NSNumber]{let actual=actor.riderFeet(pose:pose,model:matrix(values),origin:Float(defs.models[id]!.origin))!,p=(feet["position"] as! [NSNumber]).map(\.floatValue),error=simd_distance(actual.position,SIMD3(p[0],p[1],p[2]));assert(error<0.00008,"dynamic feet \(token):\(error)");let wanted=Float(n(feet,"heading")),delta=atan2(sin(actual.heading-wanted),cos(actual.heading-wanted));assert(abs(delta)<0.00001,"feet heading");checks+=4}
  if let door=row["door"] as? [String:Any]{assert(actual.doorPart==Int(n(door,"part")));assert(abs(actual.doorOpen-n(door,"open"))<0.0000001)}else{assert(actual.doorPart==nil)}
 }
 print("PASS: \(rows.count) actual bA boarding/exit/quarter-second transition frames, \(checks) real skinned vertices, maximum \(largest)m")
 '''
 def main():
- work=Path('/private/tmp/zgta-rider-playback-debug');work.mkdir(exist_ok=True)
+ work=ROOT/'local-only/research/rider-playback';work.mkdir(parents=True,exist_ok=True)
  (work/'reference.js').write_text(JS);(work/'order.json').write_text(json.dumps(archive.pedestrian_data(archive.GAME/'bmori.dff')[5]))
  subprocess.run(['node',str(work/'reference.js'),str(work/'order.json'),str(work/'reference.json')],cwd=ROOT,check=True)
  names=['NativeActorAnimation','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativeRiderAnimation','NativeBoardingAnimation']

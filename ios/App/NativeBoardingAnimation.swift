@@ -74,6 +74,18 @@ final class NativeBoardingAnimation {
         }
         return Plan(phases:phases,anchor:stood)
     }
+    /// Original bA.beside: the entry clip's terminal root locates adjacent
+    /// feet. This is distinct from the seated pose and the timed door exit.
+    func beside(_ c:Configuration,side:Int = -1)->SIMD3<Double>? {
+        guard c.seats.indices.contains(c.seat) else{return nil}
+        let seat=c.seats[c.seat]
+        if c.afloat {var at=seat.at;at.z -= 1;return at}
+        let shuffled=shuffleSeat(c,side)
+        guard let entry=clip(c,"getIn",shuffled==nil ? sideIndex(seat,side):1),let length=duration(entry) else{return nil}
+        var at=(shuffled?.at ?? seat.via ?? seat.at)-root(entry,length)
+        at.z = -c.origin
+        return at
+    }
     private func shuffleSeat(_ c:Configuration,_ side:Int)->Seat? {
         guard side>0,c.shuffle != nil,!c.astride,!c.afloat,c.seat==0,c.seats.indices.contains(0),c.seats[0].side == -1,c.seats.count>1 else{return nil}
         let right=c.seats[1]

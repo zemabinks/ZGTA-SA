@@ -320,6 +320,9 @@ final class NativeGroundVehicle {
     var restStamina:((Double)->Void)?
     private var dynamics: NativeVehicleDynamics?
     private var bikeDynamics: NativeBikeDynamics?
+    private var bikeEjection:NativeBikeEjection?
+    private var bikeContact=false,bikeOccupied=false
+    func takeBikeEjection()->NativeBikeEjection.Event? {bikeEjection?.take()}
     private var trainDynamics: NativeTrainDynamics?
     private var tracks: NativeTrainTracks?
     private var trainLayouts:[String:NativeTrainDynamics] = [:]
@@ -364,7 +367,13 @@ final class NativeGroundVehicle {
     }
     var landingGearUp: Bool { dynamics?.flight?.gearUp ?? false }
     var onWater: Bool { dynamics?.buoyancy?.onWater ?? false }
-    var lostInWater: Bool { dynamics?.buoyancy?.lost ?? false }
+    var lostInWater: Bool {
+        guard let rigid,let definition=definitions[model],let state=world.bodyState(rigid) else{return false}
+        if let afloat=dynamics?.buoyancy{return afloat.lost}
+        let point=SIMD3<Double>(state.position)
+        guard let level=waterLevel?(point) else{return false}
+        return point.y+definition.configuration.origin+0.4<level
+    }
     var heard:NativeVehicleDynamics.HeardSnapshot? {bikeDynamics?.heard ?? dynamics?.heard}
     var drivesTop:Double {definitions[model].map{0.78*$0.configuration.table.maxVelocity/3.6} ?? 40}
     var rotorScalar:Double {dynamics?.flight?.rotor ?? 0}
@@ -630,6 +639,11 @@ final class NativeGroundVehicle {
         let damage = NativeVehicleDamageController(world:world,mass:table.mass,collisionDamage:definition.collisionDamage,
             maxX:definition.damageWidth,flags:table.modelFlags,model:table.model,origin:definition.configuration.origin,flight:dynamics?.flight != nil)
         damage.onEvents = { [weak self] events,body in self?.handleDamageEvents(events,body:body) }
+        if bikeDynamics != nil {bikeEjection=NativeBikeEjection(model:Int(model) ?? 0,mass:table.mass)}
+        damage.onImpact = {[weak self] intensity,way,body,previous in
+            guard let self else{return}
+            self.bikeEjection?.impact(intensity:intensity,way:way,body:body,previousVelocity:previous,occupied:self.bikeOccupied)
+        }
         damage.onCollisions = {[weak self] collisions,body in self?.onCollisions?(collisions,body)}
         damage.isOtherVehicle = { [weak self] id in self?.others.colliders.contains(id) == true }
         damage.isRhino = { [weak self] id in self?.others.rhinos.contains(id) == true }
@@ -648,7 +662,7 @@ final class NativeGroundVehicle {
         visualWheelSpeed = 0
         forwardSpeed = 0
         chassisColliders.removeAll()
-        damageController = nil
+        damageController = nil;bikeEjection=nil;bikeContact=false;bikeOccupied=false
         workingPlateColliders=[]
         workingShapeBody=nil;workingShapeValue=nil
         workingControl=0;workingTowed=false;workingState=WorkingState()
@@ -783,11 +797,15 @@ final class NativeGroundVehicle {
                 if !controls.handbrake {wheelClocks[1] -= rear*fixed/rearRadius}
                 wheelClocks[3]=wheelClocks[1]
             }
+            bikeOccupied = !input.nobody
+            bikeEjection?.step(delta:fixed,up:state.rotation.act(SIMD3(0,1,0)),velocity:result.linearVelocity,
+                contact:bikeContact,occupied:bikeOccupied)
             world.setVelocities(rigid, linear: SIMD3<Float>(result.linearVelocity), angular: SIMD3<Float>(result.angularVelocity))
             world.step()
             let contacts = world.drainContactForceEvents()
             if let current=world.bodyState(rigid) {
                 damageController?.step(previous:body,current:current,contacts:contacts,chassis:chassisColliders,delta:fixed)
+                bikeContact=damageController?.contactSeen ?? false
             }
             onContactForces?(contacts,rigid,fixed)
             accumulator -= fixed

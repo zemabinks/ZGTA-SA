@@ -105,6 +105,29 @@ import simd
             check(simd_length(driven.orientation.vector-coasting.orientation.vector)<1e-5,model+" zero-health angular control remained active")
             if model=="487" {check(driven.rotorTurning<rotor,"zero-health helicopter rotor kept running")}
         }
+        // Real chassis contacts route the original weighted bike impact into
+        // one event with pre-impact velocity; cars never eject a bike rider.
+        for model in ["522","481","420"] {for occupied in [true,false] {
+            let fleet=manager();precondition(fleet.enter(model:model,modelPosition:SIMD3(0,0,1.1),heading:0))
+            var controls=NativeVehicleDynamics.Input();controls.nobody = !occupied
+            for _ in 0..<60 {fleet.update(delta:1/60,input:controls,currentCell:"floor");_ = fleet.takeBikeEjection()}
+            let wall=fleet.world.addBox(halfExtents:SIMD3(0.2,3,4),position:SIMD3(2,3,0))!
+            fleet.world.setColliderGroups(wall,collision:0x0001ffff,solver:0xffffffff)
+            let rigid=fleet.chassisColliders.first.flatMap{fleet.world.colliderInfo($0)?.body}!
+            fleet.world.setVelocities(rigid,linear:SIMD3(50,0,0),angular:.zero)
+            var thrown:NativeBikeEjection.Event?
+            for _ in 0..<30 {
+                fleet.update(delta:1/60,input:controls,currentCell:"floor")
+                if let event=fleet.takeBikeEjection(){thrown=event;break}
+            }
+            if occupied && model != "420" {
+                check(thrown != nil && thrown!.force>75,model+" real chassis impact did not eject occupied bike")
+                check(thrown.map{$0.velocity.x>10} ?? false,model+" ejection lost pre-impact horizontal velocity")
+            } else {check(thrown==nil,model+" ejected an absent/non-bike rider")}
+            check(fleet.takeBikeEjection()==nil,model+" same crash was consumed twice")
+            fleet.teleport(modelPosition:SIMD3(0,0,2),heading:0)
+            check(fleet.takeBikeEjection()==nil,model+" teleport retained queued ejection")
+        }}
         precondition(failures.isEmpty,"Vehicle lifecycle regressions: \(failures.joined(separator:", "))")
         print("PASS: \(checks) native vehicle lifecycle checks: promoted exclusion, explicit disappearance/world teardown, replacement, external authority, invalid entry preservation, zero-health coasting")
     }

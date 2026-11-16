@@ -992,9 +992,11 @@ class LocalGame {
     if (message.s!==processed+1) return reply();
     peer.processedHealthSequence=message.s;
     let changed=false;
-    if (message.kind==='hurt' && Number.isInteger(message.damage) && message.damage>0 &&
-        message.damage<=100 && peer.player.health>0) {
-      peer.player.health=Math.max(0,peer.player.health-message.damage);changed=true;
+    if (['hurt','impact'].includes(message.kind) && Number.isInteger(message.damage) && message.damage>0 &&
+        message.damage<=(message.kind==='impact' ? 200:100) && peer.player.health>0) {
+      const absorbed=message.kind==='impact' ? Math.min(peer.player.armour,message.damage):0;
+      peer.player.armour-=absorbed;
+      peer.player.health=Math.max(0,peer.player.health-(message.damage-absorbed));changed=true;
       if (peer.player.health===0) {
         peer.player.deaths=money(peer.player.deaths+1);peer.player.lastDeath=Date.now();
         this.abortHeist(peer.player,'you were defeated');
@@ -2874,6 +2876,14 @@ class LocalGame {
         if (health < fare.minHealth) fare.minHealth = health;
         this.save();
       }
+      // Legacy browser actors apply environmental armour loss locally. Accept
+      // only a decrease; an older/stale frame cannot restore a consumed shield.
+      // Acknowledged native peers keep their sequenced authoritative owner.
+      if (!peer.healthAckEnabled && (message.walking===true || message.driving===true) &&
+          Number.isFinite(message.armour) && message.armour>=0 && message.armour<=100) {
+        const armour=Math.round(message.armour);
+        if (armour<peer.player.armour){peer.player.armour=armour;this.save()}
+      }
       const reportedHealth = message.walking === true ? message.health :
         message.driving === true ? message.life : null;
       if (!peer.healthAckEnabled && Number.isFinite(reportedHealth) && reportedHealth >= 0 && reportedHealth <= 100) {
@@ -3116,7 +3126,7 @@ class LocalGame {
       rounded(limited(s.aim, 1.6)) : null;
     row[29] = (walking || (driving && s.aim !== undefined)) && Number.isFinite(s.shots) ?
       Math.max(0, s.shots) : 0;
-    row[30] = Math.round(Math.max(0, Math.min(100, finite(s.armour))));
+    row[30] = Math.round(Math.max(0, Math.min(100, finite(peer.player.armour))));
     row[31] = driving && Number.isInteger(s.skin) ? s.skin : 0;
     row[32] = Number.isInteger(s.act) ? s.act : 0;
     const riding = walking && typeof s.riding === 'string' ?

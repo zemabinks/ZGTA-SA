@@ -39,6 +39,11 @@ final class NativeRiderPlayback {
         self.seated=NativeRiderAnimation(duration:library.duration(of:))
     }
     var inside:Bool{state == .inside}
+    func beside(side:Int = -1,model:simd_float4x4)->SIMD3<Float>? {
+        guard inside,let at=planner.beside(configuration,side:side) else{return nil}
+        let point=model*SIMD4(SIMD3<Float>(at),1)
+        return SIMD3(point.x,point.y,point.z)
+    }
     func sit(){queue=[];phase=nil;state = .inside;capture=nil;transition=1;turn=definition.seats[configuration.seat].turn ?? 0}
     func enter(side:Int = -1,jack:Bool=false,doorOpen:Double=0){
         let plan=planner.enter(configuration,side:side,jack:jack,doorOpen:doorOpen)

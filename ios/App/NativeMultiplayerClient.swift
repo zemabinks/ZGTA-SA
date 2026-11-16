@@ -112,10 +112,20 @@ struct NativeHealthPrediction {
     private(set) var connection:String?
     private(set) var issued=0,processed=0,revision=0
     private var baseHealth=100,baseArmour=0
-    private var losses:[Int:Int]=[:]
+    private var losses:[Int:Int]=[:],impacts:[Int:Int]=[:]
     private var respawnSequence:Int?
-    var health:Int {max(0,baseHealth-losses.values.reduce(0,+))}
-    var armour:Int {baseArmour}
+    private var projected:(health:Int,armour:Int) {
+        var hp=baseHealth,protected=baseArmour
+        for sequence in Set(losses.keys).union(impacts.keys).sorted() {
+            if let loss=losses[sequence] {hp=max(0,hp-loss)}
+            else if let damage=impacts[sequence] {
+                let absorbed=min(protected,damage);protected-=absorbed;hp=max(0,hp-(damage-absorbed))
+            }
+        }
+        return (hp,protected)
+    }
+    var health:Int {projected.health}
+    var armour:Int {projected.armour}
     var active:Bool {connection != nil}
     var pendingRespawn:Int? {respawnSequence}
     mutating func disconnect(){self=NativeHealthPrediction()}
@@ -124,11 +134,17 @@ struct NativeHealthPrediction {
         self.revision=revision;self.processed=processed;issued=processed
     }
     mutating func hurt(to value:Int)->Request? {
-        guard let connection,issued<9_007_199_254_740_991,losses.count<128 else{return nil}
+        guard let connection,issued<9_007_199_254_740_991,losses.count+impacts.count<128 else{return nil}
         let damage=health-max(0,min(health,value))
         guard damage>0 else{return nil}
         issued+=1;losses[issued]=damage
         return Request(sequence:issued,connection:connection,kind:"hurt",damage:damage)
+    }
+    mutating func impact(_ damage:Int)->Request? {
+        guard let connection,health>0,(1...200).contains(damage),
+              issued<9_007_199_254_740_991,losses.count+impacts.count<128 else{return nil}
+        issued+=1;impacts[issued]=damage
+        return Request(sequence:issued,connection:connection,kind:"impact",damage:damage)
     }
     mutating func respawn()->Request? {
         guard let connection,health==0,respawnSequence==nil,issued<9_007_199_254_740_991 else{return nil}
@@ -140,7 +156,7 @@ struct NativeHealthPrediction {
               processed>=self.processed,processed<=issued,revision>=self.revision,
               revision != self.revision || (processed==self.processed && health==baseHealth && armour==baseArmour) else{return false}
         self.processed=processed;self.revision=revision;baseHealth=health;baseArmour=armour
-        losses=losses.filter{$0.key>processed}
+        losses=losses.filter{$0.key>processed};impacts=impacts.filter{$0.key>processed}
         if let sequence=respawnSequence,sequence<=processed {respawnSequence=nil}
         return true
     }
@@ -593,6 +609,17 @@ final class NativeMultiplayerClient {
             sendHealthRequest(request);return
         }
         health=max(0,min(health,value));onVitals?(health,armour)
+    }
+
+    func reportImpactDamage(_ value:Int) {
+        let damage=max(0,min(200,value));guard damage>0,health>0 else{return}
+        if healthPrediction.active {
+            guard isReady,let request=healthPrediction.impact(damage) else{return}
+            health=healthPrediction.health;armour=healthPrediction.armour;onVitals?(health,armour)
+            sendHealthRequest(request);return
+        }
+        let absorbed=min(armour,damage);armour-=absorbed;health=max(0,health-(damage-absorbed))
+        onVitals?(health,armour)
     }
 
     private func sendHealthRequest(_ request:NativeHealthPrediction.Request) {

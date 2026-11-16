@@ -1011,6 +1011,57 @@ duplicate/stale events and resetting ownership on reconnect.
 
 Focused actual archived decisions, native animation/motor and actual native
 HTTP/WebSocket/server plus legacy-shaped defence pass within their documented
-boundaries. Final acceptance passes99/99 gates, source unchanged, plus both Release
-Simulator and unsigned iPhone builds93. See
+boundaries. Core93 final acceptance passed99/99 unchanged-source gates and both native93 builds. See
 [front melee blocking](CORE_MELEE_PARRY_93.md) for scope and open limits.
+
+
+##2026-11-16 — Core94 bike crash and rollover handoff
+
+Added the missing owned bike contact-to-rider path: actual original impact
+weighting, retained pre-impact velocity, contact-gated rollover, consumed
+ejection event, forced controller exit, directional knock/death and single
+local health report. Native parking preserves the released bike's physical
+momentum. Recovered the source adjacent point from the entry clip's end root;
+full general exit-clearance planning is still a documented gap. Focused rule,
+physical and actual exit-method gates pass; frozen full-suite/build acceptance
+is running. See [bike ejection](CORE_BIKE_EJECTION_94.md).
+
+
+##2026-11-16 — Core95–97 vehicle handoffs and crash armour
+
+Completed wrecks now release/defeat an occupant once; lost-water vehicles
+release a living actor to the native foot/swim owner. Preserved the existing
+death cause on forced exit and the released hull's state/momentum. Added the
+original no-buoyancy water fallback and verified adjacent entry-end-root geometry
+against actual rider frames.
+
+The deeper hurt audit found crash damage bypassing armour in the first draft.
+Core97 moves impacts and falls into one ordered health/armour prediction and
+acknowledgement namespace. Rendering reports the amount once; the shared owner
+predicts and reconciles both values. Wreck defeat remains its separate fatal
+path. Focused actual archived/native/transport checks pass. Combined frozen
+acceptance is running; the Core94–96 intermediates are not public releases.
+See [combined evidence and remaining differences](CORE_GAMEPLAY_FOUNDATION_97.md).
+
+
+##2026-11-16 — Core98 browser/native armour consistency
+
+Legacy browser actors could consume armour locally without updating the
+independent server. Added bounded decrease-only legacy armour synchronization;
+stale frames cannot heal a shield. Acknowledged native peers retain sequenced
+authority. Player rows now publish that authority instead of raw reported armour.
+An18-check actual-handler regression covers both owners and observer rows.
+Native sources are byte-identical toCore97; final combined acceptance is running.
+
+
+##2026-11-16 — Final Core98 combined acceptance
+
+PASS107/107 regression gates, captured source unchanged. The final native App
+bytes exactly match both successful Release97 Simulator/iPhone builds.
+Actual isolated iPhone12Pro Simulator UI testing passed menu, anonymous guest
+connection, world entry and a synthesized movement-stick gesture. Server trace
+records10.14m travel and a stable position after release; scene inspected.
+Earlier intermediateCore97's one integration compile timeout is retained in its
+raw report; the same integration passes442checks in the final complete suite.
+No intermediate94–97 source release was made. All original assets, references,
+captures and outputs remain local. Retail1:1/device performance is not claimed.

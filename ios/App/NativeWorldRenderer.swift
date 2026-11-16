@@ -476,9 +476,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var onCollision: ((Float) -> Void)?
     var onLand: (() -> Void)?
     var onSplash: (() -> Void)?
+    var onVehicleLostInWater:(()->Void)?
+    var onVehicleWrecked:(()->Void)?
+    var onBikeEjection:((NativeBikeEjection.Event)->Void)?
     var onVehicleExplosion: ((SIMD3<Float>) -> Void)?
     var onVehicleMove: ((String,[String:Any]) -> Void)?
     var onContactAudio: (([NativeVehicleDamageController.Collision],NativeVehicleDamage.Body) -> Void)?
+    var onLocalImpact:((Int)->Void)?
     var onLocalHealth: ((Int) -> Void)?
     var onParachuteUsed: (() -> Void)?
     private var actionTimeRemaining: Float = 0
@@ -1173,6 +1177,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             next = start
         }
         camera = next
+        dispatchOwnedVehicleExit()
         let surface = waterSurface(at: camera)?.height
         swimming = !driving && swimController.on
         underwater = swimming && swimController.under
@@ -1843,7 +1848,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return true
     }
 
-    func exitVehicle() {
+    private func dispatchOwnedVehicleExit() {
+        guard driving else{return}
+        if groundVehicle?.damageController?.state.wrecked == true {
+            onVehicleWrecked?();return
+        }
+        if groundVehicle?.lostInWater == true {
+            onVehicleLostInWater?();return
+        }
+        if health>0,ownRiderPlayback?.inside != false,(vehicleKind=="bike" || vehicleKind=="bicycle"),
+           let event=groundVehicle?.takeBikeEjection(),let onBikeEjection {onBikeEjection(event)}
+    }
+
+    func exitVehicle(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false) {
+        let forcedFeet:SIMD3<Float>? = (ejection != nil || wrecked || water) ? { () -> SIMD3<Float> in
+            if let transform=groundVehicle?.modelTransform,
+               let beside=ownRiderPlayback?.beside(side:ownRiderSide,model:transform){return beside}
+            return ownRiderFeet?.position ?? camera
+        }():nil
         vehicleCoupling?.setOwnedVehicle(nil)
         ownCameraVisibility.reset()
         let exactFeet=ownRiderPlayback?.state == .stood ? ownRiderFeet:nil
@@ -1886,6 +1908,31 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let resumed=gameCamera.resumeFoot(from:gameCameraFrame,fallbackHeading:heading,fallbackPitch:cameraPitch)
         heading=resumed.x;cameraPitch=resumed.y
         cameraWasDriving=false
+        if let forcedFeet {
+            camera=forcedFeet;verticalSpeed=0
+            character?.reset(feet:camera,active:true,grounded:false);characterActive=true
+            prepareFootAnimation();cancelGameplayInput();personalFlight.stop()
+            crouching=false
+            if wrecked {
+                if health>0 {
+                    footDeathKind="koFront";pendingFootHit=nil;health=0;onLocalHealth?(0)
+                    footAnimator?.die("koFront")
+                } else if footAnimator?.dead != true {footAnimator?.die(footDeathKind ?? "koFront")}
+                return
+            }
+            if water {footAnimator?.resetMovementTask();return}
+            guard let ejection else{return}
+            footLocomotion.setKnockMomentum(ejection.velocity)
+            let damage=Int(min(200,max(0,ceil(ejection.force*0.05))))
+            if damage>0 {
+                if let onLocalImpact {onLocalImpact(damage)}
+                else {health=max(0,health-damage);onLocalHealth?(health)}
+            }
+            if health>0 {
+                let side=NativeFootLocomotion.supportKnockSide(velocity:ejection.velocity,heading:Double(actorHeading))
+                _ = footAnimator?.knock(["koSkidBack","koSpinR","koSkidFront","koSpinL"][side])
+            } else {footAnimator?.die("koFront")}
+        }
     }
 
     /// Despawning/losing ownership must not manufacture a parked body or play

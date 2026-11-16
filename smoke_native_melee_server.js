@@ -12,8 +12,10 @@ try {
   for(const file of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
   fs.writeFileSync(path.join(local,'selfhost/client-catalog.json'),JSON.stringify({vehicles:[],homes:[]}));
+  fs.mkdirSync(path.join(local,'native'),{recursive:true});
+  fs.writeFileSync(path.join(local,'native/melee.json'),JSON.stringify({weapons:[{id:0,blocks:true},{id:2,blocks:true},{id:9,blocks:false}]}));
   fs.writeFileSync(path.join(local,'selfhost/weapon-catalog.json'),JSON.stringify({items:[{
-    id:2,name:'Synthetic owned melee',ammo:1,capacity:1,price:0,slot:1}],shops:[]}));
+    id:2,name:'Synthetic owned melee',ammo:1,capacity:1,price:0,slot:1},{id:22,name:'Synthetic gun',ammo:1,capacity:1,price:0,slot:2}],shops:[]}));
   fs.writeFileSync(path.join(worldPath,'index.json'),JSON.stringify({detail:{size:375,grid:16,origin:-3000,cells:[{cell:28}]},inside:{cells:[]}}));
   function mesh(wall) {
     const vertices=[[1500,-2625,0],[1875,-2625,0],[1875,-2250,0],[1500,-2250,0]];
@@ -63,6 +65,17 @@ try {
   hit(a,{w:3});assert.equal(b.player.health,86,'Unowned melee bypassed selected-weapon authority');
   hit(a,{w:22});assert.equal(b.player.health,86,'Melee path authorized a gun without an accepted shot');
   assert.equal(a.processedShotSequence || 0,0,'Melee consumed an ammunition sequence');
+  // Current server-owned equipment wins over a delayed walking weapon tag.
+  b.player.health=100;b.player.armour=50;b.state.heading=Math.PI/2;b.state.act=28;b.state.weapon=0;
+  hit(a,{w:2});assert.equal(b.player.health,100);assert.equal(b.player.armour,50,'Front block consumed armour');
+  b.player.inventory={selected:22,weapons:{22:{clip:1,rest:0}}};
+  hit(a,{w:2});assert.equal(b.player.armour,36,'Old melee wire tag blocked with a server-selected gun');
+  b.player.inventory.selected=0;b.state.weapon=22;
+  hit(a,{w:2});assert.equal(b.player.armour,36,'Old gun wire tag disabled server-selected melee block');
+  b.state.heading=-Math.PI/2;hit(a,{w:2});assert.equal(b.player.armour,22,'Rear hit was parried');
+  b.state.heading=Math.PI/2;b.state.act=36;hit(a,{w:2});assert.equal(b.player.armour,8,'Idle guard stance parried a hit');
+  b.state.act=28;browser.state.weapon=9;hit(browser);
+  assert.equal(b.player.armour,0);assert.equal(b.player.health,78,'Chainsaw incorrectly entered the block path');
   console.log('PASS: actual native/browser melee handler, clear/wall/missing SCL2 geometry, cadence/range, passive/dead/interior/connection boundaries, no ammunition sequence');
 } finally {
   Date.now=originalNow;if(game){clearInterval(game.tick);clearInterval(game.projectileTimer);}
