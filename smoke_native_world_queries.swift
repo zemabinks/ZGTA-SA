@@ -10,6 +10,9 @@ final class QueryFixture {
     let groundVehicle:Vehicle?=Vehicle()
     var character:NativeCharacterController?
     var camera=WorldVector(-1,-100,0)
+    var networkInterior:Int?
+    var interiorForTest:Bool {isInterior}
+    // RENDERER_SCENE_OWNERSHIP
     var activeDetails:Set<String>=["c119"]
     var collisionRequests=NativeCollisionRequests(),desiredPhysicsCells=Set<String>(),requested=Set<String>()
     func loadCollision(name:String){requested.insert(name)}
@@ -23,6 +26,10 @@ final class QueryFixture {
     var checks=0
     func check(_ condition:Bool,_ label:String){checks += 1;precondition(condition,label)}
     let scene=QueryFixture(),manager=scene.groundVehicle!,world=manager.world
+    scene.camera.z=701;check(scene.interiorForTest,"archive fallback interior heuristic")
+    scene.networkInterior=0;check(!scene.interiorForTest,"legacy explicit exterior overrides altitude")
+    scene.camera.z=0;scene.networkInterior=3;check(scene.interiorForTest,"legacy explicit interior overrides altitude")
+    scene.networkInterior=nil
     let start=WorldVector(-1,-100,1.35),way=WorldVector(1,0,0)
     manager.loaded=["c119","c120"]
     scene.character=NativeCharacterController(world:world)

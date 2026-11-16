@@ -9,6 +9,7 @@ const {pipeline} = require('stream/promises');
 
 const ROOT = path.join(__dirname, 'local-only', 'site');
 const LOCAL_ONLY = path.join(__dirname, 'local-only');
+const stockNative = require('./stock_native_assets').create({localOnly: LOCAL_ONLY});
 const MANIFEST = path.join(LOCAL_ONLY, 'manifest.json');
 const CONNECTED = process.env.ZGTA_CONNECTED === '1';
 const SELFHOST = process.env.ZGTA_SELFHOST === '1';
@@ -266,8 +267,22 @@ function serve(req, res) {
       res.writeHead(401); return res.end('Access code required');
     }
   }
+  // Reserved native stock routes always resolve locally, after access checks.
+  // An unprepared checkout must never fetch these resources from the live site.
+  if (stockNative.matches(pathname, req.url)) {
+    void stockNative.handle(req, res, pathname); return;
+  }
   if (nativeRadio && (pathname === '/game/radio/native/index' || /^\/game\/radio\/native\/track\/\d+\.wav$/.test(pathname))) {
     void nativeRadio.handle(req,res,pathname);return;
+  }
+  if (['/game/native/original-weapons.json','/game/native/samp-skins.json'].includes(pathname)) {
+    if (!['GET','HEAD'].includes(req.method)) {res.writeHead(405,{Allow:'GET, HEAD'});return res.end();}
+    const file=path.join(LOCAL_ONLY,'original-world-assets','game','native',pathname.endsWith('/samp-skins.json') ? 'samp-skins.json':'original-weapons.json');
+    fs.stat(file,(error,stat)=>{
+      if(error || !stat.isFile()){res.writeHead(404);return res.end('Prepare the original-world weapon metadata on this Mac.');}
+      res.writeHead(200,{'Content-Type':'application/json; charset=utf-8','Content-Length':stat.size,'Cache-Control':'no-cache'});
+      if(req.method==='HEAD')return res.end();const stream=fs.createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);
+    });return;
   }
   // Extracted owner data lives in its own overlay. Preparing melee metadata
   // must never modify a shared archived site or publish original game data.
@@ -392,6 +407,7 @@ const server = CONNECTED
       cert: fs.readFileSync(path.join(LOCAL_ONLY, 'connected.crt')),
     }, serve)
   : http.createServer(serve);
+server.on('close', () => { void stockNative.close(); });
 server.on('upgrade', (req, socket, head) => {
   if (SELFHOST) {
     if (!allowedHosts.has(req.headers.host || '')) return socket.destroy();

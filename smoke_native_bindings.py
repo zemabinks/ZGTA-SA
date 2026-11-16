@@ -56,6 +56,7 @@ struct PadButton {var isPressed:Bool=false}
 struct ActualPad {var buttonA=PadButton(),buttonX=PadButton()}
 func actualBicycle(_ pad:ActualPad,context:NativeGameBindings.Context,acceptsInput:Bool=true,bunnyHopPressed:Bool=false,keyCodes:Set<Int>=[])->(Bool,Bool,Bool) {
     var gamepadRunning=false,gamepadHop=false,gamepadJumping=false
+    let network=FakeNetwork()
     let handbrakePressed=false,currentVehicle:Int?=context.driving ? 1:nil
     let keyboard=NativeGameBindings.keyboard(keyCodes,context:context),renderer:FakeRenderer?=FakeRenderer()
 '''+pad_lines+'\n'+brake+'\n'+hop+'''
@@ -73,14 +74,15 @@ class FakeResponder {
     func pressesBegan(_ presses:Set<UIPress>,with event:UIPressesEvent?) {}
     func pressesEnded(_ presses:Set<UIPress>,with event:UIPressesEvent?) {}
 }
-class FakeWeapons {var synchronized=true;var selected=0;var weapons=[Row(id:0),Row(id:22),Row(id:25)]}
-class FakeNetwork {var isReady=true;var inventoryConnection:String?="one";var resyncs=0,health=100;var passive=false;func requestInventoryResync(){resyncs += 1}}
+class FakeWeapons {var synchronized=true;var selected=0;var weapons=[Row(id:0),Row(id:22),Row(id:25)];func cycleOriginalWeapon(_ direction:Int)->Int?{preconditionFailure("Original branch in strict self-host binding carrier")}}
+class FakeNetwork {var usesClientOwnedWeapons=false;var isReady=true,originalInputBlocked=false;var originalFatal:Int?;var inventoryConnection:String?="one";var resyncs=0,health=100;var passive=false;func requestInventoryResync(){resyncs += 1}}
 class FakeGameplay {
     var state:[String:Any]=[:]
     var requests:[(String,[String:Any],(Bool?)->Void)]=[]
     func perform(_ action:String,payload:[String:Any],completion:@escaping(Bool?)->Void){requests.append((action,payload,completion))}
 }
 class FakeRenderer {
+    var originalCoughing=false
     var vehicleKind="car",isClimbing=false,swimming=false,isChuting=false,wearingJetpack=false,hasLandingGear=false,hasJetNozzle=false,vehicleLights=false
     var cancels=0,cameras=0,jumps=0,alternates=0
     var canNativeFootMeleeGuard=false
@@ -99,6 +101,8 @@ class FakeRadio {var stationName="radio",previousCount=0;func previous(){previou
 class FakeStatus {var text=""}
 class FakeView {var window:Int?=1}
 class Harness:FakeResponder {
+    var legacySelection=false
+    func updateWeaponHUD(){}
     let viewIfLoaded:FakeView?=FakeView()
     var currentVehicle:Int?,renderer:FakeRenderer?=FakeRenderer()
     var applicationActive=true,presentedViewController:Int?,heldKeys:Set<RawKey>=[],touchMeleeGuard=false,lastGamepadAim=false,usingMelee=true
@@ -114,6 +118,15 @@ class Harness:FakeResponder {
     func cycleCameraPreference(){renderer?.cycleCameraView()}
 '''
 integration=r'''
+let selecting=Harness();selecting.legacySelection=true
+selecting.performBinding(.attack);selecting.performBinding(.jump)
+check(selecting.events.isEmpty&&selecting.renderer?.jumps==0,"server textdraw selection owns gameplay input")
+for coughing in [false,true] {
+    let blocked=Harness()
+    blocked.network.originalInputBlocked = !coughing;blocked.renderer?.originalCoughing=coughing
+    blocked.pressesBegan([UIPress(26)],with:nil)
+    check(blocked.heldKeys.isEmpty,"server-frozen/coughing actor cannot latch gameplay input")
+}
 let offline=Harness()
 offline.network.isReady=false
 offline.performBinding(.attack);offline.performBinding(.jump)

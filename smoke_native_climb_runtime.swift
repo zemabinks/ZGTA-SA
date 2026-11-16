@@ -16,6 +16,8 @@ final class ClimbRuntimeHarness {
     var pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0,jumpHeld=false,walkHeld=false
     lazy var climbQueries=character.map{NativeRapierClimbQueries(world:$0.world,excluded:[$0.queries.walker,$0.queries.probe])}
     var health=100,driving=false,crouching=false,manualAnimation=false,aiming=false
+    var originalCoughing=false
+    var onLocalDamage:((Double,Int)->Void)?
     var onLocalHealth:((Int)->Void)?
     struct InactiveSwim {var on=false}
     var swimController=InactiveSwim()

@@ -7,6 +7,10 @@ import simd
 final class NativeVehicleSupportScene:NativeMovingSupport.Scene {
     typealias V=SIMD3<Double>
     struct Driver {let id:String,velocity:V,spin:V}
+    struct ObjectFrame {
+        let id:String,body:UInt64,position:V,rotation:simd_quatd
+        let velocity:V,spin:V
+    }
     private let world:SwiftRapierWorld
     private var definitions:[String:NativeVehicleTread.Definition]=[:]
     private var treads:[String:NativeVehicleTread]=[:],models:[String:String]=[:],names:[UInt64:String]=[:]
@@ -22,7 +26,7 @@ final class NativeVehicleSupportScene:NativeMovingSupport.Scene {
     }
     func invalidatePoses(){treads=[:];models=[:]}
     func clear(){entries=[];names=[:];treads=[:];models=[:];otherColliders=[]}
-    func synchronize(_ frames:[NativeGroundVehicle.SupportFrame],drivers:[String:Driver]=[:]) {
+    func synchronize(_ frames:[NativeGroundVehicle.SupportFrame],drivers:[String:Driver]=[:],objects:[ObjectFrame]=[]) {
         let old=Dictionary(uniqueKeysWithValues:entries.map{($0.id,$0)})
         var names:[UInt64:String]=[:],live:Set<String>=[]
         entries=frames.map { frame in
@@ -38,6 +42,12 @@ final class NativeVehicleSupportScene:NativeMovingSupport.Scene {
                 treads[frame.id]?.pose(work:frame.work){NativeGroundVehicle.workingPosition($0,value:$1,configuration:configuration)}
             }
             return entry
+        }
+        for frame in objects {
+            let entry=old[frame.id] ?? NativeMovingSupport.Entry(handle:frame.body,id:frame.id,vehicle:nil,position:frame.position,rotation:frame.rotation)
+            entry.handle=frame.body;entry.position=frame.position;entry.rotation=frame.rotation
+            entry.vehicle=nil;entry.driver=nil;entry.origin=0;entry.kind="object";entry.standing=true
+            entry.velocity=frame.velocity;entry.spin=frame.spin;entries.append(entry)
         }
         self.names=names;treads=treads.filter{live.contains($0.key)};models=models.filter{live.contains($0.key)}
     }

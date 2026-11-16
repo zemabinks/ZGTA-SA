@@ -20,5 +20,5 @@ def run(test,sources,output):
 def main():
     output=ROOT/'local-only/native-physics/tests/ammo-reconciliation';output.mkdir(parents=True,exist_ok=True)
     run('smoke_native_inventory_prediction.swift',['NativeInventoryPrediction'],output)
-    run('smoke_native_ammo_reconciliation.swift',['ServerAddress','NativeInventoryPrediction','NativeWeaponState','NativeWeaponShotDelivery'],output)
+    run('smoke_native_ammo_reconciliation.swift',['ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery'],output)
 if __name__=='__main__':main()

@@ -38,6 +38,17 @@ final class NativeGameViewController: UIViewController {
     private weak var chatPanel: NativeChatPanel?
     private weak var weaponPanel: NativeWeaponShopPanel?
     private var currentVehicle: RemoteVehicle?
+    private var legacyOverlay:NativeSAMPTextDrawOverlay?
+    private weak var legacyDialog:NativeSAMPDialogController?
+    private var legacySelection=false,legacyClassIndex=0
+    private var legacyKeys:UInt16=0
+    private var legacyAxes=SIMD2<Int16>.zero
+    private var legacySpecialKeys:UInt8=0
+    private var legacyCrouchUntil:Double=0
+    private var legacyArtwork:NativeSAMPArtworkSession?
+    private let originalEffects=NativeOriginalWorldEffects()
+    private var originalExitToken:UInt64?
+
     private var nearbyMissionAction: String?
     private var nearbyMissionPayload: [String:Any] = [:]
     private var displayLink: CADisplayLink?
@@ -88,7 +99,7 @@ final class NativeGameViewController: UIViewController {
     private var vehicleTuck:Double=0
     private var heldKeys: Set<UIKeyboardHIDUsage> = []
     private var canNavigateMenus:Bool { applicationActive && viewIfLoaded?.window != nil && presentedViewController == nil }
-    private var acceptsHeldInput: Bool { canNavigateMenus && network.isReady }
+    private var acceptsHeldInput: Bool { canNavigateMenus && network.isReady && !legacySelection && !network.originalInputBlocked && renderer?.originalCoughing != true }
     override var canBecomeFirstResponder: Bool { true }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -121,6 +132,7 @@ final class NativeGameViewController: UIViewController {
         applicationActive = true;network.setApplicationActive(true); frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
     private func resetControls() {
+        legacyKeys=0;legacyAxes = .zero;legacySpecialKeys=0;legacyCrouchUntil=0
         heldKeys.removeAll(); stick.reset(); lookStick.reset(); controllerGate.reset()
         previousPad = .init(); weaponCycle.cancel()
         touchMeleeGuard=false
@@ -151,7 +163,7 @@ final class NativeGameViewController: UIViewController {
             if heldKeys.insert(.keyboardEscape).inserted {performBinding(.pause)}
             return
         }
-        guard network.isReady else{return}
+        guard network.isReady,!network.originalInputBlocked,renderer?.originalCoughing != true else{return}
         var firstKeys:[UIKeyboardHIDUsage]=[]
         for press in presses {
             guard let code=press.key?.keyCode else {continue}
@@ -210,6 +222,10 @@ final class NativeGameViewController: UIViewController {
         }
     }
     private func cycleWeapon(_ direction:Int) {
+        if network.usesClientOwnedWeapons {
+            guard currentVehicle==nil,renderer?.isClimbing != true,renderer?.swimming != true,renderer?.isChuting != true,weapons.synchronized else{return}
+            renderer?.cancelWeaponInput();_ = weapons.cycleOriginalWeapon(direction);updateWeaponHUD();return
+        }
         guard currentVehicle==nil,renderer?.isClimbing != true,renderer?.swimming != true,renderer?.isChuting != true,
               weapons.synchronized else{return}
         let rows=(gameplay.state["weaponInventory"] as? [String:Any])?["weapons"] as? [[String:Any]] ?? []
@@ -243,13 +259,16 @@ final class NativeGameViewController: UIViewController {
         pauseEscapeHandoff?.release();resetControls(); super.pressesCancelled(presses, with: event)
     }
 
-    init(server: ServerAddress, settings: NativeAppSettings = .shared) {
+    init(server: ServerAddress, settings: NativeAppSettings = .shared,
+         networkServer: ServerAddress? = nil, networkSession: URLSession = .shared,
+         flavor: NativeMultiplayerClient.Flavor = .selfHost, legacy:NativeLegacyWorldConnection?=nil) {
         self.server = server
         self.appSettings = settings
-        self.network = NativeMultiplayerClient(server: server)
-        self.gameplay = NativeGameplayClient(server: server)
+        self.network = NativeMultiplayerClient(server: networkServer ?? server, session:networkSession,flavor:flavor,legacy:legacy)
+        self.gameplay = NativeGameplayClient(server: networkServer ?? server)
         self.radio = NativeVehicleRadio(server: server)
-        self.weapons = NativeWeaponState(server: server)
+        let original:Bool = {if case .originalWorld=flavor{return true};return false}()
+        self.weapons = NativeWeaponState(server: server,policy:legacy != nil ? .legacySAMP:original ? .originalWorld:.acknowledgedSelfHost)
         self.audio = NativeGameAudio(server: server)
         self.renderer = NativeWorldRenderer()
         super.init(nibName: nil, bundle: nil)
@@ -262,6 +281,7 @@ final class NativeGameViewController: UIViewController {
         view.backgroundColor = .black
         if let renderer {
             renderer.server = server
+            if network.legacy != nil {renderer.networkInterior=0}
             renderer.view.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(renderer.view)
             NSLayoutConstraint.activate([
@@ -300,12 +320,18 @@ final class NativeGameViewController: UIViewController {
         renderer?.onContactAudio = { [weak self] collisions,body in self?.audio.vehicleContacts(collisions,body:body) }
         renderer?.onLocalImpact = { [weak self] value in self?.network.reportImpactDamage(value) }
         renderer?.onLocalHealth = { [weak self] value in self?.network.reportLocalHealth(value) }
-        renderer?.onParachuteUsed = { [weak self] in self?.network.usedParachute() }
+        renderer?.onParachuteUsed = { [weak self] in
+            guard let self else{return}
+            if self.network.usesClientOwnedWeapons {_ = self.weapons.removeClientWeapon(46)}else{self.network.usedParachute()}
+        }
         network.onFlightGear = { [weak self] parachute,jetpack in self?.renderer?.setFlightGear(parachute:parachute,jetpack:jetpack) }
         weapons.onChange = { [weak self] in
             guard let self else { return }
             if self.guardWeapon != self.weapons.selected {self.guardWeapon=self.weapons.selected;self.touchMeleeGuard=false}
             self.renderer?.equippedWeapon = self.weapons.selected
+            if self.network.usesClientOwnedWeapons,let renderer=self.renderer {
+                renderer.setFlightGear(parachute:self.weapons.weapons.contains{$0.id==46},jetpack:renderer.wearingJetpack)
+            }
             self.updateWeaponHUD()
         }
         weapons.onNeedsRefresh = { [weak self] in self?.gameplay.refresh() }
@@ -325,6 +351,29 @@ final class NativeGameViewController: UIViewController {
         }
         renderer?.onCouplingRequest = { [weak self] request in self?.requestVehicleCoupling(request) ?? false }
         network.onInventory = { [weak self] state in self?.weapons.apply(state) }
+        network.onOriginalGuns = { [weak self] rows,back in _ = self?.weapons.applyOriginalGuns(rows,back:back) }
+        network.onAuthenticationRequired = { [weak self] in self?.status.text="SIGN IN TO THE ORIGINAL SERVER AGAIN TO CONTINUE" }
+        network.onLegacyEvent = { [weak self] in self?.receiveLegacyEvent($0) }
+        network.onOriginalVehicleHit = { [weak self] in _ = self?.renderer?.receiveOriginalVehicleHit($0) }
+        network.onOriginalHit = { [weak self] in self?.receiveOriginalHit($0) }
+        network.onOriginalEvent = { [weak self] event,packet in self?.receiveOriginalEvent(event,packet:packet) }
+        network.onOriginalHitResult = { [weak self] result,hit in
+            guard let self else{return}
+            if result.startBurning{_=self.originalEffects.light(by:hit.source)}
+            if result.startGas{self.originalEffects.whiff(by:hit.source)}
+            if result.douse{self.originalEffects.douse(0.3)}
+        }
+        if network.usesOriginalWorldProtocol {
+            renderer?.onLocalDamage = { [weak self] damage,weapon in
+                guard let self else{return};_=self.network.applyOriginalDamage(.init(damage:damage,weapon:weapon,quiet:true),context:.init(swimming:self.renderer?.swimming==true))
+            }
+        }else if network.legacy != nil {
+            renderer?.onLocalDamage = { [weak self] damage,weapon in
+                _=self?.network.reportLegacyDamage(damage,weapon:weapon)
+            }
+            renderer?.onLocalFatal = {[weak self] weapon in _=self?.network.reportLegacyFatal(weapon:weapon)}
+        }
+        if let legacy=network.legacy as?NativeSAMPWorldConnection {legacy.weaponDamage = { [weak self] in self?.weapons.damage(for:$0) }}
         network.onProjectiles = { [weak self] rows in self?.renderer?.synchronizeProjectiles(rows) }
         network.onBlast = { [weak self] weapon, position in
             self?.renderer?.showBlast(weapon:weapon,position:position)
@@ -388,9 +437,11 @@ final class NativeGameViewController: UIViewController {
             self?.renderer?.teleport(x: point.x, y: point.y, z: point.z, direction: heading)
         }
         network.onEnvironment = { [weak self] weather, shift, hold in
-            if let weather { self?.renderer?.setWeather(weather) }
-            if let shift { self?.renderer?.dayShift = shift }
-            self?.renderer?.dayHold = hold
+            guard let self else{return}
+            if self.network.usesOriginalWorldProtocol{self.renderer?.setWeatherOverride(weather)}
+            else if let weather{if self.network.legacy != nil{self.renderer?.setWeatherOverride(weather)}else{self.renderer?.setWeather(weather)}}
+            if let shift { self.renderer?.dayShift = shift }
+            self.renderer?.dayHold = hold
         }
         network.onVitals = { [weak self] health, armour in
             if health <= 0 { self?.resetControls() }
@@ -422,6 +473,7 @@ final class NativeGameViewController: UIViewController {
         }
         gameplay.onResult = { [weak self] result in self?.status.text = result.uppercased() }
         radio.onStatus = { [weak self] message in self?.status.text = message }
+        configureLegacyArtwork()
         network.connect()
         gameplay.refresh()
         gameHUD.radar.loadMap(server: server)
@@ -476,6 +528,9 @@ final class NativeGameViewController: UIViewController {
             return
         }
         gameplay.setConnectionReady(false)
+        originalEffects.reset();originalExitToken=nil;renderer?.setOriginalActorEffects(burning:false,coughing:false)
+        renderer?.networkInterior=network.legacy != nil ? 0:nil
+        legacyDialog?.invalidate();legacyDialog=nil;legacyOverlay?.clear();legacySelection=false
         for key in heldKeys {_ = NativeMenuKeyLatch.press(Int(key.rawValue))}
         resetControls();previousAudioPosition=nil;lastAutomaticCheckpoint.removeAll()
         renderer?.resetMultiplayerSession()
@@ -497,6 +552,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     private func stopGame() {
+        legacyArtwork?.cancel();legacyArtwork=nil;renderer?.clearLegacyWorld()
         gameplay.setConnectionReady(false)
         resetControls(); frameClock.reset()
         displayLink?.invalidate()
@@ -1068,7 +1124,206 @@ final class NativeGameViewController: UIViewController {
         return type
     }
 
+    private func receiveOriginalHit(_ hit:NativeOriginalWorldVitals.Hit){
+        guard network.isReady,network.health>0,network.originalFatal==nil else{return}
+        if currentVehicle != nil {
+            if network.deferOriginalFatal(hit,drivingCar:renderer?.vehicleKind=="car",speed:Double(renderer?.drivingSpeed ?? 0)){
+                resetControls();return
+            }
+            if network.originalHealth-max(0,hit.damage-network.originalArmour)<1,
+               network.deferOriginalImmediateFatal(hit){processOriginalFatal();return}
+            var quiet=hit;quiet.quiet=true;_=network.applyOriginalDamage(quiet);return
+        }
+        _=network.applyOriginalDamage(hit,context:.init(frontMeleeParry:renderer?.canParryOriginalHit(hit)==true,swimming:renderer?.swimming==true))
+    }
+    private func processOriginalFatal(){
+        guard let pending=network.originalFatal else{originalExitToken=nil;return}
+        guard originalExitToken != pending.token,
+              network.readyOriginalFatal(driving:currentVehicle != nil,wrecked:(renderer?.vehicleHealth ?? 0)<=0) != nil else{return}
+        originalExitToken=pending.token
+        completeVehicleExit(afterExit:{[weak self] in
+            guard let self else{return}
+            _=self.network.commitOriginalFatal(pending.token)
+            if self.originalExitToken==pending.token{self.originalExitToken=nil}
+        })
+    }
+    private func originalStaffKill(){
+        guard network.health>0,network.originalFatal==nil else{return}
+        guard currentVehicle != nil else{network.killOriginalPlayer();return}
+        if !network.deferOriginalSelfKill(drivingCar:renderer?.vehicleKind=="car",speed:Double(renderer?.drivingSpeed ?? 0)){
+            _=network.deferOriginalImmediateSelfKill()
+        }
+        resetControls();processOriginalFatal()
+    }
+    private func leaveForOriginalTeleport(){
+        network.cancelOriginalFatal();originalExitToken=nil
+        renderer?.leaveVehicleForOriginalTeleport();currentVehicle=nil
+        vehicleButton.setTitle("ENTER CAR",for:.normal);gameHUD.updateVehicle(name:nil,speed:0)
+        setDrivingControls(false);radio.stop()
+    }
+    private func receiveOriginalEvent(_ event:NativeOriginalWorldCommands.Event,packet:[String:Any]){
+        guard network.usesOriginalWorldProtocol else{return}
+        switch event {
+        case .staff(let staff):
+            if staff.freeze==true{resetControls()}
+            if let hp=staff.health{if hp>=1{network.setOriginalHealth(hp)}else{originalStaffKill()}}
+            if let armour=staff.armour{network.setOriginalArmour(armour)}
+            _=weapons.applyOriginalStaffWeapons(packet,alive:network.health>0)
+            if staff.jetpack,currentVehicle==nil,network.health>0{renderer?.setFlightGear(parachute:weapons.weapons.contains{$0.id==46},jetpack:true)}
+            if let skin=staff.skin{_=renderer?.setLocalSkin(skin);network.setLocalSkin(skin)}
+            if staff.respawn{network.respawnOriginalPlayer()}
+            if staff.clear{network.clearOriginalChat()}
+            if let announce=packet["announce"]as?String,!announce.isEmpty{status.text=String(announce.prefix(200))}
+        case .repairVehicle:_=renderer?.repairOriginalVehicle()
+        case .flipVehicle:_=renderer?.flipOriginalVehicle()
+        case .slap(let height):renderer?.liftOriginalPlayer(height)
+        case .dress(let skin,let note):
+            _=renderer?.setLocalSkin(skin);network.setLocalSkin(skin);if let note{status.text=note}
+        case .teleport(let jump):
+            guard network.health>0 else{return}
+            resetControls();leaveForOriginalTeleport()
+            renderer?.teleport(x:Float(jump.point.x),y:Float(jump.point.y),z:Float(jump.point.z),direction:jump.nativeHeading ?? renderer?.cameraDirection)
+        case .day(let shift,let hold):renderer?.dayShift=shift;renderer?.dayHold=hold
+        case .weather(let weather):renderer?.setWeatherOverride(weather)
+        case .cash:gameHUD.updateCash(network.cash)
+        case .passive(let on,_):if on{renderer?.cancelWeaponInput()}
+        case .shield(let seconds):if seconds>0{status.text="SERVER SPAWN SHIELD: \(Int(ceil(seconds)))S"}
+        case .heal(let amount):if currentVehicle==nil,network.health>0{network.setOriginalHealth(network.originalHealth+max(0,amount))}
+        case .style:status.text="SERVER FIGHTING STYLE RECEIVED — NATIVE STYLE VARIANTS ARE NOT AVAILABLE YET"
+        case .profile:break // A profile view is never a rename of the local actor.
+        case .name,.escape,.wake,.vehicleHit:break
+        }
+    }
+    private func stepOriginalGameplay(_ steps:[Double]){
+        guard network.usesOriginalWorldProtocol,network.isReady,let renderer else{return}
+        for delta in steps{
+            if renderer.swimming{originalEffects.extinguish()}
+            else if network.health>0,currentVehicle==nil,renderer.hasOriginalWorldFire{_=originalEffects.light()}
+            if network.health>0,currentVehicle==nil,!renderer.underwater,renderer.hasOriginalWorldGas{originalEffects.whiff(volume:true)}
+            for damage in originalEffects.step(delta:delta){_=network.applyOriginalDamage(.init(damage:damage.amount,weapon:damage.weapon,source:damage.source,quiet:true),context:.init(swimming:renderer.swimming))}
+        }
+        renderer.setOriginalActorEffects(burning:originalEffects.burning,coughing:originalEffects.coughing)
+        processOriginalFatal()
+    }
+    private func receiveLegacyEvent(_ event:[String:Any]) {
+        switch event["t"]as?String {
+        case "class":
+            if let skin=event["skin"]as?Int{renderer?.setLegacySkin(skin)}
+            showLegacyClass(skin:event["skin"]as?Int ?? 7)
+        case "sampGameplay":
+            guard let command=event["event"]as?NativeSAMPGameplayCommands.Event else{return}
+            renderer?.receiveLegacyGameplay(command)
+            if network.serverInputBlocked{resetControls()}
+        case "spawn":
+            renderer?.legacySpawned(generation:network.sampGameplayGeneration)
+            weapons.resetClientWeapons();weapons.setClientWeaponReady(true)
+            if let skin=event["skin"]as?Int{renderer?.setLegacySkin(skin)}
+        case "skin":if let skin=event["id"]as?Int{renderer?.setLegacySkin(skin)}
+        case "interior":renderer?.networkInterior=event["id"]as?Int
+        case "specialAction":
+            if let action=event["id"]as?Int,let renderer {renderer.setFlightGear(parachute:weapons.weapons.contains{$0.id==46},jetpack:action==2)}
+        case "weapon":
+            let id=event["id"]as?Int ?? 0,amount=event["amount"]as?Int ?? 0
+            switch event["action"]as?String{case "give":_ = weapons.giveClientWeapon(id,amount:amount)
+            case "ammo":_ = weapons.setClientAmmo(id,amount:amount)
+            case "reset":_ = weapons.resetClientWeapons()
+            case "select":_ = weapons.selectOriginalWeapon(id)
+            default:break};updateWeaponHUD()
+        case "rpc":
+            guard let id=event["id"]as?Int,let byte=UInt8(exactly:id),let data=event["data"]as?Data,let bits=event["bits"]as?Int else{return}
+            if byte==139 {
+                renderer?.clearLegacyWorld();renderer?.legacyLocalPlayerID=(network.legacy as?NativeSAMPWorldConnection)?.client.localID
+                _=legacyArtwork?.reset()
+            }
+            if legacyArtwork?.receive(id:byte,data:data)==true{return}
+            do {
+                let rpc=NativeSAMPProtocol.RPC(id:byte,data:data,bits:bits)
+                if let object=try NativeSAMPObjects.decode(rpc){try renderer?.receiveLegacyObject(object)}
+                else if let ui=try NativeSAMPServerUI.decode(rpc){applyLegacyUI(ui)}
+            }catch{status.text="INVALID SERVER WORLD OR MENU MESSAGE"}
+        case "exitForced":
+            if currentVehicle != nil{completeVehicleExit()}
+        default:break
+        }
+    }
+    private func configureLegacyArtwork() {
+        guard let legacy=network.legacy as?NativeSAMPWorldConnection,legacy.client.version == .dl else{return}
+        do {
+            let root=FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent("SAMPModels",isDirectory:true)
+            let cache=try NativeSAMPArtworkCache(root:root,namespace:legacy.client.address)
+            let session=try NativeSAMPArtworkSession(cache:cache,sendRPC:{[weak legacy] rpc in
+                var payload=NativeSAMPProtocol.Writer();payload.bytes(rpc.payload)
+                return legacy?.client.sendRPC(rpc.id,payload)==true
+            },importer:{[weak self] model,dff,txd,completion in
+                guard let renderer=self?.renderer else{completion(.failure(NativeSAMPArtwork.Failure.cancelled));return}
+                let source=self?.legacyArtwork?.sourceURL(for:model.txd)
+                let dictionary=source?.pathExtension.lowercased()=="txd" ? source?.deletingPathExtension().lastPathComponent:nil
+                renderer.importLegacyModel(model,dff:dff,txd:txd,dictionary:dictionary,completion:completion)
+            })
+            session.onWorld = {[weak self]in self?.renderer?.legacyVirtualWorld=$0}
+            session.onReset = {[weak self]in self?.renderer?.clearLegacyModels()}
+            session.onGenerationChanged = {[weak self]_ in self?.renderer?.invalidateLegacyImports()}
+            session.onStatus = {[weak self] state in
+                guard let self else{return}
+                let ready=state.phase == .idle || state.phase == .ready
+                if let panel=self.presentedViewController as?UIAlertController,panel.title=="SELECT CHARACTER" {
+                    panel.actions.first(where:{$0.title=="SPAWN"})?.isEnabled=ready
+                }
+                if let error=state.failure{self.status.text="SERVER MODEL DOWNLOAD FAILED: \(error)"}
+                else if !ready{self.status.text="SERVER MODELS: \(state.importedModels) / \(state.requiredModels)"}
+            }
+            legacyArtwork=session
+        }catch{status.text="CANNOT PREPARE SERVER MODEL CACHE: \(error)"}
+    }
+    private func showLegacyClass(skin:Int){
+        guard view.window != nil else{return};resetControls()
+        let show={ [weak self] in
+            guard let self,self.presentedViewController==nil else{return}
+            let panel=UIAlertController(title:"SELECT CHARACTER",message:"Skin \(skin)",preferredStyle:.actionSheet)
+            panel.addAction(UIAlertAction(title:"Previous",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"classStep","delta":-1])})
+            let spawn=UIAlertAction(title:"SPAWN",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"spawn"])}
+            if let phase=self.legacyArtwork?.status.phase{spawn.isEnabled=phase == .idle || phase == .ready}
+            panel.addAction(spawn)
+            panel.addAction(UIAlertAction(title:"Next",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"classStep","delta":1])})
+            panel.addAction(UIAlertAction(title:"Back to servers",style:.cancel){[weak self]_ in self?.dismiss(animated:true)})
+            panel.popoverPresentationController?.sourceView=self.view;panel.popoverPresentationController?.sourceRect=CGRect(x:self.view.bounds.midX,y:self.view.bounds.midY,width:1,height:1)
+            self.present(panel,animated:false)
+        }
+        if let current=presentedViewController{current.dismiss(animated:false,completion:show)}else{show()}
+    }
+    private func applyLegacyUI(_ event:NativeSAMPServerUI.Event){
+        if case .dialog(let model)=event {
+            resetControls();legacyDialog?.invalidate();legacyDialog=nil
+            guard let model else{return}
+            let presentDialog={ [weak self] in
+                guard let self,self.presentedViewController==nil else{return}
+                let panel=NativeSAMPDialogController(dialog:model,onResponse:{[weak self]in self?.network.legacy?.send(["t":"rpc","data":$0]) == true})
+                self.legacyDialog=panel;self.present(panel,animated:false)
+            }
+            if let current=presentedViewController{current.dismiss(animated:false,completion:presentDialog)}else{presentDialog()}
+            return
+        }
+        if legacyOverlay==nil {
+            let overlay=NativeSAMPTextDrawOverlay(onSend:{[weak self]in self?.network.legacy?.send(["t":"rpc","data":$0]) == true})
+            overlay.frame=view.bounds;overlay.autoresizingMask=[.flexibleWidth,.flexibleHeight]
+            overlay.onSelectionChanged = { [weak self] in self?.legacySelection=$0;self?.resetControls() }
+            overlay.onUnsupported = { [weak self] _,reason in self?.status.text="SERVER RESOURCE: \(reason)" }
+            legacyOverlay=overlay;view.addSubview(overlay)
+        }
+        legacyOverlay?.apply(event)
+    }
+
     @objc private func toggleWeapon() {
+        if network.usesClientOwnedWeapons {
+            guard currentVehicle==nil,presentedViewController==nil else{return};resetControls()
+            let menu=UIAlertController(title:"WEAPONS",message:nil,preferredStyle:.actionSheet)
+            for weapon in weapons.weapons {menu.addAction(UIAlertAction(title:weapon.name,style:.default){[weak self]_ in
+                guard let self else{return};self.renderer?.cancelWeaponInput();_ = self.weapons.selectOriginalWeapon(weapon.id);self.updateWeaponHUD()
+            })}
+            menu.addAction(UIAlertAction(title:"Cancel",style:.cancel))
+            menu.popoverPresentationController?.sourceView=weaponButton;menu.popoverPresentationController?.sourceRect=weaponButton.bounds
+            present(menu,animated:true);return
+        }
         if currentVehicle != nil && (renderer?.hasJetNozzle == true || renderer?.hasVehicleWorkingControls == true) { return }
         guard currentVehicle == nil else { status.text = "EXIT THE VEHICLE TO EQUIP"; return }
         guard presentedViewController == nil else { return }
@@ -1098,6 +1353,7 @@ final class NativeGameViewController: UIViewController {
     @objc private func toggleCrouch() {
         if currentVehicle != nil {if renderer?.canUnhitchVehicle == true {renderer?.releaseVehicleCoupling()}else{toggleGear()};return}
         guard currentVehicle == nil, let renderer, network.health > 0 else { return }
+        legacyCrouchUntil=ProcessInfo.processInfo.systemUptime+0.12
         renderer.toggleCrouch()
         crouchButton.backgroundColor = UIColor.black.withAlphaComponent(renderer.crouching ? 0.7 : 0.3)
     }
@@ -1123,6 +1379,9 @@ final class NativeGameViewController: UIViewController {
         if weapons.selected == 39 { network.detonateSatchels(); return }
         guard usingPistol else { return }
         guard !weapons.reloading, magazine < weapons.current.capacity, reserve > 0 else { return }
+        if network.usesClientOwnedWeapons {
+            if weapons.reloadOriginal(){renderer?.cancelWeaponInput();audio.reload(weapon:weapons.selected);updateWeaponHUD()};return
+        }
         let requestID=weapons.beginReloadRequest()
         let connection=network.inventoryConnection
         var dispatchReturned=false,synchronouslyRejected=false
@@ -1177,14 +1436,17 @@ final class NativeGameViewController: UIViewController {
         guard !renderer.wearingJetpack else { return }
         guard renderer.canRequestFootWeaponFire,weapons.current.supportsAttack else{return}
         let now = ProcessInfo.processInfo.systemUptime
-        guard now - lastAttackTime >= weapons.current.interval,let ray=currentShotRay(weapon:weapons.selected,left:false),let ticket=network.reserveShot(),weapons.fire(ticket:ticket) else { return }
+        let firedWeapon=weapons.current
+        guard now - lastAttackTime >= firedWeapon.interval,let ray=currentShotRay(weapon:weapons.selected,left:false) else { return }
+        let ticket=network.reserveShot()
+        guard (network.usesClientOwnedWeapons || ticket != nil),weapons.fire(ticket:ticket) else{return}
         lastAttackTime = now
-        if usingPistol {
+        if firedWeapon.isGun {
             updateWeaponHUD()
-            let clips = NativeWeaponAnimation.forWeapon(weapons.selected)
-            renderer.fireWeapon(clip: weapons.current.fireKind == "PROJECTILE" ? "grenade/weapon_throw/n/1" : renderer.crouching ? clips.crouchFire : clips.fire,
-                                duration: weapons.current.fireKind == "PROJECTILE" ? 0.8 : Float(weapons.current.interval))
-            emitWeaponShot(weapon: weapons.selected, left: false,ticket:ticket,ray:ray)
+            let clips = NativeWeaponAnimation.forWeapon(firedWeapon.id)
+            renderer.fireWeapon(clip: firedWeapon.fireKind == "PROJECTILE" ? "grenade/weapon_throw/n/1" : renderer.crouching ? clips.crouchFire : clips.fire,
+                                duration: firedWeapon.fireKind == "PROJECTILE" ? 0.8 : Float(firedWeapon.interval))
+            emitWeaponShot(weapon: firedWeapon.id, left: false,ticket:ticket,ray:ray)
             return
         }
     }
@@ -1198,14 +1460,19 @@ final class NativeGameViewController: UIViewController {
 
     private func finishRespawn() {
         resetControls()
+        if network.usesOriginalWorldProtocol{
+            leaveForOriginalTeleport()
+            if network.originalRespawnWasDead{originalEffects.reset();renderer?.setOriginalActorEffects(burning:false,coughing:false);weapons.reviveOriginalWeapons()}
+            renderer?.teleport(x:1154.13,y:-1771.15,z:16.6,direction:-3.7064 * .pi/180)
+            status.text="RESPAWNED";return
+        }
         if currentVehicle != nil {
             currentVehicle=nil
             renderer?.exitVehicle()
             vehicleButton.setTitle("ENTER CAR",for:.normal)
             setDrivingControls(false);radio.stop()
         }
-        renderer?.teleport(x:1480,y:-1738,z:13)
-        status.text="RESPAWNED AT THE CITY CENTRE"
+        renderer?.teleport(x:1480,y:-1738,z:13);status.text="RESPAWNED AT THE CITY CENTRE"
     }
 
     private func consumeFootMeleeHit(_ event:NativeMeleeEvent)->Bool {
@@ -1228,7 +1495,14 @@ final class NativeGameViewController: UIViewController {
               network.health > 0, !network.passive, !renderer.swimming, !renderer.isChuting,
               renderer.hasNativeFootWeaponTiming, weapons.selected == weapon, usingPistol,
               renderer.canEmitFootWeaponShot,
-              let ray=currentShotRay(weapon:weapon,left:left),let ticket=network.reserveShot() else { return false }
+              let ray=currentShotRay(weapon:weapon,left:left) else { return false }
+        if network.usesClientOwnedWeapons {
+            return NativeWeaponShotDelivery.deliver(weapon:weapon,left:left,inventory:weapons,
+                readiness:{renderer.weaponReady=$0},emission:{[self] weapon,left in
+                    updateWeaponHUD();emitWeaponShot(weapon:weapon,left:left,ticket:nil,ray:ray)
+                })
+        }
+        guard let ticket=network.reserveShot() else{return false}
         return NativeWeaponShotDelivery.deliver(weapon: weapon, left: left,ticket:ticket, inventory: weapons,
             readiness: { renderer.weaponReady = $0 }, emission: { [self] weapon, left,ticket in
                 updateWeaponHUD()
@@ -1251,10 +1525,10 @@ final class NativeGameViewController: UIViewController {
     /// Shared effects/network emission uses the captured event-time hand muzzle.
     /// Unavailable or wall-obstructed poses retain the safe body-origin fallback.
     /// Animation-event firing never restarts a clip here.
-    private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket,ray:NativeShotTargeting.Ray) {
-        guard let renderer, weapons.selected == weapon else { return }
+    private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket?,ray:NativeShotTargeting.Ray) {
+        guard let renderer,let definition=weapons.definition(for:weapon) else { return }
         renderer.recordWeaponShot(weapon:weapon,origin:ray.origin,direction:ray.direction)
-        if weapons.current.fireKind == "PROJECTILE" {
+        if definition.fireKind == "PROJECTILE" {
             network.sendWeaponShot(weapon: weapon, from: ray.origin,
                 to: ray.point(at:max(5,min(100,ray.range))), player: nil,ticket:ticket)
             return
@@ -1278,6 +1552,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func openGameplay() {
+        if network.usesClientOwnedWeapons {openChat();return}
         guard presentedViewController == nil else { return }
         heldKeys.removeAll();firePressed=false
         let panel = NativeGameplayPanel()
@@ -1322,6 +1597,10 @@ final class NativeGameViewController: UIViewController {
 
     private func sendCurrentPosition(moving:Bool,running:Bool,tuck:Double,paused:Bool) {
         guard network.isReady,let renderer else{return}
+        if network.legacySpectating {
+            if let eye=renderer.legacySpectatorPosition{_=network.sendSpectatorPosition(point:eye,keys:legacyKeys,axes:legacyAxes)}
+            return
+        }
             network.sendPosition(currentVehicle == nil ? renderer.position : renderer.vehicleWirePosition, heading: renderer.direction, moving: moving,
                                  running: running,
                                  vehicle: currentVehicle, speed: renderer.drivingSpeed,
@@ -1337,7 +1616,7 @@ final class NativeGameViewController: UIViewController {
                                  movement:renderer.footWireMovementRatio,aim:renderer.footWireAim,
                                  action:currentVehicle != nil ? renderer.riderWireAction:renderer.footWireAction,
                                  velocity:renderer.currentWireVelocity,angularVelocity:renderer.currentWireAngularVelocity,
-                                 kit:renderer.vehicleWireKit(tuck:tuck),vehicleWork:renderer.vehicleWorkingValue,paused:paused,support:renderer.footWireSupport,down:renderer.footWireDown)
+                                 kit:renderer.vehicleWireKit(tuck:tuck),vehicleWork:renderer.vehicleWorkingValue,paused:paused,support:renderer.footWireSupport,down:renderer.footWireDown,legacyRotation:renderer.legacyVehicleQuaternion,legacyKeys:legacyKeys,legacyAxes:legacyAxes,legacySpecialKeys:legacySpecialKeys)
     }
 
     private func requestVehicleCoupling(_ request:NativeVehicleCoupling.Request)->Bool {
@@ -1368,29 +1647,31 @@ final class NativeGameViewController: UIViewController {
         }
     }
 
-    private func completeVehicleExit(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false) {
+    private func completeVehicleExit(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false,afterExit:(()->Void)?=nil) {
         guard let renderer,currentVehicle != nil else{return}
         let parked = renderer.vehicleWirePosition, heading = renderer.direction
         let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
         let damage = renderer.vehicleDamage,work=renderer.vehicleWorkingValue,health=renderer.vehicleHealth
+        let legacyRotation=renderer.legacyVehicleQuaternion
         guard renderer.exitVehicle(ejection:ejection,wrecked:wrecked,water:water) else {
             let vehicleID=currentVehicle?.id
             renderer.deferVehicleExit { [weak self,weak renderer] in
                 guard let self,let renderer,self.renderer === renderer,self.currentVehicle?.id==vehicleID else{return}
-                self.completeVehicleExit(ejection:ejection,wrecked:wrecked,water:water)
+                self.completeVehicleExit(ejection:ejection,wrecked:wrecked,water:water,afterExit:afterExit)
             }
             return
         }
         if let currentVehicle {
             network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
                              vehicle: currentVehicle, vehicleHealth:health,vehicleDamage:damage,vehicleWork:work,
-                             footHeading:renderer.direction)
+                             footHeading:renderer.direction,legacyRotation:legacyRotation)
         }
         currentVehicle = nil
         vehicleButton.setTitle("ENTER CAR", for: .normal)
         gameHUD.updateVehicle(name: nil, speed: 0)
         setDrivingControls(false)
         radio.stop()
+        afterExit?()
     }
 
     private func showObjective(_ state: [String: Any]) {
@@ -1477,10 +1758,15 @@ final class NativeGameViewController: UIViewController {
         network.tickConnection(now:ProcessInfo.processInfo.systemUptime)
         let active = applicationActive && view.window != nil
         let timing = frameClock.advance(timestamp: link.timestamp, active: active)
-        if timing.discontinuity { resetControls() }
+        if timing.discontinuity { resetControls();renderer?.rebaseLegacyObjectClock() }
         let delta = Float(timing.delta)
+        stepOriginalGameplay(timing.steps)
         weapons.tick()
-        var acceptsInput = active && presentedViewController == nil && network.isReady
+        if network.usesOriginalWorldProtocol {
+            if let rows=weapons.outgoingOriginalGuns(),network.sendOriginalGuns(rows){weapons.originalGunsSent(rows)}
+            gameHUD.updateCash(network.cash)
+        }
+        var acceptsInput = active && presentedViewController == nil && network.isReady && !legacySelection && !network.originalInputBlocked
         if !acceptsInput && inputWasAvailable { resetControls() }
         inputWasAvailable = acceptsInput
         // Over-full-screen panels leave the game visible, so UIKit does not
@@ -1608,23 +1894,40 @@ final class NativeGameViewController: UIViewController {
         if !acceptsInput {
             forward = 0;sideways = 0;steering = 0;lookVertical = 0;lift = 0;cameraLookX = 0;cameraLookY = 0
         }
+        if network.usesOriginalWorldProtocol,renderer?.originalCoughing==true{forward=0;sideways=0;gamepadJumping=false;gamepadAttacking=false}
         let walking = abs(forward) + abs(sideways) > 0.05
-        let running = acceptsInput && (run || gamepadRunning || keyboard.sprint)
+        let running = acceptsInput && renderer?.originalCoughing != true && (run || gamepadRunning || keyboard.sprint)
         renderer?.walkHeld = acceptsInput && currentVehicle == nil && keyboard.walk
         if currentVehicle != nil { renderer?.lookCamera(x:cameraLookX,y:cameraLookY,delta:delta) }
         renderer?.vehicleHandbrake = acceptsInput && currentVehicle != nil &&
             (handbrakePressed || gamepadJumping || keyboard.handbrake)
+        if network.originalFatal != nil,currentVehicle != nil{renderer?.vehicleHandbrake=true}
         renderer?.vehicleControllerInput = GCController.controllers().contains { $0.extendedGamepad != nil }
         renderer?.personalFlightDown=acceptsInput && (handbrakePressed || gamepadJumping || keyboard.jump)
-        renderer?.jumpHeld=acceptsInput && (handbrakePressed || gamepadJumping || keyboard.jump)
+        renderer?.jumpHeld=acceptsInput && renderer?.originalCoughing != true && (handbrakePressed || gamepadJumping || keyboard.jump)
         renderer?.personalFlightBrake=acceptsInput && (flightBrakePressed || keyboard.flightBrake)
         vehicleTuck=acceptsInput ? Double(lookVertical):0
         if renderer?.isClimbing == true && aiming {setAiming(false)}
-        let canFight = acceptsInput && !weaponCycle.busy && currentVehicle == nil && renderer?.isClimbing != true && network.health > 0 && !network.passive &&
+        let canFight = acceptsInput && !weaponCycle.busy && currentVehicle == nil && renderer?.isClimbing != true && renderer?.originalCoughing != true && network.health > 0 && !network.passive &&
             renderer?.swimming != true && renderer?.isChuting != true &&
             (renderer?.wearingJetpack != true || renderer?.hasNativeFootWeaponTiming == true || renderer?.hasNativeFootMeleeTiming == true)
         if !canFight { renderer?.cancelWeaponInput() }
         renderer?.weaponTriggerHeld = canFight && (firePressed || gamepadAttacking)
+        var legacyInput=NativeSAMPInput.State()
+        legacyInput.enabled=acceptsInput;legacyInput.driving=currentVehicle != nil
+        legacyInput.sideways=sideways;legacyInput.forward=forward;legacyInput.steering=steering;legacyInput.pitch=lookVertical
+        let pedal=helicopter ? lift:forward
+        legacyInput.throttle=max(0,pedal);legacyInput.brake=max(0,-pedal)
+        legacyInput.crouch=ProcessInfo.processInfo.systemUptime<legacyCrouchUntil || heldKeys.contains(.keyboardC)
+        legacyInput.fire=canFight && (firePressed || gamepadAttacking)
+        legacyInput.sprint=running;legacyInput.jump=renderer?.jumpHeld==true
+        legacyInput.aim=aiming;legacyInput.handbrake=renderer?.vehicleHandbrake==true
+        legacyInput.horn=horn;legacyInput.walk=renderer?.walkHeld==true
+        legacyInput.look=renderer?.cameraLookDirection
+        legacyInput.action=currentVehicle != nil ? renderer?.vehicleHop==true:heldKeys.contains(.keyboardTab)
+        legacyInput.special=NativeSAMPInput.specialKey(heldHID:Set(heldKeys.map{Int($0.rawValue)}))
+        let legacyFrame=NativeSAMPInput.encode(legacyInput)
+        legacyKeys=legacyFrame.keys;legacyAxes=SIMD2(legacyFrame.leftRight,legacyFrame.upDown);legacySpecialKeys=legacyFrame.special
         renderer?.weaponReloading = weapons.reloading
         renderer?.weaponReady = weapons.canFire && !weaponCycle.busy
         renderer?.beginGameplayFrame()
@@ -1690,7 +1993,9 @@ final class NativeGameViewController: UIViewController {
                 }
             }
         }
-        if network.isReady, link.timestamp - lastNetwork > 0.2 {
+        let legacyClient=(network.legacy as?NativeSAMPWorldConnection)?.client
+        let positionInterval=legacyClient.map{Double(currentVehicle != nil ? $0.carMilliseconds:$0.footMilliseconds)/1000} ?? (network.legacy != nil ? 0.03:0.2)
+        if network.isReady, link.timestamp - lastNetwork >= positionInterval-0.000001 {
             lastNetwork = link.timestamp
             sendCurrentPosition(moving:walking,running:running,tuck:Double(lookVertical),paused:!acceptsInput)
         }

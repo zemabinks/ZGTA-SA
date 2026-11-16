@@ -4,7 +4,7 @@ from pathlib import Path
 import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/combat-88/weapon-roles';OUT.mkdir(parents=True,exist_ok=True)
-APP=['ServerAddress','NativeInventoryPrediction','NativeWeaponState','NativeWeaponShotDelivery']
+APP=['ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery']
 FILES=[f'ios/App/{n}.swift' for n in APP]+['smoke_native_weapon_roles.py']
 inputs={p:(ROOT/p).read_bytes() for p in FILES}
 SWIFT=r'''

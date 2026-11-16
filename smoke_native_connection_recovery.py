@@ -5,7 +5,7 @@ import hashlib,json,shutil,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 def main():
     output=ROOT/'local-only/native-physics/tests/connection-recovery';output.mkdir(parents=True,exist_ok=True)
-    sources=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeWeaponState']
+    sources=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState']
     with tempfile.TemporaryDirectory(prefix='clock-',dir=output) as temporary:
         work=Path(temporary)
         for name in sources:shutil.copyfile(ROOT/'ios/App'/f'{name}.swift',work/f'{name}.swift')

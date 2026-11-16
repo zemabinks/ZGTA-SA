@@ -494,6 +494,93 @@ pub unsafe extern "C" fn zgtaphys_collider_trimesh(
     );
     id
 }
+/// Authored local mesh attached to an existing rigid body. Keep the existing
+/// standalone entry point unchanged for archived world streaming callers.
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_collider_trimesh_parented(
+    ptr: *mut ZGTAPhysicsWorld,
+    parent: Id,
+    vertices: *const f32,
+    vertex_count: u32,
+    indices: *const u32,
+    triangle_count: u32,
+    surfaces: *const i32,
+    materials: *const i32,
+    transform: *const f32,
+    friction: f32,
+    restitution: f32,
+) -> Id {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(body_handle) = w.body_ids.get(&parent).copied() else {
+        return 0;
+    };
+    let Some(t) = floats(transform, 7) else { return 0 };
+    let norm: f32 = t[3..7].iter().map(|x| x * x).sum();
+    let body = &w.bodies[body_handle];
+    let body_norm = body.rotation().length_squared();
+    let body_position = body.translation();
+    if parent == 0
+        || vertex_count < 3
+        || vertex_count > 1_000_000
+        || triangle_count == 0
+        || triangle_count > 1_000_000
+        || indices.is_null()
+        || !friction.is_finite()
+        || friction < 0.0
+        || !restitution.is_finite()
+        || !(0.0..=1.0).contains(&restitution)
+        || !norm.is_finite()
+        || (norm - 1.0).abs() > 0.001
+        || !body_norm.is_finite()
+        || (body_norm - 1.0).abs() > 0.001
+        || t[..3].iter().any(|x| x.abs() > 1_000_000.0)
+        || [body_position.x, body_position.y, body_position.z]
+            .iter()
+            .any(|x| !x.is_finite() || x.abs() > 1_000_000.0)
+    {
+        return 0;
+    }
+    let Some(local) = pose(transform) else { return 0 };
+    let Some(v) = floats(vertices, vertex_count as usize * 3) else {
+        return 0;
+    };
+    if v.iter().any(|x| x.abs() > 1_000_000.0) {
+        return 0;
+    }
+    let idx = slice::from_raw_parts(indices, triangle_count as usize * 3);
+    if idx.iter().any(|i| *i >= vertex_count) {
+        return 0;
+    }
+    let points = v.chunks_exact(3).map(vector).collect();
+    let triangles = idx.chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
+    // Same constructor/default TriMeshFlags and face order as standalone meshes.
+    let Ok(builder) = ColliderBuilder::trimesh(points, triangles) else {
+        return 0;
+    };
+    let id = w.collider(builder, parent, local, friction, restitution);
+    if id == 0 {
+        return 0;
+    }
+    let handle = w.collider_ids[&id];
+    w.colliders[handle].set_friction_combine_rule(CoefficientCombineRule::Average);
+    let count = triangle_count as usize;
+    w.meshes.insert(
+        handle,
+        MeshInfo {
+            surfaces: if surfaces.is_null() {
+                vec![2; count]
+            } else {
+                slice::from_raw_parts(surfaces, count).to_vec()
+            },
+            materials: if materials.is_null() {
+                vec![-1; count]
+            } else {
+                slice::from_raw_parts(materials, count).to_vec()
+            },
+        },
+    );
+    id
+}
 #[no_mangle]
 pub unsafe extern "C" fn zgtaphys_collider_remove(ptr: *mut ZGTAPhysicsWorld, id: Id) -> u32 {
     let Some(w) = world(ptr) else { return 0 };

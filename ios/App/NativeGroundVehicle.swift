@@ -204,6 +204,9 @@ final class NativeGroundVehicle {
     var otherColliders: Set<SwiftRapierWorld.ColliderID> {others.colliders}
     var onOtherMove:((String,[String:Any])->Void)?
     var onCouplingStep:((Double)->Void)?
+    /// Stages external kinematic world geometry exactly once per native tick,
+    /// before existing coupling and unattended-body force owners run.
+    var onKinematicStep:((Double)->Void)?
     var onOtherCollidersChanged:(()->Void)?
     func synchronizeOtherVehicles(_ poses:[NativeOtherVehicles.Pose],excluding:String?,near position:SIMD3<Float>,
                                   promoteNear:SIMD3<Float>?=nil,delta:Double=0,wetness:Double=0) {
@@ -451,7 +454,7 @@ final class NativeGroundVehicle {
         others.waterWave = {[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:SIMD3(0,1,0))}
         others.onMove = {[weak self] in self?.onOtherMove?($0,$1)}
         others.onCollidersChanged = {[weak self] in self?.onOtherCollidersChanged?()}
-        world.beforeStep = {[weak self] delta in self?.onCouplingStep?(delta);self?.others.beforeStep(delta:delta)}
+        world.beforeStep = {[weak self] delta in self?.onKinematicStep?(delta);self?.onCouplingStep?(delta);self?.others.beforeStep(delta:delta)}
         world.afterStep = {[weak self] in self?.others.afterStep(delta:$0)}
     }
 
@@ -681,7 +684,7 @@ final class NativeGroundVehicle {
         workingShapeBody=nil;workingShapeValue=nil
         workingControl=0;workingTowed=false;workingState=WorkingState()
     }
-    func teleport(modelPosition: SIMD3<Float>, heading: Float) {
+    func teleport(modelPosition: SIMD3<Float>, heading: Float,bodyPose:NativeUnattendedVehicle.Pose?=nil) {
         guard active, definitions[model] != nil,
               modelPosition.x.isFinite, modelPosition.y.isFinite,
               modelPosition.z.isFinite, heading.isFinite else { return }
@@ -692,7 +695,7 @@ final class NativeGroundVehicle {
         let currentModel = model, damage = damageController,work=workingValue
         let fun = dynamics?.fun ?? bikeDynamics?.fun ?? 0
         let manual = dynamics?.manual ?? bikeDynamics?.manual ?? false
-        guard enter(model:currentModel,modelPosition:modelPosition,heading:heading) else { return }
+        guard enter(model:currentModel,modelPosition:modelPosition,heading:heading,bodyPose:bodyPose) else { return }
         dynamics?.fun = fun; bikeDynamics?.fun = fun
         dynamics?.manual = manual; bikeDynamics?.manual = manual
         damageController = damage

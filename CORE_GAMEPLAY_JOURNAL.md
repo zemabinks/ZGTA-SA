@@ -1,5 +1,60 @@
 # Core gameplay audit journal
 
+## 2026-11-16 — Core103 stock resources, coordinates and real reference access
+
+The previous Core102 source snapshot compiled both optimized Apple SDKs and
+passed actual UIKit custom DL scene acceptance. Its full gate recorded135/141,
+with unchanged sources. Two carriers needed newly added ownership dependencies;
+one lacked a pinned private protocol reference. Three GPU tests exposed a real
+test-platform readback problem on the discrete AMD GPU: direct render-target
+getBytes returned zeros, while an explicit GPU copy returned the exact expected
+pixels. Core103 fixes the carriers and uses aligned GPU-to-buffer copies while
+retaining the strict existing pixel assertions. The historical failed report
+is preserved; it is not relabeled as a pass.
+
+Core103 addresses actual vehicle-coordinate ownership rather than adjusting
+spawn heights. All212 original vehicle model offsets are used with the full
+quaternion to convert network model origins to native physics bodies and back.
+The pure calibration passes30,535 checks. Actual owned open.mp raw114 and
+catalog128 checks pass for037 and DL, including independent observer conversion,
+full rotation, final parked position/health and respawn cache replay. Fresh164
+only transmits heading; absent parked pitch/roll is an explicit protocol limit.
+Fatal wreck reports now retain cause51 and exact local vitals ownership; an
+unknown absolute zero-health update is no longer mislabeled as a fall.
+
+The stock resource path indexes18,108 exact DFF/TXD ranges in the owner's IMG
+archives. It serves only declared, revalidated hashes, with bounded jobs/bytes
+and no bulk extraction. The complete external COL inventory preserves original
+header IDs as hints and binds exact model names to original IDE definitions.
+Missing physical geometry is accepted only when complete inventory evidence
+proves its absence for the exact manifest. No fake collider replaces a failure.
+Four owner props have passed actual Renderer callbacks, HTTP validation, native
+Metal rendering and parented Rapier collision/moving-object registration. This
+is a narrow integrated sample, not a claim that18,108 resources have rendered.
+Host/origin/join gates remain enforced; original resources stay local.
+
+The current original browser service exposes a legitimate Guest-name API.
+The new native account helper passes137 Swift and20 actual controlled HTTP
+checks, including strict response limits, cancellation, account/build verification
+and authoritative guest restrictions. The actual native Simulator form passes
+its UIKit test with the Guest/name/Discord controls visible and no browser game
+loaded. No external Guest POST was made by that test. User-controlled live-world
+authentication remains an acceptance gate; browser login state is never imported
+from Chrome.
+
+The connected iPhone reference could not initialize XCTest UI automation.
+The actual blocker to direct screenshots was older mounted developer support.
+Compatible Apple-personalized support enabled a real screenshot of the installed
+Definitive Edition main menu. The capture and subsequent legitimate reference
+tests are local-only; this edition does not by itself prove classic-retail
+physics, frame timings or full native-app parity.
+
+Core103 full frozen-source regression, both optimized Apple builds and final
+source-only release acceptance are still pending. The remaining checklist is
+active. Incoming combat presentation/damage, passengers, pickups/checkpoints,
+animated and supplemental stock assets, retail timing and physical native-app
+input/performance remain open. No full1:1 or universal-server claim is made.
+
 ##2026-11-15 — priority override and preserved baseline
 
 - Baseline source:482af7dc7b42be7723fb76c823d03f311c061610.
@@ -1100,3 +1155,85 @@ has0rad heading change at251ms sampling. Six full-screen captures were exported
 and the exit/hover/landing scenes inspected. The isolated QA server and
 Simulator were shut down afterward. No physical-device or retail comparison,
 rendered browser-peer test or external-server native join is established.
+
+
+## Core101 — native existing-server adapters, acceptance in progress
+
+Implemented separate legacy UDP and original-browser-world connections while
+retaining strict independent-server inventory acknowledgements. The legacy path
+uses the licensed Apache2 transport through an independent bounded C ABI; it
+performs real challenge/join/class/spawn transactions. Semantic native controls,
+player/vehicle streams, mapped original skin IDs, interiors, weapons, health,
+chat, dialogs and basic TextDraws are connected to the actual native game.
+
+Owned official open.mp tests establish0.3.7 and DL-profile spawn, chat and mutual
+movement. A pre-final UIKit scenario renders the assigned SWAT/interior/HUD,
+walks5.67m and stops with zero observed drift across14 subsequent sync samples;
+final frozen-build UI acceptance remains in progress. A real separate DL server
+exercises CRC32 catalog/download/completion helpers with synthetic payloads;
+custom downloaded geometry is not rendered yet.
+
+Original-world work adds versioned snapshots/deltas, app-owned service login,
+client-owned arsenal/FIFO commands, fractional health/armour/burn/gas behavior,
+actual staff commands and delayed fatal-vehicle exit ownership. Regression work
+also exposed and fixed dropped accepted last-round shots, compact versus retail
+skin ID confusion, stale animation state on model-style changes, actor/chassis
+quaternion conversion and altitude-only interior selection.
+
+A fresh complete frozen regression suite and both optimized native SDK builds
+are running. No Core101 acceptance/public release, authenticated original-site
+join, separate legacy SA-MP server-binary acceptance, physical iPhone result or
+retail1:1 claim is made by this in-progress entry. See
+[server compatibility](SERVER_COMPATIBILITY.md) for the full remaining boundary.
+
+
+##2026-11-16 — Core102 legacy gameplay and actual native assets
+
+Core101 checkpoint passed123/123 frozen-source gates, both optimized SDK builds,
+and actual UIKit stock037/DL join/spawn/walk/dialog tests. It was not published:
+Core102 fixes the independently measured1m CPed-root/native-feet mismatch.
+Official class root10.8203 corresponds to original collision9.8203125; the
+native controller's separate0.02m contact margin is documented as a difference.
+
+Core102 now integrates DL catalogs/downloads with actual bounded DFF/TXD decode,
+static/skinned Metal upload, the existing CLP1 skeletal animation owner, custom
+skin registration, object transforms, material colors/text and exact dictionaries.
+Imported COL main faces/spheres/boxes are actual parented Rapier bodies; shadow
+faces are excluded. The owner corpus admits212 collision models/5,632 physical
+colliders while retaining2,666 main faces separately from81,404 shadow faces.
+Failed/missing resources are explicit; no alternate stock model is substituted.
+
+Server control/camera/spectator commands now reach the actual controller and
+rendered camera, with generation ownership, finite look vectors and the same
+eye used for212/streaming. Remote scripted views retain the local actor's physical
+floor. Normal spectator views reuse native camera algorithms; side mode and
+untimed smooth-look policy remain explicit unverified gaps.83 pure camera checks
+and1,673 real Renderer boundary checks pass; integrated UIKit acceptance is running.
+
+A distinct fractional legacy vitals owner preserves exact Float14/66 seeds,
+keeps byte sync quantization separate, forwards actual environmental115 damage,
+and reports first zero-health sync with cause53/54 once.7,714 actual official
+owned037/DL checks pass, plus110 decoder/lifecycle and30,520 unchanged independent
+health checks. Death/respawn testing found and fixed lost roster/vehicle caches:
+only actual current streamed Client state is republished after a confirmed spawn.
+
+Moving-object staging is now tied to each actual native60Hz tick, before existing
+coupling/unattended forces. Non-consuming Store samples prevent a later display
+pose from clamping earlier physical substeps.2,086 codec/scene/clock checks pass
+across15..144Hz. The actual support callback test passed3,792 checks including
+an authored object translate/yaw/remove/reuse scenario; final fixed-tick callback
+regression is running. Physical/browser/retail behavior is not inferred from these
+controlled fixtures.
+
+All five native physics architectures were rebuilt with the additive parented
+triangle bridge. Integrated Debug Simulatorv3 compiled with unchanged sources;
+its exact executable/dylib/metallib manifest is retained locally. Actual custom
+DL UIKit and witness tests are now running against the isolated7793 fixture.
+Final full regression and optimized both-SDK acceptance are still pending.
+
+Remaining interoperability includes incoming203/206 presentation and actual
+combat damage/hitbox policies, passengers/drive-by, full RPC/pickup/checkpoint
+coverage, raw stock/supplemental object assets, client extensions and proprietary
+server-binary acceptance. Original browser guest requests login; the legitimate
+app-owned authenticated live world still needs the user's sign-in. No retail,
+physical-phone, universal-server or full1:1 claim is made.

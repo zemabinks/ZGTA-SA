@@ -12,8 +12,8 @@ enum NativeWeaponShotDelivery {
         emission(weapon, left, ticket)
         return true
     }
-    /// Explicit offline legacy tests only. Production state refuses to predict
-    /// without a negotiated connection and a preallocated ticket.
+    /// Explicit client-owned original-world policy. The acknowledged self-host
+    /// policy still refuses to consume ammunition without a reserved ticket.
     @discardableResult static func deliver(weapon: Int, left: Bool, inventory: NativeWeaponState,
         readiness: (Bool) -> Void, emission: (Int, Bool) -> Void) -> Bool {
         let accepted = inventory.consumeAnimationShot(weapon: weapon)

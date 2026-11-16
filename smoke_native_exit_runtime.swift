@@ -23,7 +23,12 @@ for model in ["420","411","522","481","430","519","487","406","610","407"] {for 
  check(abs(first.z)<0.00001,"Flat ground placement did not use actual downward query")
  let wall=world.addBox(halfExtents:SIMD3(0.4,2,0.4),position:physical+SIMD3(0,1,0))!
  world.setColliderGroups(wall,collision:131071,solver:0xffffffff)
- controller.leave(nil)
+ var completions=0
+ controller.leave(nil,afterExit:{
+  completions+=1
+  check(!app.driving && controller.currentVehicle==nil && controller.network.packets.count==1,"Completion preceded vehicle/network commit")
+  check(controller.gameHUD.hidden && !controller.drivingControls && controller.radio.stops==1,"Completion preceded UI/radio commit")
+ })
  check(!app.driving && controller.currentVehicle==nil,"Normal/missing-metadata exit did not complete")
  check(simd_distance(app.camera,first)>0.4,"Blocked first exit was reused")
  check(app.character!.motor.fits(SIMD3<Double>(SwiftRapierWorld.gtaToRapier(app.camera)),excludingBody:body),"Exit ended inside the wall")
@@ -31,6 +36,7 @@ for model in ["420","411","522","481","430","519","487","406","610","407"] {for 
  check(controller.network.packets.count==1 && controller.network.packets[0].feet==app.camera,"Exit packet differs from placed feet")
  check(app.pendingExitPlacement==nil && !controller.drivingControls && controller.gameHUD.hidden,"Exit retained pending ownership or UI")
  check(simd_distance(old,app.camera)>0.1,"Missing metadata left actor at seated origin")
+ check(completions==1,"Normal exit completion was not exactly once")
 }}
 for mode in ["normal","bike","wreck","water"] {
  let app=try instance(mode=="bike" ? "522":"420")
@@ -38,20 +44,24 @@ for mode in ["normal","bike","wreck","water"] {
  var losses:[Int]=[];app.onLocalHealth={losses.append($0)}
  app.geometryReady=false
  let event:NativeBikeEjection.Event?=mode=="bike" ? .init(force:100,velocity:SIMD3(12,0,0)):nil
- if mode=="wreck"{controller.wreck()}else if mode=="water"{controller.waterExit()}else{controller.leave(event)}
+ var completions=0
+ let completed={completions+=1;check(!app.driving && controller.currentVehicle==nil && controller.network.packets.count==1 && controller.gameHUD.hidden && !controller.drivingControls,"Deferred completion preceded full commit")}
+ if mode=="wreck"{controller.wreck(afterExit:completed)}else if mode=="water"{controller.waterExit(afterExit:completed)}else{controller.leave(event,afterExit:completed)}
  check(app.driving && app.groundVehicle!.active && controller.currentVehicle != nil,"Unknown geometry released the hull")
  check(controller.network.packets.isEmpty && controller.drivingControls && !controller.gameHUD.hidden,"Unknown geometry changed transport/UI")
  check(app.health==100 && losses.isEmpty && !app.footAnimator!.dead,"Deferred forced exit applied damage early")
  check(app.pendingExitPlacement != nil && !app.requestedCells.isEmpty,"Unknown cells were not requested/retried")
+ check(completions==0,"Completion ran before geometry became available")
  let retry=app.pendingExitPlacement;app.pendingExitPlacement=nil;app.geometryReady=true;retry?()
  check(!app.driving && !app.groundVehicle!.active && controller.currentVehicle==nil,"Loaded retry failed to complete")
  check(controller.network.packets.count==1,"Deferred exit did not publish exactly once")
  check(app.health==(mode=="wreck" ? 0:mode=="bike" ? 95:100),"Deferred exit lost its damage cause")
  check(app.pendingExitPlacement==nil,"Completed exit retained a replay")
- retry?();check(controller.network.packets.count==1,"Consumed retry replayed exit")
+ retry?();check(controller.network.packets.count==1 && completions==1,"Consumed retry replayed exit or completion")
 }
 for changed in ["renderer","vehicleID","sameIDnewGeneration","discard"] {
- let app=try instance(),controller=BikeExitController();controller.renderer=app;app.geometryReady=false;controller.leave(nil)
+ let app=try instance(),controller=BikeExitController();controller.renderer=app;app.geometryReady=false
+ var completions=0;controller.leave(nil,afterExit:{completions+=1})
  let retry=app.pendingExitPlacement
  if changed=="renderer" {controller.renderer=try instance()}
  else if changed=="vehicleID" {controller.currentVehicle=ExitVehicle(id:"other",code:"420.0.0.0.")}
@@ -60,6 +70,7 @@ for changed in ["renderer","vehicleID","sameIDnewGeneration","discard"] {
  app.geometryReady=true;retry?()
  check(controller.network.packets.isEmpty,"Stale exit released replacement ownership: "+changed)
  check(changed=="discard" || app.driving,"Stale retry exited old live vehicle: "+changed)
+ check(completions==0,"Discarded vehicle identity ran completion: "+changed)
 }
 // Place the preferred side just inside a loaded cell. Only its widened
 // capsule corner crosses the boundary; unknown space must still defer.

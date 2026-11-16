@@ -21,6 +21,7 @@ struct RemotePlayer {
  var code="s7";var ridingVehicleID:String?;var crouching=false;var down=0;var life=100
 }
 class Network {
+ var usesClientOwnedWeapons=false
  var health=100,passive=false,hits:[String]=[],reservations=0,connected=true,strikes=0,detonations=0
  var orderedPlayers:[RemotePlayer]=[]
  var players:[String:RemotePlayer]{Dictionary(uniqueKeysWithValues:orderedPlayers.map{($0.id,$0)})}
@@ -58,7 +59,7 @@ class Harness {
  var usingPistol:Bool{weapons.current.isGun}
  func setDrivingControls(_ value:Bool){};func updateWeaponHUD(){}
  func currentShotRay(weapon:Int,left:Bool)->Ray?{Ray()}
- func emitWeaponShot(weapon:Int,left:Bool,ticket:NativeShotTicket,ray:Ray){}
+ func emitWeaponShot(weapon:Int,left:Bool,ticket:NativeShotTicket?,ray:Ray){}
 '''
 tests=r'''
 var checks=0
@@ -122,7 +123,7 @@ print("PASS: \(checks) actual VC melee dispatch/state/targeting checks;100 rejec
 with tempfile.TemporaryDirectory(prefix='snapshot-',dir=OUT) as folder:
     folder=pathlib.Path(folder)
     source=folder/'main.swift';source.write_text(profile+'\n'+stub+methods+'\n}\n'+tests)
-    files=['NativeInventoryPrediction.swift','NativeWeaponState.swift','NativeMelee.swift']
+    files=['NativeInventoryPrediction.swift','NativeOriginalWorldArsenal.swift','NativeWeaponState.swift','NativeMelee.swift']
     binary=folder/'verify'
     subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'modules'),*[str(ROOT/'ios/App'/p) for p in files],str(source),'-o',str(binary)],check=True)
     result=subprocess.run([str(binary)],text=True,capture_output=True);print(result.stdout,end='');print(result.stderr,end='');result.check_returncode()

@@ -1,0 +1,4 @@
+module ZGTASAMPTransport {
+    header "zgtasa_samp.h"
+    export *
+}

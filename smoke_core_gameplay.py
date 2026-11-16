@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,7 @@ OUT = ROOT / 'local-only/native-physics/tests/core-gameplay-gate'
 
 
 def hashes():
-    paths = [*sorted(p for p in ROOT.iterdir() if p.is_file() and p.suffix in {'.py','.js','.swift','.sh'}),
+    paths = [*sorted(p for p in ROOT.iterdir() if p.is_file() and p.suffix in {'.py','.js','.swift','.sh','.cpp','.hpp','.pwn'}),
              *sorted(p for p in (ROOT / 'ios/App').rglob('*') if p.is_file()),
              *sorted((ROOT / 'native-physics/src').rglob('*.rs')),
              *sorted(p for p in (ROOT / 'native-physics/tests').rglob('*') if p.is_file()),
@@ -27,6 +28,14 @@ def hashes():
              *sorted(p for p in (ROOT / 'native-physics/include').iterdir() if p.is_file()),
              ROOT / 'native-physics/Cargo.toml', ROOT / 'native-physics/Cargo.lock',
              ROOT / 'native-physics/source_stamp.py']
+    # Network/codec sources participate in the same frozen-source boundary.
+    # Walk only source files, excluding downloaded build products and caches.
+    for directory in ['native-samp','native-menu-codec','tests']:
+        base=ROOT/directory
+        if base.exists():
+            paths += sorted(p for p in base.rglob('*') if p.is_file()
+                            and not any(part in {'build','target','vendor','node_modules','.git','local-only','__pycache__'} for part in p.relative_to(base).parts)
+                            and (p.suffix in {'.go','.mod','.sum','.c','.cpp','.h','.hpp','.rs','.toml','.lock','.sh','.py','.js','.json','.swift','.pwn','.metal'} or p.name in {'go.mod','go.sum'}))
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
 
@@ -36,7 +45,9 @@ def main():
     required = [ROOT / 'local-only/selfhost/weapon-catalog.json',
                 ROOT / 'local-only/selfhost/client-catalog.json',
                 ROOT / 'local-only/site/game/native/foot-animation.json',
-                ROOT / 'local-only/site/game/native/models/animations.clips.bin']
+                ROOT / 'local-only/site/game/native/models/animations.clips.bin',
+                ROOT / 'local-only/original-world-assets/game/native/stock-models.json',
+                ROOT / 'local-only/research/samp-ped-height/mesh-observations.json']
     missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
     if missing:
         raise SystemExit('Prepare the owner-provided local assets/catalogs before this gate. Missing: ' + ', '.join(missing))
@@ -72,12 +83,27 @@ def main():
         'smoke_native_flight_animation.py', 'smoke_native_camera.py', 'smoke_native_foot_look_behind.py',
         'smoke_native_remote_foot.py', 'smoke_native_rider_playback.py', 'smoke_native_rider_cancellation.py',
         'smoke_native_weapon_effects.py', 'smoke_bicycle_input.py',
+        'smoke_original_world_protocol.py', 'smoke_original_world_arsenal.py',
+        'smoke_original_world_weapons.py', 'smoke_original_world_staff.py', 'smoke_original_world_wire.py',
+        'smoke_native_original_controller.py', 'smoke_native_original_commands.py', 'smoke_native_original_renderer.py',
+        'smoke_native_original_vitals.py', 'smoke_native_original_gameplay.py',
+        'smoke_native_samp_protocol.py', 'smoke_samp_server_ui.py', 'smoke_samp_artwork.py',
+        'smoke_samp_input.py', 'smoke_samp_lifecycle.py', 'smoke_samp_gameplay.py', 'smoke_samp_objects.py',
+        'smoke_native_renderware_dff.py', 'smoke_native_renderware_skeleton.py',
+        'smoke_native_renderware_collision.py', 'smoke_native_renderware_collision_world.py',
+        'test_native_renderware_txd.py', 'test_native_renderware_model.py', 'smoke_native_renderware_ped.py',
+        'test_samp_artwork_session.py', 'test_samp_object_materials.py', 'test_samp_game_camera.py', 'test_samp_stock_models.py',
+        'smoke_original_auth.py', 'smoke_samp_vehicle_coordinates.py', 'smoke_samp_combat_sync.py',
+        'test_stock_asset_access.py', 'smoke_native_stock_collision.py', 'test_samp_stock_runtime.py',
+        'test_stock_img_assets.py',
+        'smoke_samp_controls.py', 'smoke_samp_vitals.py',
     ]]
     cases += [(p.removesuffix('.js'), ['node', p]) for p in [
         'smoke_browser_armour_sync.js', 'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_weapon_transport.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js', 'smoke_vehicle_departure.js', 'smoke_health_ack.js',
         'smoke_native_melee_server.js', 'smoke_native_melee_assets.js', 'smoke_native_parry.js',
         'smoke_vehicle_coupling_server.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
     ]]
+    cases.append(('samp_ped_coordinate_calibration',['python3','smoke_samp_coordinates.py',str(ROOT/'local-only/research/samp-ped-height/mesh-observations.json')]))
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))
     cases.append(('native_sphere', ['zsh', 'native-physics/test_sphere.sh']))
     cases.append(('native_joints', ['zsh', 'native-physics/test_joints.sh']))
@@ -97,15 +123,24 @@ def main():
         print(('PASS ' if code == 0 else 'FAIL ') + name, flush=True)
         return row
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    # Large native compilers and actual GPU readbacks share this development
+    # host. Keep concurrency explicit so a bounded gate also runs on16GB Macs.
+    workers=int(os.environ.get('ZGTA_CORE_WORKERS','2'))
+    if not 1<=workers<=4:
+        raise SystemExit('ZGTA_CORE_WORKERS must be1..4')
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(run, cases))
+
+    # The raw and catalog-aware controls fixtures deliberately use the same
+    # matching UDP port. Run this second profile after the pool has released it.
+    results.append(run(('samp_vehicle_coordinate_udp',['python3','smoke_samp_controls.py','--vehicle-metadata',str(ROOT/'local-only/site/game/native/vehicles.physics.json')])))
 
     # Compile integration boundaries against the actual helpers, not stand-ins.
     for name in ['weapon_state']:
         source = ROOT / f'smoke_native_{name}.swift'
         with tempfile.TemporaryDirectory(prefix='zgta-core-' + name + '-') as temporary:
             binary = str(Path(temporary) / 'verify')
-            dependencies = ['NativeInventoryPrediction', 'NativeWeaponState']
+            dependencies = ['NativeInventoryPrediction', 'NativeOriginalWorldArsenal', 'NativeWeaponState']
             compile_command = ['xcrun', 'swiftc', '-O', '-module-cache-path', str(OUT / 'modules')]
             compile_command += [str(ROOT / 'ios/App' / (n+'.swift')) for n in dependencies]
             compile_command += [str(source), '-o', binary]

@@ -4,7 +4,7 @@ from pathlib import Path
 import hashlib,json,os,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/coupling-backend'
-NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeMultiplayerClient']
+NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeMultiplayerClient']
 MODULES=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js','vehicle_coupling.js']
 TESTS=['smoke_native_coupling_backend.py','smoke_native_coupling_backend.js','smoke_native_coupling_backend.swift']
 def main():

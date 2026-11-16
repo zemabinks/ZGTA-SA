@@ -31,6 +31,10 @@ if { [[ "$target" != device ]] && ! python3 "$project_dir/native-physics/source_
    { [[ "$target" != simulator ]] && ! python3 "$project_dir/native-physics/source_stamp.py" check "$project_dir/local-only/native-physics/ios-device"; }; then
   zsh "$project_dir/native-physics/build.sh" all
 fi
+if ! python3 "$project_dir/build_samp_transport.py" --check --platform device --platform simulator; then
+  command -v go >/dev/null || { print -u2 'Go 1.26.4 or newer is required for native SA-MP networking.'; exit 1; }
+  python3 "$project_dir/build_samp_transport.py" --platform device --platform simulator
+fi
 (cd "$project_dir/ios" && xcodegen generate --spec "$project_spec")
 build_platform() {
   local platform="$1" suffix="$2"

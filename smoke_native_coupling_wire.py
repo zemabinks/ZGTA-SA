@@ -4,7 +4,7 @@ from pathlib import Path
 import argparse,hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/coupling-wire';OUT.mkdir(parents=True,exist_ok=True)
-NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeMultiplayerClient']
+NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeMultiplayerClient']
 FILES=[f'ios/App/{n}.swift' for n in NAMES]+['ios/App/NativeActorAnimation.swift','smoke_native_coupling_wire.py','smoke_native_coupling_wire.js','smoke_native_coupling_wire.swift']
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--negative-no-callback-guard',action='store_true');args=parser.parse_args()

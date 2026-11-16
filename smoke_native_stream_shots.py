@@ -41,17 +41,18 @@ def main():
   tests=(ROOT/'smoke_native_stream_shots.swift').read_text().replace('// ACTUAL_SEND_WEAPON_SHOT',method)
   old='var socket:DeferredSocket?=DeferredSocket(),health=100,passive=false,shots=0,resyncs=0'
   assert old in tests
-  tests=tests.replace(old,old+',isReady=true;var transportGeneration:UInt64=0',1)
+  tests=tests.replace(old,old+',isReady=true,usesClientOwnedWeapons=false,usesOriginalWorldProtocol=false;var transportGeneration:UInt64=0',1)
+  tests=tests.replace('final class CallbackHarness {','final class DisabledLegacy {func send(_ packet:[String:Any])->Bool{preconditionFailure("Legacy branch in strict self-host test")}}\nfinal class CallbackHarness {\n var legacy:DisabledLegacy?',1)
   old='func requestInventoryResync(){resyncs += 1}'
   assert old in tests
-  tests=tests.replace(old,old+'\n func failTransport(generation:UInt64,reason:String){resyncs += 1}',1)
+  tests=tests.replace(old,old+'\n func failTransport(generation:UInt64,reason:String){resyncs += 1}\n func sendOriginal(_ packet:[String:Any])->Bool{preconditionFailure("Original branch in strict self-host test")}',1)
   old='client.onInventoryConnection={nonce in\n guard nonce != nil else{return};nonceCount += 1'
   assert old in tests
   tests=tests.replace(old,'client.onConnectionState={state in\n guard state == .ready else{return};nonceCount += 1',1)
   old='check(client.reserveShot()==nil,"Unnegotiated stream cannot fire")'
   assert old in tests
   tests=tests.replace(old,'client.onInventoryConnection={nonce in if nonce != nil {check(!client.isReady && client.reserveShot()==nil,"Hello alone cannot fire stream")}}\nclient.onInventory={_ in if !client.isReady {check(client.reserveShot()==nil,"Inventory before all cannot fire stream")}}\n'+old,1)
-  source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeMultiplayerClient'])+'\n'+motion+'\n'+tests
+  source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeMultiplayerClient'])+'\n'+motion+'\n'+tests
   (work/'main.swift').write_text(source)
   subprocess.run(['swiftc','-O','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',str(work/'main.swift'),'-o',str(work/'verify')],check=True)
   subprocess.run(['node',str(work/'peer.cjs'),str(work/'verify')],check=True)

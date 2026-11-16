@@ -6,9 +6,9 @@ import re
 import subprocess
 import sys
 
-TEXT = {'.md', '.py', '.js', '.swift', '.metal', '.plist', '.h', '.c', '.rs', '.sh',
+TEXT = {'.md', '.py', '.js', '.swift', '.metal', '.plist', '.h', '.c', '.cpp', '.hpp', '.pwn', '.rs', '.sh',
         '.command', '.yml', '.yaml', '.toml', '.lock', '.modulemap', '.pbxproj',
-        '.xcworkspacedata', '.xcscheme', '.txt'}
+        '.xcworkspacedata', '.xcscheme', '.txt', '.go', '.mod'}
 BAD_PARTS = {'local-only', '_next', 'node_modules', 'DerivedData', 'build',
              '__pycache__', 'xcuserdata', '.venv', '.git'}
 PATTERNS = [
@@ -60,7 +60,7 @@ def source_files(root):
         for path in sorted((root / 'ios').iterdir()):
             if path.is_file() and allowed(path.relative_to(root).as_posix()):
                 yield path
-    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-menu-codec', 'test-fixtures/native-menu', '.github'):
+    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'tests', 'test-fixtures/native-menu', '.github'):
         base = root / directory
         if base.is_dir():
             for path in sorted(base.rglob('*')):

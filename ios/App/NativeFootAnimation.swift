@@ -140,7 +140,7 @@ final class NativeFootAnimation {
     private let library: NativeSkeletalAnimationLibrary
     private lazy var swimAnimation = NativeSwimAnimation(duration:{ [unowned self] in self.duration($0) })
     private lazy var flightAnimation = NativeFlightAnimation(duration:{ [unowned self] in self.library.duration(of:$0) })
-    private let baseStyle: NativeFootAnimationStyle
+    private var baseStyle: NativeFootAnimationStyle
     private(set) var style: NativeFootAnimationStyle
     private var phase: Double
     private var idleTime: Double
@@ -399,6 +399,25 @@ final class NativeFootAnimation {
             selected.sprint = "ped/" + names[2]; selected.idle = "ped/" + names[3]; selected.skates = nil
         }
         style = selected
+    }
+    /// Changing a server-selected skin changes its gait, not the active task.
+    /// Keep movement phase, airborne history, gun/melee markers, reload, swim,
+    /// flight, blends and death state owned by this same animator instance.
+    func setModelStyle(_ value: NativeFootAnimationStyle) {
+        baseStyle = value; style = value
+        if let selected = weapon?.style {
+            for (key, name) in selected {
+                let resolved = resolve(name)
+                switch key {
+                case "walk": style.walk = resolved ?? style.walk
+                case "run": style.run = resolved ?? style.run
+                case "sprint": style.sprint = resolved ?? style.sprint
+                case "idle": style.idle = resolved ?? style.idle
+                default: break
+                }
+            }
+            style.skates = nil
+        }
     }
     @discardableResult private func start(_ kind: String) -> Double {
         guard let clip = named(kind) else { return 0 }

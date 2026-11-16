@@ -12,6 +12,11 @@ the [Metal component](https://developer.apple.com/documentation/xcode/downloadin
 is separate; install it with `xcodebuild -downloadComponent MetalToolchain` if
 missing. Command Line Tools alone do not include the iPhone SDKs.
 
+Install [Go](https://go.dev/dl/)1.26.4 or newer for the native SA-MP UDP
+transport. Go1.27.2 is the tested version. Its standard library is sufficient;
+this bridge does not fetch third-party Go modules. The pinned Apache2 transport
+source, license and provenance are under `native-samp/`.
+
 Then bootstrap this clone's own Rust and validate the native tools:
 
 ```sh
@@ -74,6 +79,20 @@ Rust toolchain. Source stamps also detect bridge/header changes and rebuild
 stale libraries after a source update. Missing Cargo packages are fetched
 normally on a first build; `ZGTA_NATIVE_OFFLINE=1` is an optional cached-build
 setting. All setup/build scripts work without relying on executable file modes.
+The build also validates the Go transport's source/archive stamps and rebuilds
+missing or stale iPhone and universal arm64/x86_64 Simulator libraries. To check
+or rebuild the bridge separately:
+
+```sh
+python3 build_samp_transport.py --check --platform device --platform simulator
+python3 build_samp_transport.py --test
+```
+
+The second command runs race-enabled host tests, builds both iOS platforms and
+links the real C ABI against their SDKs. Cached libraries alone do not establish
+server interoperability. See [server compatibility](SERVER_COMPATIBILITY.md)
+for the separately verified join/gameplay boundaries.
+
 Mac server launchers prepare runtime data separately with
 `prepare_native_runtime.sh`; game assets remain under local-only.
 

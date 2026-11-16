@@ -14,7 +14,7 @@ def main():
         snapshot = Path(temporary)
         shutil.copyfile(ROOT / 'smoke_native_shot_delivery.swift', snapshot / 'main.swift')
         sources = []
-        for name in ['ServerAddress', 'NativeInventoryPrediction', 'NativeWeaponState', 'NativeWeaponShotDelivery']:
+        for name in ['ServerAddress', 'NativeInventoryPrediction', 'NativeOriginalWorldArsenal', 'NativeWeaponState', 'NativeWeaponShotDelivery']:
             target = snapshot / f'{name}.swift'
             shutil.copyfile(ROOT / 'ios/App' / target.name, target)
             sources.append(target)

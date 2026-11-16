@@ -8,6 +8,12 @@ struct NativeIncomingHit {
     let weapon:Int,damage:Double,sourceID:String?,source:SIMD3<Float>?,piece:Int,quiet:Bool,wasAlive:Bool
     let authoritativeHealth:Int?
     let parried:Bool
+    init(original hit:NativeOriginalWorldVitals.Hit,result:NativeOriginalWorldVitals.Result,health:Int,wasAlive:Bool){
+        weapon=hit.weapon;damage=hit.damage;sourceID=hit.source
+        source=hit.point.flatMap {p in let value=SIMD3<Float>(p);return [value.x,value.y,value.z].allSatisfy(\.isFinite) ? value:nil}
+        piece=hit.piece.flatMap{(0...9).contains($0) ? $0:nil} ?? 3
+        quiet=result.quiet;self.wasAlive=wasAlive;authoritativeHealth=health;parried=result.parried
+    }
     init?(_ packet:[String:Any],fallbackSource:SIMD3<Float>?=nil,wasAlive:Bool=true) {
         guard let amount=packet["d"] as? NSNumber,CFGetTypeID(amount) != CFBooleanGetTypeID(),amount.doubleValue.isFinite,amount.doubleValue>0 else{return nil}
         let weapon=NativeHealthPrediction.integer(packet["w"]) ?? 0
@@ -210,7 +216,64 @@ enum NativeCouplingTopology {
     }
 }
 
+/// Semantic game connection; each adapter owns its real wire protocol.
+protocol NativeLegacyWorldConnection:AnyObject {
+    var state:NativeConnectionRecovery.State{get}
+    var onState:((NativeConnectionRecovery.State)->Void)?{get set}
+    var onStatus:((String)->Void)?{get set}
+    var onPlayers:(([RemotePlayer])->Void)?{get set}
+    var onVehicles:(([RemoteVehicle])->Void)?{get set}
+    var onEvent:(([String:Any])->Void)?{get set}
+    func connect()
+    func disconnect()
+    func setActive(_ active:Bool)
+    func tick(now:Double)
+    @discardableResult func send(_ message:[String:Any])->Bool
+}
 final class NativeMultiplayerClient {
+    enum Flavor {
+        case selfHost
+        case originalWorld(build: String, deviceID: String)
+    }
+    let flavor: Flavor
+    let legacy:NativeLegacyWorldConnection?
+    var usesClientOwnedWeapons:Bool{legacy != nil || usesOriginalWorldProtocol}
+    var onLegacyEvent:(([String:Any])->Void)?
+    var usesOriginalWorldProtocol: Bool { if case .originalWorld = flavor { return true }; return false }
+    var onOriginalGuns: ((Any,Bool)->Void)?
+    var onAuthenticationRequired: (()->Void)?
+    var onOriginalShot: (([String:Any])->Void)?
+    var onOriginalRecord: ((UInt8,Data)->Void)?
+    var onOriginalCommand: (([String:Any])->Void)?
+    var onOriginalVehicleHit: (([String:Any])->Void)?
+    var onOriginalHit: ((NativeOriginalWorldVitals.Hit)->Void)?
+    var onOriginalHitResult: ((NativeOriginalWorldVitals.Result,NativeOriginalWorldVitals.Hit)->Void)?
+    var onOriginalEvent: ((NativeOriginalWorldCommands.Event,[String:Any])->Void)?
+    private let originalVitals=NativeOriginalWorldVitals()
+    private(set) var originalFrozen=false
+    private(set) var originalRespawnWasDead=false
+    var originalHealth:Double{originalVitals.health}
+    var originalArmour:Double{originalVitals.armour}
+    var originalFatal:NativeOriginalWorldVitals.PendingFatal?{usesOriginalWorldProtocol ? originalVitals.pendingFatal:nil}
+    private var legacyGameplay=NativeSAMPGameplayCommands.Authority()
+    private var legacyVitals=NativeSAMPLocalVitals()
+    var legacyHealth:Double{legacyVitals.health}
+    var legacyArmour:Double{legacyVitals.armour}
+    var legacyDeathReason:UInt8{legacyVitals.fatalCause?.weapon ?? 255}
+    var legacyDeathKiller:UInt16{legacyVitals.fatalCause?.source ?? 65535}
+    private var wireHealth:Int{usesOriginalWorldProtocol ? originalVitals.wireHealth:legacy != nil ? legacyVitals.wireHealth:health}
+    private var wireArmour:Int{usesOriginalWorldProtocol ? originalVitals.wireArmour:legacy != nil ? legacyVitals.wireArmour:armour}
+    var serverInputBlocked:Bool{(legacy != nil && legacyGameplay.inputBlocked) || (usesOriginalWorldProtocol && (originalFrozen || originalFatal != nil))}
+    var originalInputBlocked:Bool{serverInputBlocked}
+    var legacySpectating:Bool{legacy != nil && legacyGameplay.spectating}
+    var sampGameplayGeneration:UInt64?{legacyGameplay.generation}
+    private var originalCommandDepth=0
+    private var originalLatestPosition: [String:Any]?
+    private let originalStream = NativeOriginalWorldStream()
+    private let originalKey = UUID().uuidString.replacingOccurrences(of:"-",with:"").lowercased()
+    private var originalHeard: Int?
+    private var originalDeathSent = false
+    private var originalRespawnRequested: Double?
     typealias ConnectionState = NativeConnectionRecovery.State
     private let server: ServerAddress
     private let session: URLSession
@@ -221,12 +284,14 @@ final class NativeMultiplayerClient {
     private var transportGeneration: UInt64 = 0
     private var lastPing: Double = -.infinity
     private(set) var state: ConnectionState = .stopped
-    var isReady: Bool { recovery.state == .ready && socket != nil }
+    var isReady: Bool { if let legacy{return legacy.state == .ready};return recovery.state == .ready && socket != nil }
     var onConnectionState: ((ConnectionState) -> Void)?
     private var socket: URLSessionWebSocketTask?
     private(set) var players: [String: RemotePlayer] = [:]
     private(set) var vehicles: [String: RemoteVehicle] = [:]
     private var playerOrder:[String]=[],vehicleOrder:[String]=[]
+    private var legacyRoster:[String:String]?
+    private var legacyHasRoster=false
     var orderedPlayers:[RemotePlayer] {playerOrder.compactMap{players[$0]}}
     var orderedVehicles:[RemoteVehicle] {vehicleOrder.compactMap{vehicles[$0]}}
     private var remoteAnimationTimes: [String: (String, Double)] = [:]
@@ -242,6 +307,8 @@ final class NativeMultiplayerClient {
     var inventoryConnection: String? { shotSequence.connection }
     var onInventoryConnection: ((String?) -> Void)?
     private(set) var localName = "LOCAL PLAYER"
+    private(set) var localSkin=7
+    func setLocalSkin(_ id:Int){if (0...311).contains(id){localSkin=id}}
     private(set) var cash = 0
     private(set) var health = 100
     private(set) var armour = 0
@@ -278,28 +345,38 @@ final class NativeMultiplayerClient {
 
     init(server: ServerAddress, session: URLSession = .shared,
          clock: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
-         automaticRecoveryTimer: Bool = true) {
+         automaticRecoveryTimer: Bool = true, flavor: Flavor = .selfHost, legacy:NativeLegacyWorldConnection?=nil) {
+        self.flavor = flavor;self.legacy=legacy
         self.server = server; self.session = session; self.clock = clock
         self.automaticRecoveryTimer = automaticRecoveryTimer
+        if let legacy{installLegacy(legacy)}
     }
     deinit { recoveryTimer?.cancel(); socket?.cancel(with: .normalClosure, reason: nil) }
 
     func connect() {
+        if let legacy{legacy.connect();return}
         resynchronizingInventory = false
         startRecoveryTimer()
         run(recovery.start(now: clock()))
     }
     func disconnect() {
+        if let legacy{legacy.disconnect();closeSocket();return}
         recovery.stop(); resynchronizingInventory = false
         recoveryTimer?.cancel(); recoveryTimer = nil
         closeSocket(); publishState()
     }
     func setApplicationActive(_ active: Bool) {
+        if let legacy{legacy.setActive(active);return}
         recovery.setActive(active, now: clock())
         if active { lastPing = -.infinity; tickConnection(now: clock()) }
     }
     func tickConnection(now: Double) {
+        if let legacy{legacy.tick(now:now);return}
         run(recovery.tick(now: now))
+        if usesOriginalWorldProtocol, let began=originalRespawnRequested, now-began>6 {
+            originalRespawnRequested=nil;onStatus?("ORIGINAL SERVER DID NOT CONFIRM RESPAWN — TRY AGAIN")
+        }
+        if usesOriginalWorldProtocol {originalWho()}
         if recovery.active, socket != nil, now.isFinite, now-lastPing >= 2 {
             lastPing = now
             send(["t": "ping", "c": now * 1000], allowBeforeReady: true)
@@ -313,6 +390,45 @@ final class NativeMultiplayerClient {
             guard let self else { return }; self.tickConnection(now: self.clock())
         }
         recoveryTimer = timer; timer.resume()
+    }
+    private func installLegacy(_ legacy:NativeLegacyWorldConnection){
+        legacy.onState = { [weak self] next in
+            guard let self else{return};if next != .ready{self.closeSocket()}
+            guard self.state != next else{return};self.state=next;self.onConnectionState?(next)
+        }
+        legacy.onStatus = { [weak self] in self?.onStatus?($0) }
+        legacy.onPlayers = { [weak self] rows in
+            guard let self else{return};self.players=Dictionary(uniqueKeysWithValues:rows.map{($0.id,$0)})
+            self.playerOrder=rows.map(\.id);self.onPlayers?(rows)
+            if !self.legacyHasRoster{self.onPresence?(rows.count+1,rows.map(\.name)+[self.localName])}
+        }
+        legacy.onVehicles = { [weak self] rows in
+            guard let self else{return};let removed=Set(self.vehicleOrder).subtracting(rows.map(\.id))
+            self.vehicles=Dictionary(uniqueKeysWithValues:rows.map{($0.id,$0)});self.vehicleOrder=rows.map(\.id)
+            for id in removed{self.onVehicleRemoved?(id)};self.onVehicles?(rows)
+        }
+        legacy.onEvent = { [weak self] message in
+            guard let self else{return}
+            switch message["t"]as?String {
+            case "sampGameplay":
+                guard let event=message["event"]as?NativeSAMPGameplayCommands.Event,self.legacyGameplay.apply(event)else{return}
+                if event.command == .reset {self.legacyVitals.reset();self.publishLegacyVitals()}
+            case "rosterReset":self.legacyHasRoster=true;self.legacyRoster=nil
+            case "roster":
+                if let names=message["players"]as?[String:String]{self.legacyHasRoster=true;self.legacyRoster=names;self.onPresence?(names.count,names.keys.sorted().compactMap{names[$0]})}
+            case "chat":if let line=message["text"]as?String{self.chatMessages.append(line);self.chatMessages=Array(self.chatMessages.suffix(50));self.onChat?(self.chatMessages)}
+            case "position":if let p=message["point"]as?SIMD3<Float>{self.onTeleport?(p,message["heading"]as?Float)}
+            case "environment":self.onEnvironment?(message["weather"]as?Int,message["shift"]as?Double,message["hold"]as?Double)
+            case "vitals":
+                if self.legacyVitals.seed(health:(message["health"]as?NSNumber)?.doubleValue,armour:(message["armour"]as?NSNumber)?.doubleValue){self.publishLegacyVitals()}
+            case "enter":
+                if (message["seat"]as?Int ?? 0)==0,let id=message["id"]as?String{self.onEnter?(id,true)}
+                else{self.onStatus?("PASSENGER SEATS REQUIRE THE NATIVE PASSENGER CONTROLLER")}
+            case "spawn":self.legacyVitals.reset();self.publishLegacyVitals()
+            default:break
+            }
+            self.onLegacyEvent?(message)
+        }
     }
     private func publishState() {
         guard state != recovery.state else { return }
@@ -332,20 +448,43 @@ final class NativeMultiplayerClient {
         closeSocket()
         guard recovery.desired, recovery.hasTransport, recovery.generation == generation else { return }
         transportGeneration = generation; lastPing = -.infinity
-        guard var parts = URLComponents(url: server.path("api/world/live"), resolvingAgainstBaseURL: false) else {
-            failTransport(generation: generation, reason: "INVALID MULTIPLAYER ADDRESS"); return
+        let url: URL, hello: [String:Any]
+        switch flavor {
+        case .selfHost:
+            guard var parts = URLComponents(url: server.path("api/world/live"), resolvingAgainstBaseURL: false) else {
+                failTransport(generation:generation,reason:"INVALID MULTIPLAYER ADDRESS");return
+            }
+            parts.scheme=server.url.scheme=="https" ? "wss":"ws"
+            guard let value=parts.url else { failTransport(generation:generation,reason:"INVALID MULTIPLAYER ADDRESS");return }
+            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1]
+        case .originalWorld(let build,let deviceID):
+            do {
+                let originalURL=try NativeOriginalWorldProtocol.liveURL(deviceID:deviceID)
+                hello=try NativeOriginalWorldProtocol.hello(build:build)
+                if ["127.0.0.1","localhost","::1"].contains(server.url.host?.lowercased() ?? "") {
+                    // A loopback-only protocol fixture is explicitly supported;
+                    // arbitrary third-party origins cannot receive this flavor.
+                    var parts=URLComponents(url:originalURL,resolvingAgainstBaseURL:false)!
+                    parts.host=server.url.host;parts.port=server.url.port
+                    parts.scheme=server.url.scheme=="https" ? "wss":"ws";url=parts.url!
+                } else { _=try NativeOriginalWorldProtocol.origin(server.url);url=originalURL }
+            } catch { stopOriginal(reason:"INVALID ORIGINAL SERVER CONFIGURATION");return }
         }
-        parts.scheme = server.url.scheme == "https" ? "wss" : "ws"
-        guard let url = parts.url else { failTransport(generation: generation, reason: "INVALID MULTIPLAYER ADDRESS"); return }
-        let task = session.webSocketTask(with: url)
-        socket = task; task.resume()
-        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1,"healthAck":1,"couplingAck":1], allowBeforeReady: true)
-        receive()
+        var request=URLRequest(url:url)
+        if usesOriginalWorldProtocol {
+            var origin=URLComponents(url:server.url,resolvingAgainstBaseURL:false)!
+            origin.path="";origin.query=nil;origin.fragment=nil
+            request.setValue(origin.string,forHTTPHeaderField:"Origin")
+        }
+        let task=session.webSocketTask(with:request)
+        socket=task;task.resume();send(hello,allowBeforeReady:true);receive()
     }
     private func closeSocket() {
         let old = socket; socket = nil
         old?.cancel(with: .normalClosure, reason: nil)
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
+        originalStream.clear();originalHeard=nil;originalDeathSent=false;originalRespawnRequested=nil;originalLatestPosition=nil
+        originalVitals.cancelPendingFatal();originalFrozen=false;originalRespawnWasDead=false
         healthPrediction.disconnect()
         deliveredRespawnSequence=0
         deliveredHitRevision=nil;deliveredHitSequence=nil
@@ -367,6 +506,7 @@ final class NativeMultiplayerClient {
 
     /// Uncertain writes are settled by a new authoritative peer, never replayed.
     func requestInventoryResync() {
+        if let legacy{legacy.disconnect();legacy.connect();return}
         guard recovery.desired, !resynchronizingInventory else { return }
         resynchronizingInventory = true
         let action = recovery.restart(now: clock())
@@ -388,7 +528,9 @@ final class NativeMultiplayerClient {
                       movement:Double? = nil,aim:Double? = nil,action:Int = 0,
                       velocity:SIMD3<Float> = .zero,angularVelocity:SIMD3<Float> = .zero,
                       kit:[Double]? = nil,vehicleWork:Int? = nil,paused:Bool = false,
-                      support:(id:String,offset:SIMD3<Float>)? = nil,down:Int=0) {
+                      support:(id:String,offset:SIMD3<Float>)? = nil,down:Int=0,
+                      legacyRotation:SIMD4<Float>?=nil,legacyKeys:UInt16=0,
+                      legacyAxes:SIMD2<Int16> = .zero,legacySpecialKeys:UInt8=0) {
         guard isReady else { return }
         func rounded(_ value:Double)->Double {value.isFinite ? floor(value*100+0.5)/100:0}
         let motion:[String:Any] = ["vx":rounded(Double(velocity.x)),"vy":rounded(Double(velocity.y)),"vz":rounded(Double(velocity.z)),
@@ -396,23 +538,31 @@ final class NativeMultiplayerClient {
             "clock":Date().timeIntervalSince1970*1000,"paused":paused]
         if let vehicle {
             var packet: [String: Any] = ["t": "me", "driving": true, "car": vehicle.code,
-                  "vehicle": vehicle.id, "skin": 7,
+                  "vehicle": vehicle.id, "skin": localSkin, "weapon":weapon,
                   "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
                   "heading": -Double(heading), "pitch": Double(pitch), "roll": -Double(roll),
                   "speed": Double(speed), "steer": -Double(steer),
-                  "health": vehicleHealth, "life": health, "armour": armour]
+                  "health": vehicleHealth, "life": wireHealth,
+                  "armour": wireArmour]
             packet["damage"] = vehicleDamage;packet["lights"] = lights;packet["horn"] = horn
             packet["act"]=action
             if let vehicleWork {packet["w"]=max(0,min(2500,vehicleWork))}
             if siren {packet["horn"]=(horn ? 1:0)+2}
             packet.merge(motion){_,new in new};if let kit {packet["kit"]=kit}
+            if legacy != nil {
+                packet["keys"]=Int(legacyKeys);packet["lr"]=Int(legacyAxes.x);packet["ud"]=Int(legacyAxes.y);packet["specialKeys"]=Int(legacySpecialKeys)
+                packet["deathReason"]=Int(legacyDeathReason);packet["deathKiller"]=Int(legacyDeathKiller)
+                if let q=legacyRotation{packet["rotation"]=[q.x,q.y,q.z,q.w]}
+            }
+            if usesOriginalWorldProtocol {originalLatestPosition=packet}
             addPendingChat(to: &packet)
             send(packet)
             return
         }
-        var packet: [String: Any] = ["t": "me", "walking": true, "skin": 7,
+        var packet: [String: Any] = ["t": "me", "walking": true, "skin": localSkin,
               "x": Double(position.x), "y": Double(position.y), "z": Double(position.z),
-              "heading": -Double(heading), "health": health, "armour": armour,
+              "heading": -Double(heading), "health": wireHealth,
+              "armour": wireArmour,
               "weapon": weapon,
               "shots": shots,
               "crouch": crouching,
@@ -421,6 +571,7 @@ final class NativeMultiplayerClient {
               "aim":aim.map{rounded($0)} ?? NSNull(),
               "anim":animation.flatMap{$0.isEmpty ? nil:NativePedestrianMotion.wireAnimation(for:$0)} ?? NSNull()]
         packet.merge(motion){_,new in new}
+        if legacy != nil {packet["keys"]=Int(legacyKeys);packet["lr"]=Int(legacyAxes.x);packet["ud"]=Int(legacyAxes.y);packet["specialKeys"]=Int(legacySpecialKeys);packet["deathReason"]=Int(legacyDeathReason);packet["deathKiller"]=Int(legacyDeathKiller)}
         packet["down"]=(1...6).contains(down) ? down:0
         if let support,!support.id.isEmpty,support.id.utf8.count<=64,
            [support.offset.x,support.offset.y,support.offset.z].allSatisfy({$0.isFinite && abs($0)<=100}) {
@@ -438,6 +589,7 @@ final class NativeMultiplayerClient {
             packet["air"] = false;packet["crouch"] = false;packet["weapon"] = 0
             packet["aim"] = NSNull();packet["pitch"] = rounded(Double(swimPitch))
         }
+        if usesOriginalWorldProtocol {originalLatestPosition=packet}
         addPendingChat(to: &packet)
         send(packet)
         positionPackets += 1
@@ -445,10 +597,15 @@ final class NativeMultiplayerClient {
     }
 
     func sendChat(_ line: String) {
+        if let legacy{_=legacy.send(["t":"chat","text":line]);return}
         guard isReady else { onStatus?("OFFLINE — MESSAGE NOT SENT"); return }
         let trimmed = String(line.trimmingCharacters(in: .whitespacesAndNewlines).prefix(240))
         guard !trimmed.isEmpty else { return }
         pendingSays.append(trimmed)
+    }
+    @discardableResult func sendSpectatorPosition(point:SIMD3<Float>,keys:UInt16=0,axes:SIMD2<Int16> = .zero)->Bool {
+        guard let legacy,legacySpectating,[point.x,point.y,point.z].allSatisfy(\.isFinite)else{return false}
+        return legacy.send(["t":"spectator","point":[point.x,point.y,point.z],"keys":Int(keys),"lr":Int(axes.x),"ud":Int(axes.y)])
     }
 
     /// A queued request has one connection-scoped identity. A failed transport
@@ -503,6 +660,11 @@ final class NativeMultiplayerClient {
     }
 
     private func addPendingChat(to packet: inout [String: Any]) {
+        if usesOriginalWorldProtocol {
+            packet["key"]=originalKey
+            packet["clock"]=Date().timeIntervalSince1970*1000+serverTimeOffsetMilliseconds
+            if let originalHeard { packet["heard"]=originalHeard }
+        }
         if !pendingSays.isEmpty { packet["say"] = pendingSays.removeFirst() }
     }
 
@@ -523,24 +685,36 @@ final class NativeMultiplayerClient {
         }
     }
 
-    func requestEnter(_ vehicle: RemoteVehicle) { send(["t": "enter", "v": vehicle.id]) }
+    func requestEnter(_ vehicle: RemoteVehicle) {
+        if let legacy{onEnter?(vehicle.id,legacy.send(["t":"enter","v":vehicle.id]));return}
+        send(["t":"enter","v":vehicle.id])
+    }
     func sendVehicleMove(_ id:String, state:[String:Any]) {
         var packet=state
         packet["t"]="vmove";packet["v"]=id
         send(packet)
     }
-    func usedParachute() {send(["t":"usedParachute"])}
-    func detonateSatchels() { send(["t":"detonate"]) }
+    func usedParachute() {if usesClientOwnedWeapons{return};send(["t":"usedParachute"])}
+    func detonateSatchels() {
+        if usesClientOwnedWeapons {onStatus?("LOCAL PLANTED-CHARGE DETONATION IS NOT AVAILABLE ON THIS CONNECTION YET");return}
+        send(["t":"detonate"])
+    }
 
     /// Public strike counter animates remote misses as well as damaging hits.
     /// It is independent of gun ammunition sequences and victim selection.
     @discardableResult func recordMeleeStrike(weapon: Int) -> Bool {
-        guard isReady,socket != nil,health>0,!passive,(0...15).contains(weapon),inventoryConnection != nil else{return false}
+        if legacy != nil{guard isReady,health>0,!passive,(0...15).contains(weapon)else{return false};shots+=1;return true}
+        guard isReady,socket != nil,health>0,!passive,(0...15).contains(weapon),(usesOriginalWorldProtocol || inventoryConnection != nil) else{return false}
         shots += 1
         return true
     }
 
     @discardableResult func sendMeleeHit(to player: String, weapon: Int = 0) -> Bool {
+        if let legacy{return legacy.send(["t":"melee","to":player,"weapon":weapon])}
+        if usesOriginalWorldProtocol {
+            guard isReady,socket != nil,health>0,!passive,(0...15).contains(weapon),!player.isEmpty else{return false}
+            return sendOriginal(["t":"hit","to":player,"n":1])
+        }
         guard isReady,socket != nil, health > 0, !passive, (0...15).contains(weapon),
               let connection = inventoryConnection else { return false }
         send(["t": "hit", "to": player, "w": weapon, "c": connection])
@@ -553,7 +727,22 @@ final class NativeMultiplayerClient {
     }
 
     @discardableResult func sendWeaponShot(weapon: Int, from origin: SIMD3<Float>, to hit: SIMD3<Float>,
-                        player: String?, ticket: NativeShotTicket? = nil,streamPlayers:[String]=[]) -> Bool {
+                        player: String?, ticket: NativeShotTicket? = nil,streamPlayers:[String]=[],
+                        hitType:Int?=nil,pellets:Int=1,piece:Int?=nil) -> Bool {
+        if let legacy{var packet:[String:Any]=["t":"shot","w":weapon,"o":[origin.x,origin.y,origin.z],"h":[hit.x,hit.y,hit.z]];if let player{packet["target"]=player};return legacy.send(packet)}
+        if usesOriginalWorldProtocol {
+            guard isReady,socket != nil,health>0,!passive,(16...43).contains(weapon),
+                  [origin.x,origin.y,origin.z,hit.x,hit.y,hit.z].allSatisfy(\.isFinite) else{return false}
+            let hitType=hitType ?? (player==nil ? 0:1)
+            guard (0...4).contains(hitType),(1...100).contains(pellets) else{return false}
+            var packet:[String:Any]=["t":"shot","w":weapon,
+                "o":[Double(origin.x),Double(origin.y),Double(origin.z)],
+                "h":[Double(hit.x),Double(hit.y),Double(hit.z)],"ht":hitType]
+            if let player {packet["id"]=player}
+            if pellets>1 {packet["n"]=pellets}
+            if let piece,(1...9).contains(piece) {packet["bp"]=piece}
+            guard sendOriginal(packet) else{return false};shots+=1;return true
+        }
         guard isReady,let task = socket, health > 0, !passive, let ticket,
               ticket.connection == inventoryConnection, shotSequence.claim(ticket) else { return false }
         let effectTargets=NativeStreamShotClaims.normalized(streamPlayers)
@@ -579,6 +768,11 @@ final class NativeMultiplayerClient {
     }
 
     func respawn() {
+        if let legacy{_=legacy.send(["t":"respawn"]);return}
+        if usesOriginalWorldProtocol {
+            guard isReady,originalRespawnRequested==nil else{return}
+            if sendOriginal(["t":"escape","c":"respawn"]) {originalRespawnRequested=clock()};return
+        }
         guard health == 0 else { return }
         if healthPrediction.active {
             guard isReady,let request=healthPrediction.respawn() else{return}
@@ -591,6 +785,7 @@ final class NativeMultiplayerClient {
     }
 
     func syncVitals(from state: [String: Any]) {
+        guard !usesOriginalWorldProtocol,legacy == nil else{return}
         if healthPrediction.active {_=applyAcknowledgedVitals(state);return}
         guard let current = state["health"] as? NSNumber,
               let protected = state["armour"] as? NSNumber else { return }
@@ -603,15 +798,30 @@ final class NativeMultiplayerClient {
     }
 
     func reportLocalHealth(_ value:Int) {
+        if legacy != nil {
+            if value<=0{_=reportLegacyFatal(weapon:255)}
+            else if isReady,!legacySpectating,!legacyVitals.dead,Double(value)<legacyVitals.health{
+                // An absolute compatibility setter does not identify a weapon
+                // or a damage event. Actual fall/drown use reportLegacyDamage.
+                if legacyVitals.seed(health:Double(value)){publishLegacyVitals()}
+            }
+            return
+        }
+        if usesOriginalWorldProtocol {
+            if value<=0{killOriginalPlayer()}else if Double(value)<originalVitals.health{_=applyOriginalDamage(.init(damage:originalVitals.health-Double(value),weapon:54,quiet:true))};return
+        }
         if healthPrediction.active {
             guard isReady,let request=healthPrediction.hurt(to:value) else{return}
             health=healthPrediction.health;armour=healthPrediction.armour;onVitals?(health,armour)
             sendHealthRequest(request);return
         }
         health=max(0,min(health,value));onVitals?(health,armour)
+        if usesOriginalWorldProtocol,health==0 {reportOriginalDeath()}
     }
 
     func reportImpactDamage(_ value:Int) {
+        if legacy != nil{_=reportLegacyDamage(Double(max(0,min(200,value))),weapon:54);return}
+        if usesOriginalWorldProtocol{_=applyOriginalDamage(.init(damage:Double(max(0,min(200,value))),weapon:0,quiet:true));return}
         let damage=max(0,min(200,value));guard damage>0,health>0 else{return}
         if healthPrediction.active {
             guard isReady,let request=healthPrediction.impact(damage) else{return}
@@ -620,6 +830,21 @@ final class NativeMultiplayerClient {
         }
         let absorbed=min(armour,damage);armour-=absorbed;health=max(0,health-(damage-absorbed))
         onVitals?(health,armour)
+        if usesOriginalWorldProtocol,health==0 {reportOriginalDeath()}
+    }
+
+    private func publishLegacyVitals(){health=legacyVitals.displayHealth;armour=legacyVitals.displayArmour;onVitals?(health,armour)}
+    /// Applies a real locally observed hit once. A successful return means the
+    /// local vital owner accepted it; RPC115 has no server health ACK/replay.
+    @discardableResult func reportLegacyDamage(_ amount:Double,weapon:Int,source:UInt16=65535,body:Int=3)->Bool {
+        guard let legacy,isReady,!legacySpectating,
+              let damage=legacyVitals.hurt(amount,weapon:weapon,source:source,body:body)else{return false}
+        _=legacy.send(["t":"takingDamage","amount":damage.amount,"weapon":damage.weapon,"source":Int(damage.source),"body":damage.body])
+        publishLegacyVitals();return true
+    }
+    @discardableResult func reportLegacyFatal(weapon:Int,source:UInt16=65535)->Bool{
+        guard legacy != nil,isReady,!legacySpectating,legacyVitals.kill(weapon:weapon,source:source)else{return false}
+        publishLegacyVitals();return true
     }
 
     private func sendHealthRequest(_ request:NativeHealthPrediction.Request) {
@@ -671,7 +896,7 @@ final class NativeMultiplayerClient {
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
                   vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "",vehicleWork:Int?=nil,
-                  footHeading:Float?=nil) {
+                  footHeading:Float?=nil,legacyRotation:SIMD4<Float>?=nil) {
         guard isReady else { return }
         // A completed exit can face away from the parked chassis. Keep that
         // actor pose independent of both the body and the resumed camera.
@@ -685,14 +910,254 @@ final class NativeMultiplayerClient {
         var parkedState:[String:Any]=["x":Double(position.x),"y":Double(position.y),"z":Double(position.z),
             "heading":-Double(heading),"pitch":Double(pitch),"roll":-Double(roll),"health":vehicleHealth,"damage":vehicleDamage]
         if let vehicleWork {parkedState["w"]=max(0,min(2500,vehicleWork))}
-        send(["t": "me", "walking": true, "skin": 7,
+        if let legacy {
+            var release:[String:Any]=["t":"exit","v":vehicle.id,"parked":parkedState,"life":wireHealth,"armour":wireArmour]
+            if let q=legacyRotation{release["rotation"]=[q.x,q.y,q.z,q.w]}
+            _=legacy.send(release)
+            _=legacy.send(["t":"me","walking":true,"x":feet.x,"y":feet.y,"z":feet.z,"heading":-facing,"health":wireHealth,"armour":wireArmour,"deathReason":Int(legacyDeathReason),"deathKiller":Int(legacyDeathKiller)]);return
+        }
+        if usesOriginalWorldProtocol {
+            var release:[String:Any]=["t":"exit","v":vehicle.id,"x":Double(position.x),"y":Double(position.y),"z":Double(position.z),
+                "h":-Double(heading),"p":Double(pitch),"r":-Double(roll),"hp":vehicleHealth,"d":vehicleDamage]
+            if let vehicleWork {release["w"]=max(0,min(2500,vehicleWork))}
+            send(release)
+            var actor:[String:Any]=["t":"me","walking":true,"skin":localSkin,"x":Double(feet.x),"y":Double(feet.y),"z":Double(feet.z),
+                "heading":-Double(facing),"health":health,"armour":armour]
+            addPendingChat(to:&actor);send(actor);return
+        }
+        send(["t": "me", "walking": true, "skin": localSkin,
               "vehicle": vehicle.id, "car": vehicle.code,
               "x": Double(feet.x), "y": Double(feet.y), "z": Double(feet.z),
               "heading": -Double(facing), "health": health, "armour": armour,
               "parked":parkedState])
     }
 
+    private func stopOriginal(reason:String,authentication:Bool=false) {
+        guard usesOriginalWorldProtocol else{return}
+        recovery.stop();recoveryTimer?.cancel();recoveryTimer=nil
+        closeSocket();publishState();onStatus?(reason)
+        if authentication {onAuthenticationRequired?()}
+    }
+    @discardableResult private func sendOriginal(_ object:[String:Any],beforeReady:Bool=false)->Bool {
+        guard usesOriginalWorldProtocol,let task=socket,(beforeReady || isReady),
+              JSONSerialization.isValidJSONObject(object),
+              let data=try? JSONSerialization.data(withJSONObject:object),let text=String(data:data,encoding:.utf8) else{return false}
+        let generation=transportGeneration
+        task.send(.string(text)){[weak self]error in
+            guard let error else{return}
+            DispatchQueue.main.async {
+                guard let self,self.socket === task,self.transportGeneration==generation else{return}
+                self.failTransport(generation:generation,reason:error.localizedDescription)
+            }
+        }
+        return true
+    }
+    @discardableResult func sendOriginalGuns(_ rows:[[Int]])->Bool {
+        guard NativeOriginalWorldProtocol.validGuns(rows) else{return false}
+        return sendOriginal(["t":"guns","w":rows])
+    }
+    @discardableResult func sendOriginalCommand(_ packet:[String:Any])->Bool {
+        guard packet["t"] as? String != "hi",packet["t"] as? String != "me" else{return false}
+        return sendOriginal(packet)
+    }
+    private func publishOriginalVitals(){
+        health=originalVitals.displayHealth;armour=originalVitals.displayArmour;onVitals?(health,armour)
+    }
+    @discardableResult func applyOriginalDamage(_ hit:NativeOriginalWorldVitals.Hit,
+        context:NativeOriginalWorldVitals.Context = .init())->NativeOriginalWorldVitals.Result {
+        guard usesOriginalWorldProtocol,isReady else{return .init()}
+        let epoch=transportGeneration,alive = !originalVitals.dead,result=originalVitals.hurt(hit,context:context)
+        if result.applied{publishOriginalVitals()}
+        guard isReady,transportGeneration==epoch else{return result}
+        onOriginalHitResult?(result,hit)
+        guard isReady,transportGeneration==epoch else{return result}
+        if result.applied || result.parried {
+            onIncomingHit?(NativeIncomingHit(original:hit,result:result,health:health,wasAlive:alive))
+        }
+        if result.killed,isReady,transportGeneration==epoch{reportOriginalDeath(by:hit.source,weapon:hit.weapon)}
+        return result
+    }
+    func setOriginalHealth(_ value:Double){guard usesOriginalWorldProtocol else{return};if originalVitals.setHealth(value){publishOriginalVitals()}}
+    func setOriginalArmour(_ value:Double){guard usesOriginalWorldProtocol else{return};if originalVitals.setArmour(value){publishOriginalVitals()}}
+    func killOriginalPlayer(){
+        guard usesOriginalWorldProtocol,!originalVitals.dead else{return}
+        originalVitals.kill();publishOriginalVitals();reportOriginalDeath()
+    }
+    @discardableResult func deferOriginalFatal(_ hit:NativeOriginalWorldVitals.Hit,drivingCar:Bool,speed:Double)->Bool {
+        guard usesOriginalWorldProtocol,isReady else{return false}
+        return originalVitals.deferMovingCarFatal(hit,nowMilliseconds:clock()*1000,drivingCar:drivingCar,speed:speed) != nil
+    }
+    @discardableResult func deferOriginalSelfKill(drivingCar:Bool,speed:Double)->Bool {
+        guard usesOriginalWorldProtocol,isReady else{return false}
+        return originalVitals.deferMovingCarSelfKill(nowMilliseconds:clock()*1000,drivingCar:drivingCar,speed:speed) != nil
+    }
+    @discardableResult func deferOriginalImmediateFatal(_ hit:NativeOriginalWorldVitals.Hit)->Bool {
+        guard usesOriginalWorldProtocol,isReady else{return false}
+        return originalVitals.deferNativeExitFatal(hit,nowMilliseconds:clock()*1000) != nil
+    }
+    @discardableResult func deferOriginalImmediateSelfKill()->Bool {
+        guard usesOriginalWorldProtocol,isReady else{return false}
+        return originalVitals.deferNativeExitSelfKill(nowMilliseconds:clock()*1000) != nil
+    }
+    func cancelOriginalFatal(){guard usesOriginalWorldProtocol else{return};originalVitals.cancelPendingFatal()}
+    func clearOriginalChat(){guard usesOriginalWorldProtocol else{return};chatMessages.removeAll();onChat?([])}
+    func readyOriginalFatal(driving:Bool,wrecked:Bool)->NativeOriginalWorldVitals.PendingFatal? {
+        guard usesOriginalWorldProtocol,isReady else{return nil}
+        return originalVitals.readyFatal(nowMilliseconds:clock()*1000,driving:driving,wrecked:wrecked)
+    }
+    @discardableResult func commitOriginalFatal(_ token:UInt64)->Bool {
+        guard usesOriginalWorldProtocol,isReady,let cause=originalVitals.consumeFatal(token:token)else{return false}
+        switch cause{case .selfKill:killOriginalPlayer();case .hit(let hit):_=applyOriginalDamage(hit)};return true
+    }
+    func respawnOriginalPlayer(){
+        guard usesOriginalWorldProtocol else{return}
+        originalRespawnWasDead=originalVitals.dead;originalVitals.respawn()
+        originalDeathSent=false;originalRespawnRequested=nil;publishOriginalVitals();onRespawn?()
+    }
+    private func reportOriginalDeath(by:String?=nil,weapon:Int?=nil) {
+        guard usesOriginalWorldProtocol,isReady,!originalDeathSent else{return}
+        if var position=originalLatestPosition {
+            if position["driving"] as? Bool == true {position["life"]=0}else{position["health"]=0}
+            addPendingChat(to:&position);send(position)
+        }
+        var packet:[String:Any]=["t":"died"]
+        if let by,!by.isEmpty {packet["by"]=by}
+        if let weapon,(0...255).contains(weapon) {packet["w"]=weapon}
+        if sendOriginal(packet) {originalDeathSent=true}
+    }
+    private func originalWho() {
+        guard usesOriginalWorldProtocol,isReady else{return}
+        let ids=originalStream.wanted(now:clock()*1000)
+        if !ids.isEmpty {_=sendOriginal(["t":"who","ids":ids])}
+    }
+    private func receiveOriginalBinary(_ data:Data,generation:UInt64) {
+        guard usesOriginalWorldProtocol,transportGeneration==generation,socket != nil else{return}
+        for event in originalStream.read(data,now:clock()*1000) {
+            guard transportGeneration==generation,socket != nil else{return}
+            switch event {
+            case .players(let rows):updateRows(rows)
+            case .shot(let shot):
+                if let weapon=shot["w"] as? Int {onWeaponSound?(weapon)}
+                onOriginalShot?(shot)
+            case .extensionRecord(let tag,let payload):onOriginalRecord?(tag,payload)
+            }
+        }
+        recovery.received(generation:generation,now:clock());originalWho()
+    }
+    /// The original service owns authentication, inventory totals and escape
+    /// approval. Nothing in this branch fabricates an independent-server ACK.
+    private func handleOriginal(_ message:[String:Any],generation:UInt64)->Bool {
+        guard usesOriginalWorldProtocol else{return false}
+        guard originalCommandDepth<8 else{return true}
+        originalCommandDepth+=1;defer{originalCommandDepth-=1}
+        switch message["t"] as? String {
+        case "login":stopOriginal(reason:"SIGN IN TO THE ORIGINAL SERVER TO CONNECT",authentication:true);return true
+        case "hello":
+            guard NativeOriginalWorldProtocol.acceptsProtocol(message["protocol"]) else {
+                stopOriginal(reason:"ORIGINAL SERVER PROTOCOL IS UNSUPPORTED — CLIENT UPDATE REQUIRED");return true
+            }
+            if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {
+                serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000
+                originalStream.clock(serverMilliseconds:time,localMilliseconds:clock()*1000)
+            }
+            originalFrozen=false
+            if let life=message["life"] as? [Any],life.count==2,
+               let hp=NativeOriginalWorldCommands.number(life[0]),let ap=NativeOriginalWorldCommands.number(life[1]) {
+                _=originalVitals.begin(health:hp,armour:ap,wasted:NativeOriginalWorldCommands.boolean(message["wasted"]) == true)
+                publishOriginalVitals()
+            }
+            guard transportGeneration==generation,socket != nil else{return true}
+            if let spot=message["spot"] as? [NSNumber],spot.count==4,spot.allSatisfy({$0.floatValue.isFinite}) {
+                onTeleport?(SIMD3(spot[0].floatValue,spot[1].floatValue,spot[2].floatValue),-spot[3].floatValue)
+            }
+            guard transportGeneration==generation,socket != nil else{return true}
+            let day=message["day"] as? [String:Any]
+            onEnvironment?((message["weather"] as? NSNumber)?.intValue,(day?["shift"] as? NSNumber)?.doubleValue,(day?["hold"] as? NSNumber)?.doubleValue)
+            guard transportGeneration==generation,socket != nil else{return true}
+            recovery.received(.hello,generation:generation,now:clock());publishState()
+            _=sendOriginal(["t":"board"],beforeReady:true);return true
+        case "guns":
+            guard NativeOriginalWorldProtocol.validGuns(message["w"]),let rows=message["w"] else{return true}
+            let back=message["back"] as? Bool == true
+            onOriginalGuns?(rows,back)
+            guard transportGeneration==generation,socket != nil else{return true}
+            if !back {recovery.received(.inventory,generation:generation,now:clock());publishState()}
+            return true
+        case "all":
+            if let value=message["protocol"],!NativeOriginalWorldProtocol.acceptsProtocol(value) {
+                stopOriginal(reason:"ORIGINAL SERVER PROTOCOL CHANGED — CLIENT UPDATE REQUIRED");return true
+            }
+            if let orders=message["orders"] as? [[String:Any]] {
+                for order in orders.prefix(128) {handle(order,generation:generation);if transportGeneration != generation || socket==nil{return true}}
+            }
+            if let name=message["you"] as? String,!name.isEmpty {localName=name}
+            if let amount=message["cash"] as? NSNumber,amount.doubleValue.isFinite {cash=amount.intValue}
+            if let heard=NativeHealthPrediction.integer(message["heard"]) {originalHeard=max(originalHeard ?? 0,heard)}
+            if let lines=message["chat"] as? [[Any]] {receiveChat(lines)}
+            if let rows=message["cars"] as? [[Any]] {updateRows(rows)}
+            else if let near=message["near"] as? [[Any]] {
+                updateRows(originalStream.near(near,serverTime:(message["time"] as? NSNumber)?.doubleValue,now:clock()*1000))
+            }
+            if let rows=message["vehicles"] as? [[Any]] {
+                vehicles.removeAll();vehicleOrder.removeAll()
+                for row in rows {if let vehicle=RemoteVehicle(row:row) {if vehicles[vehicle.id]==nil{vehicleOrder.append(vehicle.id)};vehicles[vehicle.id]=vehicle}}
+                onVehicles?(orderedVehicles)
+            }
+            guard transportGeneration==generation,socket != nil else{return true}
+            if message["you"] as? String != nil,(message["cars"] is [[Any]] || message["near"] is [[Any]]) {
+                recovery.received(.world,generation:generation,now:clock());publishState()
+            } else {recovery.received(generation:generation,now:clock())}
+            originalWho();onOriginalCommand?(message);return true
+        case "shot":
+            if let weapon=message["w"] as? Int {onWeaponSound?(weapon)};onOriginalShot?(message);return true
+        case "hit":
+            if NativeOriginalWorldCommands.truthy(message["car"]) {onOriginalVehicleHit?(message);return true}
+            guard isReady,originalFatal==nil,let amount=NativeOriginalWorldCommands.number(message["d"]),amount>0 else{return true}
+            var point:SIMD3<Double>?
+            if let p=message["p"]as?[Any],p.count==3,
+               let x=NativeOriginalWorldCommands.number(p[0]),let y=NativeOriginalWorldCommands.number(p[1]),let z=NativeOriginalWorldCommands.number(p[2]){point=SIMD3(x,y,z)}
+            let hit=NativeOriginalWorldVitals.Hit(damage:amount,weapon:NativeOriginalWorldCommands.integer(message["w"]) ?? 0,
+                source:message["from"]as?String,point:point,piece:NativeOriginalWorldCommands.integer(message["bp"]))
+            if let handler=onOriginalHit{handler(hit)}else{_=applyOriginalDamage(hit)}
+            return true
+        case "vhit":onOriginalVehicleHit?(message);return true
+        case "escape":
+            guard message["c"] as? String == "respawn",originalRespawnRequested != nil else {onOriginalCommand?(message);return true}
+            originalRespawnRequested=nil
+            if NativeOriginalWorldCommands.truthy(message["go"]) {
+                respawnOriginalPlayer()
+            } else {onStatus?("ORIGINAL SERVER DECLINED RESPAWN")}
+            onOriginalCommand?(message);return true
+        case "wake":
+            if let at=message["at"] as? [NSNumber],at.count==4,at.allSatisfy({$0.floatValue.isFinite}) {
+                respawnOriginalPlayer()
+                onTeleport?(SIMD3(at[0].floatValue,at[1].floatValue,at[2].floatValue+0.2),-at[3].floatValue)
+            }
+            return true
+        case "staff","fix","flip","slap","dress","tp","day","weather","passive","shield","name","style","dose","cash","collect":
+            for event in NativeOriginalWorldCommands.decode(message){
+                switch event {
+                case .staff(let staff):if let freeze=staff.freeze{originalFrozen=freeze}
+                case .cash(let amount):cash=amount<=Double(Int.min) ? Int.min:amount>=Double(Int.max) ? Int.max:Int(amount)
+                case .name(let name):if !name.isEmpty{localName=name}
+                case .passive(let on,_):passive=on
+                default:break
+                }
+                onOriginalEvent?(event,message)
+                guard transportGeneration==generation,socket != nil else{return true}
+            }
+            onOriginalCommand?(message);return true
+        case "inventory","couplings","vitals","flightgear":return true
+        case "kick":stopOriginal(reason:(message["reason"] as? String) ?? "ORIGINAL SERVER CLOSED THIS SESSION");return true
+        default:
+            let handled:Set<String>=["pong","projectiles","projectile","weather","day","cars","gone","chat","board","note","passive","flightgear","vitals","veh","spawned","vgone","enter","tp"]
+            if let type=message["t"] as? String,!handled.contains(type) {onOriginalCommand?(message);return true}
+            return false
+        }
+    }
+
     private func send(_ object: [String: Any], allowBeforeReady: Bool = false) {
+        if let legacy{if isReady || allowBeforeReady{_=legacy.send(object)};return}
         guard isReady || allowBeforeReady else { return }
         guard let task = socket, let data = try? JSONSerialization.data(withJSONObject: object),
               let text = String(data: data, encoding: .utf8) else { return }
@@ -722,6 +1187,7 @@ final class NativeMultiplayerClient {
                     @unknown default: return
                     }
                     if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.handle(object, generation: generation) }
+                    else if self.usesOriginalWorldProtocol {self.receiveOriginalBinary(data,generation:generation)}
                     guard self.socket === task, self.transportGeneration == generation else { return }
                     self.receive()
                 }
@@ -730,6 +1196,7 @@ final class NativeMultiplayerClient {
     }
 
     private func handle(_ message: [String: Any], generation: UInt64) {
+        if usesOriginalWorldProtocol,handleOriginal(message,generation:generation) {return}
         switch message["t"] as? String {
         case "pong":
             if let echoed = (message["c"] as? NSNumber)?.doubleValue, echoed.isFinite,
@@ -827,6 +1294,7 @@ final class NativeMultiplayerClient {
         case "cars": updateRows(message["c"])
         case "gone":
             if let id = message["id"] as? String {
+                if usesOriginalWorldProtocol {originalStream.gone(id)}
                 players.removeValue(forKey:id); remoteAnimationTimes.removeValue(forKey:id)
                 playerOrder.removeAll{$0==id};onPlayers?(orderedPlayers)
             }

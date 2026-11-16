@@ -10,6 +10,7 @@ final class RendererHarness {
  var footWeaponDefinitions=profiles,meleeDefinitions:NativeMeleeDefinitions?=metadata,skeletalLibrary:NativeSkeletalAnimationLibrary?=library
  var footAnimator:NativeFootAnimation?=NativeFootAnimation(library:library,random:{0.37})
  var equippedWeapon=0,health=100,driving=false,swimming=false,climb:Int?,personalFlight=Flight()
+ var originalCoughing=false
  var weaponReady=true,weaponReloading=false,weaponTriggerHeld=false,meleeGuardHeld=false,meleeBlockHeld=false
  let meleeInput=NativeMeleeInput(),footLocomotion=NativeFootLocomotion()
  var meleeClock:Double=0,manualAnimation=false,footLaunchRemaining:Double?,actorHeading:Float=0

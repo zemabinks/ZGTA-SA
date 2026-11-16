@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parent
 with tempfile.TemporaryDirectory(prefix='zgta-world-queries-') as temporary:
     work=Path(temporary)
     renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
-    fixture=(ROOT/'smoke_native_world_queries.swift').read_text().replace('// RENDERER_QUERY',function(renderer,'private func worldRay('))
+    fixture=(ROOT/'smoke_native_world_queries.swift').read_text().replace('// RENDERER_QUERY',function(renderer,'private func worldRay(')).replace('// RENDERER_SCENE_OWNERSHIP',function(renderer,'private var isInterior:'))
     (work/'main.swift').write_text(fixture)
     names=['SwiftRapierWorld','NativeCharacterController','NativeCharacterMotor','NativeRapierCharacterQueries','NativeWorldRay','NativeWeaponEffects','NativeGameCamera','ServerAddress']
     subprocess.run(['xcrun','swiftc','-parse-as-library','-Onone','-module-cache-path','/private/tmp/zgtasa-world-query-modules',

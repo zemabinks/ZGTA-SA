@@ -9,6 +9,11 @@ struct RemotePlayer {let id:String,vehicleID:String?;var velocity=SIMD3<Float>.z
 final class SupportRuntime {
  let groundVehicle:NativeGroundVehicle?,character:NativeCharacterController?
  let supportScene:NativeVehicleSupportScene?,movingSupport:NativeMovingSupport?
+ lazy var legacyCollisionWorld=groundVehicle.flatMap{try?NativeRenderWareCollisionWorld(world:$0.world)}
+ var legacyCollisionHandles:[UInt16:[NativeRenderWareCollisionWorld.Handle]]=[:]
+ var legacyObjectClock=NativeSAMPObjectSimulationClock()
+ var stepProbeHandle:NativeRenderWareCollisionWorld.Handle?,stepProbeOrigin:Double?
+ var stepProbeTimes:[Double]=[],stepProbeOrder:[String]=[]
  var health=100,driving=false,climb:Int?,swimController=SupportModeProbe(),personalFlight=SupportModeProbe()
  let footLocomotion=NativeFootLocomotion()
  var actorHeading:Float=0,crouching=false,footAnimator:SupportAnimatorProbe?=SupportAnimatorProbe()
@@ -31,6 +36,39 @@ final class SupportRuntime {
   character!.update(delta:delta,displacement:.zero,jump:jump,geometryReady:ready)
  }
  func remoteAt(_ player:RemotePlayer)->SIMD3<Float>?{remoteSupportPosition(player)}
+ func installAuthoredObject(_ id:UInt16=900)throws->NativeRenderWareCollisionWorld.Handle {
+  let surface=NativeRenderWareCollision.Surface(material:0,flags:nil,brightness:nil,lighting:255)
+  let mesh=NativeRenderWareCollision.Mesh(vertices:[SIMD3(-4,-4,0),SIMD3(4,-4,0),SIMD3(4,4,0),SIMD3(-4,4,0)],
+   faces:[.init(a:0,b:1,c:2,surface:surface),.init(a:0,b:2,c:3,surface:surface)])
+  let model=NativeRenderWareCollision.Model(version:.col3,name:"own_support_fixture",modelID:0,
+   bounds:.init(minimum:SIMD3(-4,-4,0),maximum:SIMD3(4,4,0),center:.zero,radius:6),flags:2,
+   spheres:[],boxes:[],mesh:mesh,faceGroups:[],shadowMesh:nil)
+  let handle=try legacyCollisionWorld!.insert(.init(id:UInt64(id)<<32,model:model,transform:.init(position:SIMD3(0,0,3)),cameraCollision:false))
+  legacyCollisionHandles[id]=[handle]
+  precondition(groundVehicle!.world.step());synchronizeMovingSupport();return handle
+ }
+ func moveAuthoredObject(_ handle:NativeRenderWareCollisionWorld.Handle,x:Float,yaw:Float)throws {
+  try legacyCollisionWorld!.move(handle,to:.init(position:SIMD3(x,0,3),rotation:simd_quatf(angle:yaw,axis:SIMD3(0,0,1))))
+ }
+ func removeAuthoredObject(_ id:UInt16=900) {
+  for handle in legacyCollisionHandles.removeValue(forKey:id) ?? []{precondition(legacyCollisionWorld!.remove(handle))}
+  synchronizeMovingSupport()
+ }
+ func configureObjectStepProbe(_ handle:NativeRenderWareCollisionWorld.Handle) {
+  stepProbeHandle=handle;stepProbeOrigin=nil;legacyObjectClock.reset()
+  // ACTUAL_KINEMATIC_CALLBACK
+  let prior=groundVehicle!.onCouplingStep
+  groundVehicle!.onCouplingStep = {[weak self] delta in self?.stepProbeOrder.append("coupling");prior?(delta)}
+ }
+ /// Narrow staging delegate: the Renderer callback and fixed-step dispatcher
+ /// remain actual source. Full Store/import resolution has its own gates.
+ private func synchronizeLegacyObjectPhysics(at timestamp:Double) {
+  stepProbeTimes.append(timestamp);stepProbeOrder.append("kinematic")
+  if stepProbeOrigin==nil{stepProbeOrigin=timestamp}
+  guard let handle=stepProbeHandle else{return}
+  let elapsed=Float(timestamp-stepProbeOrigin!)
+  try! legacyCollisionWorld!.move(handle,to:.init(position:SIMD3(elapsed*0.2,0,3),rotation:simd_quatf(angle:elapsed*0.05,axis:SIMD3(0,0,1))))
+ }
  // ACTUAL_CALLBACKS
 }
 @main enum SupportRuntimeGate {
@@ -107,6 +145,58 @@ final class SupportRuntime {
    app.swimController.on=true;_ = app.tick()
    check(!app.movingSupport!.riding && app.character!.supportFeet==nil,"Swimming retained a vehicle support task")
   }else{preconditionFailure("Imported boat has no central support surface")}
-  print("PASS native support runtime: \(checks) physical/controller/Renderer dispatch checks across five display rates")
+  // Use the actual updated Renderer callback to discover an authored COL object,
+  // then carry/turn the real controller on its true parented Rapier triangles.
+  let objectApp=try SupportRuntime(root),objectCharacter=objectApp.character!,objectSupport=objectApp.movingSupport!
+  let objectHandle=try objectApp.installAuthoredObject(),objectWorld=objectApp.legacyCollisionWorld!
+  let objectBody=objectWorld.bodyID(for:objectHandle.entityID)!,objectColliders=objectWorld.colliderIDs(for:objectHandle)!
+  objectCharacter.reset(feet:SIMD3(0.75,0.25,3.02),grounded:true)
+  for _ in 0..<6{_ = objectApp.tick()}
+  check(objectSupport.riding && !objectSupport.held,"Actual object callback failed to acquire ordinary standing support")
+  check(objectApp.supportScene!.entries.contains{$0.id=="object:900" && $0.handle==objectBody && $0.standing && $0.vehicle==nil},"Actual callback omitted authored object body")
+  check(objectApp.footWireSupport?.id=="object:900","Standing object attachment lost its separate wire identity")
+  let objectOffset=objectApp.footWireSupport!.offset
+  for frame in 1...120 {
+   try objectApp.moveAuthoredObject(objectHandle,x:Float(frame)*0.01,yaw:Float(frame)*0.003)
+   _ = objectApp.tick()
+   check(objectSupport.riding && objectSupport.through==objectBody,"Authored moving object lost its real support body")
+   let wire=objectApp.footWireSupport!,motion=objectWorld.motion(entityID:objectHandle.entityID)!
+   let expected=motion.transform.rotation.act(wire.offset)+motion.transform.position
+   check(simd_distance(wire.offset,objectOffset)<0.003,"Stationary character slides in authored object local coordinates")
+   check(objectCharacter.supportFeet.map{simd_distance($0,expected)<0.00002} == true,"Object carry presentation disagrees with native body pose")
+   check(!objectCharacter.supportAfloat,"Ordinary authored object acquired boat water suppression")
+  }
+  check(abs(objectApp.actorHeading)>0.2,"Authored object rotation did not carry character facing")
+  check(objectWorld.cameraExcludedColliderIDs==Set(objectColliders),"Camera-only exclusion disturbed standing support")
+  objectApp.removeAuthoredObject()
+  for _ in 0..<4{_ = objectApp.tick()}
+  check(!objectSupport.riding && objectCharacter.supportFeet==nil && objectApp.footWireSupport==nil,"Removed authored object retained controller/presentation/wire attachment")
+  check(objectApp.groundVehicle!.world.bodyState(objectBody)==nil && objectColliders.allSatisfy{objectApp.groundVehicle!.world.colliderInfo($0)==nil},"Object support removal leaked native body/collider")
+  let replacement=try objectApp.installAuthoredObject()
+  check(replacement.generation != objectHandle.generation && !objectWorld.remove(objectHandle),"Reused object ID accepted stale support handle")
+  objectCharacter.reset(feet:SIMD3(0.75,0.25,3.02),grounded:true)
+  for _ in 0..<6{_ = objectApp.tick()}
+  check(objectSupport.riding && objectSupport.through==objectWorld.bodyID(for:replacement.entityID),"Reused object ID did not acquire its fresh native body")
+  objectApp.removeAuthoredObject()
+  for rate in [15,20,30,60,90,120,144] {
+   let stepped=try SupportRuntime(root),handle=try stepped.installAuthoredObject(),ground=stepped.groundVehicle!
+   stepped.configureObjectStepProbe(handle)
+   stepped.character!.reset(feet:SIMD3(100,100,10))
+   var velocities:[Float]=[]
+   let originalAfter=ground.world.afterStep
+   ground.world.afterStep = {[weak stepped] delta in
+    originalAfter?(delta)
+    if let value=stepped?.legacyCollisionWorld?.motion(entityID:handle.entityID){velocities.append(value.linearVelocity.x)}
+   }
+   for _ in 0..<(rate*2){_ = stepped.tick(1/Double(rate))}
+   check(stepped.stepProbeTimes.count==120 && velocities.count==120,"Actual kinematic callback lost/doubled native ticks at \(rate)Hz")
+   check(stepped.stepProbeOrder==Array(repeating:["kinematic","coupling"],count:120).flatMap{$0},"Kinematic staging ran after coupling at \(rate)Hz")
+   for index in 1..<120 {
+    check(abs(stepped.stepProbeTimes[index]-stepped.stepProbeTimes[index-1]-1/60.0)<1e-8,"Catch-up ticks consumed wall/display time at \(rate)Hz")
+    check(abs(velocities[index]-0.2)<0.0001,"Kinematic target jumped then stopped within catch-up steps at \(rate)Hz")
+   }
+   stepped.removeAuthoredObject()
+  }
+  print("PASS native support runtime: \(checks) physical/controller/Renderer dispatch checks across five display rates plus authored object translate/rotate/remove/reuse carry and 120 fixed kinematic ticks at seven display rates")
  }
 }

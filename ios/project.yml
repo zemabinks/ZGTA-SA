@@ -26,15 +26,20 @@ targets:
         SWIFT_INCLUDE_PATHS:
           - $(inherited)
           - $(SRCROOT)/../native-physics/include
+          - $(SRCROOT)/../native-samp/include
         LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
           - $(inherited)
           - $(SRCROOT)/../local-only/native-physics/ios-device
+          - $(SRCROOT)/../local-only/native-samp/ios-device
         LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
           - $(inherited)
           - $(SRCROOT)/../local-only/native-physics/ios-simulator
+          - $(SRCROOT)/../local-only/native-samp/ios-simulator
         OTHER_LDFLAGS:
           - $(inherited)
           - -lzgtasa_native_physics
+          - -lzgtasa_samp
+          - -lresolv
     dependencies:
       - sdk: Security.framework
       - sdk: CoreFoundation.framework

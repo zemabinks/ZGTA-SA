@@ -4,6 +4,7 @@ set -euo pipefail
 project_dir="${0:A:h}"
 python3 "$project_dir/extract_client_catalog.py"
 python3 "$project_dir/prepare_native_weapons.py"
+node "$project_dir/prepare_original_world_weapons.js"
 python3 "$project_dir/prepare_native_audio.py"
 node "$project_dir/prepare_native_contact_audio.js"
 python3 "$project_dir/prepare_native_environment.py"

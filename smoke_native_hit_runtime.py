@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/native-physics/tests/hit-runtime'
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
-    names=['NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativePersonalFlightController','NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController','NativeMelee','NativeMeleeInput','NativeFallDamage','NativeLocalHitReaction','NativePedestrianReaction']
+    names=['NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativePersonalFlightController','NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController','NativeMelee','NativeMeleeInput','NativeFallDamage','NativeLocalHitReaction','NativePedestrianReaction','NativeOriginalWorldVitals']
     physics=['SwiftRapierWorld','NativeCharacterMotor','NativeRapierCharacterQueries','NativeCharacterController','NativeClimbController','NativeRapierClimbQueries']
     paths=[f'ios/App/{name}.swift' for name in names+physics]+['ios/App/NativeMultiplayerClient.swift','ios/App/NativeSkeletalActor.swift','ios/App/NativeWorldRenderer.swift','smoke_native_climb_runtime.swift','smoke_native_hit_runtime.py','smoke_native_hit_runtime.swift']
     before={p:(ROOT/p).read_bytes() for p in paths};renderer=before['ios/App/NativeWorldRenderer.swift'].decode()

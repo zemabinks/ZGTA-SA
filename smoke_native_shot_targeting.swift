@@ -36,6 +36,7 @@ final class FixtureRenderer {
 final class FixtureWeapons {
     struct Weapon {var range:Float=35;var fireKind="INSTANT_HIT"}
     var selected=22,current=Weapon()
+    func definition(for id:Int)->Weapon? {id==selected ? current:nil}
 }
 final class FixtureAudio {var count=0;func shot(weapon:Int){count += 1}}
 final class FixtureNetwork {
@@ -44,8 +45,8 @@ final class FixtureNetwork {
     var orderedPlayers:[FixturePlayer]=[],shots:[Shot]=[]
     init(){precondition(sequence.negotiate("target-geometry-fixture"))}
     func reserveShot()->NativeShotTicket? {sequence.reserve()}
-    @discardableResult func sendWeaponShot(weapon:Int,from:SIMD3<Float>,to:SIMD3<Float>,player:String?,ticket:NativeShotTicket,streamPlayers:[String]=[])->Bool {
-        guard sequence.claim(ticket) else{return false}
+    @discardableResult func sendWeaponShot(weapon:Int,from:SIMD3<Float>,to:SIMD3<Float>,player:String?,ticket:NativeShotTicket?,streamPlayers:[String]=[])->Bool {
+        guard let ticket,sequence.claim(ticket) else{return false}
         shots.append(.init(weapon:weapon,origin:from,end:to,player:player,ticket:ticket,streamPlayers:streamPlayers));return true
     }
 }

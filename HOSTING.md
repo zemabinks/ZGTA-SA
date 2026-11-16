@@ -136,6 +136,42 @@ means the phone itself. Native and browser players connected to this server
 share its world. Joining the publisher's service still requires its own
 authentication and compatible protocol.
 
+## Connecting the native app to an existing game server
+
+The asset origin and gameplay destination are separate. Keep your prepared Mac
+asset server available to the phone even when gameplay uses an external SA-MP
+server or the original browser world. Native models are not downloaded from an
+ordinary SA-MP server. Core compatibility remains in development; consult
+[SERVER_COMPATIBILITY.md](SERVER_COMPATIBILITY.md) before promising support for
+a particular roleplay server.
+
+For the original-world weapon policy, upgrading an existing archive requires:
+
+```sh
+node prepare_original_world_weapons.js
+```
+
+The normal `prepare_native_runtime.sh` path also runs this exporter. For legacy
+SA-MP skins, import your own classic game's `data/peds.ide` after preparing the
+native model index:
+
+```sh
+python3 prepare_native_samp_skins.py --peds /path/to/your/SA/data/peds.ide
+```
+
+Both commands write only ignored `local-only/original-world-assets/` sidecars;
+`serve_local.js` exposes those exact native metadata routes. A missing skin is
+reported rather than silently substituting an unrelated pedestrian. The native
+connection form checks the required sidecars before attempting a legacy join.
+The Mac asset server may require its own join code; that is independent of the
+SA-MP server password and the original service's login.
+
+In the app's Multiplayer panel, **JOIN SA-MP / OPEN.MP** accepts a host:port,
+nickname, optional server password, and0.3.7/open.mp or0.3.DL profile. The
+original-world entry opens the service's own sign-in inside the app and uses
+that app-owned session. Our independent server's anonymous guest policy does
+not change another service's access requirements.
+
 ## Accounts, backups and updates
 
 Guest progress is stored in the host's `local-only/selfhost/players.json` and

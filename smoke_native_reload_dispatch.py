@@ -5,7 +5,7 @@ import hashlib,json,subprocess,tempfile
 
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/native-physics/tests/reload-dispatch';OUT.mkdir(parents=True,exist_ok=True)
-APP=['ServerAddress','NativeInventoryPrediction','NativeWeaponState','NativeWeaponShotDelivery','NativeGameplayClient']
+APP=['ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery','NativeGameplayClient']
 FILES=[f'ios/App/{name}.swift' for name in APP]+['ios/App/NativeGameViewController.swift','ios/App/NativeActorAnimation.swift','smoke_native_reload_dispatch.py']
 inputs={p:(ROOT/p).read_bytes() for p in FILES}
 def extract(source,marker):
@@ -21,7 +21,7 @@ var checks=0
 func check(_ value:@autoclosure()->Bool,_ message:String){checks+=1;precondition(value(),message)}
 final class Status {var text=""}
 final class Network {
-    var inventoryConnection:String?="peer-one",detonations=0
+    var inventoryConnection:String?="peer-one",detonations=0,usesClientOwnedWeapons=false
     func detonateSatchels(){detonations+=1}
 }
 final class Renderer {
@@ -29,6 +29,7 @@ final class Renderer {
     var starts=0,cancels=0
     func fireWeapon(clip:String,duration:Double){starts+=1}
     func cancelReloadAnimation(){cancels+=1}
+    func cancelWeaponInput(){}
 }
 final class Audio {var reloads=0;func reload(weapon:Int){reloads+=1}}
 final class DispatchGameplay {

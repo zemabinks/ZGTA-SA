@@ -5,7 +5,7 @@ import hashlib,json,subprocess,tempfile
 
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/native-physics/tests/respawn-dispatch';OUT.mkdir(parents=True,exist_ok=True)
-APP=['ServerAddress','NativeInventoryPrediction','NativeWeaponState','NativeWeaponShotDelivery']
+APP=['NativeOriginalWorldVitals','NativeOriginalWorldEffects','ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery']
 FILES=[f'ios/App/{name}.swift' for name in APP]+['ios/App/NativeGameViewController.swift','ios/App/NativeMultiplayerClient.swift','ios/App/NativeActorAnimation.swift','smoke_native_respawn_dispatch.py']
 inputs={p:(ROOT/p).read_bytes() for p in FILES}
 def extract(source,marker):
@@ -16,8 +16,8 @@ def extract(source,marker):
 vc=inputs['ios/App/NativeGameViewController.swift'].decode()
 mp=inputs['ios/App/NativeMultiplayerClient.swift'].decode()
 prediction=extract(mp,'struct NativeHealthPrediction {')
-network_methods='\n'.join(extract(mp,marker) for marker in ['    func respawn()','    func syncVitals(','    private func sendHealthRequest(','    @discardableResult private func applyAcknowledgedVitals('])
-game_methods='\n'.join(extract(vc,marker) for marker in ['@objc private func attack()','    private func finishRespawn()'])
+network_methods='\n'.join(extract(mp,marker) for marker in ['    func cancelOriginalFatal()','    func respawn()','    func syncVitals(','    private func sendHealthRequest(','    @discardableResult private func applyAcknowledgedVitals('])
+game_methods='\n'.join(extract(vc,marker) for marker in ['@objc private func attack()','    private func finishRespawn()','    private func leaveForOriginalTeleport()'])
 callback='\n'.join(extract(vc,marker) for marker in ['        network.onVitals =','        network.onRespawn ='])
 animation=extract(inputs['ios/App/NativeActorAnimation.swift'].decode(),'struct NativeWeaponAnimation {')
 SWIFT=r'''
@@ -27,9 +27,17 @@ var checks=0
 func check(_ value:@autoclosure()->Bool,_ message:String){checks+=1;precondition(value(),message)}
 HEALTH_PREDICTION
 final class Socket {}
+final class DisabledLegacy {func send(_ packet:[String:Any])->Bool{preconditionFailure("Legacy branch in strict self-host test")}}
 final class Network {
     var healthPrediction=NativeHealthPrediction(),health=0,armour=25
-    var passive=false,isReady=true,transportGeneration:UInt64=1,deliveredRespawnSequence=0
+    var passive=false,isReady=true,usesClientOwnedWeapons=false,transportGeneration:UInt64=1,deliveredRespawnSequence=0
+    let originalVitals=NativeOriginalWorldVitals()
+    var originalRespawnWasDead=false
+    var originalRespawnRequested:Double?
+    var usesOriginalWorldProtocol=false
+    var legacy:DisabledLegacy?
+    func clock()->Double{0}
+    func sendOriginal(_ packet:[String:Any])->Bool{preconditionFailure("Original branch in strict self-host test")}
     var inventoryConnection:String?="peer-one",socket:Socket?=Socket()
     var onVitals:((Int,Int)->Void)?,onRespawn:(()->Void)?
     var requests:[[String:Any]]=[]
@@ -53,7 +61,7 @@ enum ControlState {case normal}
 final class Button {var title="";func setTitle(_ value:String,for state:ControlState){title=value}}
 final class Label {var text=""}
 final class Radio {var stops=0;func stop(){stops+=1}}
-final class HUD {var samples:[Int]=[];func updateVitals(health:Int,armour:Int){samples.append(health)}}
+final class HUD {var samples:[Int]=[],vehicleUpdates=0;func updateVitals(health:Int,armour:Int){samples.append(health)};func updateVehicle(name:String?,speed:Float){vehicleUpdates+=1}}
 struct WeaponCycle {var busy=false}
 struct Ray {}
 final class Renderer {
@@ -65,11 +73,18 @@ final class Renderer {
     func requestFootWeaponFire()->Bool{false}
     func requestFootMeleeAttack()->Bool{false}
     func fireWeapon(clip:String,duration:Float){}
+    // Controlled renderer boundary records ownership/effect calls; the actual
+    // Renderer implementation is exercised by the original-renderer gate.
+    var originalLeaves=0,effectClears=0
+    func leaveVehicleForOriginalTeleport(){originalLeaves+=1}
+    func setOriginalActorEffects(burning:Bool,coughing:Bool){check(!burning && !coughing,"Respawn re-enabled actor effects");effectClears+=1}
     func exitVehicle(){exits+=1}
-    func teleport(x:Float,y:Float,z:Float){feet=SIMD3(x,y,z);teleports.append(feet)}
+    func teleport(x:Float,y:Float,z:Float,direction:Float?=nil){feet=SIMD3(x,y,z);teleports.append(feet)}
 }
 final class Game {
     var acceptsHeldInput=true,currentVehicle:Int?=42,renderer:Renderer?=Renderer(),weaponCycle=WeaponCycle()
+    let originalEffects=NativeOriginalWorldEffects()
+    var originalExitToken:UInt64?
     let network:Network,weapons=NativeWeaponState(allowLegacySnapshots:true)
     let status=Label(),vitals=Label(),vehicleButton=Button(),attackButton=Button(),radio=Radio(),gameHUD=HUD()
     var lastAttackTime:Double = -.infinity,resets=0,heldFire=true,drivingChanges:[Bool]=[]
@@ -83,7 +98,7 @@ final class Game {
     func setDrivingControls(_ driving:Bool){drivingChanges.append(driving)}
     func updateWeaponHUD(){}
     func currentShotRay(weapon:Int,left:Bool)->Ray?{nil}
-    func emitWeaponShot(weapon:Int,left:Bool,ticket:NativeShotTicket,ray:Ray){}
+    func emitWeaponShot(weapon:Int,left:Bool,ticket:NativeShotTicket?,ray:Ray){}
     GAME_METHODS
 }
 @main enum Verify {
@@ -132,6 +147,20 @@ final class Game {
         legacy.network.respawn();check(legacy.renderer!.teleports.count==1,"Live legacy player respawned twice")
         let legacyHeal=Game();legacyHeal.network.syncVitals(from:["health":100,"armour":0])
         check(legacyHeal.renderer!.teleports.isEmpty && legacyHeal.resets==0,"Legacy ordinary heal became respawn")
+
+        // Exercise the actual newly linked original branch, with real effect
+        // and fatal-token owners plus recorded Renderer/UI call boundaries.
+        for wasDead in [false,true] {
+            let original=Game();original.network.usesOriginalWorldProtocol=true
+            original.network.originalRespawnWasDead=wasDead;original.originalExitToken=17
+            _=original.originalEffects.light();original.originalEffects.whiff(random:{0.5})
+            _=original.network.originalVitals.deferMovingCarSelfKill(nowMilliseconds:0,drivingCar:true,speed:2)
+            original.finishRespawn()
+            check(original.network.originalVitals.pendingFatal==nil && original.originalExitToken==nil,"Original respawn retained delayed vehicle fatal ownership")
+            check(original.currentVehicle==nil && original.renderer!.originalLeaves==1 && original.radio.stops==1 && original.drivingChanges==[false] && original.gameHUD.vehicleUpdates==1,"Original respawn failed vehicle/UI ownership transfer")
+            check(original.renderer!.teleports==[SIMD3(1154.13,-1771.15,16.6)] && original.status.text=="RESPAWNED" && original.resets==1,"Original spawn destination/reset diverged")
+            check(original.renderer!.effectClears==(wasDead ? 1:0) && original.originalEffects.burning == !wasDead && original.originalEffects.coughing == !wasDead,"Original living teleport cleared effects or dead respawn retained them")
+        }
 
         let offline=Game();offline.network.begin();offline.acceptsHeldInput=false;offline.attack()
         check(offline.network.requests.isEmpty && offline.renderer!.teleports.isEmpty,"Offline input requested a respawn")

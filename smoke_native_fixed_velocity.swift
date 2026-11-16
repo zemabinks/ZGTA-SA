@@ -12,6 +12,8 @@ final class FixedVelocityHarness {
     var footWeaponDefinitions: [Int:NativeFootWeaponAnimation] = [:]
     var footAnimationFrame: NativeFootAnimation.Frame?
     var health=100,driving=false,crouching=false,hasParachute=false,aiming=false,weaponTriggerHeld=false,weaponReady=true
+    var originalCoughing=false
+    var onLocalDamage:((Double,Int)->Void)?
     var weaponReloading=false,climb:Int?
     var verticalSpeed:Float=0
     var swimming:Bool {swimController.on}

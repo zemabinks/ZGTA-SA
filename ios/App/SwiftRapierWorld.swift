@@ -59,6 +59,10 @@ final class SwiftRapierWorld {
         var surfaces: [Int32] = []
         var materials: [Int32] = []
     }
+    struct ColliderPose {
+        var position: SIMD3<Float> = .zero
+        var rotation = simd_quatf(ix: 0, iy: 0, iz: 0, r: 1)
+    }
     struct CharacterSettings {
         var offset: Float = 0.02
         var up = SIMD3<Float>(0, 1, 0)
@@ -290,6 +294,30 @@ final class SwiftRapierWorld {
         let id = zgtaphys_collider_trimesh(handle, points, UInt32(mesh.vertices.count), mesh.indices,
             UInt32(count), surfaces, materials)
         if id != 0 { _ = setColliderFrictionCombine(id,.average) }
+        return id == 0 ? nil : id
+    }
+    /// Authored mesh vertices and pose stay local to an existing body. The
+    /// body's kinematic rotation/velocity then move the mesh natively in Rapier.
+    /// Existing standalone world-mesh callers keep the overload above.
+    @discardableResult
+    func addTriangleMesh(_ mesh: TriangleMesh, body: BodyID, localPose: ColliderPose = ColliderPose(),
+                         friction: Float = 0.8, restitution: Float = 0) -> ColliderID? {
+        let faces = mesh.indices.count / 3
+        let q = localPose.rotation.vector, norm = simd_length_squared(q)
+        guard bodyKinds[body] != nil, mesh.vertices.count >= 3, mesh.vertices.count <= 1_000_000,
+              !mesh.indices.isEmpty, mesh.indices.count % 3 == 0, faces <= 1_000_000,
+              mesh.indices.allSatisfy({ $0 < UInt32(mesh.vertices.count) }),
+              mesh.surfaces.isEmpty || mesh.surfaces.count == faces,
+              mesh.materials.isEmpty || mesh.materials.count == faces,
+              mesh.vertices.allSatisfy({ p in (0..<3).allSatisfy { p[$0].isFinite && abs(p[$0]) <= 1_000_000 } }),
+              (0..<3).allSatisfy({ localPose.position[$0].isFinite && abs(localPose.position[$0]) <= 1_000_000 }),
+              (0..<4).allSatisfy({ q[$0].isFinite }), norm.isFinite, abs(norm-1) <= 0.001,
+              friction.isFinite, friction >= 0, restitution.isFinite, (0...1).contains(restitution) else { return nil }
+        let points = mesh.vertices.flatMap { [$0.x,$0.y,$0.z] }
+        let surfaces = mesh.surfaces.isEmpty ? [Int32](repeating: 2,count: faces) : mesh.surfaces
+        let materials = mesh.materials.isEmpty ? [Int32](repeating: -1,count: faces) : mesh.materials
+        let id = zgtaphys_collider_trimesh_parented(handle,body,points,UInt32(mesh.vertices.count),mesh.indices,
+            UInt32(faces),surfaces,materials,pose(position: localPose.position,rotation: localPose.rotation),friction,restitution)
         return id == 0 ? nil : id
     }
     @discardableResult

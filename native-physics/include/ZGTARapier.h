@@ -36,6 +36,11 @@ uint64_t zgtaphys_collider_ball(ZGTAPhysicsWorld*,uint64_t body,float radius,con
 uint64_t zgtaphys_collider_box(ZGTAPhysicsWorld*,uint64_t body,const float *half_extents,const float *transform,float friction,float restitution);
 uint64_t zgtaphys_collider_convex(ZGTAPhysicsWorld*,uint64_t body,const float *vertices,uint32_t vertex_count,const float *transform,float friction,float restitution);
 uint64_t zgtaphys_collider_trimesh(ZGTAPhysicsWorld*,const float *vertices,uint32_t vertex_count,const uint32_t *indices,uint32_t triangle_count,const int32_t *surfaces,const int32_t *materials);
+/* Additive parented mesh API. Parent must exist in this world. Vertices and
+ * transform[7] are LOCAL to that body; unit quaternion and finite coordinates
+ * within +/-1,000,000 are required. Per-face metadata/order and mesh flags match
+ * the standalone API; no world-space vertex baking is performed. */
+uint64_t zgtaphys_collider_trimesh_parented(ZGTAPhysicsWorld*,uint64_t body,const float *vertices,uint32_t vertex_count,const uint32_t *indices,uint32_t triangle_count,const int32_t *surfaces,const int32_t *materials,const float *transform,float friction,float restitution);
 uint32_t zgtaphys_collider_remove(ZGTAPhysicsWorld*,uint64_t collider);
 uint32_t zgtaphys_collider_enabled(ZGTAPhysicsWorld*,uint64_t collider,uint32_t enabled);
 uint32_t zgtaphys_collider_surface(ZGTAPhysicsWorld*,uint64_t collider,int32_t surface,int32_t material);

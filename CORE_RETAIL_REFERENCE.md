@@ -19,13 +19,16 @@ provenance does not independently establish a pristine US executable identity.
 | Vehicle handling catalog |212 model mappings,5,723/5,724 fields match; one decimal rounding difference | Same checked raw handling inputs |
 | Pedestrian heading/style/type |276 rows,828 fields match | Same checked pedestrian style inputs |
 | Tyre adhesion | Rubber-versus-ground values match | Same checked tyre surface inputs |
-| Original executable gameplay | Not executed or observed | No original runtime parity established |
-| Supplied iOS Definitive Edition1.86 IPA | Menu resources inspected statically; no original app execution | Menu asset/layout evidence only, no original gameplay-runtime acceptance |
+| Original PC executable gameplay | Not executed or observed | No classic-retail runtime parity established |
+| Supplied iOS Definitive Edition1.86 IPA | Menu resources inspected statically | Menu asset/layout evidence; an iPhoneOS binary cannot run in Simulator |
+| User-installed DE1.86.44544238 on iPhone12Pro/iOS27.2 | Actual menu, opening CJ scene/HUD, joystick/release, orbit/pitch and bicycle entry captured through paired screen/HID services | A bounded edition-specific runtime baseline; no completed native side-by-side parity or engine-FPS measurement |
 
-The supplied mobile package is the Definitive Edition, distinct from the original
-mobile renderer/gameplay revision. No running unmodified retail installation or
-controlled retail gameplay recording has yet been established for side-by-side
-mechanics measurements. A request for a runnable reference remains open.
+The supplied mobile package and current phone reference are Definitive Edition,
+distinct from the original mobile renderer/gameplay revision. Phone inventory
+and visible running gameplay establish the reported edition/version, not a
+cryptographic guarantee of a pristine App Store binary. Controlled captures now
+exist for a bounded set of ordinary inputs; matched native comparison and
+classic-retail timing measurements remain open.
 
 Original binaries, images, extracted files, derived catalogs, disassembly and
 private recorded fixtures remain local. The source release includes our own
@@ -89,8 +92,9 @@ only architecture isARM64, its build platform is iPhoneOS (minimumiOS16/A12),
 and it contains no Simulator slice. Binary signing metadata alone does not
 establish a trusted App Store installation or a pristine gameplay build.
 Selected metadata/binary extraction and full retained evidence remain local.
-A compatible running device reference is still needed for gameplay recordings;
-no original app was installed, launched, re-signed or decrypted in this audit.
+During that earlier static pass, no original app was installed, launched,
+re-signed or decrypted. The later user-installed physical reference is recorded
+separately below; the audit does not merge these evidence types.
 
 The owner initially supplied only the IPA. Apple Simulator
 requires a build for its platform; the supplied iPhoneOS binary is not such a
@@ -101,23 +105,32 @@ A genuine running iPhone/iPad installation remains the practical mobile
 reference. PlayCover is a separate Apple Silicon compatibility route, not a
 Simulator build or an established compatible runtime for this package; its
 [published requirements](https://docs.playcover.io/getting_started/download_playcover)
-exclude Intel Macs. No PlayCover installation or original-game execution was
-attempted. Our Simulator builds come from our independent app source.
+exclude Intel Macs. No PlayCover installation or original-game Simulator
+execution was attempted. Our Simulator builds come from our independent source.
 
 ## Physical reference status, 2026-11-16
 
-The connected iPhone 12 Pro was reported by device inventory as iOS 14.5.1;
-the development tools reported a missing compatible Developer Disk Image.
-The owner owns the classic mobile app but has not installed it. The owner
-plans to update the phone and install Definitive Edition. No OS update,
-original-app installation or original gameplay launch was performed or
-verified during this pass. Re-check actual device/version availability before
-recording any reference observations; a proposed OS version is not a detected
-or validated version.
+The initial inventory reported iOS14.5.1 with no usable developer support.
+After the owner's update and installation, actual inventory reports a paired
+iPhone12Pro on iOS27.2/build24B119, Developer Mode enabled, with the installed
+DE reference reporting1.86.44544238. The audit did not perform the OS update or
+install that game.
 
-When the original runs, record its edition/build, selected graphics/control
-mode, measured frame rate and test conditions alongside each comparison.
+XCTest UI automation timed out before its test method. A separate paired
+CoreDevice capture identified older mounted support17C529, which did not offer
+the screenshot service. Compatible Apple-personalized developer support27B52
+mounted successfully and enabled direct screenshots. Ordinary visible inputs
+then reached the main menu, opening gameplay and nearby BMX. No game binary,
+save-file extraction, cheat or private-process instrumentation was used.
+
+The local reference captures retain input contact timestamps and screen RTP
+access-unit timestamps. Review MP4s use nominal30fps playback solely for visual
+inspection; this is not a measurement of the game's frame rate or of exact
+input-to-photon latency. The same scene, controls, equipment and measured native
+conditions still need a matched side-by-side replay. The current BMX first-use
+steering prompt retained its default Slider choice.
+
 Definitive Edition is useful for its own presentation and gameplay behavior;
-edition-specific differences must not silently replace the classic San
-Andreas target. Static IPA resources and archived browser outputs remain the
-available references until that runtime comparison is established.
+edition-specific differences must not silently replace the classic San Andreas
+target. The classic PC executable and classic mobile runtime remain unverified.
+All footage, contact sheets, device identifiers and test logs stay local-only.

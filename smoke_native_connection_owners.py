@@ -3,12 +3,14 @@
 
 Transport/HTTP/Rapier behavior has separate real-runtime gates. This checks
 controller call ordering, retained pose, discarded ownership and modal lifetime.
+Artwork cancellation and renderer world disposal are explicit boundary spies;
+their underlying download/GPU/resource implementations are not simulated here.
 """
 from pathlib import Path
 import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/native-physics/tests/connection-owners';OUT.mkdir(parents=True,exist_ok=True)
-paths=['ios/App/NativeGameViewController.swift','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameBindings.swift','ios/App/NativeConnectionRecovery.swift']
+paths=['ios/App/NativeGameViewController.swift','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameBindings.swift','ios/App/NativeConnectionRecovery.swift','ios/App/NativeOriginalWorldEffects.swift']
 inputs={p:(ROOT/p).read_text() for p in paths}
 def method(source,marker):
  start=source.index(marker);brace=source.index('{',start);depth=1;end=brace+1
@@ -37,6 +39,10 @@ final class Camera {var shakeCancels=0;func cancelShake(){shakeCancels+=1};func 
 final class Effects {var clears=0;func clear(){clears+=1}}
 final class DamageOwner {var resets=0;func reset(){resets+=1}}
 final class Renderer {
+ var legacyWorldClears=0
+ func clearLegacyWorld(){legacyWorldClears+=1;ownerCalls.append("legacy-world-clear")}
+ var networkInterior:Int?=3,actorEffectResets=0
+ func setOriginalActorEffects(burning:Bool,coughing:Bool){precondition(!burning && !coughing);actorEffectResets+=1}
  let localHitReaction=DamageOwner();var footDeathKind:String?="old";var pendingFootHit:SIMD3<Double>?=SIMD3(1,2,3)
  let groundVehicle:Body?=Body(),personalFlight=Flight()
  let vehicleCoupling:Couplings?=Couplings()
@@ -58,7 +64,7 @@ final class Renderer {
  var lastRiderDraw:Double=123,remoteServerTimeOffsetMilliseconds:Double?=456
  func synchronizeProjectiles(_ rows:[Int]){projectileRows=rows}
  func cancelReloadAnimation(){reloadCancelled=true}
- func teleport(x:Float,y:Float,z:Float){camera=SIMD3(x,y,z);resets+=1}
+ func teleport(x:Float,y:Float,z:Float,direction:Float?=nil){camera=SIMD3(x,y,z);if let direction {self.heading=direction};resets+=1}
 '''+method(renderer,'    func setVehicleCouplingConnection(')+method(renderer,'    private func discardOwnedVehicle()')+method(renderer,'    func deferVehicleExit(')+method(renderer,'    @discardableResult func removeVehicle(')+method(renderer,'    private func clearMultiplayerPresentation()')+method(renderer,'    func resetMultiplayerSession()')+r'''
 }
 struct RawKey:Hashable {let rawValue:Int}
@@ -68,14 +74,25 @@ enum ButtonState {case normal}
 final class Radar {var target:SIMD2<Float>?=SIMD2(1,2)}
 final class HUD {let radar=Radar();var vehicle:String?="OLD";func updateVehicle(name:String?,speed:Float){vehicle=name}}
 final class Gameplay {var ready=false,refreshes=0;func setConnectionReady(_ value:Bool){ready=value};func refresh(){precondition(ready);refreshes+=1}}
-final class Network {var stops=0;func disconnect(){stops+=1}}
+final class Network {var legacy:AnyObject?;var stops=0;func disconnect(){stops+=1;ownerCalls.append("network-disconnect")}}
 final class Audio {var stops=0;func stop(){stops+=1}}
-final class Display {var invalidated=false;func invalidate(){invalidated=true}}
+final class Display {var invalidated=false;func invalidate(){invalidated=true;ownerCalls.append("display-invalidate")}}
 struct Clock {var resets=0;mutating func reset(){resets+=1}}
 final class Presenter {var isBeingDismissed=false}
+final class LegacyDialog {var invalidations=0;func invalidate(){invalidations+=1}}
+final class LegacyOverlay {var clears=0;func clear(){clears+=1}}
+final class Artwork {
+ static var cancelled:Set<UUID>=[]
+ let id=UUID()
+ func cancel(){Self.cancelled.insert(id);ownerCalls.append("artwork-cancel")}
+ deinit{ownerCalls.append("artwork-release")}
+}
 class Parent {func viewWillDisappear(_ animated:Bool){}}
 enum NativeMultiplayerClient {typealias ConnectionState=NativeConnectionRecovery.State}
 final class Game:Parent {
+ let originalEffects=NativeOriginalWorldEffects();var originalExitToken:UInt64?=17
+ var legacyDialog:LegacyDialog?=LegacyDialog(),legacyOverlay:LegacyOverlay?=LegacyOverlay(),legacySelection=true
+ var legacyArtwork:Artwork?=Artwork()
  let gameplay=Gameplay(),network=Network(),radio=Audio(),audio=Audio(),gameHUD=HUD(),players=Text(),vehicleButton=Button()
  var renderer:Renderer?=Renderer(),displayLink:Display?=Display()
  var currentVehicle:Int?=1,heldKeys:Set<RawKey>=[RawKey(rawValue:26)]
@@ -90,9 +107,16 @@ var checks=0
 func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}
 NativeMenuKeyLatch.reset()
 let game=Game(),oldPosition=game.renderer!.camera
+let oldDialog=game.legacyDialog!,oldOverlay=game.legacyOverlay!
 var delayedExit=false;game.renderer!.pendingVehicleExit={delayedExit=true}
 var delayedPlacement=false;game.renderer!.deferVehicleExit{delayedPlacement=true};let queuedPlacement=game.renderer!.pendingExitPlacement
+_=game.originalEffects.light();game.originalEffects.whiff(random:{0.5})
 game.connectionChanged(.reconnecting)
+check(!game.originalEffects.burning && !game.originalEffects.coughing && game.originalExitToken==nil && game.renderer!.actorEffectResets==1,"loss retained original actor effects or deferred exit ownership")
+check(game.renderer!.networkInterior==nil,"independent reconnect inherited legacy interior filter")
+let legacyLoss=Game();legacyLoss.network.legacy=NSObject();legacyLoss.connectionChanged(.reconnecting)
+check(legacyLoss.renderer!.networkInterior==0,"legacy reconnect did not reset interior to exterior until server state arrives")
+check(game.legacyDialog==nil&&oldDialog.invalidations==1&&oldOverlay.clears==1 && !game.legacySelection,"old legacy dialog/textdraw input survives disconnect")
 check(!game.gameplay.ready && game.currentVehicle==nil && !game.drivingControls,"loss clears gameplay/driver ownership")
 check(game.renderer!.camera==oldPosition,"loss manufactured a car-exit offset")
 check(!game.renderer!.driving && game.renderer!.currentVehicleID==nil && !game.renderer!.groundVehicle!.active,"old body is discarded before welcome")
@@ -124,8 +148,16 @@ check(game.gameplay.ready && game.gameplay.refreshes==1 && game.lastNetwork==0 &
 check(game.renderer!.resets==resets && game.renderer!.camera==SIMD3(1480,-1738,13) && game.currentVehicle==nil,"ready resurrects old driver or moves fresh spawn")
 game.viewWillDisappear(true)
 check(game.network.stops==0 && !game.displayLink!.invalidated && game.gameplay.ready,"temporary fullscreen presentation stopped live world")
+check(game.legacyArtwork != nil && game.renderer!.legacyWorldClears==0,"temporary fullscreen presentation disposed live artwork/world owners")
+let exitingArtworkID=game.legacyArtwork!.id
+weak var exitingArtwork=game.legacyArtwork
+let shutdownStart=ownerCalls.count
 game.isBeingDismissed=true;game.viewWillDisappear(true)
 check(game.network.stops==1 && game.displayLink!.invalidated && !game.gameplay.ready && game.audio.stops==1,"permanent exit did not dispose owners")
+let shutdownCalls=Array(ownerCalls.dropFirst(shutdownStart))
+check(Artwork.cancelled.contains(exitingArtworkID) && game.legacyArtwork==nil && exitingArtwork==nil,"permanent exit retained artwork or released it before cancellation")
+check(game.renderer!.legacyWorldClears==1,"permanent exit omitted authored legacy world disposal")
+check(shutdownCalls==["artwork-cancel","artwork-release","legacy-world-clear","display-invalidate","network-disconnect"],"actual shutdown must cancel artwork before releasing its owner and clear world before display/network disposal")
 let gone=Game(),beforeGone=gone.renderer!.camera
 gone.gameplay.setConnectionReady(true)
 gone.vehicleRemoved("parked")
@@ -151,7 +183,7 @@ print("PASS connection owners: \(checks) actual extracted controller/renderer li
 '''
 with tempfile.TemporaryDirectory(prefix='zgta-connection-owners-') as directory:
  root=Path(directory);source=root/'main.swift';binary=root/'verify'
- source.write_text(inputs[paths[2]]+'\n'+inputs[paths[3]]+'\n'+code)
+ source.write_text(inputs[paths[2]]+'\n'+inputs[paths[3]]+'\n'+inputs[paths[4]]+'\n'+code)
  subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'modules'),str(source),'-o',str(binary)],check=True)
  result=subprocess.run([str(binary)],check=True,capture_output=True,text=True);print(result.stdout,end='')
  (OUT/'report.json').write_text(json.dumps({'pass':True,'output':result.stdout,'scope':__doc__,'sources':{p:hashlib.sha256(value.encode()).hexdigest() for p,value in inputs.items()}},indent=2)+'\n')

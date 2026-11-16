@@ -28,6 +28,7 @@ final class BikeExitRenderer {
  var onVehicleWrecked:(()->Void)?,onBikeEjection:((NativeBikeEjection.Event)->Void)?
  var footDeathKind:String?,pendingFootHit:SIMD3<Double>?
  var onLocalImpact:((Int)->Void)?
+ var onLocalDamage:((Double,Int)->Void)?
  var onLocalHealth:((Int)->Void)?
  let footLocomotion=NativeFootLocomotion(),headingContinuity=NativeHeadingContinuity(),personalFlight=NativePersonalFlightController()
  var footAnimator:NativeFootAnimation?
@@ -69,9 +70,9 @@ final class BikeExitController {
  var drivingControls=true
  func setDrivingControls(_ on:Bool){drivingControls=on}
  // ACTUAL_CONTROLLER_EXIT
- func leave(_ event:NativeBikeEjection.Event?){completeVehicleExit(ejection:event)}
- func wreck(){completeVehicleExit(wrecked:true)}
- func waterExit(){completeVehicleExit(water:true)}
+ func leave(_ event:NativeBikeEjection.Event?,afterExit:(()->Void)?=nil){completeVehicleExit(ejection:event,afterExit:afterExit)}
+ func wreck(afterExit:(()->Void)?=nil){completeVehicleExit(wrecked:true,afterExit:afterExit)}
+ func waterExit(afterExit:(()->Void)?=nil){completeVehicleExit(water:true,afterExit:afterExit)}
 }
 let root=URL(fileURLWithPath:CommandLine.arguments[1])
 let library=NativeSkeletalAnimationLibrary(data:try Data(contentsOf:root.appendingPathComponent("local-only/site/game/native/models/animations.clips.bin")))!

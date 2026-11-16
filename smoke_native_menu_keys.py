@@ -55,9 +55,11 @@ final class Panel:Responder {
     func moveSelection(_ value:Int){moves+=value};func adjustSelection(_ value:Int){adjustments+=value}
 '''+panel_methods+r'''
 }
-final class Network {var isReady=true}
+final class Network {var isReady=true,originalInputBlocked=false}
+final class Actor {var originalCoughing=false}
 final class Game:Responder {
     let network=Network()
+    var renderer:Actor?=Actor()
     var applicationActive=true,presentedViewController:Int?,heldKeys:Set<UIKeyboardHIDUsage>=[]
     var pauseEscapeHandoff:NativeModalKeyHandoff?=NativeModalKeyHandoff(pressed:true)
     var bindingContext=NativeGameBindings.Context(),events:[NativeGameBindings.Action]=[]
@@ -200,11 +202,13 @@ for raw:Int? in [nil,44,41] {
     check(g.forwardedBegan==[nonkey] && s.forwardedBegan==[nonkey],"Nonkeyboard forwarding lost or carried owned keyboard input")
     check(h.closes==0 && h.activations==0 && m.activations==0,"Nonkeyboard batch activated underlying menus")
 }
-for boundary in ["offline","inactive","modal"] {
+for boundary in ["offline","inactive","modal","server-freeze","cough"] {
     NativeMenuKeyState.reset();let (g,h,_,s)=gameChain()
     if boundary=="offline"{g.network.isReady=false}
     if boundary=="inactive"{g.applicationActive=false}
     if boundary=="modal"{g.presentedViewController=1}
+    if boundary=="server-freeze"{g.network.originalInputBlocked=true}
+    if boundary=="cough"{g.renderer?.originalCoughing=true}
     g.pressesBegan(nonkey,with:nil)
     check(g.forwardedBegan==[nonkey] && s.forwardedBegan==[nonkey] && h.closes==0,"Early guard swallowed nonkeyboard event: \(boundary)")
 }

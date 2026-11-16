@@ -1,6 +1,7 @@
 import Foundation
 import MetalKit
 import simd
+import CryptoKit
 
 /// Renders the locally hosted WRL2 world directly with Metal. Game meshes and
 /// texture atlases stay on the Mac; the app fetches only visible cells.
@@ -131,6 +132,60 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let markerDepth: MTLDepthStencilState
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
+    let legacyObjects=NativeSAMPObjects.Store()
+    var legacyVirtualWorld:Int32=0
+    var legacyLocalPlayerID:UInt16?
+    private var legacyModelPipelines:NativeRenderWareModel.Pipelines?
+    private var legacyPedPipelines:NativeRenderWarePedModel.Pipelines?
+    private var legacyModels:[Int32:NativeRenderWareModel.Uploaded]=[:]
+    private var legacyPedModels:[String:NativeRenderWarePedModel.Uploaded]=[:]
+    private var legacyPedStyles:[String:String]=[:]
+    private var legacyModelDefinitions:[Int32:NativeSAMPArtwork.Model]=[:]
+    private var legacyModelCosts:[Int32:Int]=[:]
+    private var legacyModelBytes=0
+    private var legacyAssetEpoch:UInt64=0
+    private var legacyStockCatalog:NativeSAMPStockModels?
+    private var legacyStockCollisionCatalog:NativeSAMPStockCollisionCatalog?
+    private var legacyStockManifestSHA256:String?
+    private var legacyStockLoader:NativeSAMPStockAssetLoader?
+    private var legacyStockModels=Set<Int32>()
+    private enum LegacyStockCollisionKind:String {case authored,authoredEmpty,inventoryAbsent}
+    private var legacyStockCollisionKinds:[Int32:LegacyStockCollisionKind]=[:]
+    private var legacyStockReferences=Set<Int32>()
+    private var legacyStockLoads:[Int32:(token:UUID,request:UUID?)]=[:]
+    private var legacyStockRetries:[Int32:Double]=[:]
+    private var legacyStockUse:[Int32:Double]=[:]
+    private var legacyStockPumping=false
+    private var legacyStockMetadataEpoch:UInt64=0
+    private var legacyStockMetadataPending=0
+    private var legacyStockMetadataRetryAfter=0.0
+    private var legacyStockMetadataTasks:[UUID:LegacyStockMetadataTransfer]=[:]
+    private let legacyImportQueue=DispatchQueue(label:"ZGTA.RenderWare.import",qos:.userInitiated)
+    private var legacyMissingObjects=Set<Int32>()
+    private var legacyMaterialOwner:NativeSAMPObjectMaterials.Owner?
+    private var legacyExactTextures:[NativeSAMPObjectMaterials.TextureRequest:NativeSAMPObjectMaterials.Texture]=[:]
+    private var legacyTextureSources:[NativeSAMPObjectMaterials.TextureRequest:UInt32]=[:]
+    private var legacyTextureConflicts=Set<NativeSAMPObjectMaterials.TextureRequest>()
+    private var legacyTextureLoads=Set<NativeSAMPObjectMaterials.TextureRequest>()
+    private var legacyTextureRetries:[NativeSAMPObjectMaterials.TextureRequest:Double]=[:]
+    private var legacyExternalTextureBytes:[NativeSAMPObjectMaterials.TextureRequest:Int]=[:]
+    private var legacyTextureUse:[NativeSAMPObjectMaterials.TextureRequest:Double]=[:]
+    private var legacyMaterialErrors=Set<String>()
+    private var legacyCollisionModels:[Int32:[NativeRenderWareCollision.Model]]=[:]
+    private lazy var legacyCollisionWorld=groundVehicle.flatMap{try?NativeRenderWareCollisionWorld(world:$0.world)}
+    private var legacyCollisionHandles:[UInt16:[NativeRenderWareCollisionWorld.Handle]]=[:]
+    private var legacyCollisionKinds:[UInt16:Int32]=[:]
+    private var legacyCollisionSerial:UInt64=1
+    private var legacySpectatorAccumulator=0.0
+    private var legacyObjectClock=NativeSAMPObjectSimulationClock()
+    private enum LegacyImportPlan {
+        case object(NativeRenderWareModel.Plan),pedestrian(NativeRenderWarePedModel.Plan)
+        var resources:NativeRenderWareModel.Plan{switch self{case .object(let plan):return plan;case .pedestrian(let plan):return plan.model}}
+    }
+    private struct LegacyPreparedImport {
+        let drawing:LegacyImportPlan
+        let collision:[NativeRenderWareCollision.Model]
+    }
     private var actorMeshes: [String: Mesh] = [:]
     private var actorParts: [String: [ActorPart]] = [:]
     private var vehicleRigs:[String:NativeVehicleRig] = [:]
@@ -281,6 +336,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private let waterWaves = NativeWaterWaves()
     private let gameCamera = NativeGameCamera()
+    private let legacyFollowCamera = NativeGameCamera(persistViews:false)
+    private var legacyGameCamera = NativeSAMPGameCamera()
+    private var legacyCameraSample:NativeSAMPGameCamera.Sample?
+    private var legacyCameraSubject:NativeSAMPGameCamera.Subject?
+    private var legacyCameraDiagnostics=Set<NativeSAMPGameCamera.Diagnostic>()
+    var legacySpectating:Bool{legacyGameCamera.spectating}
+    var legacySpectatorPosition:SIMD3<Float>?{legacyCameraSample?.spectating == true ? legacyCameraSample?.pose.eye:nil}
+    private var scenePosition:SIMD3<Float>{legacyCameraSample?.active == true ? legacyCameraSample!.pose.eye:camera}
     private var appPreferences = NativeAppSettings.defaults
     private var ownCameraVisibility=NativeCameraVisibility()
     private var gameCameraFrame: NativeGameCamera.Frame?
@@ -342,6 +405,59 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private var vehicleModels: [String: String] = [:]
     private var pedModels: [String: String] = [:]
+    private(set) var localSkin = 7
+    private var pendingLocalSkin: Int?
+    private(set) var localLegacySkin: Int?
+    private var pendingLegacySkin: Int?
+    private var sampSkinCatalog: NativeSAMPSkinCatalog?
+    @discardableResult func loadLegacySkinCatalog(_ data: Data) -> Bool {
+        guard let catalog = try? NativeSAMPSkinCatalog(data: data) else { return false }
+        sampSkinCatalog = catalog
+        if let pending = pendingLegacySkin { _ = setLegacySkin(pending) }
+        return true
+    }
+    /// SA-MP IDs refer to retail peds.ide, not the browser's compact array.
+    @discardableResult func setLegacySkin(_ skin: Int) -> Bool {
+        if (20001...30000).contains(skin) {
+            guard legacyPedModels["samp-dl-\(skin)"] != nil else{pendingLegacySkin=skin;return false}
+            guard setLocalSkin(skin)else{pendingLegacySkin=skin;return false}
+            localLegacySkin=skin;pendingLegacySkin=nil;return true
+        }
+        guard (0...311).contains(skin) else { return false }
+        guard let catalog = sampSkinCatalog, !pedModels.isEmpty else { pendingLegacySkin = skin; return false }
+        guard let native = catalog.nativeSkin(forLegacy: skin),
+              pedModels[String(native)] == catalog.model(forLegacy: skin) else {
+            pendingLegacySkin = nil
+            onStatus?("NO CONVERTED NATIVE MODEL FOR SA-MP SKIN \(skin)")
+            return false
+        }
+        guard setLocalSkin(native) else { pendingLegacySkin = skin; return false }
+        localLegacySkin = skin; pendingLegacySkin = nil
+        return true
+    }
+    /// Requests received before the model catalogue are applied once it arrives.
+    /// Unsupported/custom IDs remain explicit gaps rather than another skin
+    /// being advertised as the requested model.
+    @discardableResult func setLocalSkin(_ skin: Int) -> Bool {
+        guard (0...65535).contains(skin) else { return false }
+        pendingLegacySkin = nil; localLegacySkin = nil
+        guard !pedModels.isEmpty else { pendingLocalSkin = skin; return false }
+        guard let model = pedModels[String(skin)] else {
+            pendingLocalSkin = nil
+            onStatus?("NO CONVERTED NATIVE MODEL FOR SKIN \(skin)")
+            return false
+        }
+        pendingLocalSkin = nil
+        guard skin != localSkin else { loadActor(model); return true }
+        localSkin = skin
+        loadActor(model)
+        prepareFootAnimation()
+        // Capture matrices belong to the previous skeleton. Keep the entry/
+        // exit task and body pose, but never blend a new mesh from old bones.
+        ownRiderCapture = nil; ownRiderPrevious = nil; ownRiderFeet = nil
+        ownCameraVisibility.reset()
+        return true
+    }
     private var weaponModels: [String: String] = [:]
     private var weaponMuzzleCatalog:NativeWeaponMuzzle.Catalog?
     private var loading: Set<String> = []
@@ -356,6 +472,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var insideCells: Set<Int> = []
     private var activeFar: Set<String> = []
     private var camera = SIMD3<Float>(1480, -1738, 13)
+    /// Legacy servers own interior identity independently of altitude. Nil
+    /// retains the original browser/self-hosted scene convention.
+    var networkInterior: Int? = nil {
+        didSet { if oldValue != networkInterior { loadNearby() } }
+    }
+    private var isInterior: Bool { networkInterior.map { $0 != 0 } ?? (camera.z > 700) }
     private var heading: Float = 0
     private var actorHeading: Float = 0
     private var cameraPitch: Float = -0.15
@@ -427,6 +549,57 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var vehicleJetControl: Float = 0
     var nativeVehicleTransform: simd_float4x4? { groundVehicle?.active == true ? groundVehicle?.modelTransform : nil }
     var nativeVehicleOrientation: simd_quatf? { groundVehicle?.active == true ? groundVehicle?.orientation : nil }
+    /// Read the live owned Rapier body, including pitch/roll and immediate
+    /// server changes. Convert the rotation axis once from Y-up to GTA Z-up;
+    /// SA-MP orders quaternion components w,x,y,z. Never reconstruct from yaw.
+    var legacyVehicleQuaternion: SIMD4<Float>? {
+        guard driving, let ground = groundVehicle, ground.active,
+              let collider = ground.chassisColliders.first,
+              let body = ground.world.colliderInfo(collider)?.body,
+              let state = ground.world.bodyState(body) else { return nil }
+        let q = state.rotation
+        let value = SIMD4(q.real, q.imag.x, -q.imag.z, q.imag.y)
+        let length = simd_length_squared(value)
+        guard value.x.isFinite, value.y.isFinite, value.z.isFinite, value.w.isFinite,
+              length.isFinite, length > 0.000001 else { return nil }
+        return value
+    }
+    /// Original messages target the currently occupied vehicle. Actor health
+    /// remains with the pedestrian owner; model immunity precedes both health
+    /// damage and the optional geometry-eligible tyre burst.
+    @discardableResult func receiveOriginalVehicleHit(_ message: [String: Any],
+        random: () -> Double = { Double.random(in: 0..<1) }) -> Bool {
+        guard let ground = groundVehicle, ground.active, let damage = ground.damageController,
+              let model = Int(activeVehicleModel),
+              let hit = NativeOriginalWorldCommands.vehicleDamage(message, driving: driving, model: model) else { return false }
+        damage.state.inflict(hit.damage)
+        if let wheel = hit.wheel { _ = burstOriginalVehicleWheel(wheel, random: random) }
+        vehicleHealth = Int(min(1000, max(0, damage.state.health.rounded())))
+        activeVehicleDamage = damage.state.text()
+        return true
+    }
+    private func burstOriginalVehicleWheel(_ wheel: Int, random: () -> Double) -> Bool {
+        guard let ground = groundVehicle, ground.active, let damage = ground.damageController,
+              let model = vehicleModels[activeVehicleModel], let rig = vehicleRigs[model] else { return false }
+        let document = rig.document
+        let eligible: Bool
+        if document.kind == "bike", let bike = document.joints.bike {
+            eligible = !bike.pedalled && (wheel == 0 ? bike.hubs["front"] != nil : wheel == 1 && bike.hubs["rear"] != nil)
+        } else {
+            eligible = document.kind == "car" && document.id != 432 && document.joints.wheels.contains {
+                2 * ($0.left ? 0 : 1) + ($0.front ? 0 : 1) == wheel
+            }
+        }
+        guard eligible, damage.state.burst(wheel) else { return false }
+        guard let collider = ground.chassisColliders.first, let body = ground.world.colliderInfo(collider)?.body,
+              let state = ground.world.bodyState(body) else { return true }
+        let amount = document.kind == "bike" ? 0.02 : 0.03
+        let right = state.rotation.act(SIMD3<Float>(1,0,0)), forward = state.rotation.act(SIMD3<Float>(0,0,-1))
+        let move = right * Float(50 * ((2 * random() - 1) * amount))
+        let turn = simd_cross(forward, right) * Float(50 * ((2 * random() - 1) * amount))
+        _ = ground.world.setVelocities(body, linear: state.linearVelocity + move, angular: state.angularVelocity + turn)
+        return true
+    }
     var vehicleWirePosition: SIMD3<Float> { groundVehicle?.active == true ? groundVehicle!.bodyPosition : camera }
     var vehicleRoll: Float { groundVehicle?.active == true ? groundVehicle!.roll : vehicleFallbackRoll }
     func vehicleModelOrigin(_ code: String) -> Float { groundVehicle?.modelOrigin(String(code.split(separator: ".").first ?? "")) ?? 0 }
@@ -441,8 +614,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var nativeRotorTurning: Float { groundVehicle?.rotorTurning ?? 0 }
     var nativeVehicleAudioSnapshot:NativeGroundVehicle.AudioSnapshot? {groundVehicle?.audioSnapshot()}
     func takeVehicleHullAudio()->NativeGroundVehicle.HullAudio? {groundVehicle?.takeHullAudio()}
-    var audioEar:SIMD3<Float> {gameCameraFrame?.source ?? camera}
-    var audioForward:SIMD3<Float> {gameCameraFrame.map{simd_normalize($0.target-$0.source)} ?? aimDirection}
+    var audioEar:SIMD3<Float> {legacyCameraSample?.active == true ? legacyCameraSample!.pose.eye:gameCameraFrame?.source ?? camera}
+    var audioForward:SIMD3<Float> {legacyCameraSample?.active == true ? simd_normalize(legacyCameraSample!.pose.target-legacyCameraSample!.pose.eye):gameCameraFrame.map{simd_normalize($0.target-$0.source)} ?? aimDirection}
     func remoteVehicleAudioTop(_ model:String)->Double? {groundVehicle?.remoteAudioTop(model:model)}
     var nativeAircraftNozzle: Float? { groundVehicle?.aircraftNozzle }
     var nativeLandingGearUp: Bool { groundVehicle?.landingGearUp ?? false }
@@ -486,6 +659,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var onContactAudio: (([NativeVehicleDamageController.Collision],NativeVehicleDamage.Body) -> Void)?
     var onLocalImpact:((Int)->Void)?
     var onLocalHealth: ((Int) -> Void)?
+    /// Explicit native fatal cause; an untyped zero-health update cannot
+    /// distinguish a wreck explosion from a fall or another scripted death.
+    var onLocalFatal:((Int)->Void)?
+    /// Original-world fractional damage bypasses the integral self-host ACK
+    /// adapter. Weapon53 is drowning and54 is falling; both bypass armour.
+    var onLocalDamage: ((Double,Int) -> Void)?
     var onParachuteUsed: (() -> Void)?
     private var actionTimeRemaining: Float = 0
     private var actionClip = ""
@@ -641,11 +820,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return .init(height:Double(surface.height-base),normal:SIMD3(Double(surface.normal.x),Double(surface.normal.z),Double(-surface.normal.y)))
         }
         objectiveMarker = makeObjectiveMarker()
+        groundVehicle?.onKinematicStep = {[weak self] delta in
+            guard let self,let at=self.legacyObjectClock.advance(delta:delta,now:ProcessInfo.processInfo.systemUptime)else{return}
+            self.synchronizeLegacyObjectPhysics(at:at)
+        }
         gameCamera.trace = { [weak self] origin,direction,distance in
             guard let self else { return nil }
             let groups: UInt32 = self.driving ? 0xffff0083 : 0xffff0001
             var excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : Set<UInt64>()
             if let queries=self.character?.queries {excluded.formUnion([queries.walker,queries.probe])}
+            excluded.formUnion(self.legacyCollisionWorld?.cameraExcludedColliderIDs ?? [])
             switch self.worldRay(from:origin,direction:direction,distance:distance,groups:groups,excluding:excluded) {
             case .hit(let hit):return hit.distance
             case .unavailable(let at):return at
@@ -654,9 +838,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         gameCamera.unavailableDistance = { [weak self] origin,direction,distance in
             guard let self,let vehicle=self.groundVehicle else {return 0}
-            return NativeWorldRay.coverage(from:origin,to:origin+direction*distance,interior:self.camera.z>700,
+            return NativeWorldRay.coverage(from:origin,to:origin+direction*distance,interior:self.isInterior,
                 loaded:vehicle.isCellLoaded)?.firstUnavailable
         }
+        legacyFollowCamera.trace=gameCamera.trace
+        legacyFollowCamera.unavailableDistance=gameCamera.unavailableDistance
         weaponEffects.trace = { [weak self] origin, direction, distance in
             guard let self else{return nil}
             if case .hit(let hit)=self.worldRay(from:origin,direction:direction,distance:distance,groups:0xffff0083) {
@@ -686,7 +872,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private func collisionFor(_ point: SIMD3<Float>) -> WorldCollision? {
         let x = max(0,min(15,Int(floor((point.x+3000)/375))))
         let y = max(0,min(15,Int(floor((point.y+3000)/375))))
-        return collisions["\(point.z > 700 ? "i" : "c")\(y*16+x)"]
+        return collisions["\(isInterior ? "i" : "c")\(y*16+x)"]
     }
     func synchronizeProjectiles(_ rows: [[String: Any]]) { weaponEffects.synchronizeServer(rows) }
     func showBlast(weapon: Int, position: SIMD3<Float>,large:Bool=false) {
@@ -717,7 +903,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func weaponMuzzle(weapon:Int,left:Bool)->NativeWeaponMuzzle.Sample? {
         guard weapon==equippedWeapon,health>0,!driving else{return nil}
         var source:NativeWeaponMuzzle.Pose?
-        if let name=pedModels["7"],let actor=skeletalActors[name],let library=skeletalLibrary,let frame=footAnimationFrame {
+        if let name=pedModels[String(localSkin)],let actor=skeletalActors[name],let library=skeletalLibrary,let frame=footAnimationFrame {
             let pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,
                 figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)
             source = .init(weapon:weapon,feet:shotFeet,actorToWorld:Self.translation(shotFeet)*Self.rotationZ(-actorHeading),
@@ -728,7 +914,53 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     var direction: Float { driving ? heading : actorHeading }
     var cameraDirection: Float { gameCameraFrame?.heading ?? heading }
-    var hasNearbyFire: Bool { weaponEffects.fires.contains { simd_distance($0.position,camera)<40 } }
+    var hasNearbyFire: Bool { originalActorBurning || weaponEffects.fires.contains { simd_distance($0.position,camera)<40 } }
+    private var originalActorBurning=false
+    private(set) var originalCoughing=false
+    var hasOriginalWorldFire:Bool{weaponEffects.burning(atFeet:camera)}
+    var hasOriginalWorldGas:Bool{weaponEffects.gassed(atFeet:camera)}
+    func setOriginalActorEffects(burning:Bool,coughing:Bool){
+        originalActorBurning=burning
+        let active=coughing && health>0 && !driving && !swimming && climb==nil
+        guard originalCoughing != active else{return};originalCoughing=active
+        prepareFootAnimation()
+        if active{cancelWeaponInput();_=footAnimator?.act("ped/gas_cwr",loop:true)}else{footAnimator?.rest()}
+    }
+    func canParryOriginalHit(_ hit:NativeOriginalWorldVitals.Hit)->Bool{
+        guard canNativeFootMeleeGuard,meleeGuardHeld,meleeBlockHeld,!weaponTriggerHeld,
+              footAnimator?.firing != true,footAnimator?.busy != true,footAnimator?.stunned != true,
+              footAnimator?.rolling != true,let point=hit.point else{return false}
+        let target=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(camera)),source=SIMD3(point.x,point.z,-point.y)
+        return NativeFootLocomotion.supportKnockSide(velocity:target-source,heading:Double(actorHeading))==0
+    }
+    @discardableResult func repairOriginalVehicle()->Bool{
+        guard driving,let damage=groundVehicle?.damageController else{return false}
+        damage.state.fix();vehicleHealth=1000;activeVehicleDamage=damage.state.text();return true
+    }
+    @discardableResult func flipOriginalVehicle()->Bool{
+        guard driving,let ground=groundVehicle,ground.active,ground.damageController?.state.wrecked != true,
+              let collider=ground.chassisColliders.first,let body=ground.world.colliderInfo(collider)?.body,
+              let state=ground.world.bodyState(body)else{return false}
+        let forward=state.rotation.act(SIMD3<Float>(0,0,-1))
+        let facing=hypot(forward.x,forward.z)>0.1 ? atan2(forward.x,-forward.z):heading
+        let transform=NativeGroundVehicle.transform(position:SIMD3<Double>(state.position),rotation:simd_quatd(vector:SIMD4<Double>(state.rotation.vector)),origin:Double(activeModelOrigin))
+        camera=SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z+1)
+        ground.teleport(modelPosition:camera,heading:facing);heading=facing;actorHeading=facing
+        vehiclePitch=0;vehicleFallbackRoll=0;drivingSpeed=0;verticalSpeed=0;gameCamera.beginVehicle();return true
+    }
+    func liftOriginalPlayer(_ amount:Double){
+        guard amount.isFinite,amount>0,health>0 else{return}
+        if driving{
+            guard let ground=groundVehicle,ground.active,let collider=ground.chassisColliders.first,
+                  let body=ground.world.colliderInfo(collider)?.body,let state=ground.world.bodyState(body)else{return}
+            let position=state.position+SIMD3(0,Float(min(100,amount)),0),q=state.rotation
+            let transform=NativeGroundVehicle.transform(position:SIMD3<Double>(position),rotation:simd_quatd(vector:SIMD4<Double>(q.vector)),origin:Double(activeModelOrigin))
+            camera=SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
+            ground.teleport(modelPosition:camera,heading:heading,bodyPose:.init(position:SIMD3<Double>(position),rotation:simd_quatd(vector:SIMD4<Double>(q.vector))))
+            drivingSpeed=0;verticalSpeed=0
+        }else{teleport(x:camera.x,y:camera.y,z:camera.z+Float(min(100,amount)),direction:actorHeading)}
+    }
+    func leaveVehicleForOriginalTeleport(){if driving{discardOwnedVehicle()}}
     private var groundAudioContact:(material:Int,surface:Int)? {
         if let hit=groundVehicle?.world.raycast(origin:SwiftRapierWorld.gtaToRapier(camera+SIMD3(0,0,0.5)),direction:SIMD3(0,-1,0),distance:1.5,
             excludingColliders:driving ? groundVehicle?.chassisColliders ?? []:[],groups:0xffff0081) {
@@ -745,7 +977,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let ratio=footSprintPace>=1 && footLocomotion.requestedMovementRatio>0.5 ? 3:footLocomotion.reportedRatio
         return floor(ratio*100+0.5)/100
     }
-    var footWireAction:Int {health>0 ? climb?.part.rawValue ?? (personalFlight.state>0 ? 50+personalFlight.state-1:footAnimator?.reportedAction ?? 0):0}
+    var footWireAction:Int {(health>0 ? originalCoughing ? 31:climb?.part.rawValue ?? (personalFlight.state>0 ? 50+personalFlight.state-1:footAnimator?.reportedAction ?? 0):0) | (originalActorBurning ? 64:0)}
     var footWireAnimation:String? {health>0 && !swimController.on && footWireAction == 0 && footAnimator?.floored != true ? footAnimator?.tagged:nil}
     var footWireAirborne:Bool {climb==nil && !personalFlight.on && footAirTime>0.05}
     var footWireDown:Int {driving ? 0:footAnimator?.reportedDown ?? 0}
@@ -845,7 +1077,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let definition=footWeaponDefinitions[equippedWeapon]
         var context=NativeCombatEligibility.Context()
         context.alive=health>0
-        context.blocked=driving || swimming || climb != nil || personalFlight.chuting
+        context.blocked=driving || swimming || climb != nil || personalFlight.chuting || originalCoughing
         context.airborne = !(grounded ?? character?.state.grounded ?? (verticalSpeed==0))
         context.busy=footAnimator?.busy ?? false;context.stunned=footAnimator?.stunned ?? false
         context.rolling=footAnimator?.rolling ?? false;context.flying=personalFlight.flying
@@ -957,6 +1189,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               running: Bool = false, lookVertical: Float = 0, lift: Float = 0) {
         vehicleLeanInput = driving ? lookVertical : 0
         synchronizeOtherVehiclePhysics(delta:Double(delta))
+        if legacySpectating {
+            // The server owns the observer's camera. Do not keep falling,
+            // drowning or advancing a hidden local pedestrian in this mode.
+            legacySpectatorAccumulator += Double(delta)
+            while legacySpectatorAccumulator+1e-10>=1.0/60 {
+                groundVehicle?.world.step();legacySpectatorAccumulator=max(0,legacySpectatorAccumulator-1.0/60)
+            }
+            return
+        }
         if !driving && gameCamera.isLoaded {
             gameCamera.lookAnalog(x: turn,y: -lookVertical,delta: delta,
                                   sensitivity: Float(appPreferences.cameraSensitivity), inverted: appPreferences.invertY)
@@ -1268,7 +1509,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 spin:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(player.angularVelocity)))
         }
         supportScene.otherColliders=groundVehicle.otherColliders
-        supportScene.synchronize(groundVehicle.supportFrames(),drivers:drivers)
+        let objects=legacyCollisionHandles.sorted(by:{$0.key<$1.key}).compactMap { id,handles -> NativeVehicleSupportScene.ObjectFrame? in
+            guard let handle=handles.first,let motion=legacyCollisionWorld?.motion(entityID:handle.entityID)else{return nil}
+            let q=motion.transform.rotation
+            return .init(id:"object:\(id)",body:motion.bodyID,position:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(motion.transform.position)),
+                rotation:simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.z),iz:Double(-q.imag.y),r:Double(q.real)),
+                velocity:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(motion.linearVelocity)),spin:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(motion.angularVelocity)))
+        }
+        supportScene.synchronize(groundVehicle.supportFrames(),drivers:drivers,objects:objects)
     }
     private func configureMovingSupport() {
         guard let character else{return}
@@ -1383,6 +1631,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             feet:feet,jump:jumping,ledge:{ [weak self] in self?.swimmingLedge(feet:feet,heading:-Double(self?.actorHeading ?? 0),surface:feet.y+(depth ?? 0)) },dead:health <= 0)
         if swimController.consumeSplash() { onSplash?() }
         guard let result else { return intended }
+        if result.hurt>0{onLocalDamage?(result.hurt,53)}
         // The outgoing swim task advances animation only when it owns this
         // tick. A nil result hands the same tick to foot/flight animation.
         if let animator = footAnimator {
@@ -1455,9 +1704,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func prepareFootAnimation() {
         guard let library = skeletalLibrary,let definitions = footDefinitions else { return }
-        let model = pedModels["7"] ?? "bmori"
+        let model = pedModels[String(localSkin)] ?? "bmori"
         guard footAnimator == nil || footAnimationModel != model else { return }
-        let style = definitions.style(model:model,library:library)
+        let style = definitions.style(model:legacyPedStyles[model] ?? model,library:library)
+        if let animator = footAnimator {
+            animator.setModelStyle(style); footAnimationModel = model
+            return
+        }
         func swimSpeed(_ name: String) -> Double? {
             let clip = "swim/"+name
             guard let duration = library.duration(of:clip),duration > 0 else { return nil }
@@ -1565,10 +1818,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 // archived landing input; committed speed is already stopped
                 // by this tick's grounded collision and is not that input.
                 let damage=NativeFallDamage.amount(fastest:footAirFall,horizontal:simd_length(footAirVelocity))
-                let nextHealth=NativeFallDamage.health(after:damage,current:health)
-                if nextHealth<health {
-                    health=nextHealth;onLocalHealth?(health)
-                    if health<=0 {animator.die()}
+                if damage>0,let onLocalDamage{onLocalDamage(damage,54);if health<=0{animator.die()}}
+                else{
+                    let nextHealth=NativeFallDamage.health(after:damage,current:health)
+                    if nextHealth<health {
+                        health=nextHealth;onLocalHealth?(health)
+                        if health<=0 {animator.die()}
+                    }
                 }
             }
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footJumpMinimum = 0
@@ -1761,14 +2017,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let magnitude=simd_length(direction)
         guard magnitude.isFinite,magnitude>0.0001,distance.isFinite,distance>0 else{return .unavailable(0)}
         let unit=direction/magnitude
-        if let coverage=NativeWorldRay.coverage(from:origin,to:origin+unit*distance,interior:camera.z>700,loaded:{_ in true}) {
+        if let coverage=NativeWorldRay.coverage(from:origin,to:origin+unit*distance,interior:isInterior,loaded:{_ in true}) {
             collisionRequests.request(coverage.cells,now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
             desiredPhysicsCells=collisionRequests.retained(now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
             for name in desiredPhysicsCells {loadCollision(name:name)}
         }
         var excluded=excluding
         if let queries=character?.queries {excluded.formUnion([queries.walker,queries.probe])}
-        return NativeWorldRay.query(from:origin,direction:unit,distance:distance,interior:camera.z>700,loaded:vehicle.isCellLoaded) { start,way,limit in
+        return NativeWorldRay.query(from:origin,direction:unit,distance:distance,interior:isInterior,loaded:vehicle.isCellLoaded) { start,way,limit in
             vehicle.world.raycast(origin:SwiftRapierWorld.gtaToRapier(start),direction:SwiftRapierWorld.gtaToRapier(way),
                 distance:limit,excludingColliders:excluded,groups:groups).map {
                     .init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))
@@ -1972,7 +2228,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             crouching=false
             if wrecked {
                 if health>0 {
-                    footDeathKind="koFront";pendingFootHit=nil;health=0;onLocalHealth?(0)
+                    footDeathKind="koFront";pendingFootHit=nil;health=0
+                    if let onLocalFatal{onLocalFatal(51)}else{onLocalHealth?(0)}
                     footAnimator?.die("koFront")
                 } else if footAnimator?.dead != true {footAnimator?.die(footDeathKind ?? "koFront")}
                 return true
@@ -1982,7 +2239,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             footLocomotion.setKnockMomentum(ejection.velocity)
             let damage=Int(min(200,max(0,ceil(ejection.force*0.05))))
             if damage>0 {
-                if let onLocalImpact {onLocalImpact(damage)}
+                if let onLocalDamage{onLocalDamage(min(200,max(0,ejection.force*0.05)),0)}
+                else if let onLocalImpact {onLocalImpact(damage)}
                 else {health=max(0,health-damage);onLocalHealth?(health)}
             }
             if health>0 {
@@ -2071,31 +2329,43 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func loadNearby() {
         // The far mesh is divided into sixteen 4×4 blocks. Detailed cells are
         // 375 m squares with a 16-column grid and origin (-3000, -3000).
-        let gx = max(0, min(15, Int(floor((camera.x + 3000) / 375))))
-        let gy = max(0, min(15, Int(floor((camera.y + 3000) / 375))))
+        let anchor=scenePosition
+        let gx = max(0, min(15, Int(floor((anchor.x + 3000) / 375))))
+        let gy = max(0, min(15, Int(floor((anchor.y + 3000) / 375))))
         let detail = gy * 16 + gx
-        let indoors = camera.z > 700
+        let indoors = isInterior
         let prefix = indoors ? "i" : "c"
         activeDetail = "\(prefix)\(detail)"
         var detailNames: Set<String> = []
         // Preload and draw the adjacent cells before crossing their edges.
         // A late collision response must not leave the player without a floor.
         for dx in [Float(-90), 0, 90] { for dy in [Float(-90), 0, 90] {
-            let x = max(0, min(15, Int(floor((camera.x + 3000 + dx) / 375))))
-            let y = max(0, min(15, Int(floor((camera.y + 3000 + dy) / 375))))
+            let x = max(0, min(15, Int(floor((anchor.x + 3000 + dx) / 375))))
+            let y = max(0, min(15, Int(floor((anchor.y + 3000 + dy) / 375))))
             let number = y * 16 + x
             if !indoors || insideCells.contains(number) { detailNames.insert("\(prefix)\(number)") }
         } }
         activeDetails = detailNames
         if collisionScene != indoors {collisionScene=indoors;collisionRequests.reset()}
-        desiredPhysicsCells=collisionRequests.retained(now:ProcessInfo.processInfo.systemUptime,visible:detailNames)
+        var physicalNames=detailNames
+        if legacyCameraSample?.active == true && !legacySpectating {
+            // A remote scripted camera must not unload the floor beneath a
+            // still-live local actor or vehicle.
+            for dx in [Float(-90),0,90]{for dy in [Float(-90),0,90]{
+                let x=max(0,min(15,Int(floor((camera.x+3000+dx)/375))))
+                let y=max(0,min(15,Int(floor((camera.y+3000+dy)/375))))
+                let number=y*16+x
+                if !indoors || insideCells.contains(number){physicalNames.insert("\(prefix)\(number)")}
+            }}
+        }
+        desiredPhysicsCells=collisionRequests.retained(now:ProcessInfo.processInfo.systemUptime,visible:physicalNames)
         // The camera sits behind the player; draw the adjacent 1.5 km blocks
         // as well so a block edge never cuts across the horizon.
         var far: Set<String> = []
         for dx in [Float(-750), 0, 750] {
             for dy in [Float(-750), 0, 750] {
-                let tx = max(0, min(3, Int(floor((camera.x + 3000 + dx) / 1500))))
-                let ty = max(0, min(3, Int(floor((camera.y + 3000 + dy) / 1500))))
+                let tx = max(0, min(3, Int(floor((anchor.x + 3000 + dx) / 1500))))
+                let ty = max(0, min(3, Int(floor((anchor.y + 3000 + dy) / 1500))))
                 far.insert("t\(ty * 4 + tx)")
             }
         }
@@ -2194,6 +2464,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func loadModelIndex() {
         loadFlightAssets();loadParticleEffects()
         guard let server else { return }
+        loadLegacyStockCatalogs()
         URLSession.shared.dataTask(with:server.path("game/native/weapons.json")) { [weak self] data,response,_ in
             guard (response as? HTTPURLResponse)?.statusCode==200,let data,
                   let catalog=try? NativeWeaponMuzzle.Catalog(data:data) else{return}
@@ -2229,6 +2500,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         gameCamera.load(server: server) { [weak self] in
             guard let self else { return };self.gameCamera.setDirection(heading: self.heading,pitch: self.cameraPitch)
         }
+        legacyFollowCamera.load(server:server)
         atmosphere.load(server: server)
         regionalWeather.load(server: server)
         weatherParticles.load(server: server)
@@ -2289,10 +2561,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             DispatchQueue.main.async {
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
+                for key in self.legacyModelDefinitions.keys where (20001...30000).contains(key){self.pedModels[String(key)]="samp-dl-\(key)"}
                 self.weaponModels = index["weapons"] ?? [:]
-                self.loadActor(self.pedModels["7"] ?? "bmori")
+                if let pending = self.pendingLegacySkin { _ = self.setLegacySkin(pending) }
+                else if let pending = self.pendingLocalSkin { _ = self.setLocalSkin(pending) }
+                self.loadActor(self.pedModels[String(self.localSkin)] ?? "bmori")
                 self.loadActor("colt45")
             }
+        }.resume()
+        URLSession.shared.dataTask(with: server.path("game/native/samp-skins.json")) { [weak self] data, response, _ in
+            guard (response as? HTTPURLResponse)?.statusCode == 200, let data else { return }
+            DispatchQueue.main.async { _ = self?.loadLegacySkinCatalog(data) }
         }.resume()
         URLSession.shared.dataTask(with: server.path("game/native/handling.json")) { [weak self] data, _, _ in
             guard let self, let data,
@@ -2362,6 +2641,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func loadActor(_ name: String) {
+        if let custom=legacyPedModels[name]{skeletalActors[name]=custom.actor;return}
         guard !name.isEmpty, actorMeshes[name] == nil, !actorLoading.contains(name),
               let server else { return }
         actorLoading.insert(name)
@@ -2505,6 +2785,493 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             heightAboveRoad: definition.origin,eye: eye)
     }
 
+    func receiveLegacyGameplay(_ event:NativeSAMPGameplayCommands.Event) {
+        let now=ProcessInfo.processInfo.systemUptime
+        let seed=legacyCameraSample?.pose ?? gameCameraFrame.map{NativeSAMPGameCamera.Pose(eye:$0.source,target:$0.target)}
+        let revision=legacyGameCamera.followRevision
+        do {
+            guard try legacyGameCamera.apply(event,at:now,seed:seed) else{return}
+            if revision != legacyGameCamera.followRevision {
+                gameCamera.resetFoot(heading:actorHeading,pitch:cameraPitch)
+                gameCamera.beginVehicle();legacyCameraSubject=nil
+            }
+            if !legacyGameCamera.spectating{legacySpectatorAccumulator=0}
+        }catch{onStatus?("SERVER CAMERA COMMAND REJECTED: \(error)")}
+    }
+    func legacySpawned(generation:UInt64?) {
+        _=try?legacyGameCamera.spawned(at:ProcessInfo.processInfo.systemUptime,generation:generation)
+        legacyCameraSample=nil;legacyCameraSubject=nil;legacyCameraDiagnostics.removeAll();legacySpectatorAccumulator=0
+    }
+    func rebaseLegacyObjectClock(){legacyObjectClock.reset()}
+    private func legacySubjectFrame(_ subject:NativeSAMPGameCamera.Subject,mode:NativeSAMPGameplayCommands.SpectateMode,delta:Float,now:Double)->NativeSAMPGameCamera.SubjectFrame? {
+        if legacyCameraSubject != subject {
+            legacyCameraSubject=subject;legacyFollowCamera.resetFoot(heading:heading,pitch:cameraPitch);legacyFollowCamera.beginVehicle()
+            legacyFollowCamera.setFootZoom(gameCamera.footZoom);legacyFollowCamera.setVehicleView(gameCamera.vehicleView)
+        }
+        var focus:SIMD3<Float>,frame:NativeGameCamera.Frame?
+        switch subject {
+        case .player(let id):
+            guard let player=remotePlayers.first(where:{$0.id==String(id)})else{return nil}
+            focus=player.position+SIMD3(0,0,1)
+            if mode == .normal {
+                frame=legacyFollowCamera.followFoot(.init(position:player.position,actorHeading:player.heading,weapon:player.weapon,
+                    aiming:player.aim != nil,crouching:player.crouching,planarSpeed:hypot(player.velocity.x,player.velocity.y)),delta:delta)
+            }
+        case .vehicle(let id):
+            let driver=remotePlayers.first(where:{$0.vehicleID==String(id)})
+            let vehicle=remoteVehicles.first(where:{$0.id==String(id)}).map{predictedVehicle($0)}
+            guard let bodyPosition=driver?.position ?? vehicle?.position else{return nil}
+            let code=driver?.code ?? vehicle?.code ?? "",model=String(code.split(separator:".").first ?? "")
+            guard let definition=cameraVehicleDefinitions[model]else{return nil}
+            let yaw=driver?.heading ?? vehicle?.heading ?? 0,pitch=driver?.pitch ?? vehicle?.pitch ?? 0,roll=driver?.roll ?? vehicle?.roll ?? 0
+            let position=bodyPosition+NativeGroundVehicle.modelOffset(origin:definition.origin,heading:yaw,pitch:pitch,roll:roll)
+            focus=position
+            if mode == .normal {
+                let transform=Self.rotationZ(-yaw)*Self.rotationX(pitch)*Self.rotationY(roll)
+                let forward=SIMD3(transform.columns.1.x,transform.columns.1.y,transform.columns.1.z)
+                let right=SIMD3(transform.columns.0.x,transform.columns.0.y,transform.columns.0.z)
+                let up=SIMD3(transform.columns.2.x,transform.columns.2.y,transform.columns.2.z)
+                func vector(_ row:[Float]?)->SIMD3<Float>?{guard let row,row.count==3 else{return nil};return SIMD3(row[0],row[1],row[2])}
+                let bounds=definition.bounds
+                let input=NativeGameCamera.Vehicle(kind:definition.kind,position:position,forward:forward,right:right,up:up,
+                    moveSpeed:(driver?.velocity ?? .zero)/50,turnSpeed:(driver?.angularVelocity ?? .zero)/50,wheels:4,
+                    bounds:.init(maxX:bounds.maxX,minY:bounds.minY,maxZ:bounds.maxZ,min:vector(bounds.box?.min),max:vector(bounds.box?.max)),
+                    heightAboveRoad:definition.origin,eye:vector(definition.driverEye))
+                frame=legacyFollowCamera.followVehicle(input,delta:delta,nowMilliseconds:now*1000)
+            }
+        }
+        // Normal mode uses the existing native game-camera algorithms. Side
+        // mode has no verified adapter yet; the owner holds its last safe view.
+        return .init(focus:focus,normal:frame.map{.init(eye:$0.source,target:$0.target)},normalProvenance:.nativeGameCameraAdapter)
+    }
+    func receiveLegacyObject(_ event:NativeSAMPObjects.Event) throws {
+        switch event{case .create(let value):removeLegacyObjectCollision(value.id);case .destroy(let id):removeLegacyObjectCollision(id);default:break}
+        try legacyObjects.apply(event,at:ProcessInfo.processInfo.systemUptime)
+        refreshLegacyStockReferences()
+    }
+    private enum LegacyStockMetadata {
+        case models(NativeSAMPStockModels,String),collision(NativeSAMPStockCollisionCatalog)
+    }
+    /// Only our configured asset origin's LAN access token is eligible. The
+    /// policy discards local identity, original-site and Discord cookies.
+    private func legacyStockAccess()->NativeStockAssetAccess? {
+        guard let server else{return nil}
+        return NativeStockAssetAccess(assetOrigin:server.url,sessionCookies:HTTPCookieStorage.shared.cookies(for:server.url) ?? [])
+    }
+    /// Metadata has no pre-advertised digest. Its dedicated HTTP sink bounds
+    /// received bytes before append, rejects redirects, and never uses cookies.
+    private func loadLegacyStockCatalogs() {
+        guard let server,legacyStockMetadataTasks.isEmpty,legacyStockMetadataPending==0,
+              ProcessInfo.processInfo.systemUptime>=legacyStockMetadataRetryAfter,
+              legacyStockCatalog == nil || legacyStockCollisionCatalog == nil else{return}
+        legacyStockMetadataEpoch &+= 1;let epoch=legacyStockMetadataEpoch
+        legacyStockMetadataPending=2
+        for (path,collision) in [("game/native/stock-models.json",false),("game/native/stock-collision/catalog.json",true)] {
+            let id=UUID()
+            let request=LegacyStockMetadataTransfer(url:server.path(path),maximumBytes:16*1024*1024,access:legacyStockAccess()) {[weak self] result in
+                guard let self,self.legacyStockMetadataEpoch==epoch else{return}
+                self.legacyStockMetadataTasks.removeValue(forKey:id)
+                self.legacyImportQueue.async {[weak self] in
+                    let parsed:Result<LegacyStockMetadata,Error>=Result {
+                        let data=try result.get()
+                        return collision ? .collision(try NativeSAMPStockCollisionCatalog.decode(data)):
+                            .models(try NativeSAMPStockModels.decode(data),SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined())
+                    }
+                    DispatchQueue.main.async {
+                        guard let self,self.legacyStockMetadataEpoch==epoch,self.server==server else{return}
+                        self.legacyStockMetadataPending-=1
+                        do {
+                            switch try parsed.get(){case .models(let value,let digest):self.legacyStockCatalog=value;self.legacyStockManifestSHA256=digest;case .collision(let value):self.legacyStockCollisionCatalog=value}
+                            if self.legacyStockLoader==nil,self.legacyStockCatalog != nil,self.legacyStockCollisionCatalog != nil {
+                                var limits=NativeSAMPStockAssetLoader.Limits();limits.concurrentLoads=2;limits.pendingLoads=8
+                                self.legacyStockLoader=try .init(assetBaseURL:server.url,limits:limits,accessProvider:{[weak self]in self?.legacyStockAccess()})
+                            }
+                            self.refreshLegacyStockReferences()
+                        }catch{self.legacyStockMetadataRetryAfter=ProcessInfo.processInfo.systemUptime+30;self.onStatus?("STOCK ASSET CATALOG UNAVAILABLE: \(error)")}
+                    }
+                }
+            }
+            legacyStockMetadataTasks[id]=request;request.start()
+        }
+    }
+    private func refreshLegacyStockReferences() {
+        guard let objects=try?legacyObjects.sampledInstances(at:ProcessInfo.processInfo.systemUptime)else{return}
+        var references=Set(objects.map(\.model).filter{(1...19999).contains($0)})
+        for object in objects {for material in object.materials.values {
+            if case .texture(let model,_,_,_)=material,(1...19999).contains(model){references.insert(Int32(model))}
+        }}
+        legacyStockReferences=references
+        if !references.isEmpty{loadLegacyStockCatalogs()}
+        for id in legacyStockLoads.keys.filter({!references.contains($0)}) {
+            if let request=legacyStockLoads.removeValue(forKey:id)?.request{legacyStockLoader?.cancel(request)}
+        }
+        let now=ProcessInfo.processInfo.systemUptime
+        for id in references where legacyStockModels.contains(id){legacyStockUse[id]=now}
+        pumpLegacyStockObjects()
+    }
+    private func pumpLegacyStockObjects() {
+        guard !legacyStockPumping,let catalog=legacyStockCatalog,let collisionCatalog=legacyStockCollisionCatalog,
+              let loader=legacyStockLoader,let server else{return}
+        legacyStockPumping=true;defer{legacyStockPumping=false}
+        let now=ProcessInfo.processInfo.systemUptime
+        for id in legacyStockReferences.sorted() {
+            guard legacyStockLoads.count<2 else{break}
+            guard !legacyStockModels.contains(id),legacyStockLoads[id]==nil,(legacyStockRetries[id] ?? 0)<=now else{continue}
+            let token=UUID(),epoch=legacyAssetEpoch
+            legacyStockLoads[id]=(token,nil)
+            do {
+                let resolution=try catalog.resolve(id:id,assetBaseURL:server.url)
+                guard resolution.model.kind == .object || resolution.model.kind == .weapon else {
+                    throw NativeRenderWareModel.Failure.unsupported("stock \(resolution.model.kind.rawValue) requires its verified activity/time adapter")
+                }
+                let request=loader.load(resolution){[weak self] result in
+                    guard let self,self.legacyAssetEpoch==epoch,self.legacyStockLoads[id]?.token==token else{return}
+                    do {
+                        let prepared=try result.get()
+                        let collision=try collisionCatalog.resolve(modelID:id,modelName:prepared.model.model,
+                            source:prepared.model.source,line:prepared.model.line,stockManifestSHA256:self.legacyStockManifestSHA256,assetBaseURL:server.url)
+                        switch collision {
+                        case .missing:
+                            throw NativeRenderWareModel.Failure.unsupported("authored collision inventory incomplete for \(prepared.model.model)")
+                        case .noAuthoredCollision:
+                            guard prepared.embeddedCollision.allSatisfy({$0.name == nil || $0.name?.lowercased()==prepared.model.model})else {
+                                throw NativeRenderWareModel.Failure.malformed("embedded collision name differs from exact DFF")
+                            }
+                            self.installLegacyStockObject(prepared,collision:prepared.embeddedCollision,id:id,token:token,epoch:epoch,inventoryAbsent:prepared.embeddedCollision.isEmpty)
+                        case .ambiguous:
+                            throw NativeRenderWareModel.Failure.unsupported("ambiguous authored collision for \(prepared.model.model)")
+                        case .unique(let file):
+                            let metadata=file.metadata
+                            let asset=NativeSAMPStockModels.Asset(path:metadata.path,bytes:metadata.bytes,crc32:metadata.crc32,sha256:metadata.sha256)
+                            let request=loader.loadFile(.init(metadata:asset,url:file.url)){[weak self] result in
+                                guard let self,self.legacyAssetEpoch==epoch,self.legacyStockLoads[id]?.token==token else{return}
+                                self.legacyImportQueue.async {
+                                    let decoded:Result<NativeRenderWareCollision.Model,Error>=Result {try collisionCatalog.prepare(try result.get().data,for:file)}
+                                    DispatchQueue.main.async {
+                                        guard self.legacyAssetEpoch==epoch,self.legacyStockLoads[id]?.token==token else{return}
+                                        do {self.installLegacyStockObject(prepared,collision:[try decoded.get()],id:id,token:token,epoch:epoch)}
+                                        catch{self.failLegacyStockObject(id,token:token,error:error)}
+                                    }
+                                }
+                            }
+                            self.legacyStockLoads[id]?.request=request
+                        }
+                    }catch{self.failLegacyStockObject(id,token:token,error:error)}
+                }
+                legacyStockLoads[id]?.request=request
+            }catch{failLegacyStockObject(id,token:token,error:error)}
+        }
+    }
+    private func failLegacyStockObject(_ id:Int32,token:UUID,error:Error) {
+        guard legacyStockLoads[id]?.token==token else{return}
+        legacyStockLoads.removeValue(forKey:id);legacyStockRetries[id]=ProcessInfo.processInfo.systemUptime+30
+        if legacyMissingObjects.insert(id).inserted{onStatus?("STOCK OBJECT \(id) UNAVAILABLE: \(error)")}
+        pumpLegacyStockObjects()
+    }
+    private func legacyCollisionResourceBytes(_ models:[NativeRenderWareCollision.Model])throws->Int {
+        var total=0
+        func add(_ count:Int,_ stride:Int)throws {
+            let product=count.multipliedReportingOverflow(by:stride),sum=total.addingReportingOverflow(product.partialValue)
+            guard !product.overflow,!sum.overflow,sum.partialValue<=192*1024*1024 else{throw NativeRenderWareModel.Failure.limit("authored collision resources")}
+            total=sum.partialValue
+        }
+        try add(models.count,MemoryLayout<NativeRenderWareCollision.Model>.stride)
+        for model in models {
+            try add(model.spheres.count,MemoryLayout<NativeRenderWareCollision.Sphere>.stride)
+            try add(model.boxes.count,MemoryLayout<NativeRenderWareCollision.Box>.stride)
+            try add(model.mesh.vertices.count,MemoryLayout<SIMD3<Float>>.stride)
+            try add(model.mesh.faces.count,MemoryLayout<NativeRenderWareCollision.Face>.stride)
+            try add(model.faceGroups.count,MemoryLayout<NativeRenderWareCollision.FaceGroup>.stride)
+            if let shadow=model.shadowMesh {
+                try add(shadow.vertices.count,MemoryLayout<SIMD3<Float>>.stride)
+                try add(shadow.faces.count,MemoryLayout<NativeRenderWareCollision.Face>.stride)
+            }
+        }
+        return total
+    }
+    /// Only unreferenced stock entries may be evicted. Custom DL resources keep
+    /// their existing download/registration barrier and share the same total.
+    private func reserveLegacyModelBytes(_ bytes:Int,replacing id:Int32)throws {
+        let maximum=192*1024*1024,old=legacyModelCosts[id] ?? 0
+        guard bytes>=0,bytes<=maximum else{throw NativeRenderWareModel.Failure.limit("192MiB shared model resources")}
+        while bytes>maximum-legacyModelBytes+old || ((1...19999).contains(id) && !legacyStockModels.contains(id) &&
+              legacyStockModels.count>=128 && !legacyStockModels.isSubset(of:legacyStockReferences)) {
+            guard let unused=legacyStockModels.filter({$0 != id && !legacyStockReferences.contains($0)}).min(by:{(legacyStockUse[$0] ?? 0)<(legacyStockUse[$1] ?? 0)})else {
+                throw NativeRenderWareModel.Failure.limit("192MiB shared model resources; active references retained")
+            }
+            legacyModels.removeValue(forKey:unused);legacyStockModels.remove(unused);legacyStockUse.removeValue(forKey:unused)
+            legacyStockCollisionKinds.removeValue(forKey:unused)
+            legacyModelBytes-=legacyModelCosts.removeValue(forKey:unused) ?? 0;legacyCollisionModels.removeValue(forKey:unused)
+            for key in legacyExactTextures.keys.filter({$0.model==unused}) {
+                legacyExactTextures.removeValue(forKey:key);legacyTextureSources.removeValue(forKey:key);legacyTextureConflicts.remove(key)
+            }
+            legacyMaterialOwner?.reset()
+        }
+    }
+    private func installLegacyStockObject(_ prepared:NativeSAMPStockAssetLoader.Prepared,collision:[NativeRenderWareCollision.Model],
+                                          id:Int32,token:UUID,epoch:UInt64,inventoryAbsent:Bool=false) {
+        guard legacyAssetEpoch==epoch,legacyStockLoads[id]?.token==token else{return}
+        do {
+            guard legacyStockReferences.contains(id)else{legacyStockLoads.removeValue(forKey:id);pumpLegacyStockObjects();return}
+            guard let catalog=legacyStockCatalog,let server,
+                  let dictionary=try catalog.dictionary(named:prepared.model.txd,assetBaseURL:server.url).file else {
+                throw NativeRenderWareModel.Failure.malformed("stock dictionary provenance unavailable")
+            }
+            let dictionaryCRC=dictionary.metadata.crc32
+            let bytes=prepared.plan.meshByteCount+prepared.plan.textureByteCount+(try legacyCollisionResourceBytes(collision))
+            try reserveLegacyModelBytes(bytes,replacing:id)
+            if legacyModelPipelines==nil {
+                guard let library=device.makeDefaultLibrary()else{throw NativeRenderWareModel.Failure.gpu("native shader library missing")}
+                legacyModelPipelines=try .init(device:device,library:library,color:view.colorPixelFormat,depth:view.depthStencilPixelFormat)
+            }
+            let uploaded=try NativeRenderWareModel.Uploaded(plan:prepared.plan,device:device)
+            let old=legacyModelCosts[id] ?? 0
+            legacyModels[id]=uploaded;legacyCollisionModels[id]=collision.filter(\.hasCollisionVolumes)
+            legacyStockCollisionKinds[id]=inventoryAbsent ? .inventoryAbsent:(collision.contains(where: \.hasCollisionVolumes) ? .authored:.authoredEmpty)
+            legacyStockModels.insert(id);legacyStockUse[id]=ProcessInfo.processInfo.systemUptime
+            legacyModelCosts[id]=bytes;legacyModelBytes=legacyModelBytes-old+bytes
+            for (index,texture) in uploaded.plan.textures.enumerated() {
+                let key=NativeSAMPObjectMaterials.TextureRequest(model:id,dictionary:prepared.model.txd,texture:texture.lookupName)
+                if let previous=legacyTextureSources[key],previous != dictionaryCRC {
+                    legacyTextureConflicts.insert(key);legacyExactTextures.removeValue(forKey:key)
+                }else if !legacyTextureConflicts.contains(key) {
+                    legacyExactTextures[key] = .init(image:uploaded.textures[index],sampler:nil,containsTransparency:texture.containsTransparentPixels)
+                    legacyTextureSources[key]=dictionaryCRC
+                }
+            }
+            legacyMaterialOwner?.reset();legacyMissingObjects.remove(id);legacyStockRetries.removeValue(forKey:id)
+            legacyStockLoads.removeValue(forKey:id);pumpLegacyStockObjects()
+            // Physical publication belongs to the existing fixed-step callback.
+            // drawLegacyObjects waits for that callback's actual native handles.
+        }catch{failLegacyStockObject(id,token:token,error:error)}
+    }
+    private func legacyModelApplies(_ id:Int32)->Bool {
+        legacyStockModels.contains(id) || legacyModelDefinitions[id]?.applies(to:legacyVirtualWorld)==true
+    }
+    private func legacyStockObjectReady(_ object:NativeSAMPObjects.Instance)->Bool {
+        guard legacyStockModels.contains(object.model),legacyStockCollisionKinds[object.model] != nil,
+              let models=legacyCollisionModels[object.model]else{return false}
+        if models.isEmpty{return true} // Explicit empty COL or verified complete-inventory absence.
+        guard legacyCollisionKinds[object.id]==object.model,let handles=legacyCollisionHandles[object.id],
+              handles.count==models.count,let world=legacyCollisionWorld else{return false}
+        return handles.allSatisfy{world.colliderIDs(for:$0)?.isEmpty==false}
+    }
+    func legacyStockCollisionProvenance(for model:Int32)->String?{legacyStockCollisionKinds[model]?.rawValue}
+    private func legacyObjectSnapshot(at now:Double)->NativeSAMPObjectScene.Snapshot? {
+        guard let values=try?legacyObjects.sampledInstances(at:now)else{return nil}
+        return NativeSAMPObjectScene.resolve(values) { [self] parent in
+            switch parent {
+            case .vehicle(let id):
+                if driving,currentVehicleID==String(id),let exact=nativeVehicleTransform{return exact}
+                guard let vehicle=remoteVehicles.first(where:{$0.id==String(id)})else{return nil}
+                let value=predictedVehicle(vehicle)
+                return Self.translation(value.position)*Self.rotationZ(-value.heading)*Self.rotationX(value.pitch)*Self.rotationY(value.roll)*Self.translation(SIMD3(0,0,vehicleModelOrigin(value.code)))
+            case .player(let id):
+                if id==legacyLocalPlayerID{return Self.translation(camera)*Self.rotationZ(-actorHeading)}
+                guard let player=remotePlayers.first(where:{$0.id==String(id)})else{return nil}
+                return Self.translation(player.position)*Self.rotationZ(-player.heading)
+            case .object:return nil
+            }
+        }
+    }
+    private func removeLegacyObjectCollision(_ id:UInt16) {
+        for handle in legacyCollisionHandles.removeValue(forKey:id) ?? []{_=legacyCollisionWorld?.remove(handle)}
+        legacyCollisionKinds.removeValue(forKey:id)
+    }
+    private func synchronizeLegacyObjectPhysics(at timestamp:Double) {
+        guard let world=legacyCollisionWorld,let snapshot=legacyObjectSnapshot(at:timestamp)else{return}
+        var live=Set<UInt16>()
+        for draw in snapshot.draws {
+            guard let models=legacyCollisionModels[draw.object.model],!models.isEmpty,
+                  legacyModelApplies(draw.object.model) else{continue}
+            let id=draw.object.id;live.insert(id)
+            let matrix=draw.transform,rotation=simd_float3x3(SIMD3(matrix.columns.0.x,matrix.columns.0.y,matrix.columns.0.z),SIMD3(matrix.columns.1.x,matrix.columns.1.y,matrix.columns.1.z),SIMD3(matrix.columns.2.x,matrix.columns.2.y,matrix.columns.2.z))
+            let pose=NativeRenderWareCollisionWorld.Transform(position:SIMD3(matrix.columns.3.x,matrix.columns.3.y,matrix.columns.3.z),rotation:simd_quatf(rotation))
+            do {
+                if legacyCollisionKinds[id] != draw.object.model{removeLegacyObjectCollision(id)}
+                if let handles=legacyCollisionHandles[id]{for handle in handles{try world.move(handle,to:pose);try world.setCameraCollision(handle,enabled:draw.object.cameraCollision)}}
+                else {
+                    var made:[NativeRenderWareCollisionWorld.Handle]=[]
+                    do {for model in models {
+                        guard legacyCollisionSerial<UInt64.max else{throw NativeRenderWareCollisionWorld.Failure.limit("entity generation")}
+                        let serial=legacyCollisionSerial;legacyCollisionSerial+=1
+                        made.append(try world.insert(.init(id:serial,model:model,transform:pose,cameraCollision:draw.object.cameraCollision)))
+                    }}catch{for handle in made{_=world.remove(handle)};throw error}
+                    legacyCollisionHandles[id]=made;legacyCollisionKinds[id]=draw.object.model
+                }
+            }catch{removeLegacyObjectCollision(id);if legacyMissingObjects.insert(draw.object.model).inserted{onStatus?("OBJECT COLLISION UNAVAILABLE: \(error)")}}
+        }
+        for id in legacyCollisionHandles.keys.filter({!live.contains($0)}){removeLegacyObjectCollision(id)}
+    }
+    func invalidateLegacyImports(){
+        legacyAssetEpoch &+= 1
+        _=legacyStockLoader?.reset();legacyStockLoads.removeAll();legacyStockRetries.removeAll()
+    }
+    func clearLegacyModels() {
+        legacyAssetEpoch &+= 1
+        _=legacyStockLoader?.reset();legacyStockLoads.removeAll();legacyStockRetries.removeAll();legacyStockUse.removeAll()
+        legacyStockReferences.removeAll();legacyStockModels.removeAll()
+        legacyStockCollisionKinds.removeAll()
+        for name in legacyPedModels.keys{skeletalActors.removeValue(forKey:name)}
+        for key in legacyModelDefinitions.keys where (20001...30000).contains(key){pedModels.removeValue(forKey:String(key))}
+        if let current=localLegacySkin,(20001...30000).contains(current){pendingLegacySkin=current}
+        legacyModels.removeAll();legacyPedModels.removeAll();legacyPedStyles.removeAll();legacyModelDefinitions.removeAll();legacyModelCosts.removeAll()
+        legacyMaterialOwner?.reset();legacyExactTextures.removeAll();legacyTextureSources.removeAll();legacyTextureConflicts.removeAll();legacyTextureLoads.removeAll();legacyTextureRetries.removeAll();legacyMaterialErrors.removeAll();legacyExternalTextureBytes.removeAll();legacyTextureUse.removeAll()
+        legacyModelBytes=0;legacyMissingObjects.removeAll()
+        legacyCollisionWorld?.removeAll();legacyCollisionHandles.removeAll();legacyCollisionKinds.removeAll();legacyCollisionModels.removeAll()
+    }
+    func clearLegacyWorld() {
+        clearLegacyModels();legacyObjects.reset();legacyVirtualWorld=0;legacyLocalPlayerID=nil
+    }
+    /// Called only with protocol-verified cache receipts. Parsing remains off
+    /// the input/render thread; a stale reconnect cannot publish an old model.
+    func importLegacyModel(_ model:NativeSAMPArtwork.Model,dff:URL,txd:URL,dictionary:String?=nil,completion:@escaping(Result<Void,Error>)->Void) {
+        let epoch=legacyAssetEpoch
+        legacyImportQueue.async { [weak self] in
+            let result:Result<LegacyPreparedImport,Error>=Result {
+                let data=try Data(contentsOf:dff,options:.mappedIfSafe)
+                let geometry=try NativeRenderWareDFF.decode(data)
+                let textures=try NativeRenderWareTXD.decode(Data(contentsOf:txd,options:.mappedIfSafe))
+                let plan:LegacyImportPlan=model.type==1 ? .pedestrian(try NativeRenderWarePedModel.prepare(dff:geometry,txd:textures)):.object(try NativeRenderWareModel.prepare(dff:geometry,txd:textures))
+                for diagnostic in plan.resources.diagnostics {
+                    switch diagnostic {
+                    case .omittedMipTail:break // Preserve the actual available levels.
+                    default:throw NativeRenderWareModel.Failure.unsupported("incomplete model resources: \(diagnostic)")
+                    }
+                }
+                let collision=model.type==1 ? []:try NativeRenderWareCollision.embedded(inDFF:data).flatMap(\.models).filter(\.hasCollisionVolumes)
+                return LegacyPreparedImport(drawing:plan,collision:collision)
+            }
+            DispatchQueue.main.async {
+                guard let self,self.legacyAssetEpoch==epoch else{completion(.failure(NativeSAMPArtwork.Failure.cancelled));return}
+                do {
+                    let prepared=try result.get(),plan=prepared.drawing,bytes=plan.resources.meshByteCount+plan.resources.textureByteCount+(try self.legacyCollisionResourceBytes(prepared.collision))
+                    let old=self.legacyModelCosts[model.customID] ?? 0
+                    try self.reserveLegacyModelBytes(bytes,replacing:model.customID)
+                    if self.legacyModelPipelines==nil {
+                        guard let library=self.device.makeDefaultLibrary()else{throw NativeRenderWareModel.Failure.gpu("native shader library missing")}
+                        self.legacyModelPipelines=try .init(device:self.device,library:library,color:self.view.colorPixelFormat,depth:self.view.depthStencilPixelFormat)
+                    }
+                    let resources:NativeRenderWareModel.Uploaded
+                    switch plan {
+                    case .object(let plan):
+                        let uploaded=try NativeRenderWareModel.Uploaded(plan:plan,device:self.device)
+                        self.legacyModels[model.customID]=uploaded;resources=uploaded
+                    case .pedestrian(let plan):
+                        if self.legacyPedPipelines==nil {
+                            guard let library=self.device.makeDefaultLibrary()else{throw NativeRenderWareModel.Failure.gpu("native shader library missing")}
+                            self.legacyPedPipelines=try .init(device:self.device,library:library,color:self.view.colorPixelFormat,depth:self.view.depthStencilPixelFormat)
+                        }
+                        let uploaded=try NativeRenderWarePedModel.Uploaded(plan:plan,device:self.device),name="samp-dl-\(model.customID)"
+                        resources=uploaded.resources
+                        self.legacyPedModels[name]=uploaded;self.pedModels[String(model.customID)]=name;self.skeletalActors[name]=uploaded.actor
+                        if let style=self.sampSkinCatalog?.model(forLegacy:Int(model.baseID)){self.legacyPedStyles[name]=style}
+                        self.ownRiderCapture=nil;self.ownRiderPrevious=nil;self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
+                        if self.pendingLegacySkin==Int(model.customID){_=self.setLegacySkin(Int(model.customID))}
+                    }
+                    self.legacyModelDefinitions[model.customID]=model;self.legacyModelCosts[model.customID]=bytes
+                    self.legacyCollisionModels[model.customID]=prepared.collision
+                    for id in self.legacyCollisionKinds.keys.filter({self.legacyCollisionKinds[$0]==model.customID}){self.removeLegacyObjectCollision(id)}
+                    if let dictionary,!dictionary.isEmpty {
+                        for (index,texture) in resources.plan.textures.enumerated() {
+                            for id in Set([model.customID,model.baseID]) {
+                                let key=NativeSAMPObjectMaterials.TextureRequest(model:id,dictionary:dictionary.lowercased(),texture:texture.name.lowercased())
+                                if let previous=self.legacyTextureSources[key],previous != model.txd.checksum {
+                                    self.legacyTextureConflicts.insert(key);self.legacyExactTextures.removeValue(forKey:key)
+                                }else if !self.legacyTextureConflicts.contains(key) {
+                                    self.legacyTextureSources[key]=model.txd.checksum
+                                    self.legacyExactTextures[key] = .init(image:resources.textures[index],sampler:nil,containsTransparency:texture.containsTransparentPixels)
+                                }
+                            }
+                        }
+                        self.legacyMaterialOwner?.reset()
+                    }
+                    self.legacyModelBytes=self.legacyModelBytes-old+bytes
+                    completion(.success(()))
+                }catch{completion(.failure(error))}
+            }
+        }
+    }
+    private func resolvedLegacyMaterial(_ material:NativeSAMPObjects.Material)throws->NativeSAMPObjectMaterials.Resolved {
+        if legacyMaterialOwner==nil {
+            var limits=NativeSAMPObjectMaterials.Limits();limits.cacheBytes=32*1024*1024
+            legacyMaterialOwner=try .init(device:device,limits:limits,textureResolver:{[weak self] request in
+                guard let self else{return nil}
+                let key=NativeSAMPObjectMaterials.TextureRequest(model:request.model,dictionary:request.dictionary.lowercased(),texture:request.texture.lowercased())
+                if self.legacyTextureConflicts.contains(key){throw NativeSAMPObjectMaterials.Failure.unresolvedTexture(request.dictionary,request.texture)}
+                if let texture=self.legacyExactTextures[key]{self.legacyTextureUse[key]=ProcessInfo.processInfo.systemUptime;return texture}
+                self.loadLegacyDictionary(key);return nil
+            })
+        }
+        return try legacyMaterialOwner!.resolve(material)
+    }
+    private func loadLegacyDictionary(_ request:NativeSAMPObjectMaterials.TextureRequest) {
+        let now=ProcessInfo.processInfo.systemUptime
+        guard legacyTextureLoads.count<2,!legacyTextureLoads.contains(request),(legacyTextureRetries[request] ?? 0)<=now,
+              request.dictionary.utf8.count<=128,!request.dictionary.isEmpty,
+              request.dictionary.utf8.allSatisfy({(48...57).contains($0)||(65...90).contains($0)||(97...122).contains($0)||$0==45||$0==95}),
+              let server else{return}
+        legacyTextureLoads.insert(request);let epoch=legacyAssetEpoch
+        // Only the owner's exact raw dictionary path is considered. Server
+        // strings cannot supply paths, hosts or a similarly named dictionary.
+        URLSession.shared.dataTask(with:server.path("game/\(request.dictionary).txd")){[weak self]data,response,_ in
+            let result:Result<NativeRenderWareTXD.Texture,Error>=Result {
+                guard (response as?HTTPURLResponse)?.statusCode==200,let data,data.count<=64*1024*1024 else{throw NativeSAMPObjectMaterials.Failure.unresolvedTexture(request.dictionary,request.texture)}
+                let dictionary=try NativeRenderWareTXD.decode(data)
+                guard let texture=dictionary.textures.first(where:{$0.lookupName==request.texture.lowercased()})else{throw NativeSAMPObjectMaterials.Failure.unresolvedTexture(request.dictionary,request.texture)}
+                return texture
+            }
+            DispatchQueue.main.async {
+                guard let self,self.legacyAssetEpoch==epoch else{return}
+                self.legacyTextureLoads.remove(request)
+                do {
+                    let source=try result.get()
+                    let bytes=source.mipLevels.compactMap(\.rgba8).reduce(0){$0+$1.count}
+                    guard bytes<=32*1024*1024 else{throw NativeSAMPObjectMaterials.Failure.limit}
+                    while self.legacyExternalTextureBytes.count>=128 || self.legacyExternalTextureBytes.values.reduce(0,+)+bytes>32*1024*1024 {
+                        guard let oldest=self.legacyExternalTextureBytes.keys.min(by:{(self.legacyTextureUse[$0] ?? 0)<(self.legacyTextureUse[$1] ?? 0)})else{throw NativeSAMPObjectMaterials.Failure.limit}
+                        self.legacyExternalTextureBytes.removeValue(forKey:oldest);self.legacyExactTextures.removeValue(forKey:oldest);self.legacyTextureUse.removeValue(forKey:oldest)
+                    }
+                    let plan=NativeRenderWareModel.Plan(geometries:[],textures:[source],instances:[],draws:[],diagnostics:[],meshByteCount:0,textureByteCount:bytes)
+                    let resource=try NativeRenderWareModel.Uploaded(plan:plan,device:self.device)
+                    self.legacyExactTextures[request] = .init(image:resource.textures[0],sampler:nil,containsTransparency:source.containsTransparentPixels)
+                    self.legacyExternalTextureBytes[request]=bytes;self.legacyTextureUse[request]=now
+                    self.legacyMaterialOwner?.reset()
+                }catch{self.legacyTextureRetries[request]=now+30}
+            }
+        }.resume()
+    }
+    private func drawLegacyObjects(encoder:MTLRenderCommandEncoder,matrix:simd_float4x4,eye:SIMD3<Float>) {
+        refreshLegacyStockReferences()
+        guard let snapshot=legacyObjectSnapshot(at:ProcessInfo.processInfo.systemUptime)else{return}
+        for draw in snapshot.draws {
+            guard let model=legacyModels[draw.object.model],legacyModelApplies(draw.object.model) else {
+                if (1...19999).contains(draw.object.model){continue}
+                if legacyMissingObjects.insert(draw.object.model).inserted{onStatus?("OBJECT MODEL \(draw.object.model) NEEDS ITS ORIGINAL RENDERWARE ASSETS")};continue
+            }
+            if (1...19999).contains(draw.object.model),!legacyStockObjectReady(draw.object){continue}
+            guard let pipelines=legacyModelPipelines else{continue}
+            if let definition=legacyModelDefinitions[draw.object.model] {
+                let hour=Int(gameHour)%24,on=Int(definition.timeOn),off=Int(definition.timeOff)
+                if on != off && !(on<off ? hour>=on && hour<off:hour>=on || hour<off){continue}
+            }
+            let position=SIMD3(draw.transform.columns.3.x,draw.transform.columns.3.y,draw.transform.columns.3.z)
+            if draw.object.drawDistance>0,simd_distance(eye,position)>draw.object.drawDistance{continue}
+            do {for index in model.plan.draws.indices {
+                let packet=model.plan.draws[index],instance=model.plan.instances[packet.instance]
+                let geometry=model.plan.geometries[instance.geometry],slot=geometry.parts[packet.part].material
+                var overrides=NativeRenderWareModel.DrawOverrides()
+                if let slot=UInt8(exactly:slot),let material=draw.object.materials[slot] {
+                    do{try resolvedLegacyMaterial(material).apply(to:&overrides)}catch{
+                        let key="\(draw.object.id):\(slot):\(material.hashValue)"
+                        if legacyMaterialErrors.insert(key).inserted{onStatus?("SERVER OBJECT MATERIAL UNAVAILABLE: \(error)")}
+                    }
+                }
+                try model.encode(drawIndex:index,encoder:encoder,pipelines:pipelines,viewProjection:matrix,modelTransform:draw.transform,overrides:overrides)
+            }}catch{if legacyMissingObjects.insert(draw.object.model).inserted{onStatus?("OBJECT RENDER FAILED: \(error)")}}
+        }
+        encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(depth)
+    }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
     func draw(in view: MTKView) {
@@ -2544,9 +3311,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         let defaultDistance: Float = driving ? 11 : 4.5
         let fallbackEye = camera+SIMD3<Float>(-sin(heading)*defaultDistance,-cos(heading)*defaultDistance,driving ? 4.5 : 2.4)
-        let eye = gameCameraFrame?.source ?? fallbackEye
-        let target = gameCameraFrame?.target ?? (camera+SIMD3(sin(heading)*2,cos(heading)*2,1.2))
-        let viewMatrix = Self.lookAt(eye: eye,target: target)
+        let normal=NativeSAMPGameCamera.Pose(eye:gameCameraFrame?.source ?? fallbackEye,
+            target:gameCameraFrame?.target ?? (camera+SIMD3(sin(heading)*2,cos(heading)*2,1.2)))
+        var owner=legacyGameCamera
+        do {
+            let sampled=try owner.sample(at:now,normal:normal,subjectProvider:{[weak self] subject,mode in
+                self?.legacySubjectFrame(subject,mode:mode,delta:delta,now:now)
+            })
+            legacyGameCamera=owner;legacyCameraSample=sampled
+            if sampled.diagnostics != legacyCameraDiagnostics {
+                legacyCameraDiagnostics=sampled.diagnostics
+                if !sampled.diagnostics.isEmpty{onStatus?("SERVER CAMERA: \(sampled.diagnostics)")}
+            }
+        }catch{legacyCameraSample=nil;onStatus?("SERVER CAMERA UNAVAILABLE: \(error)")}
+        let pose=legacyCameraSample?.pose ?? normal,eye=pose.eye,target=pose.target
+        if legacyCameraSample?.active == true{loadNearby()}
+        let viewMatrix = Self.lookAt(eye:eye,target:target,up:pose.up)
         let forward = -SIMD3(viewMatrix.columns.0.z,viewMatrix.columns.1.z,viewMatrix.columns.2.z)
         let right = SIMD3(viewMatrix.columns.0.x,viewMatrix.columns.1.x,viewMatrix.columns.2.x)
         let up = SIMD3(viewMatrix.columns.0.y,viewMatrix.columns.1.y,viewMatrix.columns.2.y)
@@ -2555,7 +3335,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             manualFrom: weatherFrom,manualTo: weatherTo,manualBlend: manualBlend,delta: delta)
         let sampledWeatherFrom = weather.from,sampledWeatherTo = weather.to,blend = weather.blend
         roadWetness = ([8,16].contains(sampledWeatherFrom) ? 1-blend : 0)+([8,16].contains(sampledWeatherTo) ? blend : 0)
-        let indoors = camera.z >= 700
+        let indoors = isInterior
         atmosphereAir = indoors ? 0 : eye.z < 900 ? min(1,atmosphereAir+delta) : max(0,atmosphereAir-delta)
         conditions = environment?.sample(weatherFrom: sampledWeatherFrom,to: sampledWeatherTo,blend: blend,hour: hour,altitude: eye.z)
         let planes = gameCamera.projection(air: atmosphereAir,farClip: conditions?.farClip ?? 25000)
@@ -2602,6 +3382,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for name in activeDetails { if let mesh = meshes[name] { draw(mesh: mesh,cellSize: 128,matrix: matrix,encoder: encoder) } }
         particleDrawDelta=Double(delta)
         drawActors(encoder: encoder,matrix: matrix)
+        drawLegacyObjects(encoder:encoder,matrix:matrix,eye:eye)
         if !indoors { drawWater(eye: eye,matrix: matrix,encoder: encoder) }
         if let atmosphereSnapshot { drawAtmosphereQuads(atmosphereSnapshot.quads.filter { !$0.paintedOnSky },matrix: matrix,encoder: encoder) }
         drawEffects(encoder:encoder,matrix:matrix,eye:eye,viewMatrix:viewMatrix,projection:projection,delta:Double(delta))
@@ -2870,11 +3651,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             actorOverrides[key(name,at),default:[]].append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon))
         }
-        if driving {
+        if driving && !legacySpectating {
             let code = remoteVehicles.first(where: { $0.id == currentVehicleID })?.code ?? "420.6.1.0."
             if let name = actorName(code: code) {
                 modelInstances.append((name, camera, heading, vehiclePitch, "", 0, 0))
-                if let seat = vehicleSeats[name], let ped = pedModels["7"] {
+                if let seat = vehicleSeats[name], let ped = pedModels[String(localSkin)] {
                     let time = ProcessInfo.processInfo.systemUptime - entryStarted
                     let definition = seating?.models[activeVehicleModel]
                     let entry = definition?.clip("entry") ?? "ped/car_getin_lhs"
@@ -2950,7 +3731,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     }
                 }
             }
-        } else if !scopedCameraHidesPlayer,let name = pedModels["7"] {
+        } else if !driving && !legacySpectating && !scopedCameraHidesPlayer,let name = pedModels[String(localSkin)] {
             let original = footAnimationFrame != nil && skeletalActors[name] != nil
             let pose = skeletalActors[name].flatMap { actor in skeletalLibrary.flatMap { library in
                 footAnimationFrame.flatMap { actor.originalPose(blends:$0.blends,library:library,aim:$0.aim,hiddenBones:$0.hiddenBones,figurePitch:$0.figurePitch,figureRoll:$0.figureRoll,legBend:$0.legBend) }
@@ -2958,7 +3739,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let handWeapon = climb != nil || footAnimationFrame?.handWeaponVisible == false ? 0:effectiveWireWeapon
             appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own")
         }
-        for player in remotePlayers where simd_distance(player.position, camera) < 130 {
+        for player in remotePlayers where simd_distance(player.position, scenePosition) < 130 {
             // A passenger's public carText is still a pedestrian; draw its
             // source seat inside the referenced car instead of a second walker.
             if let vehicleID = player.ridingVehicleID {
@@ -2996,7 +3777,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     let animator:NativeRemoteFootAnimation
                     if let cached=remoteFootAnimations[player.id],cached.0==name {animator=cached.1}
                     else {
-                        animator=NativeRemoteFootAnimation(library:library,style:definitions.style(model:name,library:library),weapons:footWeaponDefinitions)
+                        animator=NativeRemoteFootAnimation(library:library,style:definitions.style(model:legacyPedStyles[name] ?? name,library:library),weapons:footWeaponDefinitions)
                         remoteFootAnimations[player.id]=(name,animator)
                     }
                     let groundContext=NativeRemoteMeleeContext.nearFlooredTarget(attackerID:player.id,
@@ -3123,7 +3904,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let token=key(name,position),offset=actorOverrideOffsets[key(name,position),default:0]
             let queued=actorOverrides[token].flatMap { $0.indices.contains(offset) ? $0[offset]:nil }
             if queued != nil {actorOverrideOffsets[token]=offset+1}
-            guard let mesh = (clip.isEmpty ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name] else { loadActor(name); continue }
+            let mesh = (clip.isEmpty ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
+            let customPed=legacyPedModels[name]
+            guard mesh != nil || customPed != nil else { loadActor(name); continue }
             let originalFoot = queued?.original ?? false
             // Archived pedestrian DFFs face local -Y after the RenderWare axis
             // conversion, while the world protocol defines heading zero as +Y.
@@ -3150,12 +3933,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let parked=parkedTransforms[key(name,position)] {transform=parked}
             if let carriage=carriageTransforms[key(name,position)] {transform=carriage}
             var uniforms = Uniforms(viewProjection: matrix * transform,
-                                    settings: SIMD4(Float(mesh.atlas.width), Float(mesh.atlas.height), night, 128))
+                                    settings: SIMD4(Float(mesh?.atlas.width ?? 1), Float(mesh?.atlas.height ?? 1), night, 128))
             configureEnvironment(&uniforms)
             let opacity:Float = queued?.identity == "own" ? ownCameraVisibility.opacity:1
             uniforms.tintColor.w *= opacity
             encoder.setDepthStencilState(opacity<1 ? markerDepth:depth)
-            let locomotion = name == pedModels["7"] && position == camera && !driving && actionTimeRemaining > 0 &&
+            let locomotion = name == pedModels[String(localSkin)] && position == camera && !driving && actionTimeRemaining > 0 &&
                 !swimming && health > 0 ? locomotionClip : nil
             let wire = clip.split(separator: "/")
             let loops: Bool? = wire.count >= 2 ? (wire.count < 3 || wire[2] == "l") : nil
@@ -3164,6 +3947,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                            locomotion: locomotion, locomotionElapsed: locomotionTime, looping: loops)
             } }
             let pose = queued?.pose ?? sampledPose
+            if let customPed {
+                guard let pose,let pipelines=legacyPedPipelines else{continue}
+                var overrides=NativeRenderWareModel.DrawOverrides();overrides.tint.w=opacity
+                do {for index in customPed.plan.model.draws.indices {
+                    try customPed.encode(drawIndex:index,pose:pose,encoder:encoder,pipelines:pipelines,viewProjection:matrix,worldTransform:transform,overrides:overrides)
+                }}catch{onStatus?("CUSTOM CHARACTER DRAW FAILED: \(error)");continue}
+            } else if let mesh {
             if let pose, let actor = skeletalActors[name], let skeletalPipeline {
                 encoder.setRenderPipelineState(skeletalPipeline)
                 actor.bind(pose: pose, encoder: encoder)
@@ -3225,6 +4015,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
                                               indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: 0)
             }
+            }
             let heldWeapon = NativeWeaponAttachment.selectedWeapon(weapon,swimming:false,
                 jetpackFlying:queued?.identity == "own" && personalFlight.flying,
                 armWeapon:footWeaponDefinitions[weapon]?.flags?["arm"] == true)
@@ -3256,7 +4047,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if actorMeshes.count > 32 {
             actorMeshes = actorMeshes.filter { visible.contains($0.key) }
             actorAnimations = actorAnimations.filter { visible.contains($0.key) }
-            skeletalActors = skeletalActors.filter { visible.contains($0.key) }
+            skeletalActors = skeletalActors.filter { visible.contains($0.key) || legacyPedModels[$0.key] != nil }
             actorAttachments = actorAttachments.filter { visible.contains($0.key) }
             actorParts = actorParts.filter { visible.contains($0.key) }
             vehicleRigs=vehicleRigs.filter{visible.contains($0.key)}
@@ -3442,16 +4233,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func configureEnvironment(_ uniforms: inout Uniforms) {
-        guard let conditions, camera.z < 700 else { return }
+        guard let conditions, !isInterior else { return }
         uniforms.fogColor = weatherSnapshot?.flash == true ? SIMD4(1,1,1,1) : conditions.skyBottom
         uniforms.fogSettings = SIMD4(conditions.fogStart,conditions.farClip,atmosphereAir,0)
     }
 
     private func drawEffects(encoder:MTLRenderCommandEncoder,matrix:simd_float4x4,eye:SIMD3<Float>,viewMatrix:simd_float4x4,projection:simd_float4x4,delta:Double) {
         if let effects=particleEffects,let renderer=particleRenderer {
+            if originalActorBurning,!driving{effects.burst("fire",at:SIMD3<Double>(camera)+SIMD3(0,0,health>0 ? 1:0.1),delta:delta)}
             effects.update(delta:delta,brightness:1-0.6*Double(night))
             let fog=weatherSnapshot?.flash==true ? SIMD4<Float>(1,1,1,1):conditions?.skyBottom ?? SIMD4<Float>(0,0,0,1)
-            renderer.draw(effects.particles,eye:eye,view:viewMatrix,projection:projection,fogColor:SIMD3(fog.x,fog.y,fog.z),fogNear:conditions?.fogStart ?? 0,fogFar:conditions?.farClip ?? 25000,fogAmount:conditions==nil || camera.z>=700 ? 0:atmosphereAir,encoder:encoder)
+            renderer.draw(effects.particles,eye:eye,view:viewMatrix,projection:projection,fogColor:SIMD3(fog.x,fog.y,fog.z),fogNear:conditions?.fogStart ?? 0,fogFar:conditions?.farClip ?? 25000,fogAmount:conditions==nil || isInterior ? 0:atmosphereAir,encoder:encoder)
             encoder.setDepthStencilState(depth)
         }
         guard let atlas=effectAtlas else{return}
@@ -3508,16 +4300,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         simd_float4x4(columns: (SIMD4(cos(a),sin(a),0,0), SIMD4(-sin(a),cos(a),0,0), SIMD4(0,0,1,0), SIMD4(0,0,0,1)))
     }
 
-    private static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>) -> simd_float4x4 {
+    private static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>,up referenceUp:SIMD3<Float> = SIMD3(0,0,1)) -> simd_float4x4 {
         var forward = target-eye
         if simd_length_squared(forward) == 0 { forward = SIMD3(0,1,0) }
         forward = simd_normalize(forward)
-        var right = simd_cross(forward,SIMD3<Float>(0,0,1))
+        var right = simd_cross(forward,referenceUp)
         // Three.Matrix4.lookAt perturbs its local z by 0.0001 when view and
         // up are parallel. Its local z maps to negative GTA y.
         if simd_length_squared(right) == 0 {
             forward.y += 0.0001;forward = simd_normalize(forward)
-            right = simd_cross(forward,SIMD3<Float>(0,0,1))
+            right = simd_cross(forward,referenceUp)
         }
         right = simd_normalize(right)
         let up = simd_cross(right,forward)
@@ -3535,5 +4327,65 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             SIMD4(0, scale, 0, 0),
             SIMD4(0, 0, far / (near - far), -1),
             SIMD4(0, 0, far * near / (near - far), 0)))
+    }
+}
+
+/// Bounded bootstrap metadata only. Model/COL bytes use the shared verified
+/// NativeSAMPStockAssetLoader instead of a second asset transfer engine.
+private final class LegacyStockMetadataTransfer:NSObject,URLSessionDataDelegate {
+    private let url:URL,maximumBytes:Int,completion:(Result<Data,Error>)->Void
+    private let access:NativeStockAssetAccess?
+    private let queue:OperationQueue={let value=OperationQueue();value.maxConcurrentOperationCount=1;return value}()
+    private var session:URLSession?,task:URLSessionDataTask?,bytes=Data(),finished=false
+    init(url:URL,maximumBytes:Int,access:NativeStockAssetAccess?=nil,completion:@escaping(Result<Data,Error>)->Void) {
+        self.url=url;self.maximumBytes=maximumBytes;self.completion=completion;self.access=access
+    }
+    func start(){queue.addOperation {
+        guard !self.finished else{return}
+        guard (1...16*1024*1024).contains(self.maximumBytes),["http","https"].contains(self.url.scheme?.lowercased() ?? ""),
+              self.url.user==nil,self.url.password==nil,self.url.query==nil,self.url.fragment==nil else {
+            self.finish(.failure(NativeSAMPStockAssetLoader.Failure.invalidURL));return
+        }
+        let configuration=URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage=nil;configuration.httpShouldSetCookies=false;configuration.urlCredentialStorage=nil;configuration.urlCache=nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest=15;configuration.timeoutIntervalForResource=30
+        self.session=URLSession(configuration:configuration,delegate:self,delegateQueue:self.queue)
+        var request=URLRequest(url:self.url);request.httpShouldHandleCookies=false
+        request.setValue("identity",forHTTPHeaderField:"Accept-Encoding")
+        if let cookie=self.access?.cookieHeader(for:self.url){request.setValue(cookie,forHTTPHeaderField:"Cookie")}
+        self.task=self.session!.dataTask(with:request);self.task?.resume()
+    }}
+    func cancel(){queue.addOperation{self.finish(.failure(NativeSAMPStockAssetLoader.Failure.cancelled))}}
+    private func finish(_ result:Result<Data,Error>) {
+        guard !finished else{return};finished=true
+        task?.cancel();task=nil;session?.invalidateAndCancel();session=nil;bytes=Data()
+        DispatchQueue.main.async{self.completion(result)}
+    }
+    func urlSession(_ session:URLSession,dataTask:URLSessionDataTask,didReceive response:URLResponse,
+                    completionHandler:@escaping(URLSession.ResponseDisposition)->Void) {
+        guard !finished else{completionHandler(.cancel);return}
+        guard let http=response as?HTTPURLResponse,http.statusCode==200,http.url==url else {
+            completionHandler(.cancel);finish(.failure(NativeSAMPStockAssetLoader.Failure.http((response as?HTTPURLResponse)?.statusCode ?? 0)));return
+        }
+        let encoding=http.value(forHTTPHeaderField:"Content-Encoding")?.trimmingCharacters(in:.whitespacesAndNewlines).lowercased() ?? "identity"
+        guard encoding=="identity" || encoding.isEmpty else{completionHandler(.cancel);finish(.failure(NativeSAMPStockAssetLoader.Failure.encoding));return}
+        guard response.expectedContentLength<0 || response.expectedContentLength<=maximumBytes else {
+            completionHandler(.cancel);finish(.failure(NativeSAMPStockAssetLoader.Failure.limit("stock metadata bytes")));return
+        }
+        completionHandler(.allow)
+    }
+    func urlSession(_ session:URLSession,dataTask:URLSessionDataTask,didReceive data:Data) {
+        guard !finished else{return}
+        guard data.count<=maximumBytes-bytes.count else{finish(.failure(NativeSAMPStockAssetLoader.Failure.limit("stock metadata stream")));return}
+        bytes.append(data)
+    }
+    func urlSession(_ session:URLSession,task:URLSessionTask,didCompleteWithError error:Error?) {
+        guard !finished else{return}
+        if let error{finish(.failure(error))}else{finish(.success(bytes))}
+    }
+    func urlSession(_ session:URLSession,task:URLSessionTask,willPerformHTTPRedirection response:HTTPURLResponse,
+                    newRequest request:URLRequest,completionHandler:@escaping(URLRequest?)->Void) {
+        completionHandler(nil);finish(.failure(NativeSAMPStockAssetLoader.Failure.redirect))
     }
 }

@@ -38,6 +38,8 @@ reverse proxy, backups, guest identities and optional Discord linking.
   property ownership, jobs, races and other local gameplay systems.
 - Browser hosting and asset archive/import tools.
 - Native Swift, UIKit, Metal and GameController source with touch controls.
+- Separate SA-MP/open.mp UDP and original-browser-world adapters; see the
+  [tested compatibility boundaries](SERVER_COMPATIBILITY.md).
 - Local asset converters, pinned Rust physics bridge and source comparison tests.
 
 Game assets, the original website bundles, extracted game catalogs, converted
