@@ -1296,3 +1296,19 @@ The updated registry contains152 cases; a single full152-case run is not claimed
 Acceptance combines the preserved149-case baseline with repaired carriers,
 unchanged core sources, focused Core104 lifecycle/model/network checks, actual
 device observations and a successful optimized iPhone build.
+
+##2026-11-17 — physical evidence qualification and vehicle findings
+
+Concurrent human phone use was confirmed after the physical trial. Exclusive
+scripted input was not established for the broader session. Retain the actual
+warning removal, corrected rendered models and observable cross-client motion,
+but do not claim isolated input latency, controlled idle-policy acceptance or
+later vehicle gas/brake/exit correctness. The318.782-second interval was free of
+harness commands, not proven free of human input. Stuck-input, broken-exit and
+teleport suspicions from later state changes are withdrawn.
+
+Two independent rendered vehicle defects remain: the same420.6.1.0. taxi is
+grey natively and yellow/orange in the browser, and the browser displays its
+parked and driven bodies simultaneously. The next candidate investigates the
+generic paint/material and ownership-publication boundaries. Live phone control
+has stopped; the current user's server and game remain unchanged.

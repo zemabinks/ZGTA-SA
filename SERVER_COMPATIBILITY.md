@@ -75,6 +75,11 @@ male01 and skin2 Maccer; overlapping recordings verify both directions of short
 walking and release. These bounded LAN results do not establish every transition
 or existing-server destination.
 See [character identity evidence and texture limits](CORE_SKIN_IDENTITY_104.md).
+The later normal Taxi trial exposed two additional confirmed differences:
+native grey versus browser yellow/orange paint, and simultaneous parked/driven
+bodies for the same vehicle. Vehicle parity is not accepted. Concurrent human
+phone input prevents attributing the later gas/brake/exit sequence to the
+scripted controls; stuck-input and broken-exit suspicions are withdrawn.
 Authoritative interior changes
 select interior streaming; a high outdoor aircraft position is not assumed to
 be an interior solely because of its altitude.
