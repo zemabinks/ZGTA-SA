@@ -398,6 +398,7 @@ final class NativeGameViewController: UIViewController {
             self?.updateAuxiliaryControls()
         }
         network.onRespawn = { [weak self] in self?.finishRespawn() }
+        network.onIncomingHit = { [weak self] hit in self?.renderer?.receiveHit(hit) }
         gameplay.onState = { [weak self] state in
             guard let self else { return }
             self.network.syncVitals(from: state)
@@ -1332,7 +1333,7 @@ final class NativeGameViewController: UIViewController {
                                  movement:renderer.footWireMovementRatio,aim:renderer.footWireAim,
                                  action:currentVehicle != nil ? renderer.riderWireAction:renderer.footWireAction,
                                  velocity:renderer.currentWireVelocity,angularVelocity:renderer.currentWireAngularVelocity,
-                                 kit:renderer.vehicleWireKit(tuck:tuck),vehicleWork:renderer.vehicleWorkingValue,paused:paused,support:renderer.footWireSupport)
+                                 kit:renderer.vehicleWireKit(tuck:tuck),vehicleWork:renderer.vehicleWorkingValue,paused:paused,support:renderer.footWireSupport,down:renderer.footWireDown)
     }
 
     private func requestVehicleCoupling(_ request:NativeVehicleCoupling.Request)->Bool {

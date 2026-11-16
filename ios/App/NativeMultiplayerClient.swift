@@ -2,6 +2,31 @@ import Foundation
 import simd
 import CoreFoundation
 
+/// A server-accepted hit is visual feedback, separate from health prediction.
+/// Damage is never applied again by its receiver.
+struct NativeIncomingHit {
+    let weapon:Int,damage:Double,sourceID:String?,source:SIMD3<Float>?,piece:Int,quiet:Bool,wasAlive:Bool
+    let authoritativeHealth:Int?
+    init?(_ packet:[String:Any],fallbackSource:SIMD3<Float>?=nil,wasAlive:Bool=true) {
+        guard let amount=packet["d"] as? NSNumber,CFGetTypeID(amount) != CFBooleanGetTypeID(),amount.doubleValue.isFinite,amount.doubleValue>0 else{return nil}
+        let weapon=NativeHealthPrediction.integer(packet["w"]) ?? 0
+        guard (0...255).contains(weapon),packet["w"]==nil || NativeHealthPrediction.integer(packet["w"]) != nil else{return nil}
+        self.weapon=weapon;damage=amount.doubleValue
+        sourceID=(packet["from"] as? String).flatMap{$0.isEmpty || $0.utf8.count>64 ? nil:$0}
+        var point:SIMD3<Float>?
+        if let raw=packet["fromAt"] as? [NSNumber],raw.count==3,
+           raw.allSatisfy({CFGetTypeID($0) != CFBooleanGetTypeID() && $0.doubleValue.isFinite && $0.floatValue.isFinite}) {
+            point=SIMD3(raw[0].floatValue,raw[1].floatValue,raw[2].floatValue)
+        }
+        source=point ?? fallbackSource.flatMap{[$0.x,$0.y,$0.z].allSatisfy(\.isFinite) ? $0:nil}
+        let part=NativeHealthPrediction.integer(packet["piece"]) ?? 3;piece=(0...9).contains(part) ? part:3
+        quiet=packet["quiet"] as? Bool ?? false
+        self.wasAlive=NativeHealthPrediction.integer(packet["beforeHealth"]).flatMap{(0...100).contains($0) ? $0>0:nil} ?? wasAlive
+        let hp=NativeHealthPrediction.integer(packet["health"])
+        authoritativeHealth=(packet["healthAck"] as? [String:Any]) != nil ? hp.flatMap{(0...100).contains($0) ? $0:nil}:nil
+    }
+}
+
 struct RemotePlayer {
     let id: String
     let name: String
@@ -192,6 +217,7 @@ final class NativeMultiplayerClient {
     private let streamShotClaims = NativeStreamShotClaims()
     private var healthPrediction=NativeHealthPrediction()
     private var deliveredRespawnSequence=0
+    private var deliveredHitRevision:Int?
     private var resynchronizingInventory = false
     private var announcedInventoryConnection: String?
     var inventoryConnection: String? { shotSequence.connection }
@@ -220,6 +246,7 @@ final class NativeMultiplayerClient {
     var onBlast: ((Int, SIMD3<Float>) -> Void)?
     var onWeaponSound: ((Int) -> Void)?
     var onVitals: ((Int, Int) -> Void)?
+    var onIncomingHit:((NativeIncomingHit)->Void)?
     var onRespawn: (() -> Void)?
     private(set) var couplingAcknowledgements=false
     private(set) var couplingRevision:Int?
@@ -302,6 +329,7 @@ final class NativeMultiplayerClient {
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         healthPrediction.disconnect()
         deliveredRespawnSequence=0
+        deliveredHitRevision=nil
         couplingAcknowledgements=false;couplingRevision=nil;couplingLinks=[]
         couplingIssued=0;couplingProcessed=0;pendingCouplings.removeAll()
         onInventoryConnection?(nil)
@@ -341,7 +369,7 @@ final class NativeMultiplayerClient {
                       movement:Double? = nil,aim:Double? = nil,action:Int = 0,
                       velocity:SIMD3<Float> = .zero,angularVelocity:SIMD3<Float> = .zero,
                       kit:[Double]? = nil,vehicleWork:Int? = nil,paused:Bool = false,
-                      support:(id:String,offset:SIMD3<Float>)? = nil) {
+                      support:(id:String,offset:SIMD3<Float>)? = nil,down:Int=0) {
         guard isReady else { return }
         func rounded(_ value:Double)->Double {value.isFinite ? floor(value*100+0.5)/100:0}
         let motion:[String:Any] = ["vx":rounded(Double(velocity.x)),"vy":rounded(Double(velocity.y)),"vz":rounded(Double(velocity.z)),
@@ -374,6 +402,7 @@ final class NativeMultiplayerClient {
               "aim":aim.map{rounded($0)} ?? NSNull(),
               "anim":animation.flatMap{$0.isEmpty ? nil:NativePedestrianMotion.wireAnimation(for:$0)} ?? NSNull()]
         packet.merge(motion){_,new in new}
+        packet["down"]=(1...6).contains(down) ? down:0
         if let support,!support.id.isEmpty,support.id.utf8.count<=64,
            [support.offset.x,support.offset.y,support.offset.z].allSatisfy({$0.isFinite && abs($0)<=100}) {
             packet["on"]=["v":support.id,"x":rounded(Double(support.offset.x)),"y":rounded(Double(support.offset.y)),"z":rounded(Double(support.offset.z))]
@@ -583,6 +612,17 @@ final class NativeMultiplayerClient {
         }
         return true
     }
+    private func deliverIncomingHit(_ message:[String:Any],wasAlive:Bool) {
+        guard isReady else{return}
+        let source=(message["from"] as? String).flatMap{players[$0]?.position}
+        guard let hit=NativeIncomingHit(message,fallbackSource:source,wasAlive:wasAlive) else{return}
+        if healthPrediction.active {
+            guard let ack=message["healthAck"] as? [String:Any],let revision=NativeHealthPrediction.integer(ack["revision"]),
+                  deliveredHitRevision.map({revision>$0}) ?? true else{return}
+            deliveredHitRevision=revision
+        }
+        onIncomingHit?(hit)
+    }
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
                   vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "",vehicleWork:Int?=nil) {
@@ -700,6 +740,7 @@ final class NativeMultiplayerClient {
                     } else {
                         healthPrediction.begin(connection:connection,health:hp,armour:protected,revision:revision,processed:processed)
                         deliveredRespawnSequence=processed
+                        deliveredHitRevision=nil
                     }
                     health=healthPrediction.health;armour=healthPrediction.armour
                 } else if healthPrediction.connection != nonce {
@@ -768,9 +809,12 @@ final class NativeMultiplayerClient {
             if let value = message["armour"] as? Int { armour = max(0,min(100,value)) }
             onVitals?(health, armour)
         case "hit":
+            let hitEpoch=transportGeneration
+            let wasAlive=health>0
             if healthPrediction.active {
                 if applyAcknowledgedVitals(message),isReady {
-                    onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE":"HIT — \(health) HEALTH REMAINING")
+                    deliverIncomingHit(message,wasAlive:wasAlive)
+                    if isReady,transportGeneration==hitEpoch {onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE":"HIT — \(health) HEALTH REMAINING")}
                 }
                 break
             }
@@ -779,8 +823,10 @@ final class NativeMultiplayerClient {
             armour -= absorbed
             health = max(0, health - (damage - absorbed))
             onVitals?(health, armour)
-            onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE" :
-                         "HIT — \(health) HEALTH REMAINING")
+            if isReady,transportGeneration==hitEpoch {
+                deliverIncomingHit(message,wasAlive:wasAlive)
+                if isReady,transportGeneration==hitEpoch {onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE" :"HIT — \(health) HEALTH REMAINING")}
+            }
         case "veh", "spawned":
             if let row = message["v"] as? [Any], let vehicle = RemoteVehicle(row: row) {
                 if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}

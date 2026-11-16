@@ -213,6 +213,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var footJumped = false
     private var footJumpMinimum: Double = 0
     private var footAirVelocity = SIMD2<Double>.zero
+    private let localHitReaction=NativeLocalHitReaction()
+    private var footDeathKind:String?
+    private var pendingFootHit:SIMD3<Double>?
     private var footSprintPace: Double = 0
     private var footLaunchRemaining: Double?
     private var footReloadWasActive = false
@@ -739,6 +742,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var footWireAction:Int {health>0 ? climb?.part.rawValue ?? (personalFlight.state>0 ? 50+personalFlight.state-1:footAnimator?.reportedAction ?? 0):0}
     var footWireAnimation:String? {health>0 && !swimController.on && footWireAction == 0 && footAnimator?.floored != true ? footAnimator?.tagged:nil}
     var footWireAirborne:Bool {climb==nil && !personalFlight.on && footAirTime>0.05}
+    var footWireDown:Int {driving ? 0:footAnimator?.reportedDown ?? 0}
     var footWireAim:Double? {
         guard health>0,climb==nil,!personalFlight.chuting,footWeaponDefinitions[equippedWeapon]?.aims == true,
               aiming || weaponTriggerHeld || footAnimator?.gunUp == true else{return nil}
@@ -772,6 +776,31 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         meleeGuardHeld=false;meleeBlockHeld=false;meleeInput.cancel();footAnimator?.cancelMeleeInput()
     }
     func cancelReloadAnimation() {footAnimator?.cancelReload();footReloadRequested=false;footReloadWasActive=false}
+    func receiveHit(_ hit:NativeIncomingHit) {
+        guard hit.wasAlive,health>0 || hit.authoritativeHealth==0 else{return}
+        prepareFootAnimation()
+        let target=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(camera))
+        let source=hit.source.map{SIMD3<Double>(SwiftRapierWorld.gtaToRapier($0))}
+        let actor=footAnimator != nil
+        let side=actor ? source.map{NativeFootLocomotion.supportKnockSide(velocity:target-$0,heading:Double(actorHeading))} ?? 0:0
+        var input=NativeLocalHitReaction.Input(weapon:hit.weapon,damage:hit.damage,healthAfter:hit.authoritativeHealth ?? health,
+            now:ProcessInfo.processInfo.systemUptime*1000)
+        input.side=side;input.piece=hit.piece;input.quiet=hit.quiet;input.wasAlive=hit.wasAlive
+        input.still=footLocomotion.requestedMovementRatio==0 && footAirTime==0;input.crouched=crouching
+        input.swimming=swimController.on;input.climbing=climb != nil
+        input.source=source;input.target=target;input.hasActor=actor
+        let response=localHitReaction.receive(input)
+        if let kind=response.death {
+            let correction=footDeathKind==nil && hit.authoritativeHealth==0
+            footDeathKind=kind;pendingFootHit=response.impulse
+            crouching=false;personalFlight.stop();cancelWeaponInput()
+            footAnimator?.die(kind,correctExisting:correction)
+            if response.loseHead {footAnimator?.loseHead()}
+        } else if !driving,let kind=response.flinch {
+            footAnimator?.flinch(kind,stun:response.stun)
+            if response.stun,footAnimator?.stunned==true {cancelWeaponInput()}
+        }
+    }
     func cancelGameplayInput() {
         cancelWeaponInput();cancelCameraInput()
         acceptedStreamShot=false
@@ -1347,7 +1376,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // tick. A nil result hands the same tick to foot/flight animation.
         if let animator = footAnimator {
             animator.arm(nil)
-            if health <= 0 && !animator.dead { animator.die("drown") }
+            if health <= 0 && !animator.dead { animator.die(footDeathKind ?? "drown") }
             else if health > 0 && animator.dead { animator.revive() }
             var animation = NativeFootAnimation.Input()
             animation.swimming = true
@@ -1403,7 +1432,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 animator.control(.init(fire:weaponTriggerHeld && context.canRequestFire,aim:aiming && context.canAim,
                     held:context.heldTrigger(weaponTriggerHeld),ready:weaponReady && !weaponReloading))
             }
-            if health<=0 && !animator.dead {animator.die("koFront")}
+            if health<=0 && !animator.dead {animator.die(footDeathKind ?? "koFront")}
             let frame=animator.update(delta:delta,input:animation)
             footAnimationFrame=frame;emitFootWeaponEvents(frame,feet:state.feet)
         }
@@ -1439,10 +1468,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                             intended: NativeCharacterController.Motion,forward: Float,sideways: Float,running: Bool) -> NativeCharacterController.Motion {
         prepareFootAnimation()
         guard let animator = footAnimator else { pendingSprintTap = false;return intended }
+        if health>0 {footDeathKind=nil;pendingFootHit=nil}
         headingContinuity.resumeFoot(facing:Double(actorHeading),locomotion:footLocomotion)
         let definition = footWeaponDefinitions[equippedWeapon]
         animator.arm(definition)
-        if health <= 0 && !animator.dead { animator.die() }
+        if health <= 0 && !animator.dead { animator.die(footDeathKind ?? "koFront") }
         else if health > 0 && animator.dead { animator.revive() }
         if weaponReloading && !footReloadWasActive && !footReloadRequested { _ = animator.beginReload() }
         footReloadWasActive = weaponReloading;footReloadRequested = false
@@ -1467,6 +1497,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         actorHeading = Float(locomotion.heading)
         advanceMelee(meleeFrame,feet:state.feet,ratio:locomotion.ratio,delta:delta)
         var motion = intended
+        let impact=pendingFootHit;pendingFootHit=nil
+        if let impact {
+            footLaunchRemaining=nil;footJumped=false
+            footAirVelocity=SIMD2(impact.x,-impact.z);motion.jump=0;motion.verticalOverride=impact.y
+        }
         var jumping = false
         if let remaining = footLaunchRemaining {
             if remaining-delta < 0 {
@@ -1479,7 +1514,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
             } else { footLaunchRemaining = remaining-delta;motion.jump = 0 }
         }
-        let airborne = !state.grounded || jumping
+        let airborne = !state.grounded || jumping || impact != nil
         if airborne,footAirTime>0,footJumped,!footAirFell,state.rising > -10,simd_length(footAirVelocity)>2.5 {
             airGrabTicks += 1
             if airGrabTicks%2==0,beginClimb(state:state,extended:false) {
@@ -1889,6 +1924,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// owned vehicle without an exit animation, parking packet or side offset.
     /// The subsequent hello applies the self-hosted server's spawn policy.
     func resetMultiplayerSession() {
+        localHitReaction.reset();footDeathKind=nil;pendingFootHit=nil
         setVehicleCouplingConnection(nil)
         discardOwnedVehicle()
         groundVehicle?.clearOtherVehicles()
@@ -1902,6 +1938,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     func teleport(x: Float, y: Float, z: Float, direction: Float? = nil) {
         guard x.isFinite,y.isFinite,z.isFinite,direction?.isFinite != false else{return}
+        pendingFootHit=nil
         ownCameraVisibility.reset()
         pendingVehicleBodyPose=nil
         climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0

@@ -53,6 +53,7 @@ def main():
         'smoke_vehicle_coupling.py', 'smoke_vehicle_working_rigs.py',
         'smoke_native_vehicle_support.py', 'smoke_native_vehicle_treads.py',
         'smoke_native_moving_support.py', 'smoke_native_support_runtime.py', 'smoke_native_support_backend.py',
+        'smoke_native_local_hit.py', 'smoke_native_hit_runtime.py', 'smoke_native_hit_backend.py',
         'smoke_native_settings.py', 'smoke_native_menu_layout.py', 'smoke_native_menu_profile.py',
         'smoke_native_menu_keys.py', 'smoke_native_audio_settings.py', 'smoke_native_menu_sound.py',
         'smoke_native_heading_transitions.py', 'smoke_native_task_transitions.py',

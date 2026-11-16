@@ -27,6 +27,7 @@ final class ClimbRuntimeHarness {
     var actorHeading:Float=0,heading:Float=0
     var footAirTime=0.0,footAirFall=0.0,footJumpMinimum=0.0,footAirFell=false,footJumped=false
     var footLaunchRemaining:Double?,footAirVelocity=SIMD2<Double>.zero,footSprintPace=0.0
+    var footDeathKind:String?,pendingFootHit:SIMD3<Double>?
     var footReloadWasActive=false,footReloadRequested=false,weaponReloading=false,weaponReady=true
     var footWeaponDefinitions:[Int:NativeFootWeaponAnimation]=[:],equippedWeapon=22,weaponTriggerHeld=false
     var meleeDefinitions:NativeMeleeDefinitions?
@@ -138,6 +139,7 @@ final class ClimbRuntimeHarness {
             return motion
         })
         if let expectedHeld {precondition(simd_distance(output.feet,expectedHeld)<0.000002);checks += 1}
+        camera=output.feet
         return output
     }
 }

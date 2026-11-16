@@ -35,7 +35,9 @@ final class Flight {var worn=true;func wear(_ value:Bool){worn=value}}
 struct Vehicle {let id:String}
 final class Camera {var shakeCancels=0;func cancelShake(){shakeCancels+=1};func resumeFoot(from:Int?,fallbackHeading:Float,fallbackPitch:Float)->SIMD2<Float>{SIMD2(fallbackHeading,fallbackPitch)}}
 final class Effects {var clears=0;func clear(){clears+=1}}
+final class DamageOwner {var resets=0;func reset(){resets+=1}}
 final class Renderer {
+ let localHitReaction=DamageOwner();var footDeathKind:String?="old";var pendingFootHit:SIMD3<Double>?=SIMD3(1,2,3)
  let groundVehicle:Body?=Body(),personalFlight=Flight()
  let vehicleCoupling:Couplings?=Couplings()
  var couplingConnection:String?="old-connection",couplingSnapshot:Int?=1
@@ -139,6 +141,7 @@ check(gone.renderer!.weaponEffects.clears==0 && !gone.renderer!.remoteRiderAnima
 check(gone.gameplay.ready && gone.network.stops==0 && gone.radio.stops==1 && gone.gameHUD.vehicle==nil && !gone.drivingControls,"despawn failed to retain connection/reset vehicle UI")
 gone.vehicleRemoved("old-car")
 check(gone.renderer!.groundVehicle!.exits==1 && gone.radio.stops==1,"repeated despawn repeated owned exit")
+check(game.renderer!.localHitReaction.resets>0 && game.renderer!.footDeathKind==nil && game.renderer!.pendingFootHit==nil,"session reset retained old damage response")
 print("PASS connection owners: \(checks) actual extracted controller/renderer lifecycle checks (non-UI spies)")
 '''
 with tempfile.TemporaryDirectory(prefix='zgta-connection-owners-') as directory:

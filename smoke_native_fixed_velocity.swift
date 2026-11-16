@@ -24,6 +24,7 @@ final class FixedVelocityHarness {
     var groundVehicle:OtherVehicleInput?
     var actorHeading:Float=3.13,heading:Float=3.13,cameraPitch:Float=0,swimHeadingTarget:Float=3.13
     var footAirTime=0.0,footAirFall=0.0,footAirFell=false,footJumped=false,footLaunchRemaining:Double?
+    var footDeathKind:String?
     var footAirVelocity=SIMD2<Double>.zero,lastFootVelocity=SIMD3<Double>.zero
     var onLocalHealth:((Int)->Void)?,onParachuteUsed:(()->Void)?,onSplash:(()->Void)?
     var ticks=0,water=false,waterEdge:Float=1481,events:[[String:Any]]=[]

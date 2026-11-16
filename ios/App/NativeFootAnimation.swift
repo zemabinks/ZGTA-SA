@@ -213,6 +213,7 @@ final class NativeFootAnimation {
     private var lastTwin = false
     private var reportedGuard = false
     private var reportedBlock = false
+    private var lastKnockCode=0
     var moveSpeed: Double = 1
     var onStep: ((String) -> Void)?
 
@@ -249,6 +250,7 @@ final class NativeFootAnimation {
     var busy: Bool { death != nil || action.map { Self.busyKinds.contains($0.kind) || ($0.kind == "fallLand" && $0.time < 0.6 * duration($0.clip)) } == true }
     var rolling: Bool { action.map { !$0.ending && ["rollL","rollR"].contains($0.kind) } == true }
     var floored: Bool { action.map { Self.floorKinds.contains($0.kind) || ["getUp","getUpFront"].contains($0.kind) } == true }
+    var reportedDown:Int {floored ? lastKnockCode:0}
     var dead: Bool { death != nil }
     var fallen: Bool { death.map { $0.time >= duration($0.clip) } == true }
     var acting: Bool { script.map { !$0.ending } == true }
@@ -417,6 +419,7 @@ final class NativeFootAnimation {
     @discardableResult func knock(_ kind: String = "koSkidBack") -> Bool {
         guard death == nil, !Self.floorKinds.contains(action?.kind ?? ""), Self.floorKinds.contains(kind), start(kind) > 0 else { return false }
         action?.weight = 1; action?.down = 0.7; flinching = nil; gunState = .aim
+        lastKnockCode=(["koSkidBack","koSpinR","koSkidFront","koSpinL","floorHit","floorHitF"].firstIndex(of:kind) ?? -1)+1
         return true
     }
     @discardableResult func act(_ clip: String, loop: Bool = false, rooted: Bool = false, cut: Bool = false,
@@ -431,8 +434,14 @@ final class NativeFootAnimation {
         guard death == nil, !floored, let clip = named(kind) ?? resolve(kind) ?? named("flinch") else { return }
         flinching = Flinch(clip: clip, stun: stun)
     }
-    func die(_ kind: String = "koFront", fallen: Bool = false) {
-        guard death == nil, let clip = named(kind) ?? resolve(kind) ?? named("koFront") else { return }
+    func die(_ kind: String = "koFront", fallen: Bool = false,correctExisting:Bool=false) {
+        guard let clip = named(kind) ?? resolve(kind) ?? named("koFront") else { return }
+        if var existing=death {
+            // A status snapshot can precede its hit event. Correct the
+            // authoritative cause without restarting the visible death clock.
+            if correctExisting {existing.kind=kind;existing.clip=clip;existing.time=min(existing.time,duration(clip));death=existing}
+            return
+        }
         death = Action(kind: kind, clip: clip, time: fallen ? duration(clip) : 0, weight: fallen ? 1 : 0)
         action = nil; flinching = nil; gunState = .aim; gunCycle.drop(); fireHeld = false
     }

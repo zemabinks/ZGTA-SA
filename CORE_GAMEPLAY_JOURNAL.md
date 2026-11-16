@@ -975,3 +975,27 @@ version and one extra Renderer admission guard differ in App source from
 accepted Core90. The unchanged bridge/header/core retains the prior five-link
 Apple ABI evidence; Core91 builds also link the real platform libraries.
 Retail/device/rendered acceptance remains open.
+
+### Core92 — local accepted-hit feedback and replicated knockdown
+
+Native hit reception previously updated health/status without invoking local
+reactions. The animator's existing remote damage logic did not fix that missing
+local route. Decoded knockdown rows also lacked a corresponding outgoing local
+tag. The response now preserves health authority and connects actual weapon,
+source position, piece and liveness context to original reaction decisions,
+real native clips and one-shot motor impulses.
+
+The archived hurt decision replay passes12,532 checks; actual native/backend
+transport proves snapshot/event races, deliberate duplicates and legacy down
+recovery. [Core92 evidence and exclusions](CORE_LOCAL_HIT_92.md) document the
+separate model, animation/physics and transport boundaries. The real clip gate
+corrects its fixtures to use canonical clip names, preserve animation-owned
+travel and wait for a fixed tick on high-refresh display frames.
+
+Core92 final acceptance passes **97/97 gates**, captured sources unchanged, and
+Release Simulator plus unsigned generic iPhone builds92. The response model
+passes12,532 checks; the real clip/native motor gate passes2,179 checks; actual
+native/backend transport passes13 client and10 authority/legacy checks. The
+unchanged native bridge/header/core retains Core90's five-link Apple ABI
+evidence, and both Core92 builds link their actual platform libraries.
+Original retail, rendered scenes, physical input and device FPS remain open.

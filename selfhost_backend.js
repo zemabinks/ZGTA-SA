@@ -875,10 +875,12 @@ class LocalGame {
     if (authorized && !area) authorized.used=true;
     peer.lastHitAt = now;
     const victim = target.player;
+    const beforeHealth=victim.health;
     const absorbed = Math.min(victim.armour, damage);
     victim.armour -= absorbed;
     victim.health = Math.max(0, victim.health - (damage - absorbed));
-    target.send({t: 'hit', from: String(peer.player.number), w: weapon, d: damage});
+    target.send({t: 'hit', from: String(peer.player.number), w: weapon, d: damage,
+      ...(target.healthAckEnabled ? {fromAt:[from.x,from.y,from.z],beforeHealth}: {})});
     this.setWanted(peer.player, Math.max(1, peer.player.wanted + 1));
     if (victim.health === 0) {
       victim.deaths = money(victim.deaths + 1);
