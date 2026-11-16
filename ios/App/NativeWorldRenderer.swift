@@ -1587,7 +1587,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               let stand=library.duration(of:"ped/climb_stand"),let vault=library.duration(of:"ped/climb_jump_b"),
               min(jump,pull,stand,vault)>0 else{return false}
         let feet=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(state.feet))
-        guard var ledge=queries.find(feet:feet,heading:-Double(actorHeading),extended:extended),ledge.fixed else{return false}
+        guard var ledge=queries.find(feet:feet,heading:-Double(actorHeading),extended:extended) else{return false}
         if !extended {ledge.high=ledge.hold.y-feet.y-1>=1.1}
         climb=NativeClimbController(ledge:ledge,feet:feet,durations:.init(jump:jump,pull:pull,stand:stand,vault:vault))
         climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0

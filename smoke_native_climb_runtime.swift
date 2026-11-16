@@ -50,6 +50,7 @@ final class ClimbRuntimeHarness {
     var completedFeet:SIMD3<Float>?,completedPart:NativeClimbController.Part?
     var lastPosePart:NativeClimbController.Part?,lastPoseTime=0.0
     var seen=Set<Int>()
+    var carrierBody:UInt64?
     func prepareFootAnimation() {} // real library/animator is preloaded below
     func cancelCameraInput() {} // camera is outside this motor/pose gate
 
@@ -65,6 +66,7 @@ final class ClimbRuntimeHarness {
         footAnimator!.arm(footWeaponDefinitions[22])
         func box(_ half:SIMD3<Float>,_ position:SIMD3<Float>,_ rotation:simd_quatf=simd_quatf(ix:0,iy:0,iz:0,r:1),kind:SwiftRapierWorld.BodyKind?=nil) {
             let body=kind.flatMap{world.addBody(kind:$0,position:position,rotation:rotation)}
+            if kind != nil{carrierBody=body}
             let id=world.addBox(halfExtents:half,body:body,position:body == nil ? position:.zero,rotation:body == nil ? rotation:simd_quatf(ix:0,iy:0,iz:0,r:1))!
             world.setColliderGroups(id,collision:0x0087ffff,solver:0xffffffff)
             world.setColliderQueryMetadata(id,surface:2,material:0)
@@ -217,15 +219,59 @@ final class ClimbRuntimeHarness {
     _ = airborne.frame(1/60);precondition(airborne.climb==nil && airborne.airGrabTicks==1)
     _ = airborne.frame(1/60);precondition(airborne.climb?.part == .jump && airborne.firstTickCount==1,"Airborne every-second-tick grab or stretch threshold failed");checks += airborne.checks+2
     frames += airborne.displayFrames;physicsTicks += airborne.fixedSteps
-    // A stationary dynamic/kinematic carrier is deliberately unsupported by
-    // Renderer, even though the secondary browser finder reports the ledge.
-    for kind in [SwiftRapierWorld.BodyKind.dynamic,.kinematicPosition,.kinematicVelocity] {
-        let carrier=try ClimbRuntimeHarness(root:root,top:1.8,depth:2,carrier:kind)
-        let output=carrier.frame(1/60)
-        precondition(carrier.climb==nil && carrier.firstTickCount==0 && output.rising>0,"Unsupported moving carrier became a frozen handhold")
+    let entries=try JSONSerialization.jsonObject(with:Data(contentsOf:root.appendingPathComponent("local-only/research/climbing/entry-reference.json"))) as! [String:Any]
+    for row in entries["cases"] as! [[String:Any]] {
+        let vehicle=row["vehicle"] as! Bool,mode=row["mode"] as! String
+        let carrier=try ClimbRuntimeHarness(root:root,top:1.8,depth:2,carrier:vehicle ? .kinematicPosition:nil)
+        if mode=="worn" {carrier.personalFlight.wear(true)}
+        if mode=="flying" {carrier.personalFlight.wear(true);carrier.personalFlight.takeOff(heading:0)}
+        if mode=="dead" {carrier.health=0}
+        if mode=="missing-animation" {carrier.footAnimator=nil}
+        _ = carrier.frame(1/60)
+        precondition((carrier.climb != nil)==(row["accepted"] as! Bool),"Actual archived climb admission differs: vehicle\(vehicle) \(mode)")
         checks += carrier.checks+1;frames += carrier.displayFrames;physicsTicks += carrier.fixedSteps
     }
-    let report:[String:Any]=["authority":"Actual current Renderer methods + real local animation/native character/core; not retail GTA replay","checks":checks,"displayFrames":frames,"physicsTicks":physicsTicks,"cases":reports,"additionalScenarios":["cancel-pending-input","air-grab-every-second-tick","unsupported-dynamic-carrier","unsupported-kinematic-position-carrier","unsupported-kinematic-velocity-carrier"],"limitations":["No UIKit, camera or Metal pose verification","Metadata load is precompleted","Physics scenes are controlled fixtures","No moving-carrier handhold or retail executable coverage"]]
+    for kind in [SwiftRapierWorld.BodyKind.dynamic,.kinematicPosition,.kinematicVelocity] {
+        for speed in [0.0,0.49,0.5,0.51] {
+            let carrier=try ClimbRuntimeHarness(root:root,top:1.8,depth:2,carrier:kind)
+            let body=carrier.carrierBody!;var state=carrier.world.bodyState(body)!;state.linearVelocity=SIMD3(Float(speed),0,0)
+            precondition(carrier.world.setBodyState(state,for:body))
+            if kind == .kinematicPosition {
+                precondition(carrier.world.setNextKinematicPose(body,position:state.position+SIMD3(Float(speed/60),0,0)))
+                carrier.world.step()
+            }
+            let measured=simd_length(SIMD3<Double>(carrier.world.bodyState(body)!.linearVelocity))
+            precondition(abs(measured-speed)<0.00001,"Carrier fixture did not establish requested velocity")
+            _ = carrier.frame(1/60)
+            precondition((carrier.climb != nil)==(measured<0.5),"Vehicle speed admission differs: \(kind) \(speed) actual\(measured)")
+            if measured<0.5 {
+                precondition(carrier.climb?.part == .edge && carrier.firstTickCount==1,"Vehicle ledge did not enter original EDGE phase")
+                precondition(carrier.climbQueries!.find(feet:.zero,heading:0)?.vault==false,"Vehicle incorrectly gained a fixed-wall vault")
+            }
+            checks += carrier.checks+3;frames += carrier.displayFrames;physicsTicks += carrier.fixedSteps
+        }
+    }
+    // Complete vehicle tasks with the real animation/motor path. The
+    // archived controller captures the ledge in world coordinates.
+    for kind in [SwiftRapierWorld.BodyKind.dynamic,.kinematicPosition,.kinematicVelocity] {
+        for hz in [30,60,120] {for top:Float in [1.8,2.7] {
+            let carrier=try ClimbRuntimeHarness(root:root,top:top,depth:2,carrier:kind)
+            carrier.jumpHeld=true
+            var completed=false
+            for _ in 0..<(hz*8) {
+                _ = carrier.frame(1/Double(hz))
+                if carrier.completedFeet != nil {
+                    precondition(carrier.climb==nil && carrier.completedPart == .stand,"Vehicle climb did not finish STAND")
+                    precondition(!carrier.seen.contains(NativeClimbController.Part.vault.rawValue),"Vehicle climb incorrectly vaulted")
+                    completed=true;break
+                }
+            }
+            precondition(completed,"Vehicle climb completion timed out")
+            checks += carrier.checks+3;frames += carrier.displayFrames;physicsTicks += carrier.fixedSteps
+            reports.append(["kind":"vehicle-stand","bodyKind":kind.rawValue,"height":top,"hz":hz,"steps":carrier.fixedSteps,"parts":carrier.seen.sorted()])
+        }}
+    }
+    let report:[String:Any]=["authority":"Actual current Renderer methods + real local animation/native character/core; actual archived entry predicate; not retail GTA replay","checks":checks,"displayFrames":frames,"physicsTicks":physicsTicks,"cases":reports,"additionalScenarios":["cancel-pending-input","air-grab-every-second-tick","slow-vehicle-admission","strict-half-unit-speed-boundary","nonfixed-vault-rejection","entry-mode-guards","vehicle-climb-completion"],"limitations":["No UIKit, camera or Metal pose verification","Metadata load is precompleted","Physics scenes are controlled fixtures","Vehicle climb captures the admission ledge in world space like the archived controller; no entity-relative moving handhold or retail executable coverage"]]
     try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:root.appendingPathComponent("local-only/research/climbing/runtime-report.json"))
     print("PASS current Renderer climb runtime:",checks,"checks,",frames,"display frames,",physicsTicks,"native physics ticks; real local clips",neutral.skeletalLibrary!.clipCount)
  }

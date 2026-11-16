@@ -65,6 +65,26 @@ final class SupportRuntime {
    check(character.state.feet==saved && !character.movementAvailable,"Missing terrain replayed carry or gameplay input")
    _ = app.tick(jump:6.07)
    check(!support.riding && character.state.rising>0,"Jump launch retained vehicle attachment")
+   // The ordinary support task must relinquish both display and network
+   // attachment when another gameplay owner takes control.
+   for mode in ["climb","swim","flight","death","drive"] {
+    app.sync("truck",model:"403")
+    let body=ground.supportFrames().first!,origin=body.position+SIMD3(0,8,0)
+    let down=scene.treadRay(body:body.body,origin:origin,distance:20)!
+    character.reset(feet:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(origin-SIMD3(0,down-0.02,0))),grounded:true)
+    for _ in 0..<5{_ = app.tick()}
+    check(support.riding,"Task transition fixture did not acquire vehicle")
+    switch mode {
+    case "climb":app.climb=1
+    case "swim":app.swimController.on=true
+    case "flight":app.personalFlight.on=true
+    case "death":app.health=0
+    default:app.driving=true
+    }
+    _ = app.tick()
+    check(!support.riding && character.supportFeet==nil && app.footWireSupport==nil,"New gameplay owner retained old support: \(mode)")
+    app.climb=nil;app.swimController.on=false;app.personalFlight.on=false;app.health=100;app.driving=false
+   }
    character.reset(feet:SIMD3(20,20,10));check(!support.riding && character.supportFeet==nil && !character.supportAfloat,"Teleport retained support presentation")
    check(app.footWireSupport==nil,"Teleport retained network support attachment")
    // Source tumble selection and momentum are dispatched by the actual

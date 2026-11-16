@@ -953,3 +953,25 @@ all five Apple Swift/C/Rust ABI links pass. The six new/expanded support gates
 retain their own reference, source and runtime limits. No original game data
 is included in the public source release; original retail, rendered scenes,
 physical input and iPhone performance still require separate acceptance.
+
+### Core91 — eligible vehicle ledges and support handoffs
+
+The existing finder already checks source vehicle speed/clearance, but native
+Renderer rejected every nonfixed ledge afterwards. Executing the actual
+archived entry predicate confirms that eligible vehicle ledges are accepted.
+The expanded native regression reproduces the old rejection before removing
+that extra guard. It now passes21,269 checks, including full low/high vehicle
+climbs across three body kinds and three display rates. Support handoffs to
+climb/swim/flight/death/driving add50 checks to that separate runtime gate.
+
+[Core91 evidence](CORE_CLIMB_ADMISSION_91.md) retains the distinction between
+world-space ledge snapshots and still-unimplemented entity-relative handholds.
+It also records the corrected position-kinematic velocity fixture. Full frozen
+regression and native build acceptance are recorded separately.
+
+Core91 final acceptance passes **94/94 gates**, captured sources unchanged, and
+Release Simulator plus unsigned generic iPhone builds91. Only the bundle
+version and one extra Renderer admission guard differ in App source from
+accepted Core90. The unchanged bridge/header/core retains the prior five-link
+Apple ABI evidence; Core91 builds also link the real platform libraries.
+Retail/device/rendered acceptance remains open.

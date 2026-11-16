@@ -41,6 +41,7 @@ def main():
  source+='\n'+(ROOT/'smoke_native_climb_runtime.swift').read_text().replace('// ACTUAL_RENDERER_METHODS',extracted)
  evidence_directory=ROOT/'local-only/research/climbing'
  evidence_directory.mkdir(parents=True,exist_ok=True)
+ subprocess.run(['node',str(ROOT/'smoke_native_climb_entry.js'),str(evidence_directory/'entry-reference.json')],cwd=ROOT,check=True)
  (evidence_directory/'runtime-source.swift').write_text(source)
  with tempfile.TemporaryDirectory(prefix='zgtasa-climb-runtime-') as temporary:
   work=Path(temporary);(work/'main.swift').write_text(source)
