@@ -779,6 +779,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func receiveHit(_ hit:NativeIncomingHit) {
         guard hit.wasAlive,health>0 || hit.authoritativeHealth==0 else{return}
         prepareFootAnimation()
+        if hit.parried {
+            if !driving,health>0 {footAnimator?.parry()}
+            return
+        }
         let target=SIMD3<Double>(SwiftRapierWorld.gtaToRapier(camera))
         let source=hit.source.map{SIMD3<Double>(SwiftRapierWorld.gtaToRapier($0))}
         let actor=footAnimator != nil

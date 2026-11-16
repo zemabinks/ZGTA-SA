@@ -999,3 +999,18 @@ native/backend transport passes13 client and10 authority/legacy checks. The
 unchanged native bridge/header/core retains Core90's five-link Apple ABI
 evidence, and both Core92 builds link their actual platform libraries.
 Original retail, rendered scenes, physical input and device FPS remain open.
+
+
+##2026-11-16 — Core93 front blocking and hit-event ownership
+
+The blocking pose and independent damage authority disagreed. Added an
+owner-profile-based strict front block before armour/health subtraction and
+wired accepted parry feedback to the real local animator. A distinct hit event
+sequence prevents unchanged-health blocks from being lost while rejecting
+duplicate/stale events and resetting ownership on reconnect.
+
+Focused actual archived decisions, native animation/motor and actual native
+HTTP/WebSocket/server plus legacy-shaped defence pass within their documented
+boundaries. Final acceptance passes99/99 gates, source unchanged, plus both Release
+Simulator and unsigned iPhone builds93. See
+[front melee blocking](CORE_MELEE_PARRY_93.md) for scope and open limits.

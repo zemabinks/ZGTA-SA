@@ -265,7 +265,26 @@ function create(catalog = {}, options = {}) {
     catalog: {items, shops, armourID}, SHOP_RADIUS, MAX_AMMO};
 }
 
+// Independent decision rule. Extracted weapon profiles remain owner-local.
+// Heading is the browser wire heading; GTA horizontal axes are X/Y.
+function createParry(profiles = []) {
+  const weapons = new Map((Array.isArray(profiles) ? profiles : []).filter(row =>
+    Number.isInteger(row?.id) && row.id >= 0 && row.id <= 15).map(row => [row.id,row]));
+  return function parries(weapon, defenderWeapon, state, attacker, defender) {
+    if (weapon === 9 || !weapons.has(weapon) || weapons.get(defenderWeapon)?.blocks !== true ||
+        state?.walking !== true || !Number.isInteger(state.act) || (state.act & 63) !== 28 ||
+        (state.down ?? 0) !== 0 || !Number.isFinite(state.heading) ||
+        ![attacker?.x,attacker?.y,defender?.x,defender?.y].every(Number.isFinite)) return false;
+    // Preserve the source physics-axis subtraction, including signed zero
+    // when attacker and defender occupy exactly the same horizontal point.
+    const dz = -attacker.y-(-defender.y);
+    const angle = Math.atan2(-(attacker.x-defender.x),-dz)-state.heading;
+    const tau = 2*Math.PI, wrapped = ((angle+Math.PI)%tau+tau)%tau-Math.PI;
+    return Math.abs(wrapped) < Math.PI/4;
+  };
+}
+
 let catalog = {};
 try { catalog = JSON.parse(fs.readFileSync(CATALOG_FILE, 'utf8')); }
 catch (error) { if (error.code !== 'ENOENT') throw error; }
-module.exports = Object.assign(create(catalog), {create});
+module.exports = Object.assign(create(catalog), {create,createParry});

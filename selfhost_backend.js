@@ -7,6 +7,10 @@ const OptionalDiscord = require('./optional_discord');
 const weaponInventory = require('./weapon_inventory');
 const worldCollision = require('./world_collision');
 const LocalProjectiles = require('./local_projectiles');
+let meleeProfiles=[];
+try {meleeProfiles=JSON.parse(fs.readFileSync(path.join(__dirname,'local-only/native/melee.json'),'utf8')).weapons;}
+catch(error){if(error.code!=='ENOENT')console.error('Could not load melee profiles:',error.message);}
+const parriesMelee=weaponInventory.createParry(meleeProfiles);
 // Optional imported geometry enables this core feature. Source-only/older
 // installations continue running without claiming coupling support.
 let couplingCatalog=null;
@@ -876,11 +880,18 @@ class LocalGame {
     peer.lastHitAt = now;
     const victim = target.player;
     const beforeHealth=victim.health;
-    const absorbed = Math.min(victim.armour, damage);
-    victim.armour -= absorbed;
-    victim.health = Math.max(0, victim.health - (damage - absorbed));
-    target.send({t: 'hit', from: String(peer.player.number), w: weapon, d: damage,
-      ...(target.healthAckEnabled ? {fromAt:[from.x,from.y,from.z],beforeHealth}: {})});
+    const defenderWeapon=target.inventoryEnabled ? weaponInventory.ensure(victim).selected:target.state?.weapon;
+    const parried=parriesMelee(weapon,defenderWeapon,target.state,from,to);
+    if (!parried) {
+      const absorbed = Math.min(victim.armour, damage);
+      victim.armour -= absorbed;
+      victim.health = Math.max(0, victim.health - (damage - absorbed));
+    }
+    // Allocate once per accepted event, before send: retransmitting an event
+    // must retain its identity even when its health revision did not change.
+    const feedback=target.healthAckEnabled ? {fromAt:[from.x,from.y,from.z],beforeHealth,parried,
+      hitAck:{connection:target.inventoryConnection,sequence:target.hitSequence=(target.hitSequence || 0)+1}}:{};
+    target.send({t: 'hit', from: String(peer.player.number), w: weapon, d: damage,...feedback});
     this.setWanted(peer.player, Math.max(1, peer.player.wanted + 1));
     if (victim.health === 0) {
       victim.deaths = money(victim.deaths + 1);

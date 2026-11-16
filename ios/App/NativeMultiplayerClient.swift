@@ -7,11 +7,13 @@ import CoreFoundation
 struct NativeIncomingHit {
     let weapon:Int,damage:Double,sourceID:String?,source:SIMD3<Float>?,piece:Int,quiet:Bool,wasAlive:Bool
     let authoritativeHealth:Int?
+    let parried:Bool
     init?(_ packet:[String:Any],fallbackSource:SIMD3<Float>?=nil,wasAlive:Bool=true) {
         guard let amount=packet["d"] as? NSNumber,CFGetTypeID(amount) != CFBooleanGetTypeID(),amount.doubleValue.isFinite,amount.doubleValue>0 else{return nil}
         let weapon=NativeHealthPrediction.integer(packet["w"]) ?? 0
         guard (0...255).contains(weapon),packet["w"]==nil || NativeHealthPrediction.integer(packet["w"]) != nil else{return nil}
         self.weapon=weapon;damage=amount.doubleValue
+        parried=(packet["parried"] as? NSNumber).map{CFGetTypeID($0)==CFBooleanGetTypeID() && $0.boolValue} ?? false
         sourceID=(packet["from"] as? String).flatMap{$0.isEmpty || $0.utf8.count>64 ? nil:$0}
         var point:SIMD3<Float>?
         if let raw=packet["fromAt"] as? [NSNumber],raw.count==3,
@@ -218,6 +220,7 @@ final class NativeMultiplayerClient {
     private var healthPrediction=NativeHealthPrediction()
     private var deliveredRespawnSequence=0
     private var deliveredHitRevision:Int?
+    private var deliveredHitSequence:Int?
     private var resynchronizingInventory = false
     private var announcedInventoryConnection: String?
     var inventoryConnection: String? { shotSequence.connection }
@@ -329,7 +332,7 @@ final class NativeMultiplayerClient {
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         healthPrediction.disconnect()
         deliveredRespawnSequence=0
-        deliveredHitRevision=nil
+        deliveredHitRevision=nil;deliveredHitSequence=nil
         couplingAcknowledgements=false;couplingRevision=nil;couplingLinks=[]
         couplingIssued=0;couplingProcessed=0;pendingCouplings.removeAll()
         onInventoryConnection?(nil)
@@ -612,14 +615,29 @@ final class NativeMultiplayerClient {
         }
         return true
     }
+    private func hitStatus(_ message:[String:Any])->String {
+        if health==0{return "DEFEATED — RESPAWN TO CONTINUE"}
+        return (message["parried"] as? Bool)==true ? "MELEE HIT BLOCKED":"HIT — \(health) HEALTH REMAINING"
+    }
     private func deliverIncomingHit(_ message:[String:Any],wasAlive:Bool) {
         guard isReady else{return}
         let source=(message["from"] as? String).flatMap{players[$0]?.position}
         guard let hit=NativeIncomingHit(message,fallbackSource:source,wasAlive:wasAlive) else{return}
         if healthPrediction.active {
-            guard let ack=message["healthAck"] as? [String:Any],let revision=NativeHealthPrediction.integer(ack["revision"]),
-                  deliveredHitRevision.map({revision>$0}) ?? true else{return}
-            deliveredHitRevision=revision
+            if let raw=message["hitAck"] {
+                guard let ack=raw as? [String:Any],let connection=ack["connection"] as? String,
+                      connection==healthPrediction.connection,
+                      let sequence=NativeHealthPrediction.integer(ack["sequence"]),sequence>0,
+                      deliveredHitSequence.map({sequence>$0}) ?? true else{return}
+                deliveredHitSequence=sequence
+            } else {
+                // Compatibility with earlier independent servers. Once a
+                // sequence is observed, an unsequenced replay cannot downgrade it.
+                guard deliveredHitSequence==nil,let ack=message["healthAck"] as? [String:Any],
+                      let revision=NativeHealthPrediction.integer(ack["revision"]),
+                      deliveredHitRevision.map({revision>$0}) ?? true else{return}
+                deliveredHitRevision=revision
+            }
         }
         onIncomingHit?(hit)
     }
@@ -740,7 +758,7 @@ final class NativeMultiplayerClient {
                     } else {
                         healthPrediction.begin(connection:connection,health:hp,armour:protected,revision:revision,processed:processed)
                         deliveredRespawnSequence=processed
-                        deliveredHitRevision=nil
+                        deliveredHitRevision=nil;deliveredHitSequence=nil
                     }
                     health=healthPrediction.health;armour=healthPrediction.armour
                 } else if healthPrediction.connection != nonce {
@@ -814,7 +832,7 @@ final class NativeMultiplayerClient {
             if healthPrediction.active {
                 if applyAcknowledgedVitals(message),isReady {
                     deliverIncomingHit(message,wasAlive:wasAlive)
-                    if isReady,transportGeneration==hitEpoch {onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE":"HIT — \(health) HEALTH REMAINING")}
+                    if isReady,transportGeneration==hitEpoch {onStatus?(health == 0 ? "DEFEATED — RESPAWN TO CONTINUE":hitStatus(message))}
                 }
                 break
             }

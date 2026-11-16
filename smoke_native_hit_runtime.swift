@@ -64,6 +64,28 @@
    flying.receiveHit(event(24,150,SIMD3(-2,0,0),health:0))
    check(!flying.personalFlight.on,"Death retained flight ownership")
   }
+  for rate in [20,30,60,90,120] {
+   let app=make();app.equippedWeapon=0;app.footAnimator!.arm(app.footWeaponDefinitions[0]);app.weaponTriggerHeld=true
+   var guardInput=NativeFootAnimation.Input();guardInput.guarding=true;guardInput.block=true
+   for _ in 0..<rate{_ = app.footAnimator!.update(delta:1/Double(rate),input:guardInput)}
+   var packet:[String:Any]=["w":0,"d":8,"beforeHealth":100,"health":100,"healthAck":["connection":"controlled"],"parried":true]
+   let parried=NativeIncomingHit(packet)!
+   check(parried.parried,"Parry feedback not decoded")
+   app.receiveHit(parried)
+   check(app.health==100 && app.weaponTriggerHeld && !app.footAnimator!.stunned,"Parry cancelled input, damaged health or stunned")
+   let definition=app.footWeaponDefinitions[0]!,name=definition.clip("guardBlock")!
+   var elapsed=0.0
+   for _ in 0..<rate/2 {
+    let dt=1/Double(rate);elapsed += dt
+    let frame=app.footAnimator!.update(delta:dt,input:guardInput)
+    let pose=frame.blends.first{$0.clip==name}!
+    let offset=elapsed<0.3 ? (1-abs(1-elapsed/0.3*2))*(definition.guardTo!-definition.guardAt!):0
+    check(abs(pose.time-(definition.guardAt!+offset))<1e-10,"Parry block clip clock differs at \(rate)Hz")
+    check(frame.shots.isEmpty && app.footAnimator!.reportedAction==28,"Parry emitted attack or lost block tag")
+   }
+   packet["parried"]=1
+   check(!NativeIncomingHit(packet)!.parried,"Numeric parry flag accepted as Boolean")
+  }
   for (index,kind) in ["koSkidBack","koSpinR","koSkidFront","koSpinL","floorHit","floorHitF"].enumerated(){
    let app=make();check(app.footAnimator!.knock(kind),"Knock fixture rejected valid action")
    check(app.footWireDown==index+1,"Outgoing knock tag differs from original order")
