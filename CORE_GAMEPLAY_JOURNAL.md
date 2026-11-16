@@ -1065,3 +1065,38 @@ Earlier intermediateCore97's one integration compile timeout is retained in its
 raw report; the same integration passes442checks in the final complete suite.
 No intermediate94–97 source release was made. All original assets, references,
 captures and outputs remain local. Retail1:1/device performance is not claimed.
+
+## Core99 — driver exit placement and delayed geometry ownership
+
+Replaced fixed/animation-only exit placement with the archived search policy
+over original imported hulls, actual native ground/reach queries and foot
+capsules. Missing cells defer ownership, health effects and exit packets; stale
+retry identity and changed wreck causes are handled before release. See
+[CORE_VEHICLE_EXIT_99.md](CORE_VEHICLE_EXIT_99.md) for evidence and limits. The
+new real-Rapier runtime and archived planner gates join the frozen regression
+suite. Retail phone capture remains pending while the owner is away.
+
+Investigated reSA/open.mp as requested; recorded current lack of native legacy
+protocol support and a scoped compatibility path in
+[SERVER_COMPATIBILITY.md](SERVER_COMPATIBILITY.md). No third-party engine code
+or binaries were imported.
+
+## Core100 — separate pedestrian and chassis exit facing
+
+The completed native exit could face away from both the chassis and resumed
+camera. Preserve that actor facing in the immediate exit packet while keeping
+the parked body's angles. Real native/server/legacy-observer tests cover nine
+first-packet cases; the real Renderer/controller runtime now imports the
+production direction property and checks three different angle roles. See
+[CORE_EXIT_FACING_100.md](CORE_EXIT_FACING_100.md). No original-site/SA-MP/open.mp
+join or retail-gameplay parity is claimed by this change.
+
+Final combined acceptance passes110/110 frozen-source regression gates and
+Release100 Simulator/generic unsigned iPhone builds. Actual UIKit/Metal guest
+testing completes taxi entry/exit,5.33m walking, jetpack takeoff/turn/descent and
+landing. The first exit packet and subsequent idle samples retain the actor's
+facing separately from the parked chassis. The airborne/grounded wire boundary
+has0rad heading change at251ms sampling. Six full-screen captures were exported
+and the exit/hover/landing scenes inspected. The isolated QA server and
+Simulator were shut down afterward. No physical-device or retail comparison,
+rendered browser-peer test or external-server native join is established.

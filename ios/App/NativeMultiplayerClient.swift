@@ -670,8 +670,12 @@ final class NativeMultiplayerClient {
     }
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
-                  vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "",vehicleWork:Int?=nil) {
+                  vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "",vehicleWork:Int?=nil,
+                  footHeading:Float?=nil) {
         guard isReady else { return }
+        // A completed exit can face away from the parked chassis. Keep that
+        // actor pose independent of both the body and the resumed camera.
+        let facing=footHeading.flatMap{$0.isFinite ? $0:nil} ?? heading
         var parked=vehicle;parked.position=position;parked.heading=heading;parked.pitch=pitch;parked.roll=roll
         if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
         parked.health=vehicleHealth;parked.damage=vehicleDamage
@@ -684,7 +688,7 @@ final class NativeMultiplayerClient {
         send(["t": "me", "walking": true, "skin": 7,
               "vehicle": vehicle.id, "car": vehicle.code,
               "x": Double(feet.x), "y": Double(feet.y), "z": Double(feet.z),
-              "heading": -Double(heading), "health": health, "armour": armour,
+              "heading": -Double(facing), "health": health, "armour": armour,
               "parked":parkedState])
     }
 

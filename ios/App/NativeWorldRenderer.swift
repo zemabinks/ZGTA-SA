@@ -227,6 +227,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var ownRiderPrevious:NativeSkeletalActor.Pose?
     private var ownRiderSide = -1
     private var ownRiderFeet:(position:SIMD3<Float>,heading:Float)?
+    private var pendingExitPlacement:(()->Void)?
+    private var vehicleExitSerial:UInt64=0
     private var pendingVehicleExit:(()->Void)?
     private var riderDoorHolds:[String:[Int:Double]]=[:]
     private var remoteRiderPlayback:[String:(String,NativeRiderPlayback)]=[:]
@@ -1796,7 +1798,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         personalFlight.stop()
         swimController.stop();swimming = false;underwater = false
         footAnimator?.rest(cut:true);footAnimationFrame = nil;footLaunchRemaining = nil
-        ownRiderAnimation = nil;ownRiderPlayback=nil;ownRiderCapture=nil;ownRiderPrevious=nil;ownRiderFeet=nil;pendingVehicleExit=nil
+        ownRiderAnimation = nil;ownRiderPlayback=nil;ownRiderCapture=nil;ownRiderPrevious=nil;ownRiderFeet=nil;pendingVehicleExit=nil;pendingExitPlacement=nil;vehicleExitSerial &+= 1
         character?.setActive(false); characterActive = false; pendingNativeJump = 0
         groundVehicle?.exit()
         entryOrigin = camera
@@ -1840,12 +1842,49 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// Keep ownership while the public get-out/door-close queue plays. Forced
     /// exits may still call exitVehicle directly (death/teleport/disconnect).
     @discardableResult func beginVehicleExit(onReady:@escaping()->Void)->Bool {
-        guard driving,pendingVehicleExit==nil,let playback=ownRiderPlayback,playback.inside else{return pendingVehicleExit != nil}
+        guard driving,pendingVehicleExit==nil,pendingExitPlacement==nil,let playback=ownRiderPlayback,playback.inside else{return pendingVehicleExit != nil || pendingExitPlacement != nil}
         pendingVehicleExit=onReady;ownRiderFeet=nil
         let part=riderDefinitions?.models[activeVehicleModel]?.seats.first?.door
         let leaveOpen=part.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
         playback.leave(side:ownRiderSide,leaveOpen:leaveOpen)
         return true
+    }
+
+    /// Preserve identity across an asynchronous geometry load. An old exit
+    /// cannot release a replacement/re-entered vehicle, even with the same ID.
+    func deferVehicleExit(_ retry:@escaping()->Void) {
+        let serial=vehicleExitSerial
+        pendingExitPlacement = { [weak self] in
+            guard let self,self.driving,self.vehicleExitSerial==serial else{return}
+            retry()
+        }
+    }
+    private func resolveVehicleExit(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement {
+        guard let groundVehicle,groundVehicle.active,let character else{return .ready(wanted)}
+        let seat=riderDefinitions?.models[activeVehicleModel]?.seats.first?.position.map{SIMD3<Double>($0)}
+        func ray(_ p:SIMD3<Double>,_ way:SIMD3<Double>,_ distance:Double)throws->Double? {
+            switch worldRay(from:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(p)),
+                            direction:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(way)),distance:Float(distance),groups:0xffff0001) {
+            case .clear:return nil
+            case .hit(let hit):return Double(hit.distance)
+            case .unavailable:throw NativeVehicleExitPlanner.QueryError.unavailable
+            }
+        }
+        do {
+            let feet=try groundVehicle.exitPosition(wanted:wanted,seat:seat,side:ownRiderSide,
+                below:{try ray($0,SIMD3(0,-1,0),$1)},along:ray,
+                fits:{p,widening,body in
+                    // A capsule can cross a cell boundary even when its centre
+                    // remains in a loaded cell. Request all four corners.
+                    let radius=0.35+widening
+                    for x in [-radius,radius] {for z in [-radius,radius] {
+                        _ = try ray(p+SIMD3(x,0,z),SIMD3(0,1,0),0.001)
+                    }}
+                    return character.motor.fits(p,widening:widening,excludingBody:body)
+                })
+            guard let feet else{return .unavailable}
+            return .ready(feet)
+        }catch{return .unavailable}
     }
 
     private func dispatchOwnedVehicleExit() {
@@ -1856,20 +1895,34 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if groundVehicle?.lostInWater == true {
             onVehicleLostInWater?();return
         }
+        if let retry=pendingExitPlacement {
+            pendingExitPlacement=nil;DispatchQueue.main.async(execute:retry);return
+        }
         if health>0,ownRiderPlayback?.inside != false,(vehicleKind=="bike" || vehicleKind=="bicycle"),
            let event=groundVehicle?.takeBikeEjection(),let onBikeEjection {onBikeEjection(event)}
     }
 
-    func exitVehicle(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false) {
-        let forcedFeet:SIMD3<Float>? = (ejection != nil || wrecked || water) ? { () -> SIMD3<Float> in
+    @discardableResult
+    func exitVehicle(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false)->Bool {
+        guard driving else{return true}
+        let wrecked=wrecked || groundVehicle?.damageController?.state.wrecked == true
+        let water=water || groundVehicle?.lostInWater == true
+        let forced=ejection != nil || wrecked || water
+        let exactFeet=ownRiderPlayback?.state == .stood ? ownRiderFeet:nil
+        let wanted:SIMD3<Float>? = forced ? { () -> SIMD3<Float> in
             if let transform=groundVehicle?.modelTransform,
                let beside=ownRiderPlayback?.beside(side:ownRiderSide,model:transform){return beside}
             return ownRiderFeet?.position ?? camera
-        }():nil
+        }():exactFeet?.position
+        let placedFeet:SIMD3<Float>?
+        switch resolveVehicleExit(wanted:wanted) {
+        case .unavailable:return false
+        case .ready(let feet):placedFeet=feet
+        }
+        let forcedFeet=forced ? placedFeet:nil
+        pendingVehicleExit=nil;pendingExitPlacement=nil;vehicleExitSerial &+= 1
         vehicleCoupling?.setOwnedVehicle(nil)
         ownCameraVisibility.reset()
-        let exactFeet=ownRiderPlayback?.state == .stood ? ownRiderFeet:nil
-        pendingVehicleExit=nil
         let floor = collision?.height(x: camera.x, y: camera.y,
                                       near: camera.z, maxDrop: 1000)
         let falling = floor.map { camera.z > $0 + 3 } ?? false
@@ -1891,9 +1944,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         activeVehicleModel = ""
         activeHandling = nil
         vehicleKind = "car"
-        if let exactFeet {
-            camera=exactFeet.position;heading=exactFeet.heading;actorHeading=exactFeet.heading
-            verticalSpeed=falling ? -1:0
+        if let placedFeet {
+            camera=placedFeet
+            if let exactFeet {heading=exactFeet.heading;actorHeading=exactFeet.heading}
+            else {actorHeading=heading}
+            verticalSpeed=0
+            character?.reset(feet:camera,active:true,grounded:false);characterActive=true
+            if !forced {footAnimator?.resetMovementTask()}
         } else {
             camera.x += cos(heading) * 2.5
             camera.y -= sin(heading) * 2.5
@@ -1918,10 +1975,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     footDeathKind="koFront";pendingFootHit=nil;health=0;onLocalHealth?(0)
                     footAnimator?.die("koFront")
                 } else if footAnimator?.dead != true {footAnimator?.die(footDeathKind ?? "koFront")}
-                return
+                return true
             }
-            if water {footAnimator?.resetMovementTask();return}
-            guard let ejection else{return}
+            if water {footAnimator?.resetMovementTask();return true}
+            guard let ejection else{return true}
             footLocomotion.setKnockMomentum(ejection.velocity)
             let damage=Int(min(200,max(0,ceil(ejection.force*0.05))))
             if damage>0 {
@@ -1933,6 +1990,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 _ = footAnimator?.knock(["koSkidBack","koSpinR","koSkidFront","koSpinL"][side])
             } else {footAnimator?.die("koFront")}
         }
+        return true
     }
 
     /// Despawning/losing ownership must not manufacture a parked body or play
@@ -1943,7 +2001,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         driving=false;currentVehicleID=nil;drivingSpeed=0;flightVerticalSpeed=0
         vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleBodyPose=nil
         activeVehicleModel="";activeHandling=nil;vehicleKind="car"
-        pendingVehicleExit=nil;ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
+        pendingVehicleExit=nil;pendingExitPlacement=nil;vehicleExitSerial &+= 1
+        ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
         riderDoorHolds.removeAll()
     }
 

@@ -44,6 +44,7 @@ final class Renderer {
  var driving=true,currentVehicleID:String?="old-car",drivingSpeed:Float=25,flightVerticalSpeed:Float=4
  var vehiclePitch:Float=0.2,vehicleFallbackRoll:Float=0.1,activeModelOrigin:Float=1
  var pendingVehicleBodyPose:Int?=1,activeVehicleModel="410",activeHandling:Int?=1,vehicleKind="car"
+ var pendingExitPlacement:(()->Void)?={},vehicleExitSerial:UInt64=0
  var pendingVehicleExit:(()->Void)?={},ownRiderPlayback:Int?=1,ownRiderPrevious:Int?=1,ownRiderCapture:Int?=1,ownRiderFeet:Int?=1
  var riderDoorHolds=["old-car":1],remotePlayers=[1],remoteVehicles=[Vehicle(id:"old-car"),Vehicle(id:"parked")],hasParachute=true
  var camera=SIMD3<Float>(12,34,56),objective:SIMD2<Float>?=SIMD2(1,2)
@@ -58,7 +59,7 @@ final class Renderer {
  func synchronizeProjectiles(_ rows:[Int]){projectileRows=rows}
  func cancelReloadAnimation(){reloadCancelled=true}
  func teleport(x:Float,y:Float,z:Float){camera=SIMD3(x,y,z);resets+=1}
-'''+method(renderer,'    func setVehicleCouplingConnection(')+method(renderer,'    private func discardOwnedVehicle()')+method(renderer,'    @discardableResult func removeVehicle(')+method(renderer,'    private func clearMultiplayerPresentation()')+method(renderer,'    func resetMultiplayerSession()')+r'''
+'''+method(renderer,'    func setVehicleCouplingConnection(')+method(renderer,'    private func discardOwnedVehicle()')+method(renderer,'    func deferVehicleExit(')+method(renderer,'    @discardableResult func removeVehicle(')+method(renderer,'    private func clearMultiplayerPresentation()')+method(renderer,'    func resetMultiplayerSession()')+r'''
 }
 struct RawKey:Hashable {let rawValue:Int}
 final class Text {var text=""}
@@ -90,6 +91,7 @@ func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}
 NativeMenuKeyLatch.reset()
 let game=Game(),oldPosition=game.renderer!.camera
 var delayedExit=false;game.renderer!.pendingVehicleExit={delayedExit=true}
+var delayedPlacement=false;game.renderer!.deferVehicleExit{delayedPlacement=true};let queuedPlacement=game.renderer!.pendingExitPlacement
 game.connectionChanged(.reconnecting)
 check(!game.gameplay.ready && game.currentVehicle==nil && !game.drivingControls,"loss clears gameplay/driver ownership")
 check(game.renderer!.camera==oldPosition,"loss manufactured a car-exit offset")
@@ -99,6 +101,7 @@ check(game.renderer!.couplingConnection==nil && game.renderer!.couplingSnapshot=
 check(game.renderer!.vehicleCoupling!.owner==nil && !game.renderer!.groundVehicle!.workingTowed,"loss retains tow ownership or working state")
 check(Array(ownerCalls.prefix(3))==["coupling-reset","coupling-owner","body-exit"],"joints/ownership must be revoked before body removal")
 check(game.renderer!.pendingVehicleExit==nil && !delayedExit,"queued old rider exit survives")
+queuedPlacement?();check(game.renderer!.pendingExitPlacement==nil && !delayedPlacement,"queued geometry exit survives disconnect")
 check(game.renderer!.remotePlayers.isEmpty && game.renderer!.remoteVehicles.isEmpty && game.renderer!.projectileRows.isEmpty,"old remote/projectile world survives")
 let world=game.renderer!
 check(world.vehicleRigStates.isEmpty && world.vehicleRigTimes.isEmpty && world.vehicleRigSpins.isEmpty,"old vehicle presentation survives new peer")
@@ -130,7 +133,9 @@ check(gone.renderer!.vehicleCoupling!.removed==["parked"],"parked deletion does 
 check(gone.currentVehicle != nil && gone.renderer!.driving && gone.renderer!.groundVehicle!.active,"parked deletion revoked unrelated local driver")
 check(gone.renderer!.groundVehicle!.otherIDs==["old-car"] && gone.renderer!.remoteVehicles.count==1,"explicit deletion failed to remove parked prediction")
 check(gone.radio.stops==0 && gone.controlResets==0,"parked deletion reset local input/audio")
+var despawnExit=false;gone.renderer!.deferVehicleExit{despawnExit=true};let despawnQueued=gone.renderer!.pendingExitPlacement
 gone.vehicleRemoved("old-car")
+despawnQueued?();check(!despawnExit && gone.renderer!.pendingExitPlacement==nil,"queued geometry exit survives owned despawn")
 check(gone.renderer!.vehicleCoupling!.removed==["parked","old-car"] && gone.renderer!.vehicleCoupling!.owner==nil,"owned deletion leaves a coupling claim")
 check(gone.currentVehicle==nil && !gone.renderer!.driving && gone.renderer!.currentVehicleID==nil,"despawn retained local ownership")
 check(gone.renderer!.groundVehicle!.exits==1 && !gone.renderer!.groundVehicle!.active,"despawn retained owned body")

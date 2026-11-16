@@ -4,7 +4,7 @@ final class ExitOwner {func setOwnedVehicle(_ id:String?){};func reset(){}}
 final class ExitCollision {func height(x:Float,y:Float,near:Float,maxDrop:Float=1000)->Float?{0}}
 final class ExitPlayback {enum State{case stood,seated};var state=State.seated;var chosen:SIMD3<Float>?;var inside:Bool{state == .seated};func beside(side:Int,model:simd_float4x4)->SIMD3<Float>?{chosen}}
 struct ExitFeet {var position:SIMD3<Float>;var heading:Float}
-final class ExitCamera {func resumeFoot(from:Int?,fallbackHeading:Float,fallbackPitch:Float)->SIMD2<Float>{SIMD2(fallbackHeading,fallbackPitch)}}
+final class ExitCamera {var resumedHeading:Float?;func resumeFoot(from:Int?,fallbackHeading:Float,fallbackPitch:Float)->SIMD2<Float>{SIMD2(resumedHeading ?? fallbackHeading,fallbackPitch)}}
 final class ExitPedestrian {func perform(_ clip:String,duration:Double){}}
 struct ExitVehicle {var id:String;var code:String;var work=0}
 final class BikeExitRenderer {
@@ -12,6 +12,7 @@ final class BikeExitRenderer {
  let ownCameraVisibility=ExitOwner(),vehicleCoupling:ExitOwner?=ExitOwner(),gameCamera=ExitCamera(),pedestrian=ExitPedestrian()
  var ownRiderPlayback:ExitPlayback?=ExitPlayback(),ownRiderFeet:ExitFeet?
  var ownRiderSide = -1
+ var pendingExitPlacement:(()->Void)?,vehicleExitSerial:UInt64=0
  var pendingVehicleExit:(()->Void)?
  let collision:ExitCollision?=ExitCollision()
  var camera=SIMD3<Float>(10,20,2),heading:Float=0.7,actorHeading:Float=0.7,verticalSpeed:Float=0
@@ -33,8 +34,10 @@ final class BikeExitRenderer {
  var cancelled=false
  var position:SIMD3<Float>{camera}
  var vehicleWirePosition:SIMD3<Float>{groundVehicle!.bodyPosition}
- var direction:Float{heading};var vehicleNose:Float{vehiclePitch};var vehicleRoll:Float{vehicleFallbackRoll}
+ var direction:Float{driving ? heading:actorHeading};var vehicleNose:Float{vehiclePitch};var vehicleRoll:Float{vehicleFallbackRoll}
  func prepareFootAnimation(){}
+ func resolveVehicleExit(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement{.ready(wanted)}
+ func deferVehicleExit(_ retry:@escaping()->Void){pendingExitPlacement=retry}
  func cancelGameplayInput(){cancelled=true;footAnimator?.cancelInput();footAnimator?.cancelMeleeInput()}
  init(root:URL,model:String,library:NativeSkeletalAnimationLibrary,profile:NativeFootWeaponAnimation)throws {
   let fleet=NativeGroundVehicle()!;groundVehicle=fleet
@@ -50,10 +53,10 @@ final class BikeExitRenderer {
  // ACTUAL_RENDERER_EXIT
 }
 final class ExitNetwork {
- struct Packet {let feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float;let health:Int,damage:String,work:Int?}
+ struct Packet {let feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float;let health:Int,damage:String,work:Int?;let footHeading:Float?}
  var packets:[Packet]=[]
- func sendExit(_ feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float,vehicle:ExitVehicle,vehicleHealth:Int,vehicleDamage:String,vehicleWork:Int?){
-  packets.append(.init(feet:feet,parked:parked,heading:heading,pitch:pitch,roll:roll,health:vehicleHealth,damage:vehicleDamage,work:vehicleWork))
+ func sendExit(_ feet:SIMD3<Float>,parked:SIMD3<Float>,heading:Float,pitch:Float,roll:Float,vehicle:ExitVehicle,vehicleHealth:Int,vehicleDamage:String,vehicleWork:Int?,footHeading:Float?=nil){
+  packets.append(.init(feet:feet,parked:parked,heading:heading,pitch:pitch,roll:roll,health:vehicleHealth,damage:vehicleDamage,work:vehicleWork,footHeading:footHeading))
  }
 }
 enum ExitButtonState {case normal}

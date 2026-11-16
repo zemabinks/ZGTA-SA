@@ -1373,10 +1373,18 @@ final class NativeGameViewController: UIViewController {
         let parked = renderer.vehicleWirePosition, heading = renderer.direction
         let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
         let damage = renderer.vehicleDamage,work=renderer.vehicleWorkingValue,health=renderer.vehicleHealth
-        renderer.exitVehicle(ejection:ejection,wrecked:wrecked,water:water)
+        guard renderer.exitVehicle(ejection:ejection,wrecked:wrecked,water:water) else {
+            let vehicleID=currentVehicle?.id
+            renderer.deferVehicleExit { [weak self,weak renderer] in
+                guard let self,let renderer,self.renderer === renderer,self.currentVehicle?.id==vehicleID else{return}
+                self.completeVehicleExit(ejection:ejection,wrecked:wrecked,water:water)
+            }
+            return
+        }
         if let currentVehicle {
             network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
-                             vehicle: currentVehicle, vehicleHealth:health,vehicleDamage:damage,vehicleWork:work)
+                             vehicle: currentVehicle, vehicleHealth:health,vehicleDamage:damage,vehicleWork:work,
+                             footHeading:renderer.direction)
         }
         currentVehicle = nil
         vehicleButton.setTitle("ENTER CAR", for: .normal)

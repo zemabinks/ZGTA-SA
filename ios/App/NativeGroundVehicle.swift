@@ -120,6 +120,7 @@ final class NativeGroundVehicle {
             let solverGroups: UInt32
             let piece: Int
         }
+        let exitGeometry:NativeVehicleExitPlanner.Geometry?
         let configuration: NativeVehicleDynamics.Configuration
         let bikeConfiguration: NativeBikeDynamics.Configuration?
         let trainConfiguration: NativeTrainDynamics.Configuration?
@@ -194,6 +195,7 @@ final class NativeGroundVehicle {
                     front: .init(at: frontAt, radius: frontRadius), rear: .init(at: rearAt, radius: rearRadius),
                     parameters: parameters, pedalled: row["pedalled"] as? Bool ?? false)
             } else { bikeConfiguration = nil }
+            exitGeometry=NativeVehicleExitPlanner.Geometry(row)
             chassis = shapes
         }
     }
@@ -510,6 +512,18 @@ final class NativeGroundVehicle {
         }
     }
     func supports(_ model: String) -> Bool { guard let definition=definitions[model] else{return false};return definition.trainConfiguration == nil || tracks != nil }
+    func exitPosition(wanted:SIMD3<Float>?,seat:SIMD3<Double>?,side:Int,
+                      below:(SIMD3<Double>,Double)throws->Double?,
+                      along:(SIMD3<Double>,SIMD3<Double>,Double)throws->Double?,
+                      fits:(SIMD3<Double>,Double,UInt64)throws->Bool) throws -> SIMD3<Float>? {
+        guard let rigid,let state=world.bodyState(rigid),let geometry=definitions[model]?.exitGeometry else{return nil}
+        let q=state.rotation
+        let feet=try NativeVehicleExitPlanner.place(geometry:geometry,
+            pose:.init(position:SIMD3<Double>(state.position),rotation:simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))),
+            seat:seat,side:side,wanted:wanted.map{SIMD3<Double>(SwiftRapierWorld.gtaToRapier($0))},
+            below:below,along:along,fits:{try fits($0,$1,rigid)})
+        return SwiftRapierWorld.rapierToGTA(SIMD3<Float>(feet))
+    }
     func modelOrigin(_ model: String) -> Float? { definitions[model].map { Float($0.configuration.origin) } }
     func modelFlags(_ model:String)->Int {definitions[model]?.configuration.table.modelFlags ?? 0}
     func handlingFlags(_ model:String)->Int {definitions[model]?.configuration.table.flags ?? 0}
@@ -837,5 +851,143 @@ final class NativeGroundVehicle {
         let right=SIMD3(1-(yy+zz),xy+wz,xz-wy),up=SIMD3(xy-wz,1-(xx+zz),yz+wx),back=SIMD3(xz+wy,yz-wx,1-(xx+yy))
         func gta(_ v:SIMD3<Double>)->SIMD3<Float>{SIMD3(Float(v.x),Float(-v.z),Float(v.y))}
         return simd_float4x4(columns:(SIMD4(gta(right),0),SIMD4(gta(-back),0),SIMD4(gta(up),0),SIMD4(gta(position+up*origin),1)))
+    }
+}
+
+/// Driver exit placement. Geometry is imported locally; candidate selection
+/// and query ownership are independent native code. Coordinates here are the
+/// physics world's Y-up axes; geometry/seat values use the model's GTA axes.
+enum NativeVehicleExitPlanner {
+    typealias V = SIMD3<Double>
+    enum Placement {case ready(SIMD3<Float>?),unavailable}
+    enum QueryError:Error {case unavailable}
+    struct Geometry {
+        struct Sphere {let centre:V,radius:Double}
+        struct Box {let minimum:V,maximum:V}
+        let origin:Double,height:Double,minimum:V,maximum:V
+        let spheres:[Sphere],boxes:[Box]
+        init?(_ row:[String:Any]) {
+            func vector(_ value:Any?)->V? {
+                guard let a=value as? [Double],a.count==3,a.allSatisfy(\.isFinite) else{return nil}
+                return V(a[0],a[1],a[2])
+            }
+            guard let origin=row["origin"] as? Double,origin.isFinite,
+                  let height=row["height"] as? Double,height.isFinite,height>0,
+                  let bounds=row["bounds"] as? [String:Any],let box=bounds["box"] as? [String:Any],
+                  let low=vector(box["min"]),let high=vector(box["max"]),low.x<=high.x,low.y<=high.y,low.z<=high.z else{return nil}
+            var spheres:[Sphere]=[],boxes:[Box]=[]
+            if let collision=row["collision"] as? [String:Any] {
+                for r in collision["spheres"] as? [[String:Any]] ?? [] {
+                    guard let centre=vector(r["center"]),let radius=r["radius"] as? Double,radius.isFinite,radius>0 else{return nil}
+                    spheres.append(.init(centre:centre,radius:radius))
+                }
+                for r in collision["boxes"] as? [[String:Any]] ?? [] {
+                    guard let a=vector(r["min"]),let b=vector(r["max"]),a.x<=b.x,a.y<=b.y,a.z<=b.z else{return nil}
+                    boxes.append(.init(minimum:a,maximum:b))
+                }
+            }
+            if spheres.isEmpty && boxes.isEmpty {
+                guard let width=row["width"] as? Double,width.isFinite,width>0,
+                      let length=row["length"] as? Double,length.isFinite,length>0 else{return nil}
+                let wheels=row["wheels"] as? [[String:Any]] ?? []
+                let bottom=0.9*min(0.4,wheels.compactMap{$0["radius"] as? Double}.min() ?? 0.4)
+                boxes=[.init(minimum:V(-0.47*width,-0.47*length,bottom-origin),maximum:V(0.47*width,0.47*length,max(bottom+0.4,0.85*height)-origin))]
+            }
+            self.origin=origin;self.height=height;minimum=low;maximum=high;self.spheres=spheres;self.boxes=boxes
+        }
+    }
+    struct Pose {var position:V,rotation:simd_quatd}
+    private struct Candidate {var start:V,direction:V}
+    /// A throwing query means streamed geometry is unknown, not empty. The
+    /// caller keeps vehicle ownership and retries after those cells arrive.
+    static func place(geometry g:Geometry,pose:Pose,seat:V?,side:Int,wanted:V?,aboard:Bool=false,
+                      below:(V,Double)throws->Double?,along:(V,V,Double)throws->Double?,
+                      fits:(V,Double)throws->Bool) throws -> V {
+        func rotate(_ value:V,_ q:simd_quatd)->V {
+            let t=2*simd_cross(q.imag,value)
+            return value+q.real*t+simd_cross(q.imag,t)
+        }
+        let inverse=simd_quatd(ix:-pose.rotation.imag.x,iy:-pose.rotation.imag.y,iz:-pose.rotation.imag.z,r:pose.rotation.real)
+        func world(_ p:V)->V {pose.position+rotate(V(p.x,g.origin+p.z,-p.y),pose.rotation)}
+        func local(_ p:V)->V {let v=rotate(p-pose.position,inverse);return V(v.x,-v.z,v.y-g.origin)}
+        func outsideHull(_ feet:V)->Bool {
+            for lift in [0.35,0.72,1.08,1.4500000000000002] {
+                let p=local(feet+V(0,lift,0))
+                for sphere in g.spheres where simd_length(p-sphere.centre)<sphere.radius+0.35+0.04 {return false}
+                for box in g.boxes {
+                    let nearest=simd_min(box.maximum,simd_max(box.minimum,p))
+                    if simd_length(p-nearest)<0.35+0.04 {return false}
+                }
+            }
+            return true
+        }
+        let middleZ=(g.minimum.z+g.maximum.z)/2
+        let seated=seat ?? V(0,(g.minimum.y+g.maximum.y)/2,middleZ)
+        let centre=world(V(0,seated.y,middleZ)),door=world(V(seated.x,seated.y,middleZ))
+        func reachable(_ feet:V)throws->Bool {
+            let vector=feet+V(0,1,0)-door,distance=simd_length(vector)
+            if distance<0.5{return true}
+            let hit=try along(door,vector/distance,distance)
+            return hit == nil || hit!>distance-0.35
+        }
+        func candidate(_ at:V,_ widening:Double,_ allowAir:Bool)throws->V? {
+            let proposed=world(at),origin=V(proposed.x,max(proposed.y,centre.y)+1.2,proposed.z)
+            let distance=try below(origin,14),floor=distance.map{origin.y-$0}
+            var feet:V
+            if let floor,floor>=centre.y-g.height-3 {feet=V(proposed.x,floor,proposed.z)}
+            else {guard allowAir else{return nil};feet=proposed-V(0,0.9,0)}
+            guard outsideHull(feet),try fits(feet,widening),try reachable(feet) else{return nil}
+            return feet
+        }
+        let airborne=try below(centre,g.height+3)==nil
+        let preferred=side<0 ? -1.0:1.0,desired=wanted.map(local)
+        let width:Double
+        if let desired,(desired.x<0 ? -1.0:desired.x>0 ? 1.0:0)==preferred {width=abs(desired.x)}
+        else {width=max(-g.minimum.x,g.maximum.x)+0.45}
+        let fore=desired?.y ?? seated.y
+        let sides=[Candidate(start:V(preferred*width,fore,seated.z),direction:V(preferred,0,0)),Candidate(start:V(-preferred*width,fore,seated.z),direction:V(-preferred,0,0))]
+        var ends=[Candidate(start:V(seated.x,g.maximum.y+0.6,seated.z),direction:V(0,1,0)),Candidate(start:V(seated.x,g.minimum.y-0.6,seated.z),direction:V(0,-1,0))]
+        if seated.y-g.minimum.y<g.maximum.y-seated.y {ends.reverse()}
+        var raised:[Candidate]=[]
+        if abs(rotate(V(1,0,0),pose.rotation).y)>0.6 {
+            raised=[Candidate(start:V(seated.x,fore,g.maximum.z+0.45),direction:V(0,0,1)),Candidate(start:V(seated.x,fore,g.minimum.z-0.45),direction:V(0,0,-1))]
+        }
+        func horizontal(_ c:Candidate)->Bool {abs(rotate(V(c.direction.x,c.direction.z,-c.direction.y),pose.rotation).y)<0.75}
+        let lateral=([sides[0]]+raised+[sides[1]]).filter(horizontal)
+        let near=[0.0,0.15,0.3,0.45,0.6,0.8,1],far=[1.3,1.6,2.0,2.5,3]
+        let routes=lateral.map{($0,near)}+lateral.map{($0,far)}+ends.filter(horizontal).map{($0,near+far)}
+        func search(_ widening:Double,_ allowAir:Bool)throws->V? {
+            for (path,distances) in routes {for distance in distances {
+                if let feet=try candidate(path.start+path.direction*distance,widening,allowAir){return feet}
+            }}
+            return nil
+        }
+        func aboveDoor()throws->V? {
+            var height=0.0
+            while height<=7 {
+                let feet=V(door.x,centre.y+height,door.z)
+                if outsideHull(feet) {return try fits(feet,0) && reachable(feet) ? feet:nil}
+                height += 0.2
+            }
+            return nil
+        }
+        func standingAboard()throws->V? {
+            guard aboard,let seat else{return nil}
+            let origin=world(seat);var lift = -1.1
+            while lift<=1.5 {
+                let feet=origin+V(0,lift,0)
+                if outsideHull(feet) {return try fits(feet,0) ? feet:nil}
+                lift += 0.1
+            }
+            return nil
+        }
+        if let feet=try standingAboard(){return feet}
+        if airborne {
+            if let feet=try search(0.2,true) ?? search(0,true) ?? aboveDoor(){return feet}
+        } else {
+            if let feet=try search(0.2,false) ?? search(0,false) ?? aboveDoor() ?? search(0,true){return feet}
+        }
+        let distance=try below(door,14)
+        return door-V(0,distance ?? 0.9,0)
     }
 }
