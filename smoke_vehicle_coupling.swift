@@ -251,6 +251,75 @@ import simd
   scoped.removeVehicle("car");scoped.update(nowMilliseconds:5,towAnchor:bar,canAcquireTow:true)
   let replacementRequest=scopedRequests.last!;scoped.rejectRequest(fresh);scoped.update(nowMilliseconds:6,towAnchor:bar,canAcquireTow:true)
   check(scopedRequests.count==4 && replacementRequest.generation != fresh.generation,"Removed-entity ACK escaped its generation")
+  // A confirmation may arrive after the live endpoints have already moved
+  // beyond the ordinary break distance. An unrealized joint must still clean
+  // up authority; incomplete streaming evidence must remain recoverable.
+  func streamDelayed(_ scene:NativeGroundVehicle,id:String="target",model:String,at:SIMD3<Double>) {
+   let row=NativeOtherVehicles.Pose(id:id,code:model,position:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(at)),heading:0,pitch:0.001,roll:0)
+   scene.synchronizeOtherVehicles([row],excluding:"root",near:row.position,promoteNear:row.position,delta:0)
+   if let body=scene.otherCouplingVehicle(id:id)?.body {_=scene.world.setBodyState(.init(position:SIMD3<Float>(at),rotation:simd_quatf(angle:0,axis:SIMD3(0,1,0))),for:body)}
+  }
+  for kind in [NativeVehicleCoupling.Kind.trailer,.tow] {
+   let rootModel=kind == .tow ? "525":"485",targetModel=kind == .tow ? "400":"606",limit=kind == .tow ? 3.0:1.5
+   let targetDefinition=NativeGroundVehicle.CouplingDefinition(catalog[targetModel]!)!
+   for readiness in ["ready","entity","body","parent-body","configuration","anchor"] where readiness != "anchor" || kind == .tow {
+    let scene=NativeGroundVehicle()!;_=scene.loadDefinitions(data);_=scene.loadCouplingDefinitions(catalogData)
+    check(scene.enter(model:rootModel,modelPosition:SIMD3(1000,1000,10),heading:0,bodyPose:start),"Delayed-confirmation root create")
+    scene.setWorkingValue(2500)
+    let root=scene.ownedCouplingVehicle(id:"root")!,bar=kind == .tow ? scene.workingFrame!.localTowAnchor!:root.configuration.rearAnchor!
+    let hook=kind == .tow ? targetDefinition.frontAnchor:targetDefinition.trailerAnchor!,aligned=start.position+bar-hook
+    if readiness != "entity" {streamDelayed(scene,model:targetModel,at:aligned+SIMD3(limit+0.01,0,0))}
+    if readiness == "body" {let body=scene.otherCouplingVehicle(id:"target")!.body!;check(scene.world.removeBody(body),"Missing target-body fixture")}
+    if readiness == "parent-body" {check(scene.world.removeBody(root.body!),"Missing parent-body fixture")}
+    if readiness == "configuration" {_=scene.loadCouplingDefinitions(Data(#"{"version":1,"models":{}}"#.utf8));check(scene.ownedCouplingVehicle(id:"root")==nil,"Missing configuration fixture")}
+    let late=NativeVehicleCoupling(ground:scene);late.reset(connection:"late");late.setOwnedVehicle("root")
+    var lateRequests:[NativeVehicleCoupling.Request]=[],accept=false
+    late.onRequest={lateRequests.append($0);return accept}
+    let link=NativeVehicleCoupling.Link(parent:"root",trailer:"target",kind:kind)
+    check(late.applyTopology([link],revision:1,connection:"late",nowMilliseconds:0),"Delayed topology rejected")
+    let initialAnchor:SIMD3<Double>?=readiness == "anchor" ? nil:bar
+    late.update(nowMilliseconds:1,towAnchor:initialAnchor)
+    check(late.activeJointCount==0,"Delayed/missing evidence created an invalid joint")
+    if readiness == "ready" {
+     check(lateRequests.count==1 && matches(lateRequests.last,parent:"root",trailer:nil,kind:kind),"Loaded separated confirmation retained authority without cleanup")
+     accept=true;late.update(nowMilliseconds:2,towAnchor:bar);check(lateRequests.count==2,"Delayed-link cleanup did not retry declined delivery")
+     late.update(nowMilliseconds:3,towAnchor:bar);check(lateRequests.count==2,"Delayed-link cleanup replayed accepted pending delivery")
+     let oldRequest=lateRequests.last!;late.reset(connection:"late-new");late.setOwnedVehicle("root");late.rejectRequest(oldRequest);late.update(nowMilliseconds:4,towAnchor:bar)
+     check(lateRequests.count==2,"Old session retained delayed-link cleanup")
+    } else {
+     late.update(nowMilliseconds:2,towAnchor:initialAnchor);check(lateRequests.isEmpty,"Incomplete streaming evidence was prematurely detached")
+     _=scene.loadCouplingDefinitions(catalogData)
+     if readiness == "parent-body" {check(scene.enter(model:rootModel,modelPosition:SIMD3(1000,1000,10),heading:0,bodyPose:start),"Restored delayed root body")}
+     scene.setWorkingValue(2500);_=scene.removeOtherVehicle(id:"target");streamDelayed(scene,model:targetModel,at:aligned)
+     late.update(nowMilliseconds:3,towAnchor:bar)
+     check(late.activeJointCount==1 && lateRequests.isEmpty,"Restored streamed endpoint could not realize its retained topology")
+    }
+   }
+   // Keep the existing inclusive break boundary: safely inside it, a late
+   // confirmation creates the ordinary joint without a cleanup request.
+   let near=NativeGroundVehicle()!;_=near.loadDefinitions(data);_=near.loadCouplingDefinitions(catalogData)
+   check(near.enter(model:rootModel,modelPosition:SIMD3(1000,1000,10),heading:0,bodyPose:start),"Within-limit delayed root create");near.setWorkingValue(2500)
+   let root=near.ownedCouplingVehicle(id:"root")!,bar=kind == .tow ? near.workingFrame!.localTowAnchor!:root.configuration.rearAnchor!,hook=kind == .tow ? targetDefinition.frontAnchor:targetDefinition.trailerAnchor!
+   streamDelayed(near,model:targetModel,at:start.position+bar-hook+SIMD3(limit-0.01,0,0))
+   let late=NativeVehicleCoupling(ground:near);late.reset(connection:"near");late.setOwnedVehicle("root");var cleanup=0
+   late.onRequest={_ in cleanup+=1;return true};_=late.applyTopology([.init(parent:"root",trailer:"target",kind:kind)],revision:1,connection:"near",nowMilliseconds:0);late.update(nowMilliseconds:1,towAnchor:bar)
+   check(late.activeJointCount==1 && cleanup==0,"Within-limit delayed confirmation was incorrectly detached")
+  }
+  let chainScene=NativeGroundVehicle()!;_=chainScene.loadDefinitions(data);_=chainScene.loadCouplingDefinitions(catalogData)
+  check(chainScene.enter(model:"485",modelPosition:SIMD3(1000,1000,10),heading:0,bodyPose:start),"Delayed chain root")
+  let chainRoot=chainScene.ownedCouplingVehicle(id:"root")!,firstAtLate=start.position+chainRoot.configuration.rearAnchor!-firstConfig.trailerAnchor!
+  let secondAtLate=firstAtLate+firstConfig.rearAnchor!-secondConfig.trailerAnchor!+SIMD3<Double>(1.51,0,0)
+  let chainRows=[NativeOtherVehicles.Pose(id:"first",code:"606",position:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(firstAtLate)),heading:0,pitch:0.001,roll:0),NativeOtherVehicles.Pose(id:"second",code:"607",position:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(secondAtLate)),heading:0,pitch:0.001,roll:0)]
+  chainScene.synchronizeOtherVehicles(chainRows,excluding:"root",near:chainRows[0].position,promoteNear:chainRows[0].position,delta:0)
+  for (id,at) in [("first",firstAtLate),("second",secondAtLate)] {let body=chainScene.otherCouplingVehicle(id:id)!.body!;_=chainScene.world.setBodyState(.init(position:SIMD3<Float>(at),rotation:simd_quatf(angle:0,axis:SIMD3(0,1,0))),for:body)}
+  let delayedChain=NativeVehicleCoupling(ground:chainScene);delayedChain.reset(connection:"chain");delayedChain.setOwnedVehicle("root");var chainRequests:[NativeVehicleCoupling.Request]=[]
+  delayedChain.onRequest={chainRequests.append($0);return true}
+  let prefix=NativeVehicleCoupling.Link(parent:"root",trailer:"first",kind:.trailer),suffix=NativeVehicleCoupling.Link(parent:"first",trailer:"second",kind:.trailer)
+  _=delayedChain.applyTopology([prefix,suffix],revision:1,connection:"chain",nowMilliseconds:0);delayedChain.update(nowMilliseconds:1)
+  check(delayedChain.activeJointCount==1 && chainScene.otherCouplingVehicle(id:"first")?.hauled==true,"Invalid delayed suffix discarded a valid physical prefix")
+  check(chainRequests.count==1 && matches(chainRequests.last,parent:"first",trailer:nil,kind:.trailer),"Delayed suffix cleanup selected the wrong parent")
+  _=delayedChain.applyTopology([prefix],revision:2,connection:"chain",nowMilliseconds:2);delayedChain.update(nowMilliseconds:3)
+  check(delayedChain.activeJointCount==1 && chainRequests.count==1,"Confirmed delayed suffix removal recreated or replayed links")
   print("PASS vehicle coupling: \(checks) actual native checks; archived working scalar/material65/forkplate/held-input profiles, confirmed chain/tow lifecycle and ACK scope; held coast\(heldDistance)m vs parked\(parkedDistance)m")
  }
 }

@@ -91,6 +91,29 @@ not replace the parked manager's callbacks. Tool input uses the source axis
 `specialDown - specialUp`; labels should follow each model's actual direction,
 because the source up key lowers the tow hook but raises forklift plates.
 
+## Delayed confirmation lifecycle
+
+Core89 fixes a confirmed link that arrives after its two live endpoints have
+already moved beyond the ordinary break distance. Previously `reconcile`
+declined to create the joint, while break detection inspected only existing
+joints. The independent server could therefore retain an attachment with no
+local constraint or cleanup request.
+
+When both compatible endpoints, their live bodies and their anchors are
+available, a separation greater than the existing 1.5 m trailer or 3 m tow
+limit now invalidates that chain suffix and requests authoritative cleanup.
+Downstream physical constraints are removed in reverse order; a valid prefix
+remains intact. Declined delivery retries through the existing cleanup path,
+while an accepted pending request remains deduplicated and scoped to its owner
+and connection generation.
+
+An unrealized link with a missing streamed entity, configuration, body or tow
+anchor keeps waiting. It is not treated as proven geometric failure, and can
+create its joint after the missing state arrives. This distinction adds no
+timeout and changes none of the acquisition or break thresholds. It applies to
+unrealized confirmed links; the existing physical-body destruction rules remain
+separate.
+
 ## Focused verification
 
 ```sh
@@ -102,13 +125,17 @@ zsh smoke_vehicle_lifecycle.sh
 python3 smoke_vehicle_air_handoff.py
 ```
 
-The final frozen expanded coupling gate passed 161,058 checks with unchanged source.
+The final frozen expanded coupling gate passed 161,133 checks with unchanged source.
 It compares continuous and wire work values with the actual archived controller
 at 15/30/60/120/144 Hz, material-65 transforms with actual `vh`, fork collision
 with the actual controller's geometry, and held/riderless constants with the
 actual parked source. It exercises real native bodies, immediate collision
 queries, fixed-step pool ordering, two-link and tow lifecycle, momentum,
 negative ACK backoff and same-id owner/session replacement.
+The delayed-confirmation cases use real native bodies for both trailer and tow,
+including declined delivery, pending deduplication, missing entity/body/config
+restoration, an absent tow anchor, within-limit acceptance and preservation of
+a valid prefix when a delayed second link is too far away.
 
 The working-rig gate passed 182,608 matrix checks over 606 actual archived poses
 for the six configured models; maximum matrix element error was

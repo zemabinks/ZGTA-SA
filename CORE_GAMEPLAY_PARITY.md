@@ -98,6 +98,12 @@ platform, never for the entire original mechanic by inference.
   collision contacts, teleport and landing events remain bounded and singular.
 - Multiplayer follows local correctness: two independent clients observe the
   same mode/facing/weapon/vehicle transition without delaying local control.
+- Attachment confirmation: move a trailer/tow pair beyond the existing break
+  distance while its acknowledgement is delayed. Loaded incompatible geometry
+  must release the authoritative link without creating a joint. Missing
+  streamed entities, bodies, definitions or anchors must wait until evidence
+  arrives; a bad second link must preserve a valid first link. Declined cleanup
+  retries, while accepted pending cleanup remains deduplicated.
 
 ## Results and limitations
 

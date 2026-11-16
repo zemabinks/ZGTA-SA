@@ -890,3 +890,29 @@ scene or original retail runtime comparison has been established here. The
 owner plans to update the iPhone 12 Pro and install Definitive Edition; actual
 version/install/runtime availability remains to be verified. Original-game
 comparison stays an open checklist requirement.
+
+### Core89 — delayed attachment confirmation
+
+Further lifecycle review reproduced a gap after the Core88 acceptance freeze:
+confirmation can arrive after loaded trailer/tow anchors have moved beyond the
+existing 1.5 m/3 m break distance. The local helper declines joint creation, but
+its old break checks only inspect joints that already exist. That leaves a
+server attachment without a local constraint. The executed old-helper matrix
+produces no cleanup for loaded anchor separations of 1.51 m and 3.01 m.
+
+The separate Core89 candidate marks that confirmed suffix for cleanup when
+both endpoints, bodies, compatible definitions and anchors are present. It
+preserves the existing distances and releases downstream constraints in reverse
+order. Missing entities/bodies/definitions/anchors continue waiting for data.
+Reconciliation precedes the existing generation-scoped cleanup dispatch, so
+declined delivery retries while accepted pending requests remain deduplicated.
+The accepted Core88 source, 89-gate report, libraries and bundles remain intact.
+
+Core89 final acceptance passes **89/89 gates**, with all captured sources
+unchanged, plus Release Simulator and unsigned generic iPhone builds, both
+identified as build89. The expanded real-Rapier coupling gate passes 161,133
+checks, including 75 new delayed-confirmation checks. Every other App file is
+byte-identical to accepted Core88 apart from the bundle version; the already
+validated v2 physics libraries are reused as read-only dependencies. No
+original retail, physical input, rendered browser scene or iPhone performance
+claim is made by this follow-up.

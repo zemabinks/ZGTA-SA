@@ -122,13 +122,28 @@ final class NativeVehicleCoupling {
     }
     private func reconcile(towAnchor:V?) {
         guard connection != nil,let owner,!topology.contains(where:{$0.trailer==owner}) else{return}
-        for link in chain {
+        let rows=chain,epoch=generation
+        for (index,link) in rows.enumerated() {
             if physical[link] != nil {continue}
             guard !invalid.contains(link),let parent=endpoint(link.parent),let target=endpoint(link.trailer),
                   parent.health>0,compatible(parent,target,link.kind),let body=parent.body,
-                  let (bar,hook)=anchors(link,parent,target,towAnchor:towAnchor),
-                  simd_distance(point(parent,bar),point(target,hook)) <= (link.kind == .tow ? 3:1.5),
-                  let promoted=ground?.haulOtherVehicle(id:link.trailer),let other=promoted.body,other != body else{break}
+                  let (bar,hook)=anchors(link,parent,target,towAnchor:towAnchor) else{break}
+            let separation=simd_distance(point(parent,bar),point(target,hook))
+            guard separation.isFinite else{break}
+            if separation > (link.kind == .tow ? 3:1.5) {
+                // Confirmation can arrive after both live endpoints have moved
+                // beyond the ordinary break distance. No joint exists to trip
+                // broken(), so retain explicit cleanup intent for this suffix.
+                // Missing/streaming bodies or anchors continue waiting instead.
+                guard let targetBody=target.body,targetBody != body,
+                      world.bodyState(body) != nil,world.bodyState(targetBody) != nil else{break}
+                for removed in rows.dropFirst(index).reversed() {
+                    invalid.insert(removed);removePhysical(removed,recordRelease:true)
+                    if generation != epoch{return}
+                }
+                break
+            }
+            guard let promoted=ground?.haulOtherVehicle(id:link.trailer),let other=promoted.body,other != body else{break}
             guard let joint=world.createSphericalJoint(body1:body,body2:other,anchor1:SIMD3<Float>(bar),anchor2:SIMD3<Float>(hook),contactsEnabled:false) else{
                 ground?.unhaulOtherVehicle(id:link.trailer);break
             }
@@ -190,6 +205,8 @@ final class NativeVehicleCoupling {
                 break
             }
         }
+        reconcile(towAnchor:towAnchor)
+        if generation != epoch{return}
         // A broken constraint is removed immediately, but its confirmed link
         // remains cleanup intent until authority removes it. A transport that
         // declined delivery must get another chance on the next fixed step;
@@ -197,7 +214,6 @@ final class NativeVehicleCoupling {
         if let broken=chain.first(where:{invalid.contains($0)}) {
             send(Request(parent:broken.parent,trailer:nil,kind:broken.kind));return
         }
-        reconcile(towAnchor:towAnchor)
         guard pending.isEmpty,chain.count<2,let owner,let head=endpoint(owner),head.health>0 else{return}
         let rows=chain
         if rows.contains(where:{$0.kind == .tow}){return}
