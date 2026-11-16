@@ -1,6 +1,7 @@
 //! Thin C ABI over the exact native Rapier source used by the archived JS build.
 //! Coordinates are passed unchanged; clients choose their world axis system.
 mod contact_events;
+mod joints;
 mod query_metadata;
 use rapier3d::parry::shape::FeatureId;
 use rapier3d::prelude::*;
@@ -24,6 +25,7 @@ pub struct ZGTAPhysicsWorld {
     bodies: RigidBodySet,
     colliders: ColliderSet,
     joints: ImpulseJointSet,
+    joint_ids: HashMap<Id, ImpulseJointHandle>,
     multibody_joints: MultibodyJointSet,
     ccd: CCDSolver,
     body_ids: HashMap<Id, RigidBodyHandle>,
@@ -126,6 +128,7 @@ pub extern "C" fn zgtaphys_world_new(x: f32, y: f32, z: f32) -> *mut ZGTAPhysics
         bodies: RigidBodySet::new(),
         colliders: ColliderSet::new(),
         joints: ImpulseJointSet::new(),
+        joint_ids: HashMap::new(),
         multibody_joints: MultibodyJointSet::new(),
         ccd: CCDSolver::new(),
         body_ids: HashMap::new(),
@@ -231,6 +234,9 @@ pub unsafe extern "C" fn zgtaphys_body_remove(ptr: *mut ZGTAPhysicsWorld, id: Id
         &mut w.multibody_joints,
         true,
     );
+    // Rapier removes attached joints with the body. Drop their public opaque
+    // IDs too, so a recycled internal handle can never revive an old joint.
+    w.joint_ids.retain(|_, joint| w.joints.contains(*joint));
     1
 }
 #[no_mangle]
@@ -1011,6 +1017,20 @@ pub unsafe extern "C" fn zgtaphys_collider_translation(
         return 0;
     };
     w.colliders[handle].set_translation(vector(p));
+    1
+}
+#[no_mangle]
+pub unsafe extern "C" fn zgtaphys_collider_translation_wrt_parent(
+    ptr: *mut ZGTAPhysicsWorld,
+    id: Id,
+    position: *const f32,
+) -> u32 {
+    let Some(w) = world(ptr) else { return 0 };
+    let Some(p) = floats(position, 3) else { return 0 };
+    let Some(handle) = w.collider_ids.get(&id).copied() else { return 0 };
+    // Match Rapier's parent-local setter. Standalone colliders are a no-op;
+    // propagation/query timing remains the same as its native/JS world.
+    w.colliders[handle].set_translation_wrt_parent(vector(p));
     1
 }
 #[no_mangle]

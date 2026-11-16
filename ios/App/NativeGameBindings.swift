@@ -10,15 +10,18 @@ enum NativeGameBindings {
         var nozzle = false
         var melee = false
         var guarding = false
+        var working = false
+        var workingIsTow = false
+        var hasCoupling = false
         var driving: Bool { if case .vehicle = mode { return true };return false }
         var aircraft: Bool { if case .vehicle(let kind)=mode { return kind=="plane" || kind=="helicopter" };return false }
     }
-    enum Action: Equatable { case jump, crouch, dive, enter, meleeAlternate, weaponPrevious, weaponNext, reload, action, jobs, chat, map, animations, camera, lights, gear, radioPrevious, radioNext, pause, attack }
+    enum Action: Equatable { case jump, crouch, dive, enter, meleeAlternate, weaponPrevious, weaponNext, reload, action, jobs, chat, map, animations, camera, lights, gear, unhitch, radioPrevious, radioNext, pause, attack }
     // USB HID usages, shared by UIKit and physical keyboards. No UIKit
     // dependency is needed to verify the complete mapping on a host machine.
     enum Key: Int, CaseIterable {
-        case a=4,c=6,d=7,e=8,f=9,g=10,h=11,j=13,l=15,m=16,q=20,r=21,s=22,t=23,v=25,w=26
-        case two=31,four=33,enter=40,escape=41,tab=43,space=44,caps=57,insert=73,home=74,delete=76
+        case a=4,c=6,d=7,e=8,f=9,g=10,h=11,j=13,l=15,m=16,q=20,r=21,s=22,t=23,v=25,w=26,x=27
+        case two=31,four=33,enter=40,escape=41,tab=43,space=44,caps=57,insert=73,home=74,delete=76,end=77
         case right=79,left=80,down=81,up=82,keypadPlus=87,keypadOne=89,keypadTwo=90,keypadFour=92,keypadSix=94,keypadEight=96,keypadZero=98
         case control=224,shift=225,alt=226,rightControl=228
     }
@@ -26,7 +29,7 @@ enum NativeGameBindings {
         var forward: Float=0,sideways:Float=0,steering:Float=0,pitch:Float=0
         var moving=false,steeringKeys=false,pitchKeys=false
         var sprint=false,walk=false,jump=false,attack=false,aim=false,handbrake=false,horn=false,flightBrake=false,hop=false
-        var look:String?,nozzle:Float=0
+        var look:String?,nozzle:Float=0,working:Float=0
     }
     static func keyAction(_ raw:Int,context c:Context)->Action? {
         guard let k=Key(rawValue:raw) else{return nil}
@@ -42,7 +45,8 @@ enum NativeGameBindings {
         case .two:return c.landingGear ? .gear:nil
         case .insert,.four:return c.driving ? .radioNext:nil
         case .r:return c.driving ? .radioPrevious:.reload
-        case .delete:return c.driving ? .radioPrevious:nil
+        case .delete:return c.driving && !c.working ? .radioPrevious:nil
+        case .x:return c.driving && c.hasCoupling ? .unhitch:nil
         case .tab:return c.driving ? nil:.action
         case .q:return c.driving ? nil:.weaponPrevious
         case .e:return c.driving ? nil:.weaponNext
@@ -76,7 +80,8 @@ enum NativeGameBindings {
             f.pitch=axis(held(.up),held(.down));f.pitchKeys=held(.up,.down)
             let left=held(.q),right=held(.e)
             f.look=left && right ? "behind":left ? "left":right ? "right":nil
-            f.nozzle=c.nozzle ? axis(held(.keypadEight),held(.keypadTwo)):0
+            f.nozzle=c.nozzle && !c.working ? axis(held(.keypadEight),held(.keypadTwo)):0
+            f.working=c.working ? axis(held(.keypadTwo,.end),held(.keypadEight,.delete)):0
         } else {
             f.forward=axis(held(.w,.up),held(.s,.down))
             f.sideways=axis(held(.d,.right),held(.a,.left))
@@ -91,8 +96,8 @@ enum NativeGameBindings {
         if melee {return current ? false:nil}
         return held != previousHeld ? held:nil
     }
-    static func shouldRequestAttack(held:Bool,wasHeld:Bool,nativeGun:Bool,nativeMelee:Bool)->Bool {
-        held && ((!nativeGun && !nativeMelee) || !wasHeld)
+    static func shouldRequestAttack(held:Bool,wasHeld:Bool,nativeGun:Bool,nativeMelee:Bool,edgeOnlyUtility:Bool=false)->Bool {
+        held && ((!nativeGun && !nativeMelee && !edgeOnlyUtility) || !wasHeld)
     }
     struct Pad {
         var a=false,b=false,x=false,y=false,lb=false,rb=false,leftClick=false,rightClick=false,menu=false,options=false
@@ -105,6 +110,19 @@ enum NativeGameBindings {
         guard c.driving,!c.aircraft else{return nil}
         return pad.lb && pad.rb ? "behind":pad.lb ? "left":pad.rb ? "right":nil
     }
+    /// World raise/lower is a native touch/D-pad adaptation. Original PC
+    /// working-part keys retain their source DOWN-UP sign on every vehicle.
+    static func workingControl(context c:Context,keyboard:Float=0,touchRaise:Bool=false,touchLower:Bool=false,pad:Pad?=nil)->Float {
+        guard c.driving,c.working else{return 0}
+        let up:Float=c.workingIsTow ? 1:-1
+        var value=(touchRaise ? up:0)-(touchLower ? up:0)
+        if keyboard != 0 {value=keyboard}
+        if let pad {
+            let axis=(pad.up ? up:0)-(pad.down ? up:0)
+            if axis != 0 {value=axis}
+        }
+        return value.isFinite ? min(1,max(-1,value)):0
+    }
     static func padActions(_ now:Pad,previous old:Pad,context c:Context)->[Action] {
         if now.menu && !old.menu{return [.pause]}
         var out:[Action]=[]
@@ -112,8 +130,11 @@ enum NativeGameBindings {
         if now.y && !old.y {out.append(c.melee && c.guarding ? .meleeAlternate:.enter)}
         guard !c.driving else {
             if c.landingGear && now.leftClick && !old.leftClick {out.append(.gear)}
-            if now.up && !old.up {out.append(.radioNext)}
-            if now.down && !old.down {out.append(.radioPrevious)}
+            if !c.working,now.up && !old.up {out.append(.radioNext)}
+            if !c.working,!c.nozzle,now.down && !old.down {out.append(.radioPrevious)}
+            // D-pad right is unused by the retained steering/look/brake map.
+            // Unhitch here is explicitly a native controller adaptation.
+            if c.hasCoupling,now.right && !old.right {out.append(.unhitch)}
             return out
         }
         if now.x && !old.x && c.mode != .jetpack && c.mode != .parachute && !(c.melee && c.guarding) {out.append(.jump)}
@@ -143,6 +164,7 @@ enum NativeGameBindings {
         case .jetpack:return "SPACE / PAD A: RISE - SHIFT / PAD X: DESCEND\nC: BRAKE - CTRL / PAD B OR RT: FIRE\nF / PAD Y: REMOVE WHEN GROUNDED - MENU: PAUSE"
         case .parachute:return "WASD / STICK: STEER\nCTRL / PAD B OR RT: OPEN CANOPY\nESC / MENU: PAUSE"
         case .vehicle(let kind):
+            if c.working {return "NUM8 / DELETE: WORKING -   NUM2 / END: WORKING +\nTOUCH / D-PAD UP/DOWN: RAISE / LOWER\nX / D-PAD RIGHT: UNHITCH WHEN COUPLED - F / Y: EXIT"}
             if kind=="bicycle" {return "W/S OR RT/LT: PEDAL / REVERSE - X: BRAKE\nHOLD / RELEASE CTRL, KEYPAD 0 OR PAD A: BUNNY HOP\nF / RETURN / PAD Y: EXIT - ESC / MENU: PAUSE"}
             if c.aircraft {return "ARROWS / LEFT STICK: PITCH / ROLL\nA/D OR LB/RB: RUDDER - W/S OR RT/LT: THRUST\nF / PAD Y: EXIT - ESC / MENU: PAUSE"}
             return "W/S OR RT/LT: GAS / BRAKE - ARROWS: STEER\nSPACE / PAD X: HANDBRAKE - Q/E OR LB/RB: LOOK\nF / RETURN / PAD Y: EXIT - ESC / MENU: PAUSE"

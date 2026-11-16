@@ -6,6 +6,27 @@ var checks=0
 func check(_ ok:@autoclosure()->Bool,_ why:String) {checks += 1;if !ok() {print("FAIL: \(why)");exit(1)}}
 func keys(_ list:K...)->Set<Int> {Set(list.map(\.rawValue))}
 let foot=B.Context(),car=B.Context(mode:.vehicle("car")),plane=B.Context(mode:.vehicle("plane"),landingGear:true,nozzle:true)
+let forklift=B.Context(mode:.vehicle("car"),working:true),tow=B.Context(mode:.vehicle("car"),working:true,workingIsTow:true,hasCoupling:true)
+for c in [forklift,tow] {
+    for key in [K.keypadEight,.delete] {check(B.keyboard(keys(key),context:c).working == -1,"Original working raise key sign")}
+    for key in [K.keypadTwo,.end] {check(B.keyboard(keys(key),context:c).working == 1,"Original working lower key sign")}
+    check(B.keyboard(keys(.delete,.end),context:c).working==0,"Opposing working keys neutralize")
+    check(B.keyAction(K.delete.rawValue,context:c)==nil,"Working Delete must not also change radio")
+    var up=B.Pad();up.up=true;var down=B.Pad();down.down=true
+    let sign:Float=c.workingIsTow ? 1:-1
+    check(B.workingControl(context:c,touchRaise:true)==sign && B.workingControl(context:c,touchLower:true) == -sign,"Touch arrows change world height, including tow sign")
+    check(B.workingControl(context:c,pad:up)==sign && B.workingControl(context:c,pad:down) == -sign,"Dpad working height adaptation")
+    check(B.padActions(up,previous:.init(),context:c).isEmpty && B.padActions(down,previous:.init(),context:c).isEmpty,"Working Dpad cannot also retune radio")
+    check(B.workingControl(context:c,keyboard:Float.nan)==0,"Invalid working axis fails neutral")
+}
+check(B.workingControl(context:car,touchRaise:true)==0 && B.workingControl(context:foot,touchRaise:true)==0,"Working input cannot leak across contexts")
+check(B.keyAction(K.x.rawValue,context:tow) == .unhitch && B.keyAction(K.x.rawValue,context:car)==nil,"Original X releases confirmed coupling only")
+var releasePad=B.Pad();releasePad.right=true
+check(B.padActions(releasePad,previous:.init(),context:tow)==[.unhitch],"Unclaimed DpadRight is native unhitch adaptation")
+check(B.padActions(releasePad,previous:releasePad,context:tow).isEmpty,"Held release does not repeat")
+check(!B.shouldRequestAttack(held:true,wasHeld:true,nativeGun:false,nativeMelee:false,edgeOnlyUtility:true),"Detonator cannot repeat at display cadence")
+var nozzleDown=B.Pad();nozzleDown.down=true
+check(B.padActions(nozzleDown,previous:.init(),context:plane).isEmpty,"Nozzle-down cannot also select previous radio")
 let climb=B.Context(mode:.climb),swim=B.Context(mode:.swim),jet=B.Context(mode:.jetpack),chute=B.Context(mode:.parachute)
 check(B.keyboard(keys(.space),context:foot).sprint,"PC Space sprint")
 check(!B.keyboard(keys(.shift),context:foot).sprint,"Shift is not sprint")

@@ -29,7 +29,7 @@ def renderer_glue():
 import Foundation
 struct RendererAirPlayer {var kit:[Float]}
 struct RendererParkedVehicle {var id:String}
-struct RendererAirRig {struct Document {var id:Int};var document:Document}
+struct RendererAirRig {struct Joints {var working:NativeVehicleRig.Working?=nil};struct Document {var id:Int;var joints=Joints()};var document:Document}
 func rendererAirInput(_ vehicle:NativeGroundVehicle?,id:String?,player:RendererAirPlayer?,model:Int,initial:NativeVehicleRig.Input)->NativeVehicleRig.Input {
  let groundVehicle=vehicle,parked=id.map{RendererParkedVehicle(id:$0)},rig=RendererAirRig(document:.init(id:model))
  var input=initial

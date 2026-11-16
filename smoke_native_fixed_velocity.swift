@@ -12,10 +12,14 @@ final class FixedVelocityHarness {
     var footWeaponDefinitions: [Int:NativeFootWeaponAnimation] = [:]
     var footAnimationFrame: NativeFootAnimation.Frame?
     var health=100,driving=false,crouching=false,hasParachute=false,aiming=false,weaponTriggerHeld=false,weaponReady=true
+    var weaponReloading=false,climb:Int?
+    var verticalSpeed:Float=0
+    var swimming:Bool {swimController.on}
     var equippedWeapon=0,personalFlightDown=false,personalFlightBrake=false,pendingParachuteOpen=false
     var pendingSprintTap=false,pendingDive=false,pendingSwimJump=false
     var acceptedStreamShot=false,pendingNativeJump=0.0
     var pendingClimbPull=false,pendingClimbDrop=false,jumpHeld=false,walkHeld=false,sprintWasHeld=false,vehicleHop=false
+    var vehicleWorkingControl:Float=0
     final class OtherVehicleInput {func cancelPendingInput(){}}
     var groundVehicle:OtherVehicleInput?
     var actorHeading:Float=3.13,heading:Float=3.13,cameraPitch:Float=0,swimHeadingTarget:Float=3.13
@@ -177,7 +181,9 @@ private extension Float {var double:Double {Double(self)}}
         queued.personalFlight.wear(true)
         queued.personalFlight.takeOff(heading:1.23,velocity:SIMD3(2,3,4))
         queued.personalFlight.steer(x:1,y:1,open:true,up:true)
+        queued.vehicleWorkingControl=1
         queued.cancelGameplayInput()
+        check(queued.vehicleWorkingControl==0,"Input cancellation retained a working-vehicle command")
         check(walker.state.feet==beforeCancel.feet && walker.state.rising==beforeCancel.rising && walker.stepVelocity==committed,
               "Cancelling queued intent reset committed airborne momentum")
         check(queued.personalFlight.on && queued.personalFlight.worn && queued.personalFlight.heading==1.23 &&

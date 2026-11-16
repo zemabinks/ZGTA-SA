@@ -3,7 +3,9 @@ let library=NativeSkeletalAnimationLibrary(data:try Data(contentsOf:game.appendi
 let profiles=try NativeFootWeaponAnimation.load(data:Data(contentsOf:game.appendingPathComponent("native/foot-animation.json")))
 let metadata=try NativeMeleeDefinitions(data:Data(contentsOf:root.appendingPathComponent("local-only/native/melee.json")))
 let document=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[2]))) as! [String:Any]
-struct Flight {var on=false}
+struct Flight {var on=false,flying=false,chuting=false}
+struct CharacterState {var grounded=true}
+final class CharacterProbe {var state=CharacterState()}
 final class RendererHarness {
  var footWeaponDefinitions=profiles,meleeDefinitions:NativeMeleeDefinitions?=metadata,skeletalLibrary:NativeSkeletalAnimationLibrary?=library
  var footAnimator:NativeFootAnimation?=NativeFootAnimation(library:library,random:{0.37})
@@ -13,7 +15,8 @@ final class RendererHarness {
  var meleeClock:Double=0,manualAnimation=false,footLaunchRemaining:Double?,actorHeading:Float=0
  var onMeleeGroundTarget:((NativeMeleeProbe)->Bool)?,onMeleeSwing:((Int)->Void)?,onFootMeleeHit:((NativeMeleeEvent)->Bool)?
  var weaponEventFeet:SIMD3<Float>?,acceptedStreamShot=false,acceptedStreamRay:Int?
- var onFootWeaponShot:((Int,Bool)->Bool)?,hasNativeFootWeaponTiming=false
+ var onFootWeaponShot:((Int,Bool)->Bool)?
+ var character:CharacterProbe?,verticalSpeed:Float=0,aiming=false
  func prepareFootAnimation(){}
  func controlsForTest()->NativeMeleeInput.Frame {meleeControls(delta:1/60,grounded:true)}
  func advanceForTest(_ frame:NativeMeleeInput.Frame){advanceMelee(frame,feet:.zero,ratio:0,delta:1/60)}

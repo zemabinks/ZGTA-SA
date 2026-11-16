@@ -127,6 +127,46 @@ struct NativeHealthPrediction {
 /// Speaks the existing local server's WebSocket protocol without Discord.
 /// Browser heading/roll are Three Y-yaw/Z-roll. GTA native controls use the
 /// opposite signs for those two angles; convert once at this wire boundary.
+struct NativeCouplingLink: Equatable {
+    let parent: String
+    let trailer: String
+    let kind: String
+}
+
+/// Bounded topology validation only. Vehicle models, physical joints and
+/// authority remain owned by the scene/server, not by fabricated row fields.
+enum NativeCouplingTopology {
+    static func validID(_ value: String) -> Bool {
+        !value.isEmpty && value.utf8.count <= 64 &&
+        value == value.trimmingCharacters(in: .whitespacesAndNewlines) &&
+        !value.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+    }
+    struct Snapshot { let revision: Int; let links: [NativeCouplingLink] }
+    static func parse(_ value: [String: Any]) -> Snapshot? {
+        guard let revision=NativeHealthPrediction.integer(value["revision"]),
+              let rows=value["links"] as? [[String:Any]], rows.count<=256 else { return nil }
+        var links:[NativeCouplingLink]=[], outgoing:[String:String]=[:], incoming=Set<String>()
+        for row in rows {
+            guard let parent=row["parent"] as? String, let trailer=row["trailer"] as? String,
+                  let kind=row["kind"] as? String, validID(parent),validID(trailer),parent != trailer,
+                  ["trailer","tow"].contains(kind),outgoing[parent]==nil,incoming.insert(trailer).inserted else { return nil }
+            outgoing[parent]=trailer;links.append(.init(parent:parent,trailer:trailer,kind:kind))
+        }
+        for link in links where link.kind == "tow" {
+            guard !incoming.contains(link.parent),outgoing[link.trailer]==nil else{return nil}
+        }
+        for parent in outgoing.keys {
+            var seen=Set<String>(),current=parent,count=0
+            while let next=outgoing[current] {
+                guard seen.insert(current).inserted else { return nil }
+                count+=1;guard count<=2 else { return nil };current=next
+            }
+        }
+        links.sort { $0.parent < $1.parent }
+        return Snapshot(revision:revision,links:links)
+    }
+}
+
 final class NativeMultiplayerClient {
     typealias ConnectionState = NativeConnectionRecovery.State
     private let server: ServerAddress
@@ -181,6 +221,12 @@ final class NativeMultiplayerClient {
     var onWeaponSound: ((Int) -> Void)?
     var onVitals: ((Int, Int) -> Void)?
     var onRespawn: (() -> Void)?
+    private(set) var couplingAcknowledgements=false
+    private(set) var couplingRevision:Int?
+    private(set) var couplingLinks:[NativeCouplingLink]=[]
+    private var couplingIssued=0,couplingProcessed=0
+    private var pendingCouplings:[Int:(Bool)->Void]=[:]
+    var onCouplings: (([NativeCouplingLink],Int,String)->Void)?
     var onFlightGear: ((Bool,Bool) -> Void)?
     var onChat: (([String]) -> Void)?
 
@@ -247,7 +293,7 @@ final class NativeMultiplayerClient {
         guard let url = parts.url else { failTransport(generation: generation, reason: "INVALID MULTIPLAYER ADDRESS"); return }
         let task = session.webSocketTask(with: url)
         socket = task; task.resume()
-        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1,"healthAck":1], allowBeforeReady: true)
+        send(["t": "hi", "nativeInventory": true, "inventoryAck": 1,"healthAck":1,"couplingAck":1], allowBeforeReady: true)
         receive()
     }
     private func closeSocket() {
@@ -256,6 +302,8 @@ final class NativeMultiplayerClient {
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         healthPrediction.disconnect()
         deliveredRespawnSequence=0
+        couplingAcknowledgements=false;couplingRevision=nil;couplingLinks=[]
+        couplingIssued=0;couplingProcessed=0;pendingCouplings.removeAll()
         onInventoryConnection?(nil)
         // A fresh peer has a fresh row/clock/shot namespace. Never carry a
         // previous driver, remote actor, projectile or queued command into it.
@@ -292,7 +340,7 @@ final class NativeMultiplayerClient {
                       swimState: Int = 0,swimPitch: Float = 0,swimRatio: Float = 0,
                       movement:Double? = nil,aim:Double? = nil,action:Int = 0,
                       velocity:SIMD3<Float> = .zero,angularVelocity:SIMD3<Float> = .zero,
-                      kit:[Double]? = nil,paused:Bool = false) {
+                      kit:[Double]? = nil,vehicleWork:Int? = nil,paused:Bool = false) {
         guard isReady else { return }
         func rounded(_ value:Double)->Double {value.isFinite ? floor(value*100+0.5)/100:0}
         let motion:[String:Any] = ["vx":rounded(Double(velocity.x)),"vy":rounded(Double(velocity.y)),"vz":rounded(Double(velocity.z)),
@@ -307,6 +355,7 @@ final class NativeMultiplayerClient {
                   "health": vehicleHealth, "life": health, "armour": armour]
             packet["damage"] = vehicleDamage;packet["lights"] = lights;packet["horn"] = horn
             packet["act"]=action
+            if let vehicleWork {packet["w"]=max(0,min(2500,vehicleWork))}
             if siren {packet["horn"]=(horn ? 1:0)+2}
             packet.merge(motion){_,new in new};if let kit {packet["kit"]=kit}
             addPendingChat(to: &packet)
@@ -347,6 +396,57 @@ final class NativeMultiplayerClient {
         let trimmed = String(line.trimmingCharacters(in: .whitespacesAndNewlines).prefix(240))
         guard !trimmed.isEmpty else { return }
         pendingSays.append(trimmed)
+    }
+
+    /// A queued request has one connection-scoped identity. A failed transport
+    /// is uncertain: close/reconnect drops it rather than replaying an action
+    /// the server may already have accepted. Invalid requests allocate nothing.
+    @discardableResult func requestCoupling(parent:String,trailer:String?,kind:String,
+        completion:@escaping(Bool)->Void)->Bool {
+        guard isReady,couplingAcknowledgements,couplingRevision != nil,
+              let connection=inventoryConnection,let task=socket,
+              NativeCouplingTopology.validID(parent),
+              trailer.map({NativeCouplingTopology.validID($0) && $0 != parent}) ?? true,
+              ["trailer","tow"].contains(kind),pendingCouplings.count<128,
+              couplingIssued<NativeShotSequence.maximum else{return false}
+        let sequence=couplingIssued+1,generation=transportGeneration
+        let packet:[String:Any]=["t":"hitch","v":parent,"tr":trailer.map{$0 as Any} ?? NSNull(),"kind":kind,"c":connection,"s":sequence]
+        guard let data=try? JSONSerialization.data(withJSONObject:packet),let text=String(data:data,encoding:.utf8) else{return false}
+        couplingIssued=sequence;pendingCouplings[sequence]=completion
+        task.send(.string(text)) { [weak self] error in
+            guard let error else{return}
+            DispatchQueue.main.async {
+                guard let self,self.socket === task,self.transportGeneration==generation,self.inventoryConnection==connection else{return}
+                self.failTransport(generation:generation,reason:error.localizedDescription)
+            }
+        }
+        return true
+    }
+
+    private func receiveCouplings(_ message:[String:Any],generation:UInt64) {
+        guard couplingAcknowledgements,let task=socket,transportGeneration==generation,
+              let connection=inventoryConnection,announcedInventoryConnection==connection,
+              let value=message["state"] as? [String:Any],let snapshot=NativeCouplingTopology.parse(value) else{return}
+        if let revision=couplingRevision {
+            guard snapshot.revision>=revision,
+                  snapshot.revision != revision || snapshot.links==couplingLinks else{return}
+        }
+        var sequence:Int?,accepted=false,processed=couplingProcessed
+        if let raw=message["ack"] {
+            guard let ack=raw as? [String:Any],ack["connection"] as? String==connection,
+                  let next=NativeHealthPrediction.integer(ack["sequence"]),next>0,next<=couplingIssued,
+                  let floor=NativeHealthPrediction.integer(ack["processed"]),floor>=next,
+                  floor>=couplingProcessed,floor<=couplingIssued,
+                  let boolean=ack["accepted"] as? NSNumber,CFGetTypeID(boolean)==CFBooleanGetTypeID() else{return}
+            sequence=next;accepted=boolean.boolValue;processed=floor
+        }
+        let changed=couplingRevision==nil || snapshot.revision != couplingRevision
+        couplingRevision=snapshot.revision;couplingLinks=snapshot.links;couplingProcessed=processed
+        let completion=sequence.flatMap{pendingCouplings.removeValue(forKey:$0)}
+        recovery.received(generation:generation,now:clock())
+        if changed {onCouplings?(snapshot.links,snapshot.revision,connection)}
+        guard socket === task,transportGeneration==generation,inventoryConnection==connection,couplingAcknowledgements else{return}
+        completion?(accepted)
     }
 
     private func addPendingChat(to packet: inout [String: Any]) {
@@ -480,19 +580,22 @@ final class NativeMultiplayerClient {
     }
 
     func sendExit(_ feet: SIMD3<Float>, parked position: SIMD3<Float>, heading: Float, pitch: Float, roll: Float,
-                  vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "") {
+                  vehicle: RemoteVehicle, vehicleHealth: Int,vehicleDamage: String = "",vehicleWork:Int?=nil) {
         guard isReady else { return }
         var parked=vehicle;parked.position=position;parked.heading=heading;parked.pitch=pitch;parked.roll=roll
         if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
-        parked.health=vehicleHealth;parked.damage=vehicleDamage;vehicles[vehicle.id]=parked
+        parked.health=vehicleHealth;parked.damage=vehicleDamage
+        if let vehicleWork {parked.work=max(0,min(2500,vehicleWork))}
+        vehicles[vehicle.id]=parked
         onVehicles?(orderedVehicles)
+        var parkedState:[String:Any]=["x":Double(position.x),"y":Double(position.y),"z":Double(position.z),
+            "heading":-Double(heading),"pitch":Double(pitch),"roll":-Double(roll),"health":vehicleHealth,"damage":vehicleDamage]
+        if let vehicleWork {parkedState["w"]=max(0,min(2500,vehicleWork))}
         send(["t": "me", "walking": true, "skin": 7,
               "vehicle": vehicle.id, "car": vehicle.code,
               "x": Double(feet.x), "y": Double(feet.y), "z": Double(feet.z),
               "heading": -Double(heading), "health": health, "armour": armour,
-              "parked": ["x": Double(position.x), "y": Double(position.y),
-                         "z": Double(position.z), "heading": -Double(heading),
-                         "pitch": Double(pitch), "roll": -Double(roll), "health": vehicleHealth,"damage":vehicleDamage]])
+              "parked":parkedState])
     }
 
     private func send(_ object: [String: Any], allowBeforeReady: Bool = false) {
@@ -555,13 +658,18 @@ final class NativeMultiplayerClient {
                 resynchronizingInventory = false; onInventory?(state)
                 recovery.received(.inventory, generation: generation, now: clock()); publishState()
             }
+        case "couplings":
+            receiveCouplings(message,generation:generation)
         case "hello":
             guard message["inventoryAck"] as? Int == 1, let nonce = message["inventoryConnection"] as? String,
                   shotSequence.negotiate(nonce) else {
                 onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING"); return
             }
             let freshHello=announcedInventoryConnection != nonce
-            if freshHello { announcedInventoryConnection = nonce; onInventoryConnection?(nonce) }
+            if freshHello {
+                couplingAcknowledgements=NativeHealthPrediction.integer(message["couplingAck"])==1
+                announcedInventoryConnection = nonce; onInventoryConnection?(nonce)
+            }
             guard transportGeneration==generation,socket != nil else{return}
             if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
             if freshHello,let spot = message["spot"] as? [NSNumber], spot.count >= 3 {

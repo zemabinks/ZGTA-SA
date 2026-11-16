@@ -32,6 +32,10 @@ struct NativeFootWeaponAnimation: Decodable {
     var flags: [String: Bool]?
     var use: String?
     var aims: Bool?
+    /// OP's sight-bearing profiles have the original first-person flag. Their
+    /// input task requires an aimed sight before starting a shot; this is not
+    /// a replacement for the separate camera/sight renderer.
+    var requiresAim: Bool { flags?["firstPerson"] == true }
     func clip(_ name: String) -> String? { clips?[name] ?? nil }
     static func load(data: Data) throws -> [Int: NativeFootWeaponAnimation] {
         struct Document: Decodable { let weapons: [NativeFootWeaponAnimation] }

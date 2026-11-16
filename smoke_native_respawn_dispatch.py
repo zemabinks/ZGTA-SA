@@ -35,6 +35,7 @@ final class Network {
     var requests:[[String:Any]]=[]
     func send(_ value:[String:Any]){requests.append(value)}
     func reserveShot()->NativeShotTicket?{nil}
+    func detonateSatchels(){}
     func begin(_ nonce:String="peer-one",health:Int=0){
         transportGeneration+=1;inventoryConnection=nonce;socket=Socket();deliveredRespawnSequence=0
         healthPrediction.begin(connection:nonce,health:health,armour:25,revision:0,processed:0)
@@ -57,6 +58,7 @@ struct WeaponCycle {var busy=false}
 struct Ray {}
 final class Renderer {
     var isChuting=false,isClimbing=false,swimming=false,wearingJetpack=false,crouching=false
+    var canRequestFootWeaponFire=true,canUseFootUtility=true
     var hasNativeFootWeaponTiming=false,hasNativeFootMeleeTiming=false
     var health=0,exits=0,deploys=0,teleports:[SIMD3<Float>]=[],feet=SIMD3<Float>(100,200,30)
     func openParachute(){deploys+=1}
@@ -77,6 +79,7 @@ final class Game {
         CALLBACKS
     }
     func resetControls(){resets+=1;heldFire=false}
+    func updateAuxiliaryControls(){} // Actual UI-context dispatch is a separate gate.
     func setDrivingControls(_ driving:Bool){drivingChanges.append(driving)}
     func updateWeaponHUD(){}
     func currentShotRay(weapon:Int,left:Bool)->Ray?{nil}
@@ -138,6 +141,8 @@ final class Game {
         check(blocked.network.requests.isEmpty,"Busy action passed attack ownership guard")
         let foot=Game();foot.currentVehicle=nil;foot.network.begin();foot.attack();_=foot.network.receive(100,processed:1,revision:1,respawned:1)
         check(foot.renderer!.teleports.count==1 && foot.renderer!.exits==0 && foot.radio.stops==0 && foot.drivingChanges.isEmpty,"On-foot respawn manufactured vehicle exit")
+        let deadCanopy=Game();deadCanopy.network.begin();deadCanopy.renderer!.isChuting=true;deadCanopy.attack()
+        check(deadCanopy.network.requests.count==1 && deadCanopy.renderer!.deploys==0 && deadCanopy.renderer!.teleports.isEmpty,"Dead parachutist deployed instead of requesting acknowledged respawn")
 
         // API callbacks may synchronously change world ownership. The ACK
         // caller must recheck that boundary before moving a replacement world.

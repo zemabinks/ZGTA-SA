@@ -21,12 +21,12 @@ def main():
     start = renderer.index('motion: { [self] step,state,intended in')
     boundary = renderer[renderer.index('\n', start):renderer.index('                    if let held=climbingMotion', start)]
     methods = '\n'.join(function(renderer, marker) for marker in
-                        ['private func swimmingMotion(', 'private func personalFlightMotion(',
+                        ['private func combatEligibility(', 'private func swimmingMotion(', 'private func personalFlightMotion(',
                          'private var personalFlightAnimationInput:', 'func cancelGameplayInput('])
     skeletal = (ROOT / 'ios/App/NativeSkeletalActor.swift').read_text()
     source = skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal', '')
     source += '\nfinal class NativeSkeletalActor {\n' + skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')] + '}\n'
-    names = ['NativeGunAnimation', 'NativeSwimAnimation', 'NativeFlightAnimation', 'NativeFootAnimation',
+    names = ['NativeCombatEligibility', 'NativeGunAnimation', 'NativeSwimAnimation', 'NativeFlightAnimation', 'NativeFootAnimation',
              'NativePersonalFlightController', 'NativeFootLocomotion', 'NativeHeadingContinuity',
              'NativeSprintController', 'NativeSwimController', 'NativeMelee']
     for name in names:

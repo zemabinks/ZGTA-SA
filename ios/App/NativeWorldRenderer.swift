@@ -370,6 +370,50 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var pendingVehicleBodyPose:NativeUnattendedVehicle.Pose?
     private var vehicleFallbackRoll: Float = 0
     private let groundVehicle = NativeGroundVehicle()
+    private var couplingConnection:String?
+    private struct CouplingSnapshot {let links:[NativeCouplingLink],revision:Int,connection:String}
+    private var couplingSnapshot:CouplingSnapshot?
+    private lazy var vehicleCoupling:NativeVehicleCoupling? = {
+        guard let ground=groundVehicle else{return nil}
+        let coupling=NativeVehicleCoupling(ground:ground)
+        coupling.onRequest = {[weak self] request in self?.onCouplingRequest?(request) ?? false}
+        return coupling
+    }()
+    var onCouplingRequest:((NativeVehicleCoupling.Request)->Bool)?
+    var vehicleWorkingControl:Float=0
+    var hasVehicleWorkingControls:Bool {
+        guard driving,groundVehicle?.hasWorkingControls==true,let name=vehicleModels[activeVehicleModel],
+              let working=vehicleRigs[name]?.document.joints.working else{return false}
+        return !working.parts.isEmpty
+    }
+    var vehicleWorkingIsTow:Bool {groundVehicle?.workingFrame?.localTowAnchor != nil}
+    var vehicleWorkingValue:Int? {driving ? groundVehicle?.workingValue:nil}
+    var canUnhitchVehicle:Bool {driving && vehicleCoupling?.towing != nil}
+    func setVehicleCouplingConnection(_ value:String?) {
+        guard value != couplingConnection else{return}
+        couplingConnection=value;couplingSnapshot=nil
+        vehicleCoupling?.reset(connection:value);groundVehicle?.workingTowed=false
+    }
+    func applyVehicleCouplings(_ links:[NativeCouplingLink],revision:Int,connection:String) {
+        guard connection==couplingConnection,links.allSatisfy({NativeVehicleCoupling.Kind(rawValue:$0.kind) != nil}) else{return}
+        couplingSnapshot = .init(links:links,revision:revision,connection:connection)
+        let rows=links.map{NativeVehicleCoupling.Link(parent:$0.parent,trailer:$0.trailer,kind:NativeVehicleCoupling.Kind(rawValue:$0.kind)!)}
+        _ = vehicleCoupling?.applyTopology(rows,revision:revision,connection:connection,nowMilliseconds:ProcessInfo.processInfo.systemUptime*1000)
+        groundVehicle?.workingTowed=vehicleCoupling?.towedCar != nil
+    }
+    func rejectVehicleCoupling(_ request:NativeVehicleCoupling.Request) {vehicleCoupling?.rejectRequest(request)}
+    func releaseVehicleCoupling(secondOnly:Bool=false) {vehicleCoupling?.requestRelease(nowMilliseconds:ProcessInfo.processInfo.systemUptime*1000,secondOnly:secondOnly)}
+    func vehicleCouplingMovePacket(_ id:String)->[String:Any]? {groundVehicle?.otherVehicleMovePacket(id)}
+    private func updateVehicleCoupling() {
+        guard let ground=groundVehicle else{return}
+        vehicleCoupling?.setOwnedVehicle(driving && health>0 && ground.active ? currentVehicleID:nil)
+        if ground.consumeWorkingDrop() {releaseVehicleCoupling()}
+        let frame=ground.workingFrame
+        vehicleCoupling?.update(nowMilliseconds:ProcessInfo.processInfo.systemUptime*1000,
+            towAnchor:hasVehicleWorkingControls ? frame?.localTowAnchor:nil,
+            canAcquireTow:hasVehicleWorkingControls && (frame?.canAcquireTow ?? false))
+        ground.workingTowed=vehicleCoupling?.towedCar != nil
+    }
     var vehicleHandbrake = false
     var vehicleHop = false
     var vehicleControllerInput = false
@@ -546,6 +590,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         textureLoader = MTKTextureLoader(device: device)
         super.init()
         groundVehicle?.onOtherMove = {[weak self] id,state in self?.onVehicleMove?(id,state)}
+        groundVehicle?.onCouplingStep = {[weak self] _ in self?.updateVehicleCoupling()}
         groundVehicle?.onOtherCollidersChanged = {[weak self] in
             guard let self else{return}
             self.character?.otherColliders=self.groundVehicle?.otherColliders ?? []
@@ -707,7 +752,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var swimmingState: Int { swimController.on ? swimController.state.rawValue : 0 }
     var swimmingPitch: Float { Float(swimController.pitch) }
     var swimmingRatio: Float { Float(swimController.ratio) }
-    var swimmingBreath: Int? { swimController.on && swimController.under ? Int(ceil(swimController.breath*100)) : nil }
+    var swimmingBreath: Int? { swimController.displayBreath }
     var aimDirection: SIMD3<Float> {
         if driving,let frame = gameCameraFrame { return simd_normalize(frame.target-frame.source) }
         return SIMD3(sin(heading)*cos(cameraPitch),cos(heading)*cos(cameraPitch),sin(cameraPitch))
@@ -727,6 +772,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pendingClimbPull=false;pendingClimbDrop=false;jumpHeld=false;walkHeld=false
         pendingParachuteOpen=false;sprintWasHeld=false
         vehicleHop=false;groundVehicle?.cancelPendingInput()
+        vehicleWorkingControl=0
         personalFlightDown=false;personalFlightBrake=false;personalFlight.cancelInput()
     }
     func recordWeaponShot(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>) {
@@ -748,6 +794,28 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               ["gun","stream","launch","throw"].contains(definition.use ?? ""),climb==nil,!driving,!swimming,!personalFlight.chuting else{return false}
         return !personalFlight.flying || definition.arm
     }
+    private func combatEligibility(grounded:Bool?=nil)->NativeCombatEligibility.Context {
+        let definition=footWeaponDefinitions[equippedWeapon]
+        var context=NativeCombatEligibility.Context()
+        context.alive=health>0
+        context.blocked=driving || swimming || climb != nil || personalFlight.chuting
+        context.airborne = !(grounded ?? character?.state.grounded ?? (verticalSpeed==0))
+        context.busy=footAnimator?.busy ?? false;context.stunned=footAnimator?.stunned ?? false
+        context.rolling=footAnimator?.rolling ?? false;context.flying=personalFlight.flying
+        context.arm=definition?.arm ?? false;context.requiresAim=definition?.requiresAim ?? false
+        context.aimHeld=aiming;context.ready=weaponReady;context.reloading=weaponReloading
+        return context
+    }
+    var canRequestFootWeaponFire:Bool {combatEligibility().canRequestFire}
+    var supportsFootWeaponAim:Bool {footWeaponDefinitions[equippedWeapon]?.aims == true}
+    var canUseFootUtility:Bool {
+        // The detonator's source action is an eligibility/stun check, not an
+        // ammunition event. Inventory synchronization belongs to the caller.
+        let context=combatEligibility()
+        return context.canAim && !context.stunned
+    }
+    var canEmitFootCombatMarker:Bool {combatEligibility().canEmitShot}
+    var canEmitFootWeaponShot:Bool {hasNativeFootWeaponTiming && canEmitFootCombatMarker}
     private var activeMeleeDefinition:NativeMeleeDefinitions.Definition? {
         guard let value=meleeDefinitions?[equippedWeapon],let profile=footWeaponDefinitions[equippedWeapon],let library=skeletalLibrary,
               value.compatible(profile,duration:{library.duration(of:$0)}) else{return nil}
@@ -790,13 +858,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
     var nativeWeaponStreamActive:Bool {
-        hasNativeFootWeaponTiming && [37,38,41,42].contains(equippedWeapon) &&
-            health>0 && !weaponReloading && (acceptedStreamShot ||
+        // An accepted last round still owns this frame's presentation after
+        // atomic inventory delivery makes the next round unavailable.
+        var context=combatEligibility();context.ready=weaponReady || acceptedStreamShot
+        return hasNativeFootWeaponTiming && [37,38,41,42].contains(equippedWeapon) &&
+            context.canEmitShot && (acceptedStreamShot ||
                 (weaponReady && weaponTriggerHeld && footAnimator?.gunShooting == true && footAnimator?.fired == true))
     }
     @discardableResult func requestFootWeaponFire()->Bool {
         prepareFootAnimation()
-        guard hasNativeFootWeaponTiming,health>0,weaponReady,!weaponReloading,
+        guard hasNativeFootWeaponTiming,canRequestFootWeaponFire,
               let animator=footAnimator else{return false}
         animator.arm(footWeaponDefinitions[equippedWeapon])
         return animator.fire(held:true)
@@ -891,7 +962,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     camera=SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
                 }else{camera += NativeGroundVehicle.modelOffset(origin:origin-activeModelOrigin,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)}
                 activeModelOrigin = origin
-                if groundVehicle.enter(model:activeVehicleModel,modelPosition:camera,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll,bodyPose:pendingVehicleBodyPose){pendingVehicleBodyPose=nil}
+                if groundVehicle.enter(model:activeVehicleModel,modelPosition:camera,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll,bodyPose:pendingVehicleBodyPose){
+                    pendingVehicleBodyPose=nil
+                    groundVehicle.setWorkingValue(remoteVehicles.first{$0.id==currentVehicleID}?.work ?? 0)
+                }
                 groundVehicle.damageController?.state.load(health:Double(vehicleHealth),text:activeVehicleDamage)
                 if let name=vehicleModels[activeVehicleModel],let rig=vehicleRigs[name] {groundVehicle.setDamageHinges(rig.damageHinges)}
             }
@@ -911,6 +985,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         steer:max(-1,min(1,input.yaw+(groundVehicle.aloft ? 0:input.steer))),handbrake:input.handbrake)
                 }
                 if !controlsEnabled {groundVehicle.cancelPendingInput()}
+                vehicleCoupling?.setOwnedVehicle(health>0 ? currentVehicleID:nil)
+                groundVehicle.workingTowed=vehicleCoupling?.towedCar != nil
+                groundVehicle.workingControl=controlsEnabled && hasVehicleWorkingControls ? Double(vehicleWorkingControl):0
                 let ownedInput=NativeVehicleInputOwnership.gated(input,enabled:controlsEnabled)
                 groundVehicle.update(delta: Double(delta), input: ownedInput, currentCell: activeDetail)
                 if let damage = groundVehicle.damageController?.state {
@@ -1178,9 +1255,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         guard swimController.on else { swimController.ashore(delta);return intended }
         headingContinuity.external(.swimming)
-        let profile = NativeSprintController.Profile.forMode(swimController.under ? .underwater : .water)
-        let pace = sprintController.control(profile,ticks:50*delta,tapped:pendingSprintTap,held:running,
-            staminaLeft:stamina.left,take:{ [self] in stamina.take($0) })
+        let pace:Double
+        if health>0 {
+            if swimController.under {stamina.prepareUnderwater()}
+            let profile = NativeSprintController.Profile.forMode(swimController.under ? .underwater : .water)
+            pace = sprintController.control(profile,ticks:50*delta,tapped:pendingSprintTap,held:running,
+                staminaLeft:stamina.left,take:{ [self] in stamina.take($0) })
+        } else {pace=0}
         pendingSprintTap = false
         swimController.steer(push:push,sprint:pace >= 1 ? pace : 0,dive:pendingDive,pitch:Double(cameraPitch))
         pendingDive = false
@@ -1189,13 +1270,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let difference = atan2(sin(target-actorHeading),cos(target-actorHeading))
             actorHeading += max(-Float(4*delta),min(Float(4*delta),difference))
         }
+        // Recovery belongs to the input/steering phase. The following step
+        // may switch breast/dive states or hand this tick back to the shore.
+        if health>0 && (pace < 1 || swimController.under) {
+            stamina.rest(50*delta*(swimController.state == .breast ? 0.25 : 0.5))
+        }
         let feet = SIMD3<Double>(SwiftRapierWorld.gtaToRapier(state.feet))
         let jumping = pendingSwimJump;pendingSwimJump = false
         let result = swimController.step(delta:delta,depth:depth,grounded:state.grounded,heading:-Double(actorHeading),
             feet:feet,jump:jumping,ledge:{ [weak self] in self?.swimmingLedge(feet:feet,heading:-Double(self?.actorHeading ?? 0),surface:feet.y+(depth ?? 0)) },dead:health <= 0)
-        if pace < 1 || swimController.under {
-            stamina.rest(50*delta*(swimController.state == .breast ? 0.25 : 0.5))
-        }
         if swimController.consumeSplash() { onSplash?() }
         guard let result else { return intended }
         // The outgoing swim task advances animation only when it owns this
@@ -1232,6 +1315,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard personalFlight.on || personalFlight.state==10 else{return nil}
         let ownedFacing=personalFlight.on
         if ownedFacing {headingContinuity.external(personalFlight.chuting ? .parachute:.jetpack)}
+        if personalFlight.chuting {stamina.restForLocomotion(ticks:50*delta,ratio:0)}
         let stepped=personalFlight.step(delta:delta,grounded:state.grounded,heading:-Double(heading),height:personalFlight.flying ? height:nil)
         // Touchdown can finish the flight task without returning displacement.
         // Publish its final facing before the foot task resumes in this tick.
@@ -1252,8 +1336,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let canAim=personalFlight.flying && definition?.arm == true && definition?.use == "gun"
             animator.arm(canAim ? definition:nil)
             if canAim {
+                let context=combatEligibility(grounded:state.grounded)
                 animation.gun = .init(pitch:Double(cameraPitch),yaw:min(1.4,max(-1.4,NativeHeadingContinuity.difference(Double(actorHeading),from:Double(heading)))))
-                animator.control(.init(fire:weaponTriggerHeld && weaponReady,aim:aiming,held:weaponTriggerHeld,ready:weaponReady))
+                animator.control(.init(fire:weaponTriggerHeld && context.canRequestFire,aim:aiming && context.canAim,
+                    held:context.heldTrigger(weaponTriggerHeld),ready:weaponReady && !weaponReloading))
             }
             if health<=0 && !animator.dead {animator.die("koFront")}
             let frame=animator.update(delta:delta,input:animation)
@@ -1298,7 +1384,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         else if health > 0 && animator.dead { animator.revive() }
         if weaponReloading && !footReloadWasActive && !footReloadRequested { _ = animator.beginReload() }
         footReloadWasActive = weaponReloading;footReloadRequested = false
-        let effectiveAim = definition?.aims == true && (aiming || animator.gunUp || weaponTriggerHeld)
+        let aimContext=combatEligibility(grounded:state.grounded)
+        let effectiveAim = definition?.aims == true && (animator.gunUp ||
+            (aiming && aimContext.canAim) || (weaponTriggerHeld && aimContext.canRequestFire))
         let meleeFrame=meleeControls(delta:delta,grounded:state.grounded)
         var control = NativeFootLocomotion.Input()
         control.stick = SIMD2(Double(sideways),Double(forward));control.cameraHeading = Double(heading)
@@ -1337,12 +1425,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         } else {airGrabTicks=0}
         let wholeBodyAim = animator.gunUp && !(definition?.arm ?? false) && !crouching
-        if !airborne {
+        if !airborne && health>0 {
             let restricted = wholeBodyAim || crouching || definition?.flags?["heavy"] == true || !animator.sprints
             footSprintPace = restricted ? 0 : sprintController.control(.forMode(.foot),ticks:50*delta,tapped:pendingSprintTap,held:running,
                 staminaLeft:stamina.left,take:{ [self] in stamina.take($0) })
-            if footSprintPace < 1 { stamina.rest(50*delta*(locomotion.ratio > 1 ? 0.15 : 0.5)) }
-        }
+        } else if health<=0 {footSprintPace=0}
+        if health>0 && footSprintPace < 1 {stamina.restForLocomotion(ticks:50*delta,ratio:locomotion.ratio)}
         pendingSprintTap = false
         var animation = NativeFootAnimation.Input()
         animation.fly=personalFlightAnimationInput;animation.position=SIMD3<Double>(state.feet);animation.heading=Double(actorHeading)
@@ -1351,7 +1439,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         animation.crouch = crouching;animation.strafe = locomotion.strafe
         animation.guarding=meleeFrame.guarding;animation.block=meleeFrame.blocking
         animation.gun = effectiveAim ? .init(pitch:aiming ? Double(cameraPitch) : 0,yaw:min(1.4,max(-1.4,NativeHeadingContinuity.difference(Double(actorHeading),from:Double(heading))))) : nil
-        if effectiveAim { animator.control(.init(fire:weaponTriggerHeld && weaponReady,aim:aiming,held:weaponTriggerHeld,pushed:locomotion.pushing,ready:weaponReady)) }
+        let fireContext=combatEligibility(grounded:!airborne)
+        animator.control(.init(fire:weaponTriggerHeld && fireContext.canRequestFire,aim:aiming && fireContext.canAim,
+            held:fireContext.heldTrigger(weaponTriggerHeld),pushed:locomotion.pushing,ready:weaponReady && !weaponReloading))
         if airborne {
             footAirTime += delta;footJumped = footJumped || jumping;footAirFall = max(footAirFall,-state.rising)
             if state.rising < -5 {
@@ -1401,23 +1491,25 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func emitFootWeaponEvents(_ frame:NativeFootAnimation.Frame,feet:SIMD3<Float>) {
+        let weapon=equippedWeapon
         if hasNativeFootMeleeTiming,let melee=activeMeleeDefinition,let animator=footAnimator {
-            guard health>0,weaponReady,!weaponReloading,
+            guard canEmitFootCombatMarker,
                   let blow=melee.blow(swing:animator.swing,aside:animator.aside) else{return}
             let attack=animator.aside=="ground" ? -1:animator.aside=="run" ? 0:animator.swing+1
             for _ in frame.shots {
-                let event=NativeMeleeEvent(weapon:equippedWeapon,attack:attack,aside:animator.aside,feet:feet,heading:actorHeading,
+                guard equippedWeapon==weapon,canEmitFootCombatMarker else{break}
+                let event=NativeMeleeEvent(weapon:weapon,attack:attack,aside:animator.aside,feet:feet,heading:actorHeading,
                     range:melee.range,radius:blow.radius,simulationTime:meleeClock)
                 _ = onFootMeleeHit?(event)
             }
             return
         }
-        guard hasNativeFootWeaponTiming,health>0,!weaponReloading else{return}
+        guard canEmitFootWeaponShot else{return}
         weaponEventFeet=feet
         defer {weaponEventFeet=nil}
         for left in frame.shots {
-            guard weaponReady else{break}
-            if onFootWeaponShot?(equippedWeapon,left) == true,[37,38,41,42].contains(equippedWeapon) {acceptedStreamShot=true}
+            guard equippedWeapon==weapon,combatEligibility().canEmitShot else{break}
+            if onFootWeaponShot?(weapon,left) == true,[37,38,41,42].contains(weapon) {acceptedStreamShot=true}
         }
     }
 
@@ -1648,6 +1740,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func exitVehicle() {
+        vehicleCoupling?.setOwnedVehicle(nil)
         ownCameraVisibility.reset()
         let exactFeet=ownRiderPlayback?.state == .stood ? ownRiderFeet:nil
         pendingVehicleExit=nil
@@ -1656,7 +1749,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let falling = floor.map { camera.z > $0 + 3 } ?? false
         if let id=currentVehicleID,groundVehicle?.active == true {
             let code=remoteVehicles.first{$0.id==id}?.code ?? "\(activeVehicleModel).6.1.0."
-            let work=remoteVehicles.first{$0.id==id}?.work ?? 0
+            let work=groundVehicle?.workingValue ?? remoteVehicles.first{$0.id==id}?.work ?? 0
             activeVehicleDamage=vehicleDamage
             groundVehicle?.parkCurrentVehicle(id:id,code:code,health:vehicleHealth,damage:activeVehicleDamage,work:work)
         } else{groundVehicle?.exit()}
@@ -1694,6 +1787,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// Despawning/losing ownership must not manufacture a parked body or play
     /// a queued exit after the old vehicle has already ceased to exist.
     private func discardOwnedVehicle() {
+        vehicleCoupling?.setOwnedVehicle(nil)
         groundVehicle?.exit()
         driving=false;currentVehicleID=nil;drivingSpeed=0;flightVerticalSpeed=0
         vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleBodyPose=nil
@@ -1703,6 +1797,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     @discardableResult func removeVehicle(id:String)->Bool {
+        vehicleCoupling?.removeVehicle(id)
         groundVehicle?.removeOtherVehicle(id:id)
         remoteVehicles.removeAll{$0.id==id}
         guard currentVehicleID==id else{return false}
@@ -1729,6 +1824,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// owned vehicle without an exit animation, parking packet or side offset.
     /// The subsequent hello applies the self-hosted server's spawn policy.
     func resetMultiplayerSession() {
+        setVehicleCouplingConnection(nil)
         discardOwnedVehicle()
         groundVehicle?.clearOtherVehicles()
         remotePlayers=[];remoteVehicles=[]
@@ -2001,11 +2097,29 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         URLSession.shared.dataTask(with: server.path("game/native/vehicles.physics.json")) { [weak self] data,response,_ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let cameraDefinitions = (try? JSONDecoder().decode(CameraVehicleDocument.self,from: data))?.models ?? [:]
-            DispatchQueue.main.async { self?.groundVehicle?.loadDefinitions(data);self?.cameraVehicleDefinitions = cameraDefinitions }
+            DispatchQueue.main.async {
+                guard let self else{return}
+                self.vehicleCoupling?.reset(connection:self.couplingConnection)
+                self.groundVehicle?.loadDefinitions(data);self.cameraVehicleDefinitions = cameraDefinitions
+                if let snapshot=self.couplingSnapshot {self.applyVehicleCouplings(snapshot.links,revision:snapshot.revision,connection:snapshot.connection)}
+                self.loadVehicleCouplingDefinitions()
+            }
         }.resume()
         URLSession.shared.dataTask(with:server.path("game/native/trains.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
             DispatchQueue.main.async {self?.groundVehicle?.loadTracks(data)}
+        }.resume()
+    }
+
+    private func loadVehicleCouplingDefinitions() {
+        guard let server else{return}
+        URLSession.shared.dataTask(with:server.path("game/native/vehicle-coupling.json")) { [weak self] data,response,_ in
+            guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
+            DispatchQueue.main.async {
+                guard let self else{return}
+                self.groundVehicle?.loadCouplingDefinitions(data)
+                if self.driving {self.groundVehicle?.setWorkingValue(self.remoteVehicles.first{$0.id==self.currentVehicleID}?.work ?? 0)}
+            }
         }.resume()
     }
 
@@ -2030,7 +2144,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if vehicleModels.values.contains(name) {
             for suffix in ["bin","png","json"] {
                 group.enter()
-                URLSession.shared.dataTask(with:server.path("game/native/models/\(name).rig.\(suffix)")) { data,response,_ in
+                // Rig hierarchy export can change draw traversal, indices and
+                // texture layers together. Never combine a fresh hierarchy
+                // with an older cached binary/atlas from the same URL.
+                let request=URLRequest(url:server.path("game/native/models/\(name).rig.\(suffix)"),cachePolicy:.reloadIgnoringLocalCacheData)
+                URLSession.shared.dataTask(with:request) { data,response,_ in
                     lock.lock()
                     if (response as? HTTPURLResponse)?.statusCode==200 {
                         if suffix=="bin" {rigBinary=data} else if suffix=="png" {rigImage=data} else {rigMetadata=data}
@@ -3023,6 +3141,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let delta=min(0.1,max(0,now-(vehicleRigTimes[token] ?? now)));vehicleRigTimes[token]=now
         var input=NativeVehicleRig.Input()
         if own {
+            input.work=groundVehicle?.workingRenderValue ?? 0
             input.steering = -(groundVehicle?.output?.steering ?? 0)
             input.rearSteering = -(groundVehicle?.output?.rearSteering ?? 0)
             let angles=groundVehicle?.wheelAnglesDouble ?? []
@@ -3048,11 +3167,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             input.frontSpin=spins.x;input.rearSpin=spins.y
             if let player,let bike=remoteBikeFrames[player.id] {input.lean=bike.lean;input.crank=bike.crank}
             if let kit=player?.kit {
+                if kit.indices.contains(5),rig.document.joints.working != nil {input.work=Double(kit[5])*1000}
                 if kit.indices.contains(5),rig.document.id==520 {input.nozzle=Double(kit[5])*5000}
-                if kit.indices.contains(5),rig.document.id != 520,((groundVehicle?.handlingFlags(String(rig.document.id)) ?? 0)&64) != 0 {input.rearSteering=Double(kit[5])}
+                if kit.indices.contains(5),rig.document.joints.working == nil,rig.document.id != 520,((groundVehicle?.handlingFlags(String(rig.document.id)) ?? 0)&64) != 0 {input.rearSteering=Double(kit[5])}
                 input.gearUp=kit.indices.contains(6) && kit[6] != 0
             }
             if player==nil,let parked,let frame=groundVehicle?.otherVehicle(parked.id) {
+                input.work=Double(frame.work)
                 input.rotor=frame.rotor;input.gearUp=frame.gearUp
                 if frame.dynamic {
                     input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin;input.offsets=frame.offsets

@@ -20,7 +20,7 @@ attack_start=vc.index('        if NativeGameBindings.shouldRequestAttack(')
 attack_end=vc.index('\n',vc.index('        lastAttackButton = gamepadAttacking',attack_start))
 attack_block=vc[attack_start:attack_end]
 raw_trigger=next(line.strip() for line in vc.splitlines() if line.strip().startswith('renderer?.weaponTriggerHeld = canFight'))
-touch_held=next(line.strip() for line in vc.splitlines() if line.strip().startswith('if acceptsInput && firePressed && renderer?.hasNativeFootWeaponTiming'))
+touch_held=next(line.strip() for line in vc.splitlines() if line.strip().startswith('if acceptsInput && firePressed &&'))
 attack_methods='''
     func pollAttack(_ held:Bool) {
         let gamepadAttacking=held,canFight=true,firePressed=false
@@ -85,6 +85,8 @@ class FakeRenderer {
     var cancels=0,cameras=0,jumps=0,alternates=0
     var canNativeFootMeleeGuard=false
     var hasNativeFootWeaponTiming=false,hasNativeFootMeleeTiming=false,weaponTriggerHeld=false
+    var hasVehicleWorkingControls=false,vehicleWorkingIsTow=false,canUnhitchVehicle=false,unhitches=0
+    func releaseVehicleCoupling(secondOnly:Bool=false){unhitches+=1}
     var vehicleHop=false,vehicleHandbrake=false
     func cancelWeaponInput(){cancels += 1}
     func cycleCameraView(){cameras += 1}
@@ -198,6 +200,15 @@ for melee in [false,true] {
     check(firing.events.count==count,"actual touch-held path does not continuously re-buffer native melee/gun")
 }
 print("PASS: actual extracted held-trigger edge/touch timing; total \(checks) checks")
+let detonatorInput=Harness();detonatorInput.weapons.selected=40
+for _ in 0..<120 {detonatorInput.pollAttack(true);detonatorInput.pollTouchHeld(true)}
+check(detonatorInput.events==["attack"],"actual detonator held trigger must stay one edge action")
+detonatorInput.pollAttack(false);detonatorInput.pollAttack(true)
+check(detonatorInput.events==["attack","attack"],"fresh detonator press did not rearm")
+let workingInput=Harness();workingInput.currentVehicle=1;workingInput.renderer?.hasVehicleWorkingControls=true
+workingInput.renderer?.vehicleWorkingIsTow=true;workingInput.renderer?.canUnhitchVehicle=true
+check(workingInput.bindingContext.working && workingInput.bindingContext.workingIsTow && workingInput.bindingContext.hasCoupling,"actual context omitted working/coupling metadata")
+workingInput.performBinding(.unhitch);check(workingInput.renderer?.unhitches==1,"actual binding dispatch did not release coupling")
 for releaseBeforeAppearance in [false,true] {
     let shared=NativeModalKeyHandoff(pressed:true),presenter=Harness(),panel=PauseHarness(shared)
     presenter.pauseEscapeHandoff=shared

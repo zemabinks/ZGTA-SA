@@ -70,5 +70,16 @@ struct NativeStamina {
         value = max(-150,value-amount/3);return true
     }
     mutating func rest(_ amount: Double) { value = min(150,value+amount) }
+    /// Public pedestrian swim steering restores a nonpositive effort budget
+    /// before underwater sprint control. Underwater effort itself costs zero;
+    /// retaining an exhausted foot budget would suppress its input response.
+    mutating func prepareUnderwater() { if value <= 0 { value = 0.1 } }
+    /// The pedestrian's common recovery path also runs during ordinary air
+    /// motion and parachuting. The caller decides whether sprint effort owns
+    /// this tick; a parachute uses the source's cleared locomotion ratio zero.
+    mutating func restForLocomotion(ticks: Double, ratio: Double) {
+        guard ticks.isFinite, ticks > 0, ratio.isFinite else { return }
+        rest(ticks * (ratio > 1 ? 0.15 : 0.5))
+    }
     mutating func reset() { value = 150 }
 }

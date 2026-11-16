@@ -42,7 +42,7 @@ def main():
     (output/'reference.js').write_text(JS)
     subprocess.run(['node',str(output/'reference.js'),str(output/'reference.json')],cwd=ROOT,check=True)
     renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
-    methods=['private func footMotion(','private func beginClimb(','private func climbingMotion(',
+    methods=['private func combatEligibility(','var canEmitFootWeaponShot:','var canEmitFootCombatMarker:','var hasNativeFootWeaponTiming:','private func footMotion(','private func beginClimb(','private func climbingMotion(',
              'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(',
              'private var activeMeleeDefinition:','var hasNativeFootMeleeTiming:','var canNativeFootMeleeGuard:',
              'private func meleeControls(','private func advanceMelee(']
@@ -52,7 +52,7 @@ def main():
     skeletal=(ROOT/'ios/App/NativeSkeletalActor.swift').read_text()
     source=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')
     source+='\nfinal class NativeSkeletalActor {\n'+skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]+'}\n'
-    for name in ['NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation',
+    for name in ['NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation',
                  'NativePersonalFlightController','NativeFootLocomotion','NativeHeadingContinuity',
                  'NativeSprintController','NativeMelee','NativeMeleeInput','NativeFallDamage']:
         source+='\n'+(ROOT/'ios/App'/f'{name}.swift').read_text()

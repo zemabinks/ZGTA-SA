@@ -26,4 +26,6 @@ jobs:
       - run: node smoke_health_ack.js
       - run: node smoke_native_melee_server.js
       - run: node smoke_native_melee_assets.js
+      - run: node smoke_native_working_assets.js
+      - run: node smoke_vehicle_coupling_server.js
       - run: node smoke_radio_import_bounds.js

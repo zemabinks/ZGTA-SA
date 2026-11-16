@@ -7,6 +7,12 @@ const OptionalDiscord = require('./optional_discord');
 const weaponInventory = require('./weapon_inventory');
 const worldCollision = require('./world_collision');
 const LocalProjectiles = require('./local_projectiles');
+// Optional imported geometry enables this core feature. Source-only/older
+// installations continue running without claiming coupling support.
+let couplingCatalog=null;
+try {couplingCatalog=JSON.parse(fs.readFileSync(path.join(__dirname,'local-only/selfhost/coupling-catalog.json'),'utf8'));}
+catch(error){if(error.code!=='ENOENT')console.error('Could not load coupling geometry:',error.message);}
+const VehicleCoupling=couplingCatalog ? require('./vehicle_coupling'):null;
 
 const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
@@ -421,6 +427,7 @@ class LocalGame {
     this.players = new Map();
     this.peers = new Set();
     this.vehicles = new Map();
+    this.coupling=VehicleCoupling?.create(couplingCatalog) || null;
     this.nextVehicle = 1;
     this.race = null;
     this.parties = new Map();
@@ -632,7 +639,7 @@ class LocalGame {
   }
 
   removeRaceCar(member) {
-    if (!member?.carId || !this.vehicles.delete(member.carId)) return;
+    if (!member?.carId || !this.deleteVehicle(member.carId)) return;
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: member.carId});
     member.carId = null;
   }
@@ -1301,7 +1308,7 @@ class LocalGame {
 
   removeMissionVehicle(player) {
     const id = player.job?.vehicleId;
-    if (!id || !this.vehicles.delete(id)) return;
+    if (!id || !this.deleteVehicle(id)) return;
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id});
   }
 
@@ -1375,8 +1382,58 @@ class LocalGame {
   }
 
   removeOwnedVehicle(vehicle) {
-    if (!vehicle || !this.vehicles.delete(vehicle.id)) return;
+    if (!vehicle || !this.deleteVehicle(vehicle.id)) return;
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'vgone', id: vehicle.id});
+  }
+
+  deleteVehicle(id) {
+    if(!this.vehicles.has(id))return false;
+    if(this.coupling?.removeVehicle(id))this.broadcastCouplings();
+    return this.vehicles.delete(id);
+  }
+
+  broadcastCouplings(ackPeer=null,ack=null,onlyAck=false) {
+    if(!this.coupling?.enabled)return;
+    const state=this.coupling.snapshot();
+    if(!onlyAck){
+      const remaining=new Set(state.links.map(l=>l.trailer));
+      for(const target of this.lastCouplingTargets || [])if(!remaining.has(target))
+        for(const peer of this.peers)if(peer.ready&&!peer.couplingAckEnabled)peer.send({t:'unhitch',v:target});
+      this.lastCouplingTargets=remaining;
+    }
+    for(const peer of this.peers)if(peer.ready&&peer.couplingAckEnabled&&(!onlyAck||peer===ackPeer))
+      peer.send({t:'couplings',state,...(peer===ackPeer&&ack?{ack}:{})});
+  }
+
+  handleHitch(peer,message) {
+    if(!this.coupling?.enabled||!peer.ready)return;
+    let sequence=null;
+    if(peer.inventoryEnabled){
+      if(!peer.couplingAckEnabled||message.c!==peer.inventoryConnection||
+         !Number.isSafeInteger(message.s)||message.s<1)return;
+      sequence=message.s;peer.processedCouplingSequence ??=0;
+      if(sequence<=peer.processedCouplingSequence){
+        const accepted=peer.couplingResults?.get(sequence)===true;
+        this.broadcastCouplings(peer,{connection:peer.inventoryConnection,sequence,processed:peer.processedCouplingSequence,accepted},true);
+        return;
+      }
+      if(sequence!==peer.processedCouplingSequence+1)return;
+    }
+    const before=this.coupling.snapshot().revision;
+    const result=this.coupling.request({peer,parent:message.v,trailer:message.tr,kind:message.kind,
+      vehicles:this.vehicles,peers:this.peers,now:Date.now()});
+    // The archived browser attaches locally before reporting hitch. Its real
+    // unhitch handler releases by TARGET ID, so a rejected legacy report must
+    // explicitly undo that prediction rather than leave an unconfirmed joint.
+    if(!result.accepted&&!peer.inventoryEnabled&&typeof message.tr==='string')peer.send({t:'unhitch',v:message.tr});
+    let ack=null;
+    if(sequence!==null){
+      peer.processedCouplingSequence=sequence;peer.couplingResults ||=new Map();
+      peer.couplingResults.set(sequence,result.accepted);
+      while(peer.couplingResults.size>32)peer.couplingResults.delete(peer.couplingResults.keys().next().value);
+      ack={connection:peer.inventoryConnection,sequence,processed:sequence,accepted:result.accepted};
+    }
+    this.broadcastCouplings(peer,ack,before===this.coupling.snapshot().revision);
   }
 
   addOwnedVehicle(player, slot) {
@@ -1411,6 +1468,10 @@ class LocalGame {
     vehicle.row[3] = position[0]; vehicle.row[4] = position[1];
     vehicle.row[5] = position[2]; vehicle.row[6] = position[3];
     vehicle.row[7] = rounded(report.pitch); vehicle.row[8] = rounded(report.roll);
+    if(Number.isFinite(report.w)) {
+      while(vehicle.row.length<17)vehicle.row.push(null);
+      vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,report.w)));entry.work=vehicle.row[16];
+    }
     entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];
     if (Number.isFinite(report.health))
       entry.health = Math.min(entry.health,
@@ -1443,6 +1504,10 @@ class LocalGame {
     vehicle.row[6] = rounded(report.heading);
     vehicle.row[7] = rounded(report.pitch);
     vehicle.row[8] = rounded(report.roll);
+    if(Number.isFinite(report.w)) {
+      while(vehicle.row.length<17)vehicle.row.push(null);
+      vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,report.w)));
+    }
     if (Number.isFinite(report.health))
       vehicle.row[9] = Math.min(vehicle.row[9],Math.max(0, Math.min(1000, Math.round(report.health))));
     if (typeof report.damage === 'string' && report.damage)
@@ -1456,7 +1521,7 @@ class LocalGame {
     // These authority checks belong to this independent local server.
     if (!peer.ready || peer.player.insideHome || typeof message.v !== 'string') return;
     const vehicle = this.vehicles.get(message.v), at = this.position(peer.player);
-    if (!vehicle || !at || vehicle.missionOwner && vehicle.missionOwner !== peer.player ||
+    if (!vehicle || !at || this.coupling && !this.coupling.canMove(peer,vehicle.id) || vehicle.missionOwner && vehicle.missionOwner !== peer.player ||
         [...this.peers].some(other => other.ready && other.state?.vehicle === vehicle.id &&
           (other.state.driving === true || other.state.passenger === true))) return;
     if (![message.x,message.y,message.z,message.h,message.p,message.r].every(Number.isFinite) ||
@@ -2639,6 +2704,7 @@ class LocalGame {
 
   onMessage(peer, message) {
     if (!message || typeof message !== 'object') return;
+    if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
     if (peer.ready && peer.player.health<=0 && (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)) {
       peer.player.flightGear={parachute:false,jetpack:false};
       peer.send({t:'flightgear',...peer.player.flightGear});this.save();
@@ -2650,6 +2716,7 @@ class LocalGame {
       return;
     }
     if (message.t === 'vmove') {this.updateUnattendedVehicle(peer,message);return;}
+    if (message.t === 'hitch') {this.handleHitch(peer,message);return;}
     if (message.t === 'selfHealth') {this.applySelfHealth(peer,message);return;}
     if (message.t === 'detonate' && peer.ready && peer.inventoryEnabled) {
       this.projectiles.detonate(String(peer.player.number)); return;
@@ -2665,13 +2732,18 @@ class LocalGame {
       if (peer.inventoryAckEnabled && message.healthAck===1) {
         peer.healthAckEnabled=true;peer.processedHealthSequence ??= 0;
       }
+      if(peer.inventoryAckEnabled&&message.couplingAck===1&&this.coupling?.enabled){
+        peer.couplingAckEnabled=true;peer.processedCouplingSequence ??=0;
+      }
       peer.ready = true;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
         spot: [1480, -1738, 13, 0],
         life: [peer.player.health, peer.player.armour],...this.healthState(peer), out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0,
-        ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {})});
+        ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {}),
+        ...(peer.couplingAckEnabled?{couplingAck:1}:{})});
+      if(peer.couplingAckEnabled)peer.send({t:'couplings',state:this.coupling.snapshot()});
       peer.send(this.fullState(peer));
       peer.send({t:'flightgear',...(peer.player.flightGear || {})});
       if (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)
@@ -2704,6 +2776,7 @@ class LocalGame {
       }
       peer.state = message;
       peer.lastSeen = Date.now();
+      if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
       const surface = [message.x,message.y,message.z].every(Number.isFinite) ? waterHeight(message.x,message.y,message.z) : null;
       if (peer.inventoryEnabled) {
         // The native public-client swim states use a 1,150-unit oxygen pool:
@@ -3118,6 +3191,7 @@ class LocalGame {
 
   remove(peer) {
     if (!this.peers.delete(peer)) return;
+    if(this.coupling?.releasePeer(peer))this.broadcastCouplings();
     if (![...this.peers].some(other => other.player === peer.player)) {
       this.partyInvites.delete(peer.player);
       this.leaveParty(peer.player);

@@ -68,6 +68,7 @@
 		75FC3E0DF53C7D9BFE2494DC /* NativeConnectionRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A94B01CC17E576695BB0572 /* NativeConnectionRecovery.swift */; };
 		7957D46C996635F0D97FC5DB /* NativeVirtualStick.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52623E232AD9E36EADF98FC7 /* NativeVirtualStick.swift */; };
 		809BCE04A064DB232B28C422 /* NativeMenuSoundData.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE6EFA75EEFFCEE84931D577 /* NativeMenuSoundData.swift */; };
+		82383A5FF5BB810F26C6E94F /* NativeCombatEligibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD051557FBDF8C9F92AC65F /* NativeCombatEligibility.swift */; };
 		83D5043A797662B20D20121A /* NativeAnimationPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A80829C7A98ABE5DC1C42D9D /* NativeAnimationPanel.swift */; };
 		8560D8FBB8E0A30912063E06 /* NativeWaterWaves.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840F23FF20BF569772DB890A /* NativeWaterWaves.swift */; };
 		8B6D3FF8836239DF899B5089 /* NativeCameraVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD574FE74BEC5CF4D2483FB6 /* NativeCameraVisibility.swift */; };
@@ -120,6 +121,7 @@
 		F4251C46E93F4F6ACA5D5344 /* NativeWeatherAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DEED582EAC6344E9961902B /* NativeWeatherAudio.swift */; };
 		F531D1167B263FC9CDFBFC40 /* NativeVehicleRig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 976F21502D066100E945BDF7 /* NativeVehicleRig.swift */; };
 		FB5EBE7FE0004A3588CFA229 /* NativeVehicleAudioSpatial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09716AFE34EB334F442D99A3 /* NativeVehicleAudioSpatial.swift */; };
+		FBF7589533B5A4A87BA2A194 /* NativeVehicleCoupling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F21D9BA3DB131EEB43CCFF /* NativeVehicleCoupling.swift */; };
 		FEEE0106520E8068D6D1E2B2 /* WorldShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 1AF69E8CCF1AC866E1B91582 /* WorldShaders.metal */; };
 /* End PBXBuildFile section */
 
@@ -140,6 +142,7 @@
 		1A079C289993B9B3644543FB /* NativeFallDamage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFallDamage.swift; sourceTree = "<group>"; };
 		1AF69E8CCF1AC866E1B91582 /* WorldShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = WorldShaders.metal; sourceTree = "<group>"; };
 		1BF84EEC926D9870EC20D6FB /* NativeRemoteMeleeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRemoteMeleeContext.swift; sourceTree = "<group>"; };
+		1DD051557FBDF8C9F92AC65F /* NativeCombatEligibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCombatEligibility.swift; sourceTree = "<group>"; };
 		1E5C4091FF57DC58D6C219E2 /* Style.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Style.swift; sourceTree = "<group>"; };
 		2326D5F1610E7F3B8859A41D /* NativeGameViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameViewController.swift; sourceTree = "<group>"; };
 		23A47E76CCEE38AC4EC0FE1F /* NativeGameplayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameplayPanel.swift; sourceTree = "<group>"; };
@@ -159,6 +162,7 @@
 		426DBCAFCD69B30D0BB99ED4 /* NativeRegionalWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRegionalWeather.swift; sourceTree = "<group>"; };
 		427B9024362FE74EF9CB6A5D /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		45B4846180421489379816D5 /* NativeDEMenuStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDEMenuStyle.swift; sourceTree = "<group>"; };
+		48F21D9BA3DB131EEB43CCFF /* NativeVehicleCoupling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleCoupling.swift; sourceTree = "<group>"; };
 		49E1DB8E527A12C33170D18F /* NativeMenuProfileClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMenuProfileClient.swift; sourceTree = "<group>"; };
 		4C869C965C2E923B5C8B3588 /* NativeVehicleSeating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleSeating.swift; sourceTree = "<group>"; };
 		4DEED582EAC6344E9961902B /* NativeWeatherAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWeatherAudio.swift; sourceTree = "<group>"; };
@@ -286,6 +290,7 @@
 				D317C08D8555DB9A863B986F /* NativeChatPanel.swift */,
 				4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */,
 				65793AA68B36AEC43B0BF0CD /* NativeClimbController.swift */,
+				1DD051557FBDF8C9F92AC65F /* NativeCombatEligibility.swift */,
 				6A94B01CC17E576695BB0572 /* NativeConnectionRecovery.swift */,
 				2C6BA81B3041DCDEDDDC0BEB /* NativeContactAudio.swift */,
 				45B4846180421489379816D5 /* NativeDEMenuStyle.swift */,
@@ -348,6 +353,7 @@
 				8162236584EA8A1768F6CBC2 /* NativeVehicleAudioDynamics.swift */,
 				09716AFE34EB334F442D99A3 /* NativeVehicleAudioSpatial.swift */,
 				88619053F1E69339BD0A9A81 /* NativeVehicleBuoyancy.swift */,
+				48F21D9BA3DB131EEB43CCFF /* NativeVehicleCoupling.swift */,
 				6B0299955CDF0C5E3943E14D /* NativeVehicleDamage.swift */,
 				F7254CF01969FD67C56A9E68 /* NativeVehicleDamageController.swift */,
 				F74C81507F4A0EC09727DCF9 /* NativeVehicleDynamics.swift */,
@@ -490,6 +496,7 @@
 				5447F93CFED6627A34254193 /* NativeChatPanel.swift in Sources */,
 				9A6319D331B41445AF5F6B4E /* NativeCityMapViewController.swift in Sources */,
 				6353BFD93B26FE90A5CD4C75 /* NativeClimbController.swift in Sources */,
+				82383A5FF5BB810F26C6E94F /* NativeCombatEligibility.swift in Sources */,
 				75FC3E0DF53C7D9BFE2494DC /* NativeConnectionRecovery.swift in Sources */,
 				EDF00D63145A8D470AC46E33 /* NativeContactAudio.swift in Sources */,
 				99353400109D646830373149 /* NativeDEMenuStyle.swift in Sources */,
@@ -552,6 +559,7 @@
 				24D7F42F5A14B834A88C3E9F /* NativeVehicleAudioDynamics.swift in Sources */,
 				FB5EBE7FE0004A3588CFA229 /* NativeVehicleAudioSpatial.swift in Sources */,
 				1925C9F28562038C60371B86 /* NativeVehicleBuoyancy.swift in Sources */,
+				FBF7589533B5A4A87BA2A194 /* NativeVehicleCoupling.swift in Sources */,
 				53532FE888770CECECC12D44 /* NativeVehicleDamage.swift in Sources */,
 				518043F146396171A2DE04BB /* NativeVehicleDamageController.swift in Sources */,
 				2CB1AF0FD4599795C3601F0E /* NativeVehicleDynamics.swift in Sources */,

@@ -271,13 +271,14 @@ function serve(req, res) {
   }
   // Extracted owner data lives in its own overlay. Preparing melee metadata
   // must never modify a shared archived site or publish original game data.
-  if (SELFHOST && pathname === '/game/native/melee.json') {
+  if (SELFHOST && ['/game/native/melee.json','/game/native/vehicle-coupling.json'].includes(pathname)) {
     if (!['GET','HEAD'].includes(req.method)) {
       res.writeHead(405, {Allow:'GET, HEAD'});return res.end();
     }
-    const metadata = path.join(LOCAL_ONLY,'native','melee.json');
+    const metadata = pathname.endsWith('/vehicle-coupling.json') ?
+      path.join(LOCAL_ONLY,'selfhost','coupling-catalog.json'):path.join(LOCAL_ONLY,'native','melee.json');
     fs.stat(metadata,(error,stat)=>{
-      if (error || !stat.isFile()) {res.writeHead(404);return res.end('Prepare native melee data on the Mac.');}
+      if (error || !stat.isFile()) {res.writeHead(404);return res.end('Prepare the native metadata on the Mac.');}
       res.writeHead(200, {'Content-Type':'application/json; charset=utf-8',
         'Content-Length':stat.size,'Cache-Control':'no-cache'});
       if (req.method==='HEAD') return res.end();
@@ -285,6 +286,26 @@ function serve(req, res) {
       stream.on('error',()=>res.destroy());stream.pipe(res);
     });
     return;
+  }
+  // Working hierarchies must travel with their own matching mesh/atlas family.
+  // A partial export is never mixed with the older archived family.
+  const workingRig=SELFHOST && /^\/game\/native\/models\/([A-Za-z0-9_]+)\.rig(\.normals\.bin|\.bin|\.png|\.json)$/.exec(pathname);
+  if(workingRig){
+    const directory=path.join(LOCAL_ONLY,'native-working','models'),name=workingRig[1];
+    const family=['.rig.bin','.rig.normals.bin','.rig.png','.rig.json'].map(s=>path.join(directory,name+s));
+    const present=family.filter(file=>fs.existsSync(file));
+    if(present.length){
+      if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{Allow:'GET, HEAD'});return res.end();}
+      if(present.length!==family.length){res.writeHead(503,{'Cache-Control':'no-store'});return res.end('Working vehicle export is incomplete.');}
+      const file=path.join(directory,name+'.rig'+workingRig[2]);
+      fs.stat(file,(error,stat)=>{
+        if(error||!stat.isFile()){res.writeHead(404);return res.end();}
+        res.writeHead(200,{'Content-Type':file.endsWith('.json')?'application/json; charset=utf-8':file.endsWith('.png')?'image/png':'application/octet-stream',
+          'Content-Length':stat.size,'Cache-Control':'no-cache'});
+        if(req.method==='HEAD')return res.end();
+        const stream=fs.createReadStream(file);stream.on('error',()=>res.destroy());stream.pipe(res);
+      });return;
+    }
   }
   // The game document needs its cookie before JavaScript opens the socket.
   // Assets are fetched concurrently and must not each create an account.

@@ -77,12 +77,16 @@ final class NativeUnattendedVehicle {
     }
     var state:SwiftRapierWorld.BodyState? {world.bodyState(body)}
     static func quaternion(_ q:simd_quatf)->simd_quatd {.init(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))}
+    static func controls(velocity:V,wetness:Double,held:Bool,fallen:Bool)->NativeVehicleDynamics.Input {
+        var input=NativeVehicleDynamics.Input();input.nobody=true;input.abandoned = !held;input.riderless=fallen && !held
+        let brake=held ? 0:simd_length(velocity)<5 ? 0.2:0.0
+        input.pedals=SIMD2(0,brake);input.drive = .init(throttle:0,steer:0,handbrake:false,pedals:SIMD2(0,brake));input.wetness=wetness
+        return input
+    }
     func beforeStep(delta:Double,wetness:Double=0,held:Bool=false) {
         guard let current=state else{return}
         speedWas=V(current.linearVelocity)
-        var input=NativeVehicleDynamics.Input();input.nobody=true;input.abandoned = !held;input.riderless=fallen
-        let brake=simd_length(current.linearVelocity)<5 ? 0.2:0.0
-        input.pedals=SIMD2(0,brake);input.drive = .init(throttle:0,steer:0,handbrake:false,pedals:SIMD2(0,brake));input.wetness=wetness
+        let input=Self.controls(velocity:speedWas!,wetness:wetness,held:held,fallen:fallen)
         let state=NativeVehicleDynamics.BodyState(position:V(current.position),rotation:Self.quaternion(current.rotation),linearVelocity:V(current.linearVelocity),angularVelocity:V(current.angularVelocity))
         let ray:(V,V,Double)->NativeVehicleDynamics.RayHit? = {[world,body] origin,direction,distance in
             guard let hit=world.raycast(origin:SIMD3<Float>(origin),direction:SIMD3<Float>(direction),distance:Float(distance),excludingBody:body) else{return nil}

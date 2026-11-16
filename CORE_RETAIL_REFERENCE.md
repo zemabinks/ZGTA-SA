@@ -92,7 +92,7 @@ Selected metadata/binary extraction and full retained evidence remain local.
 A compatible running device reference is still needed for gameplay recordings;
 no original app was installed, launched, re-signed or decrypted in this audit.
 
-The owner confirmed that only the IPA is currently available. Apple Simulator
+The owner initially supplied only the IPA. Apple Simulator
 requires a build for its platform; the supplied iPhoneOS binary is not such a
 build. Re-signing or editing bundle metadata does not supply the missing
 Simulator executable and dependencies. See Apple's
@@ -103,3 +103,21 @@ Simulator build or an established compatible runtime for this package; its
 [published requirements](https://docs.playcover.io/getting_started/download_playcover)
 exclude Intel Macs. No PlayCover installation or original-game execution was
 attempted. Our Simulator builds come from our independent app source.
+
+## Physical reference status, 2026-11-16
+
+The connected iPhone 12 Pro was reported by device inventory as iOS 14.5.1;
+the development tools reported a missing compatible Developer Disk Image.
+The owner owns the classic mobile app but has not installed it. The owner
+plans to update the phone and install Definitive Edition. No OS update,
+original-app installation or original gameplay launch was performed or
+verified during this pass. Re-check actual device/version availability before
+recording any reference observations; a proposed OS version is not a detected
+or validated version.
+
+When the original runs, record its edition/build, selected graphics/control
+mode, measured frame rate and test conditions alongside each comparison.
+Definitive Edition is useful for its own presentation and gameplay behavior;
+edition-specific differences must not silently replace the classic San
+Andreas target. Static IPA resources and archived browser outputs remain the
+available references until that runtime comparison is established.

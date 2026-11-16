@@ -14,10 +14,13 @@ final class NativeWeaponState {
         let interval: Double
         let animation: String
         let fireKind: String
-        var isMelee: Bool { id == 0 || fireKind.uppercased() == "MELEE" }
+        var isMelee: Bool { id == 0 || ((1...15).contains(id) && fireKind.uppercased() == "MELEE") }
         // Existing callers use this for ammunition-driven attacks, including
-        // throwables/streams. A nonzero melee weapon must not spend a round.
-        var isGun: Bool { !isMelee }
+        // throwables/streams. USE/CAMERA and the parachute's legacy MELEE data
+        // are utility roles, not a fallback gun or an unarmed attack.
+        var isGun: Bool { ["INSTANT_HIT", "PROJECTILE", "AREA_EFFECT"].contains(fireKind.uppercased()) }
+        var isUtility: Bool { !isMelee && !isGun }
+        var supportsAttack: Bool { isMelee || isGun }
     }
     private var catalog: [Weapon] = [Weapon(id: 0, name: "Fists", model: "", range: 1.6,
         capacity: 0, interval: 0.35, animation: "unarmed", fireKind: "MELEE")]
@@ -88,7 +91,7 @@ final class NativeWeaponState {
 
     var pendingShotCount: Int { prediction.pending.count }
     var synchronized: Bool { prediction.connection != nil ? prediction.synchronized && !prediction.needsResync : allowLegacySnapshots }
-    var canFire: Bool { synchronized && !reloading && current.id == selected && (!current.isGun || rounds > 0) }
+    var canFire: Bool { synchronized && !reloading && current.id == selected && (current.isMelee || current.isGun && rounds > 0) }
 
     /// Unacknowledged snapshots are ignored unless an explicit offline legacy
     /// mode was selected by a test. They never overwrite sequenced truth.
@@ -144,7 +147,8 @@ final class NativeWeaponState {
     }
 
     private func consumeRound(weapon: Int, ticket: NativeShotTicket?) -> Bool {
-        if !current.isGun { return synchronized } // melee spends no predicted ammunition
+        if current.isMelee { return synchronized } // melee spends no predicted ammunition
+        guard current.isGun else { return false }
         if allowLegacySnapshots && prediction.connection == nil {
             if current.isGun { ammunition[String(selected)] = [rounds-1, reserve] }
             return true

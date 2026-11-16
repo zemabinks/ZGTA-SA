@@ -31,6 +31,9 @@ final class NativeSwimController {
     var pitch: Double { state == .under || state == .glide ? angle : 0 }
     var pace: Double { max(1,sprint) }
     var breath: Double { oxygen/1150 }
+    /// Match the pedestrian status owner: keep the bar while oxygen recovers
+    /// after surfacing or leaving water, and show it whenever underwater.
+    var displayBreath: Int? { under || breath < 1 ? Int(ceil(100 * breath)) : nil }
     var turns: Bool { state != .dive && state != .out && ((state == .under || state == .glide) || push > 0) }
     let turnRate: Double = 4
     func consumeSplash() -> Bool { defer { splashed = false };return splashed }

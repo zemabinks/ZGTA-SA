@@ -4,6 +4,7 @@
 const fs=require('node:fs'),path=require('node:path'),{createHash}=require('node:crypto');
 const {spawnSync}=require('node:child_process');
 const {archivedModules}=require('./smoke_vehicle_dynamics');
+const {reference:couplingReference}=require('./prepare_native_vehicle_coupling');
 
 function rigFactory(load) {
   // Expose the existing closed-over pure rig constructor, without executing
@@ -23,8 +24,8 @@ function rigFactory(load) {
 function createLibrary(options={}) {
   const load=archivedModules(),sourceHash=createHash('sha256');
   for(const id of Object.keys(load.factories).sort((a,b)=>Number(a)-Number(b)))sourceHash.update(id+':'+load.factories[id].toString()+'\n');
-  for(const file of [__filename,path.join(__dirname,'prepare_native_vehicle_rig_atlas.py'),path.join(__dirname,'smoke_vehicle_dynamics.js')])sourceHash.update(fs.readFileSync(file));
-  const sourceSHA256=sourceHash.digest('hex'),rig=rigFactory(load),T=load(85339),geometry=load(88711),catalogue=load(72197);
+  for(const file of [__filename,path.join(__dirname,'prepare_native_vehicle_rig_atlas.py'),path.join(__dirname,'smoke_vehicle_dynamics.js'),path.join(__dirname,'prepare_native_vehicle_coupling.js')])sourceHash.update(fs.readFileSync(file));
+  const sourceSHA256=sourceHash.digest('hex'),rig=rigFactory(load),T=load(85339),geometry=load(88711),catalogue=load(72197),coupling=couplingReference(load);
   const game=options.game??path.join(__dirname,'local-only/site/game'),hashes=new Map(),decodedTextures=new Map();
   const filename=url=>path.join(game,url.split('/').pop());
   function inputHash(file){if(!hashes.has(file))hashes.set(file,createHash('sha256').update(fs.readFileSync(file)).digest('hex'));return hashes.get(file)}
@@ -63,8 +64,10 @@ function createLibrary(options={}) {
     // time. This is the same original pose function, with explicit inputs.
     motion.pose?.(0,0,0,{drop:[0,0],lean:0,crank:0,rotor:0,spin:0,gearUp:false,nozzle:5000},[0,0,0,0]);
     const damage=load(39851).k({root,body,wheels});
-    root.updateMatrixWorld(true);
-    return {id:Number(id),definition,parsed,bytes,root,body,wheels,table,bounds,size,motion,damage,textures,T,geometry,rig,cache:signature(definition)};
+    const built={id:Number(id),definition,parsed,bytes,root,body,wheels,table,bounds,size,motion,damage,textures,T,geometry,rig,coupling,cache:signature(definition)};
+    // Prepare original working-part groups at their rest pose before exporting
+    // hierarchy indices. Runtime working controls then rotate these same groups.
+    coupling.prepare(built);root.updateMatrixWorld(true);return built;
   }
   return {load,build,catalogue,game,T,geometry,rig,signature,cached};
 }
@@ -177,6 +180,9 @@ function loadJoints(built,objects,indices) {
       rearForkLength:Math.max(0.1,Math.hypot(motion.hubs.rear.at[1]-rear.position.y,motion.hubs.rear.at[2]-rear.position.z)),minimumZ:built.bounds.box.min[2]};
   }
   rows.rearSteerOnly=(built.table.flags??0)&32?true:false;
+  const working=built.coupling.configuration(built).working;
+  if(working)rows.working={tow:working.tow===true,turn:working.turn??0,lift:working.lift??0,
+    parts:[...(root.userData.parts??[])].map(([role,part])=>({node:indices.get(part.group),role,rest:quaternion(part.rest),home:vector(part.group.position)}))};
   return rows;
 }
 

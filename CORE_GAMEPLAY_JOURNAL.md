@@ -789,3 +789,104 @@ Core86 frozen source. The first HTTP melee-assets attempt hit the sandbox's
 loopback-listen restriction; its authorized isolated rerun passed. No production
 listener or saves were changed. This is not a newly run 75-gate aggregate, new
 Simulator playtest, device measurement or original retail comparison.
+
+### Core88 — shared effort, combat ownership and physical towing/tools
+
+Continued the core-mechanics priority through movement, combat, special
+vehicles, controls, native physics and the independent server. Advanced
+roleplay remains deferred; this batch does not establish overall 1:1 parity.
+
+- Movement effort now follows the checked incoming-task ordering: exhausted
+  underwater preparation, swimming recovery before its state transition,
+  airborne/parachute recovery without erasing cached sprint pace, and no
+  dead-task budget/counter advancement. Recovering breath remains visible
+  after surfacing or reaching shore. Full original stat/training curves
+  remain unavailable.
+- Actual task eligibility gates new foot attacks, aim and committed animation
+  emissions separately. Stun suppresses melee/gun markers; a reentrant
+  first-hand callback cannot spend a newly selected weapon's second round.
+  Accepted final stream rounds keep their presentation. Utility slots no
+  longer manufacture ammo/melee attacks; actual detonator, parachute deploy
+  and dead-player respawn actions retain their owners.
+- Trailer/tow constraints use imported body-local anchors, confirmed topology,
+  native spherical joints, two-link limits and source release conditions.
+  Tow anchors move continuously. Forklift plates and the original selected
+  dumper/dozer spheres move with their tool pose; hauled cars receive the
+  source held force profile. Working values persist across parking and body
+  promotion, while cancelling input releases the axis.
+- Six working model families are staged together with mesh, normals, atlas and
+  metadata validation. The HTTP overlay rejects incomplete exports. The
+  original configured Andromada frame is absent, so no invented ramp/control
+  is exposed. Remaining moving triangle-query deformation and live load
+  carrying are explicitly open.
+- Context controls preserve normal driving, nozzle, horn, bicycle, radio,
+  deploy and respawn actions. Tow directions account for the original
+  reversed hook axis. Independent touch releases do not erase another held
+  button. The full binding gate passes 3,833 checks.
+- The independent server negotiates connection/sequence-owned attachment
+  acknowledgements, validates current driver/model/geometry/claims and emits
+  actual legacy unhitch messages. It preserves work state in parked/owned
+  rows. Reconnect, exit, death and entity deletion revoke attachment claims.
+  Wire-body transforms were checked through 162 actual encoder/decoder cases;
+  the server's extra 20 mm acquisition tolerance is a documented transport
+  quantization policy, not an original gameplay constant.
+- Cross-system review reproduced lost safety cleanup: declining the first
+  detach enqueue previously produced attempts 1→1→1 while the physical joint
+  had already vanished. Invalid confirmed links now retain cleanup intent
+  until authoritative removal; the checked result is 1→2→2, with no uncertain
+  replay after the second request queues. Safety detach can run under covered
+  input while new acquisitions remain blocked; nonce/owner checks still apply.
+- The additive Swift/C/Rust bridge implements spherical joints, lifetime and
+  parent-local collider movement. All five Apple libraries and ABI links
+  pass. The expanded actual WASM/native joint gate passes 56,094 checks,
+  including genuinely overlapping contact suppression and force events.
+  Six archived pre-step whole-world ray misses differ from native immediate
+  queries; this known query-policy difference is retained, not called parity.
+
+Focused evidence is documented in CORE_EFFORT_RECOVERY_88.md,
+CORE_COMBAT_TASK_OWNERSHIP_88.md, CORE_VEHICLE_COUPLING.md,
+CORE_VEHICLE_CONTROLS_88.md, CORE_COUPLING_TRANSPORT_88.md and
+CORE_COUPLING_SERVER_REVIEW_88.md. The additional
+CORE_COUPLING_BACKEND_INTEGRATION_88.md records 160 checks using the actual
+native URLSession client, copied real backend/Peer/authority and a separate
+legacy-protocol WebSocket observer. Eight attachment requests across two
+cookie/nonce sessions cover two links, rejection/sequence continuity, five
+legacy releases, cooldown, saved work and an accepted deliberately lost ACK
+without replay. Initial garage/anchor data is synthetic administrative fixture
+setup; the observer is not a rendered browser game. Original expressions, binary resources,
+catalogs, generated rigs and numerical traces stay local-only. REA tooling was
+unavailable; new source probes used ordinary local Node execution and have no
+fabricated REA Evidence IDs.
+
+Final frozen full-suite acceptance passed **89/89 gates**, with all captured
+production, importer and test sources unchanged throughout the run. Both
+Release Simulator and unsigned generic iPhone builds passed against unchanged
+production sources; both bundles identify build88. All five native Apple
+physics libraries and Swift/C/Rust ABI links pass. The final expanded coupling
+gate passes 161,058 checks; working rigs pass 182,608 matrix checks over 606
+archived poses; effort/breath passes 104,253 comparisons plus 15 guards; the
+actual native/backend/legacy-observer integration passes 160 checks. These
+results apply to the bounded regressions described above, not retail parity.
+
+The first aggregate is a diagnostic run:
+84/88 passed, with four reduced-harness compile failures repaired in the shared
+movement fixtures and bicycle harness. It predates the final
+cleanup/covered-input fix. The initial app build exposed the missing Apple
+Metal compiler component, which was restored through Xcode's component tool;
+the pre-cleanup build was intentionally interrupted for the final source.
+Those attempts are retained separately and are not final passing acceptance.
+
+Two additional regressions use unchanged existing test bodies and the frozen
+v2 native library. All 212 production chassis, including trains, enter/exit;
+the tested real-contact driving trajectory agrees at 60/120 Hz. The actual
+archived unattended manager generates nine scenarios/3,480 frames; the existing
+native controller comparison covers its seven non-pool cases/2,580 frames.
+Maximum position error is 2.20e-17, with zero health error or damage-state
+mismatches. These bounded regressions do not establish original retail vehicle
+handling or live traffic behavior.
+
+No physical input, device FPS, new GPU playtest, live browser/native vehicle
+scene or original retail runtime comparison has been established here. The
+owner plans to update the iPhone 12 Pro and install Definitive Edition; actual
+version/install/runtime availability remains to be verified. Original-game
+comparison stays an open checklist requirement.

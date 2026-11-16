@@ -24,7 +24,7 @@ def function(source,marker):
 
 def main():
  renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
- methods=['private func footMotion(','private func beginClimb(','private func climbingMotion(',
+ methods=['private func combatEligibility(','var canEmitFootWeaponShot:','var canEmitFootCombatMarker:','var hasNativeFootWeaponTiming:','private func footMotion(','private func beginClimb(','private func climbingMotion(',
           'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(',
           'private var activeMeleeDefinition:','var hasNativeFootMeleeTiming:','var canNativeFootMeleeGuard:',
           'private func meleeControls(','private func advanceMelee(']
@@ -35,7 +35,7 @@ def main():
  library=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')
  aim=skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]
  source=library+'\nfinal class NativeSkeletalActor {\n'+aim+'}\n'
- names=['NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativePersonalFlightController',
+ names=['NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativePersonalFlightController',
         'NativeFootLocomotion','NativeHeadingContinuity','NativeSprintController','NativeMelee','NativeMeleeInput','NativeFallDamage']
  for name in names:source+='\n'+(ROOT/'ios/App'/f'{name}.swift').read_text()
  source+='\n'+(ROOT/'smoke_native_climb_runtime.swift').read_text().replace('// ACTUAL_RENDERER_METHODS',extracted)

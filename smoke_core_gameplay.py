@@ -19,11 +19,14 @@ OUT = ROOT / 'local-only/native-physics/tests/core-gameplay-gate'
 
 
 def hashes():
-    paths = [*sorted(p for p in (ROOT / 'ios/App').rglob('*') if p.is_file()),
+    paths = [*sorted(p for p in ROOT.iterdir() if p.is_file() and p.suffix in {'.py','.js','.swift','.sh'}),
+             *sorted(p for p in (ROOT / 'ios/App').rglob('*') if p.is_file()),
              *sorted((ROOT / 'native-physics/src').rglob('*.rs')),
+             *sorted(p for p in (ROOT / 'native-physics/tests').rglob('*') if p.is_file()),
+             *sorted((ROOT / 'native-physics').glob('*.sh')),
              *sorted(p for p in (ROOT / 'native-physics/include').iterdir() if p.is_file()),
              ROOT / 'native-physics/Cargo.toml', ROOT / 'native-physics/Cargo.lock',
-             ROOT / 'weapon_inventory.js', ROOT / 'selfhost_backend.js', ROOT / 'local_projectiles.js']
+             ROOT / 'native-physics/source_stamp.py']
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
 
@@ -43,6 +46,11 @@ def main():
         'smoke_native_fixed_velocity.py', 'smoke_native_task_handoffs.py', 'smoke_native_fall_damage.py', 'smoke_native_health.py',
         'smoke_native_camera_motion.py', 'smoke_native_world_reset.py', 'smoke_vehicle_air_handoff.py', 'smoke_train_layout.py',
         'smoke_native_combat_transitions.py', 'smoke_native_combat_animation.py', 'smoke_native_fire_arrival.py', 'smoke_native_reload_dispatch.py', 'smoke_native_respawn_dispatch.py', 'smoke_native_connection_recovery.py', 'smoke_native_recovery.py', 'smoke_native_connection_owners.py',
+        'smoke_native_weapon_roles.py', 'smoke_native_combat_eligibility.py',
+        'smoke_native_combat_interruptions.py', 'smoke_native_combat_dispatch.py',
+        'smoke_native_effort_recovery.py', 'smoke_native_coupling_wire.py', 'smoke_native_coupling_controls.py',
+        'smoke_native_coupling_backend.py',
+        'smoke_vehicle_coupling.py', 'smoke_vehicle_working_rigs.py',
         'smoke_native_settings.py', 'smoke_native_menu_layout.py', 'smoke_native_menu_profile.py',
         'smoke_native_menu_keys.py', 'smoke_native_audio_settings.py', 'smoke_native_menu_sound.py',
         'smoke_native_heading_transitions.py', 'smoke_native_task_transitions.py',
@@ -65,9 +73,11 @@ def main():
     cases += [(p.removesuffix('.js'), ['node', p]) for p in [
         'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_weapon_transport.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js', 'smoke_vehicle_departure.js', 'smoke_health_ack.js',
         'smoke_native_melee_server.js', 'smoke_native_melee_assets.js',
+        'smoke_vehicle_coupling_server.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
     ]]
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))
     cases.append(('native_sphere', ['zsh', 'native-physics/test_sphere.sh']))
+    cases.append(('native_joints', ['zsh', 'native-physics/test_joints.sh']))
     cases.append(('vehicle_lifecycle',['zsh','smoke_vehicle_lifecycle.sh']))
 
     def run(case):

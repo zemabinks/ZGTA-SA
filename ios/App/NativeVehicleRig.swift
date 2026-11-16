@@ -10,6 +10,7 @@ final class NativeVehicleRig {
         var steering=0.0,rearSteering=0.0,frontSpin=0.0,rearSpin=0.0
         var offsets=[Double](),drop=[Double](),lean=0.0,crank:Double?
         var rotor=0.0,rotorSpin:Double?,nozzle=5000.0,gearUp=false
+        var work=0.0
         var looks=[Int](),tyres=[Int](),brokenLights=[Int](),doorAngles=[Double](),doorAxes=[Int]()
         var lights=false,braking=false,scorched=false
         var extras:Set<Int>?
@@ -32,11 +33,13 @@ final class NativeVehicleRig {
     struct GearJoint:Decodable {let node:Int,frame:String,axis:[Double],angle:Double,over:[Double],at:[Double],undo:[Double]}
     struct NozzleJoint:Decodable {let node:Int}
     struct Hub:Decodable {let at:[Double],radius:Double}
+    struct WorkingPart:Decodable {let node:Int,role:String,rest:[Double],home:[Double]}
+    struct Working:Decodable {let tow:Bool,turn:Double,lift:Double,parts:[WorkingPart]}
     struct Bike:Decodable {
         let model:Int,front:Int,rear:Int,crank:Int?,parameters:[String:Double],hubs:[String:Hub],restDrop:Double
         let frontWheels:[Int],frontMudguards:[Int],rearWheels:[Int],pedals:[Int],pedalled:Bool,rearForkLength:Double,minimumZ:Double
     }
-    struct Joints:Decodable {let damage:[DamageJoint],wheels:[WheelJoint],rotors:[RotorJoint],gear:[GearJoint],nozzles:[NozzleJoint],rearSteerOnly:Bool,bike:Bike?}
+    struct Joints:Decodable {let damage:[DamageJoint],wheels:[WheelJoint],rotors:[RotorJoint],gear:[GearJoint],nozzles:[NozzleJoint],rearSteerOnly:Bool,bike:Bike?,working:Working?}
     struct WaterMask:Decodable {let node:Int,positions:[Float],indices:[UInt32]}
     struct Document:Decodable {let version:Int,id:Int,kind:String,nodes:[Node],draws:[DrawDefinition],joints:Joints,waterMasks:[WaterMask]?}
     let document:Document
@@ -48,6 +51,9 @@ final class NativeVehicleRig {
                   (node.position+node.rotation+node.scale+node.matrix).allSatisfy(\.isFinite)
               }),document.draws.allSatisfy({document.nodes.indices.contains($0.node)&&$0.start>=0&&$0.count>=0}),
               (document.waterMasks ?? []).allSatisfy({mask in document.nodes.indices.contains(mask.node)&&mask.positions.count%3==0&&mask.positions.allSatisfy(\.isFinite)&&mask.indices.allSatisfy{Int($0)<mask.positions.count/3}}) else{return nil}
+        if let working=document.joints.working {
+            guard working.turn.isFinite,working.lift.isFinite,working.parts.allSatisfy({part in document.nodes.indices.contains(part.node)&&part.rest.count==4&&part.home.count==3&&(part.rest+part.home).allSatisfy(\.isFinite)}) else{return nil}
+        }
         self.document=document
     }
     private static func v(_ values:[Double])->V {V(values[0],values[1],values[2])}
@@ -122,6 +128,19 @@ final class NativeVehicleRig {
             for joint in joints.gear {
                 let transform=Self.compose(Self.v(joint.at),Self.axis(Self.v(joint.axis),joint.angle*state.gearShare),V(repeating:1))
                 locals[joint.node]=Self.matrix(joint.over)*transform*Self.matrix(joint.undo)
+            }
+        }
+        if let working=joints.working {
+            let work=input.work.isFinite ? min(2500,max(0,input.work)):0
+            for part in working.parts {
+                if working.tow {
+                    let angle=8*work*2e-5*(part.role=="misc_b" ? -1:1)
+                    rotations[part.node]=Self.multiply(Self.q(part.rest),Self.axis(V(1,0,0),angle))
+                } else if working.lift != 0 {
+                    positions[part.node]=Self.v(part.home)+V(0,0,work*working.lift)
+                } else {
+                    rotations[part.node]=Self.multiply(Self.q(part.rest),Self.axis(V(1,0,0),work*working.turn))
+                }
             }
         }
         for joint in joints.damage {

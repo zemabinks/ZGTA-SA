@@ -53,6 +53,9 @@ final class NativeOtherVehicles {
         var reference:Pose3?
         var press:(direction:SIMD2<Double>,point:V,speed:Double)?
         var fallen=false
+        var hauled=false
+        var workingGeneration = -1,workingValue:Int?
+        var workingBody:SwiftRapierWorld.BodyID?
         var rotor=0.0,gearUp=false
         init(_ source:Pose,model:String,definition:NativeGroundVehicle.Definition,pose:Pose3){
             id=source.id;self.model=model;self.definition=definition;self.source=source;lastRaw=source
@@ -63,6 +66,8 @@ final class NativeOtherVehicles {
     }
     private let world:SwiftRapierWorld
     private var definitions:[String:NativeGroundVehicle.Definition] = [:]
+    private var couplingDefinitions:[String:NativeGroundVehicle.CouplingDefinition] = [:]
+    private var workingGeneration=0
     private var entries:[String:Entry] = [:]
     private var order:[String] = []
     private(set) var colliders:Set<SwiftRapierWorld.ColliderID> = []
@@ -76,6 +81,24 @@ final class NativeOtherVehicles {
     private var now=0.0
     init(world:SwiftRapierWorld){self.world=world}
     func load(_ definitions:[String:NativeGroundVehicle.Definition]){clear();self.definitions=definitions}
+    func setCouplingDefinitions(_ profiles:[String:NativeGroundVehicle.CouplingDefinition]) {
+        couplingDefinitions=profiles;workingGeneration &+= 1
+        for entry in entries.values{applyWorkingCollisionPose(entry)}
+    }
+    private func applyWorkingCollisionPose(_ entry:Entry) {
+        guard let body=entry.bodyID else{entry.workingBody=nil;return}
+        let changed=entry.workingBody != body || entry.workingGeneration != workingGeneration
+        guard changed || entry.workingValue != entry.work else{return}
+        let ids=entry.colliderIDs.sorted()
+        if changed {for (id,shape) in zip(ids,entry.definition.chassis){_ = world.setColliderTranslationWrtParent(id,position:shape.centre)}}
+        if let profile=couplingDefinitions[entry.model],let working=profile.working {
+            for shape in working.movingShapes where ids.indices.contains(shape.index) {
+                let position=NativeGroundVehicle.workingPosition(shape.at,value:Double(entry.work),configuration:profile)
+                _ = world.setColliderTranslationWrtParent(ids[shape.index],position:SIMD3<Float>(position))
+            }
+        }
+        entry.workingBody=body;entry.workingGeneration=workingGeneration;entry.workingValue=entry.work
+    }
     func clear(){for id in Array(order){remove(id)};entries.removeAll();order.removeAll();rebuildColliders()}
     private func rawEqual(_ a:Pose,_ b:Pose)->Bool {
         a.position==b.position && a.heading==b.heading && a.pitch==b.pitch && a.roll==b.roll && a.health==b.health && a.damage==b.damage && a.work==b.work && a.occupied==b.occupied && a.foreignAI==b.foreignAI && a.kept==b.kept
@@ -103,7 +126,7 @@ final class NativeOtherVehicles {
                 // occupied pose. Demoting afterwards overwrote that target
                 // with the old parked position; a stationary remote driver
                 // then never supplied another changed packet to correct it.
-                if entry.rig != nil && (source.occupied || source.kept || source.foreignAI) { demote(entry) }
+                if entry.rig != nil && (source.occupied || source.kept || source.foreignAI) { entry.hauled=false;demote(entry) }
                 if changed {
                     entry.health=source.health;entry.damage=source.damage;entry.work=source.work
                     if let rig=entry.rig {
@@ -173,7 +196,7 @@ final class NativeOtherVehicles {
                 let far=now-entry.shovedAt>=400 && (near.map{simd_distance(entry.pose.position,$0)>radius+11} ?? true)
                 entry.rest=slow && far ? entry.rest+delta:0
                 let fell=far && below(entry.pose.position,400)==nil
-                if entry.health<=0 || entry.rest>1.5 || fell {
+                if entry.health<=0 || !entry.hauled && (entry.rest>1.5 || fell) {
                     demote(entry);onMove?(entry.id,packet(entry))
                 }else if now-entry.sentAt>100 {
                     entry.sentAt=now;onMove?(entry.id,packet(entry))
@@ -193,6 +216,7 @@ final class NativeOtherVehicles {
             world.setColliderPiece(collider,piece:Int32(shape.piece));world.setColliderSurface(collider,surface:2,material:63);entry.solids.insert(collider)
         }
         if entry.solids.count != entry.definition.chassis.count{world.removeBody(body);entry.body=nil;entry.solids=[]}
+        applyWorkingCollisionPose(entry)
         rebuildColliders()
     }
     private func promote(_ entry:Entry){
@@ -202,6 +226,7 @@ final class NativeOtherVehicles {
             waterLevel:{[weak self] in self?.waterLevel?($0)},waterWave:{[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:V(0,1,0))})
         entry.rig?.random=random;entry.rest=0;entry.sentAt = -Double.infinity
         if let rig=entry.rig{entry.fallen=rig.fallen}else{makeKinematic(entry)}
+        applyWorkingCollisionPose(entry)
         rebuildColliders()
     }
     private func demote(_ entry:Entry){
@@ -212,8 +237,9 @@ final class NativeOtherVehicles {
     }
     func beforeStep(delta:Double){
         for id in order {guard let entry=entries[id] else{continue}
+            applyWorkingCollisionPose(entry)
             if let rig=entry.rig {
-                entry.reference=entry.pose;rig.beforeStep(delta:delta,wetness:wetness)
+                entry.reference=entry.pose;rig.beforeStep(delta:delta,wetness:wetness,held:entry.hauled)
                 if let press=entry.press{rig.shove(direction:press.direction,point:press.point,speed:press.speed)}
             }else if let body=entry.body {
                 world.setNextKinematicPose(body,position:SIMD3<Float>(entry.pose.position),rotation:simd_quatf(vector:SIMD4<Float>(entry.pose.rotation.vector)))
@@ -258,11 +284,37 @@ final class NativeOtherVehicles {
                 waterLevel:{[weak self] in self?.waterLevel?($0)},waterWave:{[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:V(0,1,0))})
             entry.rig?.random=random;entry.sentAt = -Double.infinity
             if let rig=entry.rig{entry.fallen=rig.fallen}else{makeKinematic(entry)}
+            applyWorkingCollisionPose(entry)
             rebuildColliders()
         }
     }
     func bodyID(_ id:String)->SwiftRapierWorld.BodyID?{entries[id]?.bodyID}
     func bodyState(_ id:String)->SwiftRapierWorld.BodyState?{entries[id]?.bodyID.flatMap{world.bodyState($0)}}
+    /// Confirmed coupling pins the actual solver; distance/rest must not turn
+    /// one end of a live joint into a replacement kinematic body.
+    @discardableResult func haul(_ id:String)->Bool {
+        guard let entry=entries[id],entry.health>0,!entry.source.occupied,!entry.source.foreignAI,!entry.source.kept,
+              entry.definition.configuration.kind != "train" else{return false}
+        if entry.rig == nil {promote(entry)}
+        guard entry.rig != nil else{return false}
+        entry.hauled=true;entry.rest=0;return true
+    }
+    func unhaul(_ id:String) {
+        guard let entry=entries[id],entry.hauled else{return}
+        entry.hauled=false;entry.rest=0
+        // Retain the current body/velocities; ordinary unattended rest rules
+        // resume on subsequent steps. The release is sent without a stop pose.
+        onMove?(id,packet(entry))
+    }
+    func couplingVehicle(_ id:String,definitions:[String:NativeGroundVehicle.CouplingDefinition])->NativeGroundVehicle.CouplingVehicle? {
+        guard let entry=entries[id],let configuration=definitions[entry.model] else{return nil}
+        let pose=entry.bodyID.flatMap{world.bodyState($0)}.map{Pose3(position:V($0.position),rotation:NativeUnattendedVehicle.quaternion($0.rotation))} ?? entry.pose
+        return .init(id:id,body:entry.bodyID,configuration:configuration,pose:pose,health:entry.health,
+            occupied:entry.source.occupied,claimed:entry.source.foreignAI || entry.source.kept,dynamic:entry.rig != nil,hauled:entry.hauled)
+    }
+    func couplingVehicles(definitions:[String:NativeGroundVehicle.CouplingDefinition])->[NativeGroundVehicle.CouplingVehicle] {
+        order.compactMap{couplingVehicle($0,definitions:definitions)}
+    }
     func snapshot(_ id:String)->Snapshot?{
         guard let entry=entries[id] else{return nil}
         let e=NativeUnattendedVehicle.euler(entry.pose.rotation),output=entry.rig?.output
@@ -273,9 +325,14 @@ final class NativeOtherVehicles {
             health:entry.health,damage:entry.damage,work:entry.work,dynamic:entry.rig != nil,frontSpin:entry.rig?.frontSpin ?? 0,rearSpin:entry.rig?.rearSpin ?? 0,offsets:offsets,
             rotor:entry.rig?.rotor ?? entry.rotor,gearUp:entry.rig?.gearUp ?? entry.gearUp)
     }
-    private func packet(_ entry:Entry)->[String:Any]{
+    func movePacket(_ id:String)->[String:Any]? {
+        guard let entry=entries[id] else{return nil}
+        let current=entry.bodyID.flatMap{world.bodyState($0)}.map{Pose3(position:V($0.position),rotation:NativeUnattendedVehicle.quaternion($0.rotation))}
+        return packet(entry,pose:current)
+    }
+    private func packet(_ entry:Entry,pose:Pose3?=nil)->[String:Any]{
         func round(_ n:Double,_ scale:Double)->Double{floor(n*scale+0.5)/scale}
-        let e=NativeUnattendedVehicle.euler(entry.pose.rotation),p=entry.pose.position
+        let physical=pose ?? entry.pose,e=NativeUnattendedVehicle.euler(physical.rotation),p=physical.position
         return ["x":round(p.x,100),"y":round(-p.z,100),"z":round(p.y,100),"h":round(e.heading,1000),"p":round(e.pitch,1000),"r":round(e.roll,1000),"hp":entry.health,"d":entry.damage,"w":entry.work]
     }
     private func rebuildColliders(){

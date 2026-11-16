@@ -12,6 +12,14 @@ uint32_t zgtaphys_world_step(ZGTAPhysicsWorld *world); /* exactly 1/60 second */
 /* transform[7]: position xyz, quaternion xyzw. mass[7]: mass,COM xyz,inertia xyz. */
 uint64_t zgtaphys_body_new(ZGTAPhysicsWorld*,uint32_t kind,const float *transform,const float *mass,float gravity_scale);
 uint32_t zgtaphys_body_remove(ZGTAPhysicsWorld*,uint64_t body);
+/* Spherical impulse joint: anchors[6] are body1/body2 LOCAL xyz. Contacts are
+ * disabled for towing. Opaque joint IDs belong to this world and are invalidated
+ * by either body's removal. No angular motor, spring or impulse break is added. */
+uint64_t zgtaphys_joint_spherical(ZGTAPhysicsWorld*,uint64_t body1,uint64_t body2,const float *anchors,uint32_t contacts_enabled,uint32_t wake_up);
+uint32_t zgtaphys_joint_anchor1(ZGTAPhysicsWorld*,uint64_t joint,const float *anchor_xyz,uint32_t wake_up);
+uint32_t zgtaphys_joint_remove(ZGTAPhysicsWorld*,uint64_t joint,uint32_t wake_up);
+/* All output pointers required. bodies[2], anchors[6], contacts_enabled[1]. */
+uint32_t zgtaphys_joint_info(ZGTAPhysicsWorld*,uint64_t joint,uint64_t *bodies,float *anchors,uint32_t *contacts_enabled);
 /* state[13]: position xyz, quaternion xyzw, linear xyz, angular xyz. */
 uint32_t zgtaphys_body_state(ZGTAPhysicsWorld*,uint64_t body,float *state);
 uint32_t zgtaphys_body_set_state(ZGTAPhysicsWorld*,uint64_t body,const float *state);
@@ -44,6 +52,8 @@ uint32_t zgtaphys_character_move(ZGTAPhysicsWorld*,uint64_t collider,const float
 /* Archived public world factory increments prediction distance by one f32 ULP per tick. */
 uint32_t zgtaphys_archived_stepping(ZGTAPhysicsWorld*,uint32_t enabled);
 uint32_t zgtaphys_collider_translation(ZGTAPhysicsWorld*,uint64_t collider,const float *position);
+/* LOCAL parent offset; standalone collider is an accepted no-op, as in Rapier. */
+uint32_t zgtaphys_collider_translation_wrt_parent(ZGTAPhysicsWorld*,uint64_t collider,const float *position);
 uint32_t zgtaphys_collider_info(ZGTAPhysicsWorld*,uint64_t collider,float *position,uint64_t *body,uint32_t *dynamic,int32_t *material);
 /* Query options bit1: groups supplied; bit2: require a parent body. Flags are Rapier QueryFilterFlags. */
 uint32_t zgtaphys_intersections_capsule(ZGTAPhysicsWorld*,const float *position,float half_height,float radius,uint32_t groups,uint32_t flags,uint32_t options,const uint64_t *excluded_colliders,uint32_t collider_count,const uint64_t *excluded_bodies,uint32_t body_count,uint64_t *colliders,uint32_t capacity);

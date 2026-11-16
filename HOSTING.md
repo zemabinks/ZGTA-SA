@@ -114,6 +114,19 @@ atlases, models, skeletons, animations, HUD, handling, vehicle rigs, effects and
 runtime catalogs under `local-only/site/game/native/`. Some missing public
 animation/flight files can be fetched by their preparation tools. Radio
 recordings are not bundled; see [NATIVE_RADIO.md](NATIVE_RADIO.md).
+Native setup also creates the separate local coupling catalog and complete
+working-vehicle rig stage. To upgrade an already prepared native archive:
+
+```sh
+node prepare_native_vehicle_coupling.js
+node prepare_native_working_vehicles.js
+node smoke_native_working_stage.js
+```
+
+Restart the local server after generating the coupling catalog so it can
+negotiate the attachment protocol. These commands keep original derived data
+under `local-only/`; retain the complete matched rig families. See
+[working vehicles and towing](CORE_VEHICLE_COUPLING.md) for coverage and limits.
 When using owner-supplied radio streams, start the server with
 `local-only/venv/bin/python host.py serve` so its decoder uses that environment.
 

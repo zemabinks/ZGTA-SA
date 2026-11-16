@@ -21,16 +21,20 @@ struct RemotePlayer {
  var code="s7";var ridingVehicleID:String?;var crouching=false;var down=0;var life=100
 }
 class Network {
- var health=100,passive=false,hits:[String]=[],reservations=0,connected=true,strikes=0
+ var health=100,passive=false,hits:[String]=[],reservations=0,connected=true,strikes=0,detonations=0
  var orderedPlayers:[RemotePlayer]=[]
  var players:[String:RemotePlayer]{Dictionary(uniqueKeysWithValues:orderedPlayers.map{($0.id,$0)})}
  func sendMeleeHit(to id:String,weapon:Int=0)->Bool{guard connected else{return false};hits.append(id);return true}
  func recordMeleeStrike(weapon:Int)->Bool{guard connected else{return false};strikes+=1;return true}
  func reserveShot()->NativeShotTicket?{reservations+=1;return nil}
  func respawn(){health=100}
+ func detonateSatchels(){detonations+=1}
 }
 class Renderer {
  var isChuting=false,swimming=false,isClimbing=false,wearingJetpack=false,crouching=false
+ // These are observed public Renderer outputs. The real eligibility and
+ // actual Renderer wrapper have a separate CLP/source dispatch gate.
+ var canRequestFootWeaponFire=true,canEmitFootCombatMarker=true,canUseFootUtility=true
  var hasNativeFootWeaponTiming=false,hasNativeFootMeleeTiming=true,visible=true,requests=0
  func openParachute(){};func exitVehicle(){};func teleport(x:Int,y:Int,z:Int){}
  func requestFootWeaponFire()->Bool{false}
@@ -50,7 +54,7 @@ class Harness {
  var acceptsHeldInput=true,applicationActive=true,presentedViewController:Int?,currentVehicle:Int?
  var renderer:Renderer?=Renderer(),lastAttackTime=0.0
  let network=Network(),weaponCycle=Queue(),audio=Audio(),status=Status(),vehicleButton=Button(),radio=Radio()
- let weapons=NativeWeaponState(catalog:[.init(id:22,name:"Synthetic gun",model:"",range:40,capacity:17,interval:0.3,animation:"fixture",fireKind:"INSTANT_HIT")],allowLegacySnapshots:true)
+ let weapons=NativeWeaponState(catalog:[.init(id:22,name:"Synthetic gun",model:"",range:40,capacity:17,interval:0.3,animation:"fixture",fireKind:"INSTANT_HIT"),.init(id:40,name:"Detonator",model:"",range:0,capacity:1,interval:0.3,animation:"",fireKind:"USE")],allowLegacySnapshots:true)
  var usingPistol:Bool{weapons.current.isGun}
  func setDrivingControls(_ value:Bool){};func updateWeaponHUD(){}
  func currentShotRay(weapon:Int,left:Bool)->Ray?{Ray()}
@@ -66,6 +70,10 @@ for _ in 0..<100{h.attack()}
 check(h.renderer!.requests==100,"Press did not reach animation request")
 check(h.network.hits.isEmpty && h.network.reservations==0 && h.audio.hits==0,"Rejected animation request caused damage or reserved ammunition")
 check(h.consumeFootMeleeHit(event) && h.network.hits==["target"] && h.audio.hits==1,"Actual marker did not dispatch one hit")
+let beforeStunHits=h.network.hits.count,beforeStunStrikes=h.network.strikes
+h.renderer!.canEmitFootCombatMarker=false
+check(!h.consumeFootMeleeHit(event) && h.network.hits.count==beforeStunHits && h.network.strikes==beforeStunStrikes,"VC bypassed the Renderer combat-marker ownership boundary")
+h.renderer!.canEmitFootCombatMarker=true
 check(h.network.strikes==1,"A hit marker did not advance exactly one remote strike")
 check(h.network.reservations==0 && h.weapons.pendingShotCount==0,"Melee marker consumed a gun sequence")
 for blocked in 0..<9 {
@@ -105,6 +113,10 @@ h.weapons.apply(["revision":2,"selected":22,"weapons":[["id":22,"clip":17,"rest"
 check(!h.consumeFootMeleeHit(event) && h.weapons.rounds==17,"Switched weapon accepted stale melee marker")
 h.weapons.setConnection("new-unacknowledged-connection")
 check(!h.consumeFootMeleeHit(event),"Unsynchronized inventory emitted melee")
+h.weapons.setConnection(nil);h.weapons.apply(["revision":3,"selected":40,"weapons":[["id":40,"clip":1,"rest":0]]])
+let priorReservations=h.network.reservations
+h.attack();check(h.network.detonations==1 && h.weapons.rounds==1 && h.network.reservations==priorReservations,"Detonator spent a gun round/ticket instead of using its real action")
+h.renderer!.canUseFootUtility=false;h.attack();check(h.network.detonations==1,"Detonator bypassed hand/task eligibility")
 print("PASS: \(checks) actual VC melee dispatch/state/targeting checks;100 rejected requests cause0 hits and0 gun reservations")
 '''
 with tempfile.TemporaryDirectory(prefix='snapshot-',dir=OUT) as folder:

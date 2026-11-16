@@ -8,6 +8,14 @@ import ZGTARapier
 final class SwiftRapierWorld {
     typealias BodyID = UInt64
     typealias ColliderID = UInt64
+    typealias JointID = UInt64
+    struct SphericalJointState {
+        let body1: BodyID
+        let body2: BodyID
+        let anchor1: SIMD3<Float>
+        let anchor2: SIMD3<Float>
+        let contactsEnabled: Bool
+    }
     enum BodyKind: UInt32 { case fixed = 0, dynamic = 1, kinematicPosition = 2, kinematicVelocity = 3 }
     enum CombineRule: UInt32 { case average = 0, min = 1, multiply = 2, max = 3 }
     struct BodyState {
@@ -144,6 +152,30 @@ final class SwiftRapierWorld {
         return true
     }
     func bodyKind(_ id:BodyID)->BodyKind? {bodyKinds[id]}
+    /// Anchors are local to each body in this world's axes. Towing uses a free
+    /// spherical joint with connected-body contacts disabled; no spring or
+    /// angular motor is introduced by this bridge.
+    func createSphericalJoint(body1:BodyID,body2:BodyID,anchor1:SIMD3<Float>,anchor2:SIMD3<Float>,
+                              contactsEnabled:Bool=false,wakeUp:Bool=true)->JointID? {
+        let anchors=[anchor1.x,anchor1.y,anchor1.z,anchor2.x,anchor2.y,anchor2.z]
+        let id=zgtaphys_joint_spherical(handle,body1,body2,anchors,contactsEnabled ? 1:0,wakeUp ? 1:0)
+        return id == 0 ? nil:id
+    }
+    @discardableResult
+    func setJointAnchor1(_ id:JointID,anchor:SIMD3<Float>,wakeUp:Bool=true)->Bool {
+        zgtaphys_joint_anchor1(handle,id,[anchor.x,anchor.y,anchor.z],wakeUp ? 1:0) != 0
+    }
+    @discardableResult
+    func removeJoint(_ id:JointID,wakeUp:Bool=true)->Bool {
+        zgtaphys_joint_remove(handle,id,wakeUp ? 1:0) != 0
+    }
+    func sphericalJointState(_ id:JointID)->SphericalJointState? {
+        var bodies=[UInt64](repeating:0,count:2),anchors=[Float](repeating:0,count:6),contacts:UInt32=0
+        guard zgtaphys_joint_info(handle,id,&bodies,&anchors,&contacts) != 0 else{return nil}
+        return .init(body1:bodies[0],body2:bodies[1],anchor1:SIMD3(anchors[0],anchors[1],anchors[2]),
+                     anchor2:SIMD3(anchors[3],anchors[4],anchors[5]),contactsEnabled:contacts != 0)
+    }
+    func jointExists(_ id:JointID)->Bool {sphericalJointState(id) != nil}
     func bodyState(_ id: BodyID) -> BodyState? {
         var result = [Float](repeating: 0, count: 13)
         guard zgtaphys_body_state(handle, id, &result) != 0 else { return nil }
@@ -337,6 +369,12 @@ final class SwiftRapierWorld {
     @discardableResult
     func setColliderTranslation(_ id: ColliderID, position: SIMD3<Float>) -> Bool {
         zgtaphys_collider_translation(handle, id, [position.x, position.y, position.z]) != 0
+    }
+    /// Moves an attached shape in its parent's local frame, preserving body
+    /// pose and momentum. A standalone collider keeps Rapier's no-op behavior.
+    @discardableResult
+    func setColliderTranslationWrtParent(_ id:ColliderID,position:SIMD3<Float>)->Bool {
+        zgtaphys_collider_translation_wrt_parent(handle,id,[position.x,position.y,position.z]) != 0
     }
     func colliderInfo(_ id: ColliderID) -> ColliderInfo? {
         var position = [Float](repeating: 0, count: 3), body: UInt64 = 0, dynamic: UInt32 = 0, material: Int32 = -1

@@ -23,6 +23,11 @@ func rendererInput(_ vehicle:NativeGroundVehicle,_ context:RendererInputContext)
  let entryStarted=0.0
  let forward=context.forward,turn=context.turn,sideways=context.sideways,lookVertical=context.lookVertical,lift=context.lift
  let vehicleHandbrake=context.brake,vehicleHop=context.hop,vehicleControllerInput=context.pad,vehicleJetControl=context.jets,roadWetness=context.wetness,vehicleKind=context.kind
+ // This fixture drives an ordinary bicycle, without a staged working rig or
+ // negotiated coupling baseline. Use the real ownership helper nonetheless.
+ let currentVehicleID:String?="fixture-bike"
+ let vehicleCoupling:NativeVehicleCoupling?=NativeVehicleCoupling(ground:vehicle)
+ let hasVehicleWorkingControls=false,vehicleWorkingControl:Float=0
  var steeringInput:Float=0
  var groundVehicle:NativeGroundVehicle?=vehicle
  __PREFIX__
@@ -50,7 +55,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     machine = platform.machine()
     assert machine in ['arm64', 'x86_64']
-    names = ['SwiftRapierWorld','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeSprintController','NativeVehicleInputOwnership']
+    names = ['SwiftRapierWorld','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeSprintController','NativeVehicleInputOwnership','NativeVehicleCoupling']
     with tempfile.TemporaryDirectory(prefix='snapshot-', dir=output) as temporary:
         snapshot=Path(temporary);files=[]
         for name in names:

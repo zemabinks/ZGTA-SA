@@ -23,6 +23,7 @@ final class ClimbRuntimeHarness {
     final class VehicleInputOwner {var cancellations=0;func cancelPendingInput(){cancellations += 1}}
     let groundVehicle:VehicleInputOwner?=VehicleInputOwner()
     var vehicleHop=false
+    var vehicleWorkingControl:Float=0
     var actorHeading:Float=0,heading:Float=0
     var footAirTime=0.0,footAirFall=0.0,footJumpMinimum=0.0,footAirFell=false,footJumped=false
     var footLaunchRemaining:Double?,footAirVelocity=SIMD2<Double>.zero,footSprintPace=0.0
@@ -38,7 +39,7 @@ final class ClimbRuntimeHarness {
     var camera=SIMD3<Float>.zero
     let sprintController=NativeSprintController()
     var stamina=NativeStamina(),pendingSprintTap=false
-    var hasNativeFootWeaponTiming=false
+    var verticalSpeed:Float=0
     var onFootWeaponShot:((Int,Bool)->Bool)?
     var acceptedStreamShot=false,pendingNativeJump=0.0,pendingSwimJump=false,pendingDive=false
     var acceptedStreamRay:(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>)?
@@ -190,14 +191,16 @@ final class ClimbRuntimeHarness {
     let neutral=try ClimbRuntimeHarness(root:root,top:2.7,depth:2)
     for _ in 0..<90 {_ = neutral.frame(1/60)}
     precondition(neutral.climb?.part == .hang)
-    neutral.pendingClimbPull=true;neutral.pendingClimbDrop=true;neutral.jumpHeld=true;neutral.walkHeld=true;neutral.vehicleHop=true
+    neutral.pendingClimbPull=true;neutral.pendingClimbDrop=true;neutral.jumpHeld=true;neutral.walkHeld=true;neutral.vehicleHop=true;neutral.vehicleWorkingControl=1
     neutral.cancelGameplayInput();_ = neutral.frame(1/60)
     precondition(neutral.climb?.part == .hang && !neutral.jumpHeld && !neutral.walkHeld && !neutral.vehicleHop && !neutral.pendingClimbPull && !neutral.pendingClimbDrop)
     precondition(neutral.groundVehicle?.cancellations==1,"Focus cancellation must discard an unlaunched vehicle action");checks += 4
+    precondition(neutral.vehicleWorkingControl==0,"Focus cancellation retained a working-vehicle command");checks += 1
     frames += neutral.displayFrames;physicsTicks += neutral.fixedSteps
     // Actual Renderer emission must expose event-time physics position during
     // every catch-up marker, then restore the ordinary display-pose fallback.
-    neutral.hasNativeFootWeaponTiming=true
+    neutral.climb=nil;neutral.climbPhase=nil;neutral.footAnimator!.resetMovementTask()
+    precondition(neutral.hasNativeFootWeaponTiming && neutral.canEmitFootWeaponShot,"Marker-position fixture must use real eligible weapon state")
     neutral.camera=SIMD3(100,200,300)
     let eventFeet=SIMD3<Float>(101,202,303)
     var observed:[SIMD3<Float>]=[]

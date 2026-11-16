@@ -6,9 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {createHash} = require('node:crypto');
 const {archivedModules} = require('./smoke_vehicle_dynamics');
+const {reference:couplingReference}=require('./prepare_native_vehicle_coupling');
 
 async function main() {
-  const load = archivedModules(), R = load(55077); await R.init();
+  const load = archivedModules(), R = load(55077); await R.init();const coupling=couplingReference(load);
   const T = load(85339), catalogue = load(72197), modelParser = load(78315).A;
   const geometry = load(88711), stance = load(74921).p, handling = load(87605);
   const solver = load(23895), requested = process.argv.slice(2).map(Number);
@@ -95,8 +96,10 @@ async function main() {
         car.rigid.recomputeMassPropertiesFromColliders();
         raw.massProperties={mass:car.rigid.mass(),centre:vector(car.rigid.localCom()),
           principalInertia:vector(car.rigid.principalInertia())};
+        raw.movingShapes=(car.solids.moving??[]).map(({collider,at})=>({index:car.solids.indexOf(collider),at:vector(at)}));
         raw.solverSupported = ['car','trailer','bike','plane','heli','boat','train'].includes(raw.kind); world.free();
       } else raw.solverSupported = false;
+      raw.coupling=coupling.configuration({...raw,root});
       geometry.xd(root,null); models[id] = raw;
     } catch (error) { failures.push({id,model:definition.model,error:error.message}); }
   }

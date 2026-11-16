@@ -5,6 +5,87 @@ import simd
 /// SCL2 chassis contacts. Unsupported vehicle categories retain their caller's
 /// existing path until their separate original solvers have been translated.
 final class NativeGroundVehicle {
+    /// Optional owner-imported coupling facts. Missing/invalid data disables
+    /// coupling rather than inventing an anchor from the visible mesh.
+    struct CouplingDefinition {
+        struct Working {
+            struct Plate {let x:Double,y:Double,z:Double,halfX:Double,halfY:Double,halfZ:Double}
+            struct MovingShape {let index:Int,at:SIMD3<Double>}
+            let tow:Bool,available:Bool,frame:String?,turn:Double?,lift:Double?,up:Double?,down:Double?
+            let plates:[Plate]
+            let pivot:SIMD3<Double>?,movingShapes:[MovingShape]
+        }
+        let id:Int,kind:String,origin:Double,minimum:SIMD3<Double>,maximum:SIMD3<Double>
+        let rearAnchor:SIMD3<Double>?,trailerAnchor:SIMD3<Double>?,frontAnchor:SIMD3<Double>
+        let targets:Set<Int>,working:Working?
+        init?(_ row:[String:Any]) {
+            func vector(_ raw:Any?)->SIMD3<Double>? {guard let a=raw as? [Double],a.count==3,a.allSatisfy(\.isFinite) else{return nil};return SIMD3(a[0],a[1],a[2])}
+            guard let id=row["id"] as? Int,id>=0,let kind=row["kind"] as? String,
+                  let origin=row["origin"] as? Double,origin.isFinite,
+                  let low=vector(row["minimum"]),let high=vector(row["maximum"]),
+                  low.x<=high.x,low.y<=high.y,low.z<=high.z,let front=vector(row["frontAnchor"]),
+                  let targets=row["targets"] as? [Int],targets.count<64,targets.allSatisfy({$0>=0}) else{return nil}
+            let rear=vector(row["rearAnchor"]),hook=vector(row["trailerAnchor"])
+            for key in ["rearAnchor","trailerAnchor"] where row[key] != nil && !(row[key] is NSNull) {
+                guard vector(row[key]) != nil else{return nil}
+            }
+            self.id=id;self.kind=kind;self.origin=origin;minimum=low;maximum=high;frontAnchor=front;rearAnchor=rear;trailerAnchor=hook;self.targets=Set(targets)
+            if let work=row["working"] as? [String:Any] {
+                let fields=["turn","lift","up","down"]
+                guard fields.allSatisfy({work[$0]==nil || (work[$0] as? Double)?.isFinite==true}) else{return nil}
+                let rawPlates=work["plates"] as? [[Double]] ?? []
+                guard work["plates"]==nil || work["plates"] is [[Double]],rawPlates.count<=32,
+                      rawPlates.allSatisfy({$0.count==6 && $0.allSatisfy(\.isFinite) && $0[3]>0 && $0[4]>0 && $0[5]>0}) else{return nil}
+                let plates=rawPlates.map{Working.Plate(x:$0[0],y:$0[1],z:$0[2],halfX:$0[3],halfY:$0[5],halfZ:$0[4])}
+                let rawMoving=work["movingShapes"] as? [[String:Any]] ?? []
+                guard work["movingShapes"]==nil || work["movingShapes"] is [[String:Any]],rawMoving.count<=4096 else{return nil}
+                var moving:[Working.MovingShape]=[];var indices:Set<Int>=[]
+                for row in rawMoving {guard let index=row["index"] as? Int,index>=0,indices.insert(index).inserted,let at=vector(row["at"]) else{return nil};moving.append(.init(index:index,at:at))}
+                let pivot=vector(work["pivot"])
+                guard work["pivot"]==nil || work["pivot"] is NSNull || pivot != nil else{return nil}
+                working=Working(tow:work["tow"] as? Bool ?? false,available:work["available"] as? Bool ?? true,frame:work["frame"] as? String,turn:work["turn"] as? Double,lift:work["lift"] as? Double,up:work["up"] as? Double,down:work["down"] as? Double,plates:plates,pivot:pivot,movingShapes:moving)
+            } else {working=nil}
+        }
+    }
+    struct CouplingVehicle {
+        let id:String,body:SwiftRapierWorld.BodyID?,configuration:CouplingDefinition
+        let pose:NativeUnattendedVehicle.Pose
+        let health:Int,occupied:Bool,claimed:Bool,dynamic:Bool,hauled:Bool
+    }
+    struct WorkingFrame {
+        let value:Int,preciseValue:Double,kitValue:Double,localTowAnchor:SIMD3<Double>?,canAcquireTow:Bool,dropRequested:Bool
+    }
+    struct WorkingState {
+        private(set) var angle=0.0
+        private var wasTowed=false,freed=false,dropped=false,drop=false
+        mutating func seat(value:Int,tow:Bool) {self=WorkingState();angle=Double(min(2500,max(0,value)))*(tow ? 8:1)}
+        mutating func update(delta:Double,pad:Double,towed:Bool,configuration:CouplingDefinition.Working) {
+            guard delta.isFinite,delta>0 else{return}
+            let ticks=50*delta,control=pad.isFinite ? max(-1,min(1,pad)):0,x=128*control
+            if configuration.tow {
+                if towed && !wasTowed {angle=max(0,angle-100);freed=false}
+                wasTowed=towed
+                if abs(x)>10 {
+                    if x>0 {angle=max(towed ? 10000:0,angle-2*x*ticks)}
+                    else if angle<20000 {angle=min(20000,angle-6*x*ticks)}
+                }
+                if towed && angle<19900 {freed=true}
+                if towed && angle>=20000 && freed && !dropped {drop=true;dropped=true}
+                if angle<20000 {dropped=false}
+            } else if abs(x)>10 {
+                let rate=configuration.lift != nil ? (x>=0 ? -(configuration.down ?? 0):-(configuration.up ?? 0)):10
+                angle=min(2500,max(0,angle+control*rate*ticks))
+            }
+        }
+        func frame(_ configuration:CouplingDefinition,towed:Bool)->WorkingFrame? {
+            guard let work=configuration.working else{return nil}
+            let value=Int(floor(min(2500,max(0,work.tow ? angle/8:angle))+0.5))
+            let bar=work.tow ? SIMD3<Double>(0,(1-angle/20000)/2+0.5,1.05-configuration.minimum.y):nil
+            return .init(value:value,preciseValue:work.tow ? angle/8:angle,kitValue:Double(value)/1000,localTowAnchor:bar,
+                canAcquireTow:work.tow && !towed && angle>=20000 && !dropped,dropRequested:drop)
+        }
+        mutating func consumeDrop()->Bool {let requested=drop;drop=false;return requested}
+    }
     struct CameraFrame {
         let position: SIMD3<Float>
         let forward: SIMD3<Float>
@@ -114,6 +195,7 @@ final class NativeGroundVehicle {
     private lazy var others = NativeOtherVehicles(world:world)
     var otherColliders: Set<SwiftRapierWorld.ColliderID> {others.colliders}
     var onOtherMove:((String,[String:Any])->Void)?
+    var onCouplingStep:((Double)->Void)?
     var onOtherCollidersChanged:(()->Void)?
     func synchronizeOtherVehicles(_ poses:[NativeOtherVehicles.Pose],excluding:String?,near position:SIMD3<Float>,
                                   promoteNear:SIMD3<Float>?=nil,delta:Double=0,wetness:Double=0) {
@@ -139,6 +221,75 @@ final class NativeGroundVehicle {
         others.park(source,physicalPose:pose,linear:SIMD3<Double>(current.linearVelocity),angular:SIMD3<Double>(current.angularVelocity),rotor:rotor,gearUp:gear)
     }
     private var definitions: [String: Definition] = [:]
+    private var couplingDefinitions:[String:CouplingDefinition] = [:]
+    /// Source working-axis convention: specialDown minus specialUp.
+    var workingControl=0.0
+    var workingTowed=false
+    private var workingState=WorkingState()
+    private(set) var workingPlateColliders:Set<SwiftRapierWorld.ColliderID>=[]
+    private var workingShapeBody:SwiftRapierWorld.BodyID?,workingShapeValue:Double?
+    var hasWorkingControls:Bool {couplingDefinitions[model]?.working?.available == true}
+    var workingValue:Int? {workingFrame?.value}
+    var workingRenderValue:Double? {workingFrame?.preciseValue}
+    var workingFrame:WorkingFrame? {couplingDefinitions[model].flatMap{workingState.frame($0,towed:workingTowed)}}
+    func setWorkingValue(_ value:Int) {guard let configuration=couplingDefinitions[model]?.working else{return};workingState.seat(value:value,tow:configuration.tow);updateWorkingPlateColliders();updateWorkingShapeColliders()}
+    func consumeWorkingDrop()->Bool {workingState.consumeDrop()}
+    @discardableResult func loadCouplingDefinitions(_ data:Data)->Int {
+        guard let document=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+              document["version"] as? Int==1,let rows=document["models"] as? [String:[String:Any]] else{return 0}
+        let parsed=rows.compactMapValues(CouplingDefinition.init)
+        guard parsed.count==rows.count,parsed.allSatisfy({String($0.value.id)==$0.key}) else{return 0}
+        couplingDefinitions=parsed;workingShapeBody=nil;workingShapeValue=nil;others.setCouplingDefinitions(parsed);updateWorkingPlateColliders();updateWorkingShapeColliders();return parsed.count
+    }
+    func ownedCouplingVehicle(id:String)->CouplingVehicle? {
+        guard let configuration=couplingDefinitions[model],let rigid,let state=world.bodyState(rigid) else{return nil}
+        return .init(id:id,body:rigid,configuration:configuration,
+            pose:.init(position:SIMD3<Double>(state.position),rotation:NativeUnattendedVehicle.quaternion(state.rotation)),
+            health:Int(damageController?.state.health ?? 1000),occupied:true,claimed:false,dynamic:true,hauled:false)
+    }
+    func otherCouplingVehicle(id:String)->CouplingVehicle? {others.couplingVehicle(id,definitions:couplingDefinitions)}
+    func drawnCouplingVehicles()->[CouplingVehicle] {others.couplingVehicles(definitions:couplingDefinitions)}
+    func haulOtherVehicle(id:String)->CouplingVehicle? {guard others.haul(id) else{return nil};return otherCouplingVehicle(id:id)}
+    func unhaulOtherVehicle(id:String) {others.unhaul(id)}
+    func otherVehicleMovePacket(_ id:String)->[String:Any]? {others.movePacket(id)}
+    private func updateWorkingPlateColliders() {
+        guard let rigid,let definition=definitions[model],let profile=couplingDefinitions[model],
+              let work=profile.working,work.available,!work.plates.isEmpty,let first=definition.chassis.first else{
+            for id in workingPlateColliders{world.removeCollider(id)};workingPlateColliders=[];return
+        }
+        let lift=workingState.angle*(work.lift ?? 0)
+        func local(_ plate:CouplingDefinition.Working.Plate)->SIMD3<Float>{SIMD3(Float(plate.x),Float(profile.origin+plate.z+lift),Float(-plate.y))}
+        if workingPlateColliders.count != work.plates.count {
+            for id in workingPlateColliders{world.removeCollider(id)};workingPlateColliders=[]
+            for plate in work.plates {
+                guard let collider=world.addBox(halfExtents:SIMD3(Float(plate.halfX),Float(plate.halfY),Float(plate.halfZ)),body:rigid,position:local(plate),friction:1,restitution:0) else{
+                    for id in workingPlateColliders{world.removeCollider(id)};workingPlateColliders=[];return
+                }
+                world.setColliderGroups(collider,collision:first.collisionGroups,solver:first.solverGroups)
+                world.setColliderSurface(collider,surface:2,material:63);workingPlateColliders.insert(collider)
+            }
+        }
+        for (id,plate) in zip(workingPlateColliders.sorted(),work.plates) {_ = world.setColliderTranslationWrtParent(id,position:local(plate))}
+    }
+    static func workingPosition(_ at:SIMD3<Double>,value:Double,configuration:CouplingDefinition)->SIMD3<Double> {
+        guard value.isFinite,let work=configuration.working,work.available,!work.tow else{return at}
+        if let lift=work.lift {return at+SIMD3(0,value*lift,0)}
+        guard let pivot=work.pivot,let turn=work.turn else{return at}
+        return pivot+simd_quatd(angle:value*turn,axis:SIMD3(1,0,0)).act(at-pivot)
+    }
+    private func updateWorkingShapeColliders() {
+        guard let rigid,let definition=definitions[model] else{workingShapeBody=nil;workingShapeValue=nil;return}
+        let value=workingRenderValue ?? 0,ids=chassisColliders.sorted(),changedBody=workingShapeBody != rigid
+        guard changedBody || workingShapeValue != value else{return}
+        if changedBody {for (id,shape) in zip(ids,definition.chassis){_ = world.setColliderTranslationWrtParent(id,position:shape.centre)}}
+        if let profile=couplingDefinitions[model],let work=profile.working {
+            for shape in work.movingShapes where ids.indices.contains(shape.index) {
+                let position=Self.workingPosition(shape.at,value:value,configuration:profile)
+                _ = world.setColliderTranslationWrtParent(ids[shape.index],position:SIMD3<Float>(position))
+            }
+        }
+        workingShapeBody=rigid;workingShapeValue=value
+    }
     private var audioTopCache:[String:Double] = [:]
     private var cells: [String: [SwiftRapierWorld.ColliderID]] = [:]
     private var cellData: [String: Data] = [:]
@@ -197,7 +348,7 @@ final class NativeGroundVehicle {
     var bicyclePedal: Int { bikeDynamics?.pedal ?? 0 }
     var bicycleCrank: Float { Float(bikeDynamics?.crank ?? 0) }
     var bicycleHop: Float { Float(bikeDynamics?.hop ?? 0) }
-    func cancelPendingInput() {bikeDynamics?.cancelPendingHop()}
+    func cancelPendingInput() {bikeDynamics?.cancelPendingHop();workingControl=0}
     var bikeFullLean: Float { Float(definitions[model]?.bikeConfiguration?.parameters["fullAnimLean"] ?? 0) }
     var rotorTurning: Float { Float(dynamics?.flight?.turning ?? 0) }
     var aircraftNozzle: Float? {
@@ -244,6 +395,7 @@ final class NativeGroundVehicle {
         guard let definition=definitions[model] else{return nil}
         func round3(_ value:Double)->Double {floor(value*1000+0.5)/1000}
         var kit:[Double]?
+        if let frame=workingFrame {kit=[frame.kitValue]}
         if let bike=bikeDynamics {
             kit=[round3(bike.lean),round3(tuck)]
             if definition.bikeConfiguration?.pedalled == true {
@@ -281,7 +433,7 @@ final class NativeGroundVehicle {
         others.waterWave = {[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:SIMD3(0,1,0))}
         others.onMove = {[weak self] in self?.onOtherMove?($0,$1)}
         others.onCollidersChanged = {[weak self] in self?.onOtherCollidersChanged?()}
-        world.beforeStep = {[weak self] in self?.others.beforeStep(delta:$0)}
+        world.beforeStep = {[weak self] delta in self?.onCouplingStep?(delta);self?.others.beforeStep(delta:delta)}
         world.afterStep = {[weak self] in self?.others.afterStep(delta:$0)}
     }
 
@@ -289,9 +441,12 @@ final class NativeGroundVehicle {
         guard let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rows = document["models"] as? [String: [String: Any]] else { return 0 }
         definitions = rows.compactMapValues { Definition($0) }
+        couplingDefinitions=rows.compactMapValues{($0["coupling"] as? [String:Any]).flatMap(CouplingDefinition.init)}
         trainLayouts.removeAll()
         audioTopCache.removeAll()
         others.load(rows.compactMapValues { row in var value=row;value["solverSupported"]=true;return Definition(value) })
+        others.setCouplingDefinitions(couplingDefinitions)
+        workingShapeBody=nil;workingShapeValue=nil
         let classes = document["materialClasses"] as? [Int] ?? []
         let parts = (document["collisionFallbackParts"] as? [String:[[String:Any]]] ?? [:]).mapValues { rows in
             rows.compactMap { row -> CollisionPart? in
@@ -474,6 +629,8 @@ final class NativeGroundVehicle {
         damageController = damage
         // The native query bridge refreshes body/collider transforms and its
         // query BVH directly; creation must not advance the shared world.
+        updateWorkingPlateColliders()
+        updateWorkingShapeColliders()
         updatePose()
         return true
     }
@@ -485,6 +642,9 @@ final class NativeGroundVehicle {
         forwardSpeed = 0
         chassisColliders.removeAll()
         damageController = nil
+        workingPlateColliders=[]
+        workingShapeBody=nil;workingShapeValue=nil
+        workingControl=0;workingTowed=false;workingState=WorkingState()
     }
     func teleport(modelPosition: SIMD3<Float>, heading: Float) {
         guard active, definitions[model] != nil,
@@ -494,13 +654,14 @@ final class NativeGroundVehicle {
         // the rigid body left wheel compression/counts, transmission inertia,
         // steering, flight thrust and cached contact output at the old place.
         // Damage is a separate controller in that source and survives tp.
-        let currentModel = model, damage = damageController
+        let currentModel = model, damage = damageController,work=workingValue
         let fun = dynamics?.fun ?? bikeDynamics?.fun ?? 0
         let manual = dynamics?.manual ?? bikeDynamics?.manual ?? false
         guard enter(model:currentModel,modelPosition:modelPosition,heading:heading) else { return }
         dynamics?.fun = fun; bikeDynamics?.fun = fun
         dynamics?.manual = manual; bikeDynamics?.manual = manual
         damageController = damage
+        if let work {setWorkingValue(work)}
         if let damage { dynamics?.setTyres(damage.state.wheels); bikeDynamics?.setTyres(damage.state.wheels) }
     }
     func setDamageHinges(_ gta:[Int:SIMD3<Double>]) {
@@ -571,6 +732,12 @@ final class NativeGroundVehicle {
             }
             let result: NativeVehicleDynamics.Output
             var controls = input
+            if let work=couplingDefinitions[model]?.working {
+                let alive=damageController.map{!$0.state.wrecked && $0.state.health>0} ?? true
+                workingState.update(delta:fixed,pad:alive ? workingControl:0,towed:workingTowed,configuration:work)
+                updateWorkingPlateColliders()
+                updateWorkingShapeColliders()
+            }
             if let bikeDynamics,let staminaLeft {bikeDynamics.breathLeft=staminaLeft()}
             if let damage = damageController?.state {
                 dynamics?.setTyres(damage.wheels);bikeDynamics?.setTyres(damage.wheels)
