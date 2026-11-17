@@ -1,5 +1,6 @@
 import Foundation
 import simd
+import CryptoKit
 
 /// Local geometry/joints exported from original88711/62540/39851. Every pose
 /// remains in the original DFF/GTA frame until its final Metal matrix cast.
@@ -14,11 +15,19 @@ final class NativeVehicleRig {
         var looks=[Int](),tyres=[Int](),brokenLights=[Int](),doorAngles=[Double](),doorAxes=[Int]()
         var lights=false,braking=false,scorched=false
         var extras:Set<Int>?
+        var appearanceCode:String?
     }
     struct State { var gearShare=0.0;var rotorSpin=0.0 }
     struct Draw {
         let start:Int,count:Int,node:Int,transform:simd_float4x4
         let layerOverride:Float,emissive:Bool,scorched:Bool,alphaTest:Float
+        /// Linear material RGB plus an explicit neutral-paint encoding flag.
+        let paint:SIMD4<Float>
+        init(start:Int,count:Int,node:Int,transform:simd_float4x4,layerOverride:Float,emissive:Bool,scorched:Bool,alphaTest:Float,
+             paint:SIMD4<Float> = SIMD4(1,1,1,0)) {
+            self.start=start;self.count=count;self.node=node;self.transform=transform
+            self.layerOverride=layerOverride;self.emissive=emissive;self.scorched=scorched;self.alphaTest=alphaTest;self.paint=paint
+        }
     }
     struct Frame {let matrices:[simd_double4x4];let visible:[Bool];let draws:[Draw]}
     struct Node:Decodable {
@@ -26,7 +35,7 @@ final class NativeVehicleRig {
         let matrixAutoUpdate:Bool,visible:Bool,wheel:Bool,damaged:Bool,lowDetail:Bool
         let hub:String?,node:String?,extra:Int?
     }
-    struct DrawDefinition:Decodable {let node:Int,start:Int,count:Int;let materialVisible:Bool;let lens:Int,texture:Int,litTexture:Int;let alphaTest:Double}
+    struct DrawDefinition:Decodable {let node:Int,start:Int,count:Int;let materialVisible:Bool;let lens:Int,texture:Int,litTexture:Int;let alphaTest:Double;let paint:Int?,color:[Double]?}
     struct DamageJoint:Decodable {let part:Int,node:Int,rest:[Double],hinge:[Double]}
     struct WheelJoint:Decodable {let node:Int,hub:String?;let home:[Double],rest:[Double],lean:[Double];let front:Bool,left:Bool,bogie:Bool}
     struct RotorJoint:Decodable {let node:Int,name:String,rest:[Double]}
@@ -41,20 +50,51 @@ final class NativeVehicleRig {
     }
     struct Joints:Decodable {let damage:[DamageJoint],wheels:[WheelJoint],rotors:[RotorJoint],gear:[GearJoint],nozzles:[NozzleJoint],rearSteerOnly:Bool,bike:Bike?,working:Working?}
     struct WaterMask:Decodable {let node:Int,positions:[Float],indices:[UInt32]}
-    struct Document:Decodable {let version:Int,id:Int,kind:String,nodes:[Node],draws:[DrawDefinition],joints:Joints,waterMasks:[WaterMask]?}
+    struct Document:Decodable {let version:Int,id:Int,kind:String,nodes:[Node],draws:[DrawDefinition],joints:Joints,waterMasks:[WaterMask]?;let paint:NativeVehiclePaint.Metadata?;let binarySHA256:String?,atlasSHA256:String?,normalsSHA256:String?,binaryEncoding:String?}
     let document:Document
+    private let vehiclePaint:NativeVehiclePaint?
+    var hasDynamicPaint:Bool{vehiclePaint != nil}
     var damageHinges:[Int:SIMD3<Double>] {Dictionary(uniqueKeysWithValues:document.joints.damage.map{($0.part,Self.v($0.hinge))})}
     init?(data:Data) {
-        guard let document=try? JSONDecoder().decode(Document.self,from:data),document.version==1,!document.nodes.isEmpty,
+        guard data.count<=32_000_000,let document=try? JSONDecoder().decode(Document.self,from:data),[1,2].contains(document.version),!document.nodes.isEmpty,
               document.nodes.count<4096,document.nodes.enumerated().allSatisfy({index,node in
                   node.parent<index && node.parent>=(-1) && node.position.count==3 && node.rotation.count==4 && node.scale.count==3 && node.matrix.count==16 &&
                   (node.position+node.rotation+node.scale+node.matrix).allSatisfy(\.isFinite)
-              }),document.draws.allSatisfy({document.nodes.indices.contains($0.node)&&$0.start>=0&&$0.count>=0}),
+              }),document.draws.count<=50_000,document.draws.allSatisfy({document.nodes.indices.contains($0.node)&&$0.start>=0&&$0.count>=0&&$0.alphaTest.isFinite}),
               (document.waterMasks ?? []).allSatisfy({mask in document.nodes.indices.contains(mask.node)&&mask.positions.count%3==0&&mask.positions.allSatisfy(\.isFinite)&&mask.indices.allSatisfy{Int($0)<mask.positions.count/3}}) else{return nil}
         if let working=document.joints.working {
             guard working.turn.isFinite,working.lift.isFinite,working.parts.allSatisfy({part in document.nodes.indices.contains(part.node)&&part.rest.count==4&&part.home.count==3&&(part.rest+part.home).allSatisfy(\.isFinite)}) else{return nil}
         }
+        let paint:NativeVehiclePaint?
+        if document.version==2 {
+            guard document.binaryEncoding=="VPC2",let metadata=document.paint,let decoded=NativeVehiclePaint(metadata),
+                  let binary=document.binarySHA256,Self.digest(binary),
+                  document.atlasSHA256.map(Self.digest) ?? true,
+                  document.normalsSHA256.map(Self.digest) ?? true,
+                  document.draws.allSatisfy({draw in
+                      guard let slot=draw.paint,(-1...3).contains(slot),let color=draw.color,color.count==3 else{return false}
+                      return color.allSatisfy{$0.isFinite && (0...1).contains($0)}
+                  })else{return nil}
+            paint=decoded
+        }else{paint=nil}
         self.document=document
+        self.vehiclePaint=paint
+    }
+    private static func digest(_ value:String)->Bool{value.utf8.count==64 && value.utf8.allSatisfy{(48...57).contains($0)||(97...102).contains($0)}}
+    /// Version2 RGB meaning must never be combined with an older baked mesh.
+    /// CPU-only/no-atlas oracle documents can decode but cannot be uploaded.
+    func validatesAssetFamily(binary:Data,atlas:Data)->Bool {
+        guard document.version==2 else{return binary.prefix(4) != Data("VPC2".utf8)}
+        guard binary.count<=128_000_000,atlas.count<=64_000_000,
+              binary.prefix(4)==Data("VPC2".utf8),
+              let mesh=document.binarySHA256,let image=document.atlasSHA256 else{return false}
+        func hash(_ value:Data)->String{SHA256.hash(data:value).map{String(format:"%02x",$0)}.joined()}
+        return hash(binary)==mesh && hash(atlas)==image
+    }
+    func meshData(_ binary:Data)->Data? {
+        guard document.version==2 else{return binary.prefix(4)==Data("VPC2".utf8) ? nil:binary}
+        guard binary.count>=16,binary.prefix(4)==Data("VPC2".utf8)else{return nil}
+        var decoded=binary;decoded.replaceSubrange(0..<4,with:Data("WRL2".utf8));return decoded
     }
     private static func v(_ values:[Double])->V {V(values[0],values[1],values[2])}
     private static func q(_ values:[Double])->Q {Q(ix:values[0],iy:values[1],iz:values[2],r:values[3])}
@@ -160,20 +200,23 @@ final class NativeVehicleRig {
             if parent>=0 {visible[index]=visible[index] && visible[parent]}
         }
         var draws:[Draw]=[]
+        let colors=vehiclePaint?.colors(code:input.appearanceCode,model:document.id)
         for draw in document.draws {
             guard visible[draw.node],draw.materialVisible else{continue}
             let lamp=[0,1,3,2].indices.contains(draw.lens) ? [0,1,3,2][draw.lens]:-1
             let broken=input.brokenLights.indices.contains(lamp) && input.brokenLights[lamp]==1
             let lit=draw.lens>=0 && draw.litTexture>0 && !broken && (draw.lens<2 ? input.lights:input.lights || input.braking)
             let m=matrices[draw.node],transform=simd_float4x4(columns:(SIMD4<Float>(m[0]),SIMD4<Float>(m[1]),SIMD4<Float>(m[2]),SIMD4<Float>(m[3])))
-            let packet=Draw(start:draw.start,count:draw.count,node:draw.node,transform:transform,layerOverride:lit ? Float(draw.litTexture):-1,emissive:lit,scorched:input.scorched,alphaTest:Float(draw.alphaTest))
+            let rgb=vehiclePaint.flatMap{paint in colors.flatMap{paint.color(slot:draw.paint ?? -1,colors:$0)}}
+            let paint=rgb.map{SIMD4($0,Float(1))} ?? SIMD4<Float>(1,1,1,0)
+            let packet=Draw(start:draw.start,count:draw.count,node:draw.node,transform:transform,layerOverride:lit ? Float(draw.litTexture):-1,emissive:lit,scorched:input.scorched,alphaTest:Float(draw.alphaTest),paint:paint)
             // Preserve triangle order while joining adjacent groups with the
             // same actual draw state; texture/color stay in each vertex.
             if let previous=draws.last,previous.node==packet.node,previous.start+previous.count==packet.start,
                previous.layerOverride==packet.layerOverride,previous.emissive==packet.emissive,
-               previous.scorched==packet.scorched,previous.alphaTest==packet.alphaTest {
+               previous.scorched==packet.scorched,previous.alphaTest==packet.alphaTest,previous.paint==packet.paint {
                 draws[draws.count-1]=Draw(start:previous.start,count:previous.count+packet.count,node:packet.node,transform:packet.transform,
-                    layerOverride:packet.layerOverride,emissive:packet.emissive,scorched:packet.scorched,alphaTest:packet.alphaTest)
+                    layerOverride:packet.layerOverride,emissive:packet.emissive,scorched:packet.scorched,alphaTest:packet.alphaTest,paint:packet.paint)
             } else {draws.append(packet)}
         }
         return Frame(matrices:matrices,visible:visible,draws:draws)

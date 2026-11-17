@@ -66,7 +66,7 @@ final class Game {
  var legacyAxes=SIMD2<Int16>(-128,127),legacySpecialKeys:UInt8=3
  var legacyCrouchUntil:TimeInterval=0
  let network=Network(),gameplay=Gameplay(),weaponCycle=NativeWeaponCycleQueue(),radio=Radio(),gameHUD=HUD(),status=Status()
- let vehicleButton=Button(),radioButton=Button(),runButton=Button(),jumpButton=Button(),gasButton=Button(),brakeButton=Button()
+ let vehicleButton=Button(),radioButton=Button(),runButton=Button(),jumpButton=Button(),gasButton=Button(),brakeButton=Button(),handbrakeButton=Button()
  let weaponButton=Button(),reloadButton=Button(),aimButton=Button(),crouchButton=Button(),attackButton=Button()
  let weapons=NativeWeaponState(catalog:[
   .init(id:22,name:"Pistol",model:"",range:30,capacity:17,interval:0.3,animation:"",fireKind:"INSTANT_HIT"),

@@ -8,22 +8,59 @@ const digest=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const suffixes=['.rig.bin','.rig.normals.bin','.rig.png','.rig.json'];
 
 function validateFamily(directory,model,id,expectedSignature){
-  const files={};for(const suffix of suffixes){const name=model+suffix,bytes=fs.readFileSync(path.join(directory,name));if(!bytes.length)throw Error('Empty rig component '+name);files[name]={bytes:bytes.length,sha256:digest(bytes)}}
-  const metadata=JSON.parse(fs.readFileSync(path.join(directory,model+'.rig.json'),'utf8')),bytes=fs.readFileSync(path.join(directory,model+'.rig.bin'));
-  if(metadata.version!==1||metadata.id!==id||metadata.model!==model||metadata.cacheSignature!==expectedSignature)throw Error('Rig identity/signature mismatch '+model);
-  if(bytes.length<16||bytes.readUInt32LE(0)!==0x324c5257||bytes.readUInt32LE(4)!==metadata.vertices||bytes.readUInt32LE(8)!==metadata.indices||bytes.readUInt32LE(12)!==metadata.textures.length+1)throw Error('Rig binary/metadata mismatch '+model);
-  const n=metadata.vertices,i=metadata.indices,t=metadata.textures.length+1,expected=16+n*12+n*8+i*4+n*4+n*2+(n%2?2:0)+n*4+t*2;
-  if(bytes.length!==expected||fs.statSync(path.join(directory,model+'.rig.normals.bin')).size!==n*12)throw Error('Truncated rig buffers '+model);
-  if(!metadata.nodes.length||metadata.nodes.some((node,index)=>node.parent< -1||node.parent>=index)||metadata.draws.some(draw=>draw.node<0||draw.node>=metadata.nodes.length||draw.start<0||draw.count<0||draw.start+draw.count>i))throw Error('Invalid hierarchy/draw ranges '+model);
-  const png=fs.readFileSync(path.join(directory,model+'.rig.png'));
-  if(!png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||png.length<24||png.readUInt32BE(16)!==1024||png.readUInt32BE(20)!==Math.ceil(t/8)*128)throw Error('Rig atlas mismatch '+model);
-  if(!metadata.joints.working)throw Error('Missing working rig metadata '+model);
+  const sha=value=>typeof value==='string'&&/^[0-9a-f]{64}$/.test(value);
+  const integer=(value,min,max)=>Number.isSafeInteger(value)&&value>=min&&value<=max;
+  const vector=(value,count)=>Array.isArray(value)&&value.length===count&&value.every(Number.isFinite);
+  if(typeof model!=='string'||!/^[a-z0-9_]{1,64}$/.test(model)||!integer(id,0,65535)||!sha(expectedSignature))throw Error('Invalid requested rig identity/signature');
+  const files={},components={},limits={'.rig.bin':128_000_000,'.rig.normals.bin':12_000_000,'.rig.png':64_000_000,'.rig.json':32_000_000};
+  for(const suffix of suffixes){
+    const name=model+suffix,file=path.join(directory,name),size=fs.statSync(file);
+    if(!size.isFile()||size.size<=0||size.size>limits[suffix])throw Error('Invalid rig component size '+name);
+    const bytes=fs.readFileSync(file);if(bytes.length!==size.size)throw Error('Rig component changed while reading '+name);
+    files[name]={bytes:bytes.length,sha256:digest(bytes)};components[suffix]=bytes;
+  }
+  const metadata=JSON.parse(components['.rig.json'].toString('utf8')),bytes=components['.rig.bin'];
+  if(![1,2].includes(metadata.version)||metadata.id!==id||metadata.model!==model||metadata.cacheSignature!==expectedSignature)throw Error('Rig identity/signature mismatch '+model);
+  if(metadata.version===2){
+    for(const [key,suffix]of [['binarySHA256','.rig.bin'],['atlasSHA256','.rig.png'],['normalsSHA256','.rig.normals.bin']]){
+      if(!sha(metadata[key])||metadata[key]!==files[model+suffix].sha256)throw Error('Rig component hash mismatch '+model+suffix);
+    }
+    if(metadata.binaryEncoding!=='VPC2')throw Error('Neutral rig encoding mismatch '+model);
+    const paint=metadata.paint,validColor=value=>integer(value,0,(paint?.palette?.length??0)-1)||integer(value,0x1000000,0x1ffffff);
+    if(!paint||paint.version!==1||paint.vertexRGB!=='neutral-paint-slot-rgb'||paint.customFlag!==0x1000000||paint.customLimit!==0x2000000||
+       !Array.isArray(paint.palette)||!integer(paint.palette.length,1,1024)||paint.palette.some(rgb=>!Array.isArray(rgb)||rgb.length!==3||rgb.some(c=>!integer(c,0,255)))||
+       !Array.isArray(paint.defaults)||paint.defaults.length!==2||!paint.defaults.every(validColor)||
+       !Array.isArray(paint.colorVariants)||paint.colorVariants.length>256||paint.colorVariants.some(row=>!Array.isArray(row)||row.length!==4||!row.every(validColor)))throw Error('Invalid neutral rig paint metadata '+model);
+  }else if(metadata.paint!=null||(metadata.binaryEncoding!=null&&metadata.binaryEncoding!=='WRL2')){
+    // Deliberate legacy support retains baked RGB. Relabelling a neutral
+    // family as v1 must never bypass the new-family hashes or colour contract.
+    throw Error('Legacy rig contains neutral paint metadata '+model);
+  }
+  if(!integer(metadata.vertices,1,999999)||!integer(metadata.indices,3,2999999)||metadata.indices%3!==0||
+     !Array.isArray(metadata.textures)||metadata.textures.length>=1024||metadata.textures.some((row,index)=>!row||row.layer!==index+1||!integer(row.width,1,16384)||!integer(row.height,1,16384)))throw Error('Invalid rig buffer counts/textures '+model);
+  if(bytes.length<16||bytes.readUInt32LE(0)!==(metadata.version===2?0x32435056:0x324c5257)||bytes.readUInt32LE(4)!==metadata.vertices||bytes.readUInt32LE(8)!==metadata.indices||bytes.readUInt32LE(12)!==metadata.textures.length+1)throw Error('Rig binary/metadata mismatch '+model);
+  const n=metadata.vertices,i=metadata.indices,t=metadata.textures.length+1,indexAt=16+n*20,colorAt=indexAt+i*4,layerAt=colorAt+n*4;
+  const expected=16+n*12+n*8+i*4+n*4+n*2+(n%2?2:0)+n*4+t*2,normals=components['.rig.normals.bin'];
+  if(bytes.length!==expected||normals.length!==n*12)throw Error('Truncated rig buffers '+model);
+  for(let at=16;at<indexAt;at+=4)if(!Number.isFinite(bytes.readFloatLE(at)))throw Error('Nonfinite rig position/UV '+model);
+  for(let at=0;at<normals.length;at+=4)if(!Number.isFinite(normals.readFloatLE(at)))throw Error('Nonfinite rig normal '+model);
+  for(let at=indexAt;at<colorAt;at+=4)if(bytes.readUInt32LE(at)>=n)throw Error('Invalid rig vertex index '+model);
+  for(let vertex=0;vertex<n;vertex++)if(bytes.readUInt16LE(layerAt+vertex*2)>=t)throw Error('Invalid rig texture layer '+model);
+  if(!Array.isArray(metadata.nodes)||!integer(metadata.nodes.length,1,4095)||metadata.nodes.some((node,index)=>!node||!integer(node.parent,-1,index-1)||!vector(node.position,3)||!vector(node.rotation,4)||!vector(node.scale,3)||!vector(node.matrix,16))||
+     !Array.isArray(metadata.draws)||metadata.draws.length>50000||metadata.draws.some(draw=>!draw||!integer(draw.node,0,metadata.nodes.length-1)||!integer(draw.start,0,i)||!integer(draw.count,0,i-draw.start)||draw.start%3!==0||draw.count%3!==0||
+       !integer(draw.texture,0,t-1)||!integer(draw.litTexture,0,t-1)||!Number.isFinite(draw.alphaTest)||draw.alphaTest<0||draw.alphaTest>1||
+       (metadata.version===2&&(!integer(draw.paint,-1,3)||!vector(draw.color,3)||draw.color.some(v=>v<0||v>1)))))throw Error('Invalid hierarchy/draw ranges '+model);
+  const png=components['.rig.png'];
+  if(png.length<33||!png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||png.readUInt32BE(8)!==13||png.subarray(12,16).toString()!=='IHDR'||png.readUInt32BE(16)!==1024||png.readUInt32BE(20)!==Math.ceil(t/8)*128)throw Error('Rig atlas mismatch '+model);
+  const working=metadata.joints?.working;
+  if(!working||typeof working.tow!=='boolean'||!Number.isFinite(working.turn)||!Number.isFinite(working.lift)||!Array.isArray(working.parts)||working.parts.length>32768||
+     working.parts.some(part=>!part||!integer(part.node,0,metadata.nodes.length-1)||typeof part.role!=='string'||part.role.length>64||!vector(part.rest,4)||!vector(part.home,3)))throw Error('Invalid working rig metadata '+model);
   return {id,model,workingParts:metadata.joints.working.parts.length,files};
 }
 
 function safeOutput(output){
   const local=path.resolve(__dirname,'local-only'),relative=path.relative(local,output);
-  if(relative===''||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))throw Error('Working rigs must stay under this project local-only directory');
+  if(relative===''||relative==='..'||relative.startsWith('..'+path.sep)||path.isAbsolute(relative))throw Error('Working rigs must stay under this project local-only directory');
   function status(file){try{return fs.lstatSync(file)}catch(error){if(error.code==='ENOENT')return null;throw error}}
   let current=local;
   for(const part of relative.split(path.sep)){if(status(current)?.isSymbolicLink())throw Error('Refusing shared output ancestor '+current);current=path.join(current,part)}

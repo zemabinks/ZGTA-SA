@@ -30,6 +30,7 @@ final class NativeGameViewController: UIViewController {
     private let jumpButton = NativeIconButton()
     private let gasButton = NativeIconButton()
     private let brakeButton = NativeIconButton()
+    private let handbrakeButton = NativeIconButton()
     private let ammoLabel = UILabel()
     private let vitals = UILabel()
     private let stick = VirtualStick()
@@ -649,6 +650,14 @@ final class NativeGameViewController: UIViewController {
                               for: [.touchUpInside, .touchUpOutside, .touchCancel])
         brakeButton.isHidden = true
         view.addSubview(brakeButton)
+        handbrakeButton.translatesAutoresizingMaskIntoConstraints = false
+        styleControl(handbrakeButton, icon: nil, fallback: "p.circle.fill",
+                     accessibility: "Hold handbrake")
+        handbrakeButton.addTarget(self, action: #selector(pressHandbrake), for: .touchDown)
+        handbrakeButton.addTarget(self, action: #selector(releaseHandbrake),
+                                 for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        handbrakeButton.isHidden = true
+        view.addSubview(handbrakeButton)
         attackButton.setTitle("HIT", for: .normal)
         attackButton.setTitleColor(.white, for: .normal)
         attackButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
@@ -781,6 +790,10 @@ final class NativeGameViewController: UIViewController {
             crouchButton.centerYAnchor.constraint(equalTo: jumpButton.centerYAnchor),
             crouchButton.widthAnchor.constraint(equalToConstant: 44),
             crouchButton.heightAnchor.constraint(equalTo: crouchButton.widthAnchor)
+            ,handbrakeButton.trailingAnchor.constraint(equalTo: crouchButton.leadingAnchor, constant: -10),
+            handbrakeButton.centerYAnchor.constraint(equalTo: brakeButton.centerYAnchor),
+            handbrakeButton.widthAnchor.constraint(equalToConstant: 44),
+            handbrakeButton.heightAnchor.constraint(equalTo: handbrakeButton.widthAnchor)
             ,vehicleButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14),
             vehicleButton.bottomAnchor.constraint(equalTo: look.topAnchor, constant: 46),
             vehicleButton.heightAnchor.constraint(equalToConstant: 48),
@@ -1043,10 +1056,10 @@ final class NativeGameViewController: UIViewController {
         radioButton.isHidden = !driving
         runButton.isHidden = driving
         let roadVehicle = driving && !["plane","helicopter","boat","train"].contains(renderer?.vehicleKind ?? "car")
-        jumpButton.isHidden = driving && !roadVehicle
-        styleControl(jumpButton, icon: driving ? nil : "Touch_jump",
-                     fallback: driving ? "p.circle.fill" : "figure.run",
-                     accessibility: driving ? "Hold handbrake" : "Jump")
+        // Brake/reverse occupies the old Jump frame. A separate road-only
+        // handbrake keeps both controls hittable, including working/tow modes.
+        jumpButton.isHidden = driving
+        handbrakeButton.isHidden = !roadVehicle
         gasButton.isHidden = !driving
         brakeButton.isHidden = !driving
         let helicopter = driving && renderer?.vehicleKind == "helicopter"

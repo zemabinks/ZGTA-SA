@@ -1,5 +1,66 @@
 # Core gameplay audit journal
 
+## 2026-11-17 — Core106 touch ownership and paired acceptance
+
+The real Core105 UI run exposed a covered handbrake: its reused Jump button
+shared the brake/reverse frame, and brake was later in the hit-test order.
+Core106 gives the road handbrake a separate44-point lower-row target, leaving
+foot Jump and its special-mode handlers intact. The real UIKit carrier passes
+20574 checks across144 synthetic screen/context cases and reproduces270
+historical105 overlap hit failures. Its final verifier pins current controller,
+HUD, stick and both test sources. These are synthetic geometry/context cases
+executed with real UIKit, not144 tested physical devices.
+
+Actual extracted input bindings pass3836 checks. The coupling-control carrier
+needed its new handbrake button spy; its repaired65 checks pass with unchanged
+App source, preserving the initial failed compile. An earlier240-second
+concurrent-build timeout is also retained separately. See
+`CORE_TOUCH_OWNERSHIP_106.md` for these boundaries.
+
+Both complete App SDK builds pass against unchanged181-file App/resource
+hashes. The optimized iPhone product remains unsigned and uninstalled while
+someone is using the phone. The separate full-game Simulator joins fresh8806,
+starts the real taxi job, enters, checks three distinct hittable driving
+controls, presses/releases gas and handbrake, and exits with foot Jump restored.
+The174.050-second actual UIKit run passes with no handbrake hit-point fallback.
+The cab was stationary before that press, so braking deceleration is not
+certified. Independent unpatched browser frames and wire confirm one same-ID
+yellow cab, occupied publication before driver and foot publication before
+final parked restoration, without `vgone`. Physical-phone/retail performance
+and remaining fundamental mechanics are still open. The155-case registry is
+not represented as one freshly completed full run.
+
+## 2026-11-17 — Core105 vehicle appearance and presence
+
+The grey native taxi was traced through export, rig decoding and draw state.
+The correction retains intrinsic painted vertex colour and per-part material
+slots, then applies the actual instance's original palette/custom RGB through
+a separate Metal fragment entry. New neutral-painted VPC2 families are
+explicitly distinguished from legacy baked WRL2. All212 families and six
+working overrides are adopted only in the private candidate; actual HTTP
+hash verification covers all848 files. Fresh normal host preparation accepts
+the new families and rejects mixed generations. See
+`CORE_VEHICLE_PAINT_105.md` for primary, actual GPU and migration coverage.
+
+The duplicate cab was a separate authority-publication defect. The original
+browser's parked manager expects the retained registry row's driver marker,
+then hides its parked representation after the driving body actually exists.
+Core105 reserves entry by transport and vehicle incarnation, publishes that
+marker only after a valid driving report, and restores the same ID at its
+final accepted pose on release. It never uses visibility-only `vgone`, which
+would create an original-browser tombstone. Unbound original free-play actor
+reports remain supported without giving them registry/mission authority.
+Actual archived manager/serializer execution, real HTTP/WebSocket, unchanged
+Swift client and18 affected server regressions pass. See
+`CORE_VEHICLE_PRESENCE_105.md` for scope and remaining carjacking/removal limits.
+
+Both complete App SDK builds pass with unchanged captured App sources. The
+Release iPhone product is unsigned and uninstalled; the human-used phone and
+its current Core104 world are untouched. Isolated paired Simulator/browser
+screen acceptance is recorded separately. The registry now contains155 cases;
+a single full155-case run has not been executed. Earlier frozen/composite
+results and focused new regressions remain distinct. No1:1 claim is made.
+
 ## 2026-11-16 — Core103 stock resources, coordinates and real reference access
 
 The previous Core102 source snapshot compiled both optimized Apple SDKs and

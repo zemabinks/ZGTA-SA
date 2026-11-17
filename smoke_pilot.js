@@ -27,6 +27,14 @@ try {
     state: {walking: true, x: 1480, y: -1738, z: 13},
     send: packet => otherSent.push(packet)};
   game.peers.add(peer); game.peers.add(otherPeer);
+  const board = (vehicleId,pilotPeer=peer) => {
+    const plane=game.vehicles.get(vehicleId),row=plane.row;
+    game.onMessage(pilotPeer,{t:'me',walking:true,x:row[3],y:row[4],z:row[5]});
+    game.onMessage(pilotPeer,{t:'enter',v:vehicleId});
+    assert.equal(game.vehicleClaim(plane)?.peer,pilotPeer,'Flight fixture must use the normal nearby entry handshake');
+    game.onMessage(pilotPeer,{t:'me',driving:true,vehicle:vehicleId,car:row[2],x:row[3],y:row[4],z:row[5],health:row[9]});
+    assert.equal(game.vehicleDriver(plane),pilotPeer,'Flight fixture did not send its first valid driving report');
+  };
   assert.throws(() => game.action(player, 'job.start', {job: 'pilot', model: 511}),
     /level 4/);
   assert.equal(game.gameplayState(player).pilot.level, 1);
@@ -55,6 +63,7 @@ try {
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: 'wrong',
     x: from[0], y: from[1], z: from[2] + 45, speed: 20});
   assert.equal(player.job.stage, 'takeoff', 'another aircraft cannot count as takeoff');
+  board(planeId);
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: planeId,
     x: from[0], y: from[1], z: from[2] + 45, speed: 20, health: 1000});
   assert.equal(player.job.stage, 'landing');
@@ -76,6 +85,7 @@ try {
       x: from[0], y: from[1], z: from[2] + 45, speed: 20},
     send: packet => sent.push(packet)};
   game.peers.add(peer);
+  board(planeId);
   assert.throws(() => game.action(resumed, 'job.complete', {}), /destination apron/);
   const to = [begun.state.job.target.x, begun.state.job.target.y, airport('sf').stand[2]];
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: planeId,
@@ -106,6 +116,7 @@ try {
   const nextTarget = game.gameplayState(resumed).job.target;
   const nextTo = [nextTarget.x, nextTarget.y, airport(resumed.job.to).stand[2]];
   resumed.job.started = Date.now() - 540000;
+  board(damagedId);
   game.onMessage(peer, {t: 'me', driving: true, car: '593.1.1.0.', vehicle: damagedId,
     x: nextFrom[0], y: nextFrom[1], z: nextFrom[2] + 40, speed: 20, health: 700});
   assert.equal(resumed.job.minHealth, 700);
@@ -155,6 +166,7 @@ try {
   const beagleFrom = [beagleSpawn[3], beagleSpawn[4], beagleSpawn[5] - 1.1];
   const beagleTarget = game.gameplayState(unlocked).job.target;
   const beagleTo = [beagleTarget.x, beagleTarget.y, airport(unlocked.job.to).stand[2]];
+  board(beagleId,airportPeer);
   game.onMessage(airportPeer, {t: 'me', driving: true, car: beagleCode,
     vehicle: beagleId, x: beagleFrom[0], y: beagleFrom[1],
     z: beagleFrom[2] + 40, speed: 20, health: 1000});

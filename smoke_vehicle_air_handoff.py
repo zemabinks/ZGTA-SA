@@ -40,7 +40,7 @@ func rendererAirInput(_ vehicle:NativeGroundVehicle?,id:String?,player:RendererA
 def main():
  out=ROOT/'local-only/native-physics/tests/vehicle-air-handoff';out.mkdir(parents=True,exist_ok=True)
  machine=platform.machine();assert machine in ['arm64','x86_64']
- names=['SwiftRapierWorld','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeVehicleRig']
+ names=['SwiftRapierWorld','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeVehiclePaint','NativeVehicleRig']
  with tempfile.TemporaryDirectory(prefix='snapshot-',dir=out) as temporary:
   work=Path(temporary);reference=work/'reference.json'
   subprocess.run(['node','-e',JS,str(reference)],cwd=ROOT,check=True)

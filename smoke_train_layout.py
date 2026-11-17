@@ -32,6 +32,7 @@ struct TrainLayoutPlayer {var vehicleID:String?;var code:String;var position:SIM
 struct TrainDrawPlan {var matrices:[String:simd_float4x4];var identities:[String:String];var instances:Int}
 func rendererTrainPlan(_ groundVehicle:NativeGroundVehicle?,driving:Bool,currentVehicleID:String?,camera:SIMD3<Float>,remoteVehicles:[RemoteVehicle],remotePlayers:[TrainLayoutPlayer],models:[String:String])->TrainDrawPlan {
  var modelInstances:[(String,SIMD3<Float>,Float,Float,String,Double,Int)]=[]
+ var vehicleAppearanceCodes:[String:[String]]=[:]
  let drivenVehicleIDs=Set(remotePlayers.compactMap(\\.vehicleID))
  func actorName(code:String)->String? {models[String(code.split(separator: ".").first ?? "")]}
  func key(_ name:String,_ p:SIMD3<Float>)->String {"\\(name):\\(p.x):\\(p.y):\\(p.z)"}

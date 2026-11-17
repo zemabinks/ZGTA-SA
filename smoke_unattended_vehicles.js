@@ -11,9 +11,11 @@ function managerFactory(lib){
  const start=source.indexOf('cq=function')+3,marker='for(let e of[...ec])ep(e)}}',end=source.indexOf(marker,start)+marker.length+1;
  assert(start>=3&&end>start,'Original19737 manager signature');
  const helpers=source.slice(source.indexOf('let vV=new d.Pq0'),source.indexOf(',kf={16:9'));
+ const workStart=source.indexOf('let vn='),workEnd=source.indexOf('var vm=',workStart);
+ assert(workStart>=0&&workEnd>workStart,'Original work-angle helper signature');
  const muStart=source.indexOf('function mu(e)'),muEnd=source.indexOf('let md=',muStart);
  const expression=source.slice(start,end).replace('return{recar(e,t)', 'return{native:()=>({N,G,B,ek,eI,ea,el,Q}),recar(e,t)');
- const make=Function('scope','with(scope){'+helpers+';const mi=(e,t)=>{let l=e.root.userData.frames.get(t);return l?new d.Pq0().setFromMatrixPosition(l):null},ms=(e,t)=>new d.Pq0(t.x,e.origin+t.z,-t.y);'+source.slice(muStart,muEnd)+';return ('+expression+')}')(scope);
+ const make=Function('scope','with(scope){'+helpers+';const mi=(e,t)=>{let l=e.root.userData.frames.get(t);return l?new d.Pq0().setFromMatrixPosition(l):null},ms=(e,t)=>new d.Pq0(t.x,e.origin+t.z,-t.y);'+source.slice(workStart,workEnd)+source.slice(muStart,muEnd)+';return ('+expression+')}')(scope);
  return {make,clock};
 }
 async function main(){

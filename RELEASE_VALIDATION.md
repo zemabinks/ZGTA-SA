@@ -1,6 +1,17 @@
 # Community source release validation
 
-Latest core acceptance,15 November2026:85 Swift source files,34 core regression
+Current Core106 evidence is recorded in `CORE_VEHICLE_PAINT_105.md`,
+`CORE_VEHICLE_PRESENCE_105.md`, `CORE_TOUCH_OWNERSHIP_106.md` and
+`CORE_GAMEPLAY_JOURNAL.md`. Both complete
+Simulator Debug and unsigned iPhone Release builds pass. Vehicle paint,
+fresh-host migration, archived browser presence and actual native/server wire
+regressions and the actual paired Simulator/browser taxi transition pass within
+their documented boundaries. The current phone remains
+on Core104 while a person is using it. Core103's149-case composite acceptance,
+Core104's focused additions and Core105's affected checks are separate records;
+there is no single all-pass155-case run or full original-game certification.
+
+Historical core acceptance,15 November2026:85 Swift source files,34 core regression
 gates, matching optimized universal Simulator and unsigned ARM64 iPhone builds.
 The installed79 Simulator was used for city climbing/visibility, car controls,
 entry/exit and owner-radio station switching/download checks. Literal sphere

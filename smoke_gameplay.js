@@ -64,7 +64,10 @@ async function connect(port, cookie) {
   await opened;
   return {
     close: () => socket.end(),
+    lastState:null,
+    mark:()=>messages.length,
     send(message) {
+      if(message.t==='me')this.lastState=message;
       const data = Buffer.from(JSON.stringify(message));
       const mask = crypto.randomBytes(4);
       const header = data.length < 126 ? Buffer.from([0x81, 0x80 | data.length]) :
@@ -73,8 +76,8 @@ async function connect(port, cookie) {
       for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i & 3];
       socket.write(Buffer.concat([header, mask, masked]));
     },
-    wait(match) {
-      const found = messages.find(match);
+    wait(match,after=0) {
+      const found = messages.slice(after).find(match);
       if (found) return Promise.resolve(found);
       return new Promise((resolve, reject) => {
         const waiter = {match, resolve, timer: setTimeout(() => reject(new Error('WebSocket message timed out')), 5000)};
@@ -155,13 +158,27 @@ async function main() {
     const earlyBuy = await api('/api/local/action', 'POST', {action: 'car.buy', model: 410});
     assert.equal(earlyBuy.status, 400);
     let x = 1480, y = -1738;
+    async function board(vehicle,client=ws) {
+      if(client.lastState?.driving&&client.lastState.vehicle===vehicle[0])return;
+      const latest=(await api('/api/world/cars')).body.cars.find(row=>row[0]===vehicle[0]);
+      assert(latest,'Boarding fixture vehicle must still exist');
+      client.send({t:'me',walking:true,skin:7,x:latest[3],y:latest[4],z:latest[5]});
+      const at=client.mark();client.send({t:'enter',v:latest[0]});
+      assert.equal((await client.wait(message=>message.t==='enter'&&message.v===latest[0],at)).ok,true,'Normal nearby entry must precede logical driving');
+      // This existing fixture covers legacy reports with condition omitted;
+      // explicit vehicle-health bonuses are covered by smoke_taxi.js.
+      client.send({t:'me',driving:true,skin:7,vehicle:latest[0],car:latest[2],x:latest[3],y:latest[4],z:latest[5]});
+      if(client===ws){x=latest[3];y=latest[4];}
+    }
     async function moveTo(target, driving = false, vehicle = null) {
+      if(driving&&vehicle)await board(vehicle);
       const startX = x, startY = y;
-      const steps = Math.ceil(Math.hypot(target.x - x, target.y - y) / 5);
+      const steps = Math.max(1,Math.ceil(Math.hypot(target.x - x, target.y - y) / 5));
       for (let i = 1; i <= steps; i++) {
         x = startX + (target.x - startX) * i / steps;
         y = startY + (target.y - startY) * i / steps;
         ws.send({t: 'me', walking: !driving, driving, skin: 7, x, y, z: 13,
+          ...(driving ? {car:'400'} : {}),
           ...(vehicle ? {vehicle: vehicle[0], car: vehicle[2]} : {})});
         // Match an actual client's update cadence; the server limits bursts.
         await new Promise(resolve => setTimeout(resolve, 20));
@@ -248,24 +265,22 @@ async function main() {
       await moveTo(started.body.state.job.target);
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
         'patient pickup requires driving');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,car:'400'});
       await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
         'another vehicle cannot collect the patient');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
-        vehicle: ambulance.v[0], car: ambulance.v[2]});
+      await moveTo(started.body.state.job.target,true,ambulance.v);
       await new Promise(resolve => setTimeout(resolve, 100));
       const pickup = await api('/api/local/action', 'POST', {action: 'job.pickup'});
       assert.equal(pickup.status, 200, JSON.stringify(pickup.body));
       assert.equal(pickup.body.state.job.stage, 'delivery');
       await moveTo(pickup.body.state.job.target, true, ambulance.v);
       await new Promise(resolve => setTimeout(resolve, 3100));
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,car:'400'});
       await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
         'another vehicle cannot return the patient');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
-        vehicle: ambulance.v[0], car: ambulance.v[2]});
+      await moveTo(pickup.body.state.job.target,true,ambulance.v);
       await new Promise(resolve => setTimeout(resolve, 100));
       const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
@@ -306,12 +321,11 @@ async function main() {
       await moveTo(started.body.state.job.target);
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
         'passenger pickup requires driving');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,car:'400'});
       await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400,
         'another vehicle cannot collect the passenger');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
-        vehicle: cab.v[0], car: cab.v[2]});
+      await moveTo(started.body.state.job.target,true,cab.v);
       await new Promise(resolve => setTimeout(resolve, 100));
       const pickup = await api('/api/local/action', 'POST', {action: 'job.pickup'});
       assert.equal(pickup.status, 200, JSON.stringify(pickup.body));
@@ -321,12 +335,11 @@ async function main() {
       await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
         'passenger drop-off requires driving');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13});
+      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,car:'400'});
       await new Promise(resolve => setTimeout(resolve, 3100));
       assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400,
         'another vehicle cannot drop off the passenger');
-      ws.send({t: 'me', walking: false, driving: true, skin: 7, x, y, z: 13,
-        vehicle: cab.v[0], car: cab.v[2]});
+      await moveTo(pickup.body.state.job.target,true,cab.v);
       await new Promise(resolve => setTimeout(resolve, 100));
       const delivered = await api('/api/local/action', 'POST', {action: 'job.complete'});
       assert.equal(delivered.status, 200, JSON.stringify(delivered.body));
@@ -539,12 +552,19 @@ async function main() {
       message.v === loaners[0][0])).ok, false, 'other player cannot take host loaner');
     assert.equal((await api('/api/local/action', 'POST', {action: 'race.finish'})).status, 400,
       'finish requires checkpoints in order');
+    const firstRace=(await api('/api/local/state')).body.race,freeAt=otherWs.mark();
+    ws.send({t:'me',driving:true,car:'400',skin:7,x:firstRace.target.x,y:firstRace.target.y,z:13});
+    const free=await otherWs.wait(message=>message.t==='cars'&&message.c.some(row=>row[0]===all.id&&row[2]==='400'),freeAt);
+    assert.equal(free.c.find(row=>row[0]===all.id)[35],null,'Legitimate unbound car cannot inherit race loaner identity');
+    assert.equal((await api('/api/local/action','POST',{action:'race.checkpoint'})).status,400,'Unbound free-play driving cannot advance the marked race');
+    assert.equal((await api('/api/local/state')).body.race.index,1,'Rejected unbound race report advanced progress');
+    await board(loaners[1],otherWs);
     for (let index = 1; index <= 3; index++) {
       const race = (await api('/api/local/state')).body.race;
       assert.equal(race.index, index);
-      await moveTo(race.target, true);
+      await moveTo(race.target, true,loaners[0]);
       otherWs.send({t: 'me', walking: false, driving: true, skin: 7,
-        x: race.target.x, y: race.target.y, z: 13});
+        x: race.target.x, y: race.target.y, z: 13,vehicle:loaners[1][0],car:loaners[1][2]});
       await new Promise(resolve => setTimeout(resolve, 100));
       const action = index === 3 ? 'race.finish' : 'race.checkpoint';
       const first = await api('/api/local/action', 'POST', {action});
@@ -586,20 +606,17 @@ async function main() {
       car: getaway.v[2], vehicle: 'wrong-car', x, y, z: 13});
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal((await api('/api/local/action', 'POST', {action: 'job.pickup'})).status, 400);
-    ws.send({t: 'me', walking: false, driving: true, skin: 7,
-      car: getaway.v[2], vehicle: getaway.v[0], x, y, z: 13});
+    await moveTo((await api('/api/local/state')).body.job.target,true,getaway.v);
     await new Promise(resolve => setTimeout(resolve, 100));
     const stolen = await api('/api/local/action', 'POST', {action: 'job.pickup'});
     assert.equal(stolen.status, 200, JSON.stringify(stolen.body));
     assert.equal(stolen.body.state.wanted, 2);
     assert.equal(stolen.body.state.job.stage, 'delivery');
-    await moveTo(stolen.body.state.job.target, true);
-    ws.send({t: 'me', walking: false, driving: true, skin: 7,
-      car: getaway.v[2], vehicle: 'wrong-car', x, y, z: 13});
+    await moveTo(stolen.body.state.job.target, true,getaway.v);
+    ws.send({t:'me',driving:true,skin:7,car:'400',x,y,z:13});
     await new Promise(resolve => setTimeout(resolve, 100));
     assert.equal((await api('/api/local/action', 'POST', {action: 'job.complete'})).status, 400);
-    ws.send({t: 'me', walking: false, driving: true, skin: 7,
-      car: getaway.v[2], vehicle: getaway.v[0], x, y, z: 13});
+    await moveTo((await api('/api/local/state')).body.job.target,true,getaway.v);
     await new Promise(resolve => setTimeout(resolve, 3100));
     const escaped = await api('/api/local/action', 'POST', {action: 'job.complete'});
     assert.equal(escaped.status, 200, JSON.stringify(escaped.body));

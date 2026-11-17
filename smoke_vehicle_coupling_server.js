@@ -55,11 +55,18 @@ function peer(game,mode='native',handshake=true){
   if(handshake)game.onMessage(p,{t:'hi',...(mode==='native'?{nativeInventory:true,inventoryAck:1,couplingAck:1}:mode==='inventory-only'?{nativeInventory:true,inventoryAck:1}:{})});
   return p;
 }
-function drive(p,root){p.player.health=100;p.player.insideHome=null;p.state={driving:true,vehicle:root.id,car:root.row[2],x:root.row[3],y:root.row[4],z:root.row[5],heading:root.row[6],pitch:root.row[7],roll:root.row[8]};p.lastSeen=now;}
+function drive(game,p,root){
+  p.player.health=100;p.player.insideHome=null;
+  game.onMessage(p,{t:'me',walking:true,x:root.row[3],y:root.row[4],z:root.row[5]});
+  game.onMessage(p,{t:'enter',v:root.id});
+  check(game.vehicleClaim(root)?.peer===p,'Real enter denied coupling fixture');
+  game.onMessage(p,{t:'me',driving:true,vehicle:root.id,car:root.row[2],x:root.row[3],y:root.row[4],z:root.row[5],heading:root.row[6],pitch:root.row[7],roll:root.row[8]});
+  check(game.vehicleDriver(root)===p,'Real first drive did not establish coupling fixture');
+}
 function reset(game,mode='native'){
   for(const p of [...game.peers])game.remove(p);game.vehicles.clear();game.coupling=Coupling.create(catalog);now+=10_000;
   const p=peer(game,mode),root=vehicle('root',8001),a=vehicle('a',8002,100,95),b=vehicle('b',8002,100,90),c=vehicle('c',8002,100,85);
-  for(const v of[root,a,b,c])game.vehicles.set(v.id,v);drive(p,root);return{p,root,a,b,c};
+  for(const v of[root,a,b,c])game.vehicles.set(v.id,v);drive(game,p,root);return{p,root,a,b,c};
 }
 function hitch(game,p,s,parent='root',trailer='a',kind='trailer',connection=p.inventoryConnection){game.onMessage(p,{t:'hitch',v:parent,tr:trailer,kind,c:connection,s});}
 const ack=p=>p.packets.filter(m=>m.t==='couplings'&&m.ack).at(-1);
@@ -192,7 +199,7 @@ try{
   });
   scenario('actual chain, third link and mixed tow branch boundaries',()=>{
     const{p}=reset(game);hitch(game,p,1);hitch(game,p,2,'a','b');check(game.coupling.snapshot().links.length===2,'actual second chain rejected');hitch(game,p,3,'b','c');check(!ack(p).ack.accepted&&game.coupling.snapshot().links.length===2,'actual third link accepted');
-    const f=reset(game);f.root.row[2]='8003.0';f.root.row[16]=2500;drive(f.p,f.root);f.a.row[2]='8001.0';f.a.row[4]=94.95;f.b.row[4]=89.95;
+    const f=reset(game);f.root.row[2]='8003.0';f.root.row[16]=2500;drive(game,f.p,f.root);f.a.row[2]='8001.0';f.a.row[4]=94.95;f.b.row[4]=89.95;
     hitch(game,f.p,1,'root','a','tow');check(ack(f.p).ack.accepted,'actual tow setup rejected');hitch(game,f.p,2,'a','b');check(!ack(f.p).ack.accepted&&game.coupling.snapshot().links.length===1,'actual backend emitted mixed chain');
   });
   scenario('actual claimed vmove only owner; unclaimed remains legacy-compatible',()=>{
@@ -244,7 +251,7 @@ try{
     class Socket extends EventEmitter{constructor(){super();this.writable=true;this.writableLength=0;this.output=[];}write(bytes){this.output.push(Buffer.from(bytes));return true;}end(){this.ended=true;}destroy(){this.destroyed=true;}}
     const socket=new Socket(),req={url:'/api/world/live',headers:{host:'localhost:12345',upgrade:'websocket','sec-websocket-key':Buffer.alloc(16,7).toString('base64')},socket:{remoteAddress:'127.0.0.1'}};
     game.upgrade(req,socket,Buffer.alloc(0));const p=[...game.peers][0];check(p&&typeof p.close==='function','real Peer was not constructed');
-    game.onMessage(p,{t:'hi',nativeInventory:true,inventoryAck:1,couplingAck:1});drive(p,game.vehicles.get('root'));hitch(game,p,1);check(game.coupling.snapshot().links.length===1,'real Peer setup failed');
+    game.onMessage(p,{t:'hi',nativeInventory:true,inventoryAck:1,couplingAck:1});drive(game,p,game.vehicles.get('root'));hitch(game,p,1);check(game.coupling.snapshot().links.length===1,'real Peer setup failed');
     p.close();check(p.closed&&socket.ended&&!game.peers.has(p),'real close did not detach peer');check(game.coupling.snapshot().links.length===0,'real close retained coupling');p.close();check(game.coupling.snapshot().links.length===0,'repeated real close changed topology');
   });
   scenario('legacy browser refresh and rejection roll back its speculative joint',()=>{

@@ -20,7 +20,16 @@ try {
   const peer = {player, ready: true, lastSeen: Date.now(),
     state: {walking: true, x: 1480, y: -1738, z: 13}, send() {}};
   game.peers.add(peer);
+  const board = cab => {
+    if(game.vehicleDriver(cab)===peer)return;
+    game.onMessage(peer,{t:'me',walking:true,x:cab.row[3],y:cab.row[4],z:cab.row[5]});
+    game.onMessage(peer,{t:'enter',v:cab.id});
+    assert.equal(game.vehicleClaim(cab)?.peer,peer,'Taxi fixture must use the normal nearby entry handshake');
+    game.onMessage(peer,{t:'me',driving:true,vehicle:cab.id,car:cab.row[2],x:cab.row[3],y:cab.row[4],z:cab.row[5]});
+    assert.equal(game.vehicleDriver(cab),peer,'Taxi fixture did not publish its first valid driving report');
+  };
   const place = (target, cab = null, health = null) => {
+    if(cab)board(cab);
     const state = {t: 'me', walking: !cab, driving: !!cab,
       x: target.x, y: target.y, z: 13,
       ...(cab ? {vehicle: cab.id, car: cab.row[2]} : {}),
@@ -37,6 +46,7 @@ try {
     return cab;
   };
   let cab = start();
+  board(cab);
   game.onMessage(peer, {t: 'me', driving: true, vehicle: cab.id,
     car: cab.row[2], x: 1486, y: -1735, z: 14.1, heading: 0.6, health: 1000});
   assert.equal(cab.row[3], 1486, 'the mission cab follows its native driver');
@@ -48,8 +58,10 @@ try {
   const pickup = game.gameplayState(peer.player).job.target;
   place(pickup);
   assert.throws(() => game.action(peer.player, 'job.pickup', {}), /Drive the mission vehicle/);
-  place(pickup, {id: 'wrong-car', row: [null, null, cab.row[2]]});
+  const wrongCar={id:'wrong-car',row:['wrong-car','Test',cab.row[2],pickup.x,pickup.y,13,0,0,0,1000,'',null]};
+  game.vehicles.set(wrongCar.id,wrongCar);place(pickup,wrongCar);
   assert.throws(() => game.action(peer.player, 'job.pickup', {}), /marked cab/);
+  place(pickup);
   place(pickup, cab, 1000);
   game.action(peer.player, 'job.pickup', {});
   assert.equal(game.gameplayState(peer.player).job.stage, 'delivery');

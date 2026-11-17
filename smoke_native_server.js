@@ -44,6 +44,8 @@ try {
   game.vehicles.set(loaner.id,loaner);
   game.onMessage(b.peer,{t:'me',driving:true,vehicle:loaner.id,car:'420',x:1570,y:-2460,z:13.6,health:1,damage:condition});
   assert.equal(loaner.row[9],1000,'another player cannot alter the mission vehicle condition');
+  game.onMessage(a.peer,{t:'enter',v:loaner.id});
+  assert(a.packets.filter(p=>p.t==='enter'&&p.v===loaner.id).at(-1)?.ok,'Native mission driver must complete the normal enter handshake');
   game.onMessage(a.peer,{t:'me',driving:true,vehicle:loaner.id,car:'420',x:1570,y:-2460,z:13.6,health:645,damage:condition});
   assert.equal(loaner.row[9],645);assert.equal(loaner.row[10],condition);
   game.onMessage(a.peer,{t:'me',walking:true,vehicle:loaner.id,car:'420',x:1572,y:-2460,z:13.6,

@@ -20,7 +20,9 @@ try{
  move(browser,35);check(browser.player.health===100&&browser.player.armour===35,'Browser environmental loss was ignored');
  move(browser,50);check(browser.player.armour===35,'Stale browser frame restored consumed armour');
  for(const bad of [true,false,null,'0',NaN,Infinity,-1,101]){move(browser,bad);check(browser.player.armour===35,'Malformed browser armour changed authority')}
- move(browser,20,{walking:false,driving:true,car:'420',life:90});check(browser.player.armour===20&&browser.player.health===90,'Driving armour/health namespaces mixed');
+ const car={id:'armour-fixture',row:['armour-fixture','Synthetic','420',1570,-2460,13.6,0,0,0,1000,'',null]};game.vehicles.set(car.id,car);
+ game.onMessage(browser,{t:'enter',v:car.id});check(game.vehicleClaim(car)?.peer===browser,'Driving armour fixture did not use normal entry');
+ move(browser,20,{walking:false,driving:true,vehicle:car.id,car:'420',life:90});check(browser.player.armour===20&&browser.player.health===90,'Driving armour/health namespaces mixed');
  move(browser,35);check(game.row(browser)[30]===20,'Observer row used stale reported armour');
  move(native,0,{health:0});check(native.player.health===100&&native.player.armour===50,'Native frame bypassed acknowledged vitals');
  check(game.row(native)[30]===50,'Native observer row used unaccepted predicted/spoofed armour');

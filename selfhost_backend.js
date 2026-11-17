@@ -431,6 +431,9 @@ class LocalGame {
     this.players = new Map();
     this.peers = new Set();
     this.vehicles = new Map();
+    // A claim refers to this particular vehicle object and transport peer;
+    // neither an account number nor a reused wire ID grants driving rights.
+    this.vehicleClaims = new Map();
     this.coupling=VehicleCoupling?.create(couplingCatalog) || null;
     this.nextVehicle = 1;
     this.race = null;
@@ -1389,10 +1392,178 @@ class LocalGame {
     return [...this.vehicles.values()].find(vehicle => vehicle.owner === player && vehicle.slot === slot);
   }
 
+  vehicleClaim(vehicle) {
+    const claim = vehicle && this.vehicleClaims.get(vehicle.id);
+    return claim?.vehicle === vehicle ? claim : null;
+  }
+
+  validVehiclePose(value) {
+    return value && typeof value === 'object' &&
+      [value.x,value.y,value.z].every(Number.isFinite) &&
+      Math.abs(value.x)<=6000 && Math.abs(value.y)<=6000 && value.z>=-200 && value.z<=1000 &&
+      ['heading','pitch','roll'].every(key => value[key]===undefined || Number.isFinite(value[key])) &&
+      (value.health===undefined || Number.isFinite(value.health) && value.health>=0 && value.health<=1000) &&
+      (value.damage===undefined || typeof value.damage==='string' && value.damage.length<=512) &&
+      (value.w===undefined || Number.isFinite(value.w));
+  }
+
+  vehicleDriver(vehicle) {
+    const claim=this.vehicleClaim(vehicle),peer=claim?.peer;
+    return claim?.driving && this.peers.has(peer) && !peer.closed && peer.ready &&
+      peer.player.health>0 && !peer.player.insideHome && peer.state?.driving===true &&
+      peer.state.vehicle===vehicle.id && peer.state.car===vehicle.row[2] ? peer : null;
+  }
+
+  publishVehicle(vehicle) {
+    if(this.vehicles.get(vehicle.id)!==vehicle)return;
+    for(const peer of this.peers)if(peer.ready&&!peer.player.insideHome)
+      peer.send({t:'veh',v:vehicle.row.slice()});
+  }
+
+  releaseVehicleClaim(claim,{publish=true,removeActor=false}={}) {
+    if(this.vehicleClaims.get(claim.vehicle.id)!==claim)return;
+    this.vehicleClaims.delete(claim.vehicle.id);
+    if(this.vehicles.get(claim.vehicle.id)!==claim.vehicle)return;
+    claim.vehicle.row[11]=null;
+    if(claim.driving)this.saveVehicleGarage(claim.vehicle,true);
+    if(!claim.driving || !publish)return;
+    if(removeActor)for(const other of this.peers)if(other.ready&&other!==claim.peer)
+      other.send({t:'gone',id:String(claim.peer.player.number)});
+    // Replace the remote driving row before making its parked counterpart
+    // visible. The logical vehicle and coupling ID never disappear.
+    this.publishPlayerRows();
+    this.publishVehicle(claim.vehicle);
+  }
+
+  pruneVehicleClaims() {
+    const now=Date.now();
+    for(const claim of this.vehicleClaims.values()) {
+      const peer=claim.peer,vehicle=claim.vehicle;
+      if(this.vehicles.get(vehicle.id)!==vehicle || !this.peers.has(peer) || peer.closed ||
+         !peer.ready || peer.player.health<=0 || peer.player.insideHome ||
+         vehicle.row[9]<=0 || (!claim.driving && now>=claim.until) ||
+         (claim.driving && now-peer.lastSeen>10000))
+        this.releaseVehicleClaim(claim,{removeActor:claim.driving});
+    }
+  }
+
+  requestVehicleEntry(peer,id) {
+    this.pruneVehicleClaims();
+    const vehicle=typeof id==='string'&&id.length>0&&id.length<=64 ? this.vehicles.get(id) : null;
+    if(!vehicle || !this.peers.has(peer) || peer.closed || !peer.ready || peer.player.health<=0 ||
+       peer.player.insideHome || vehicle.row[9]<=0 ||
+       vehicle.missionOwner && vehicle.missionOwner!==peer.player ||
+       !this.validVehiclePose(peer.state) || Date.now()-peer.lastSeen>10000 ||
+       Math.hypot(peer.state.x-vehicle.row[3],peer.state.y-vehicle.row[4],peer.state.z-vehicle.row[5])>8)
+      return false;
+    const existing=this.vehicleClaim(vehicle);
+    if(existing)return existing.peer===peer;
+    if([...this.vehicleClaims.values()].some(claim=>claim.peer===peer))return false;
+    // The public enter promise times out after four seconds. Allow its asset
+    // and get-in transition to finish, but do not let repeated requests extend
+    // a reservation forever. An acknowledgement alone changes no appearance.
+    this.vehicleClaims.set(id,{vehicle,peer,until:Date.now()+12000,driving:false,exitPose:null});
+    return true;
+  }
+
+  prepareVehicleReport(peer,message) {
+    const current=[...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&claim.driving);
+    if(message.driving!==true) {
+      // Ordinary foot reports continue during the get-in animation. A native
+      // final parked snapshot, unlike those reports, also cancels pending entry.
+      const pending=[...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&
+        message.vehicle===claim.vehicle.id&&message.car===claim.vehicle.row[2]&&
+        this.validVehiclePose(message.parked));
+      return {release:current || pending};
+    }
+    // The original serializer deliberately omits vehicle for cG.local free-play
+    // cars. Such an actor owns no server vehicle and cannot hide/update one.
+    if(this.unboundVehicleReport(message))return {release:current};
+    const vehicle=typeof message.vehicle==='string' ? this.vehicles.get(message.vehicle) : null;
+    const claim=this.vehicleClaim(vehicle);
+    if(!claim || claim.peer!==peer || current && current!==claim ||
+       !this.peers.has(peer) || peer.closed || peer.player.health<=0 || peer.player.insideHome ||
+       vehicle.row[9]<=0 || vehicle.missionOwner && vehicle.missionOwner!==peer.player ||
+       message.car!==vehicle.row[2] || !this.validVehiclePose(message) ||
+       !claim.driving && (Date.now()>=claim.until ||
+         Math.hypot(message.x-vehicle.row[3],message.y-vehicle.row[4],message.z-vehicle.row[5])>16))
+      return null;
+    return {claim,start:!claim.driving};
+  }
+
+  unboundVehicleReport(message) {
+    if(message.vehicle!==undefined&&message.vehicle!==null)return false;
+    if(typeof message.car!=='string'||message.car.length>64||!this.validVehiclePose(message))return false;
+    const model=Number(message.car.split('.')[0]);
+    return Number.isInteger(model)&&model>=400&&model<=611;
+  }
+
+  writeVehiclePose(vehicle,report) {
+    if(!this.validVehiclePose(report))return false;
+    const condition=`${vehicle.row[9]}:${vehicle.row[10]}`;
+    for(const [index,key] of [[3,'x'],[4,'y'],[5,'z'],[6,'heading'],[7,'pitch'],[8,'roll']])
+      if(report[key]!==undefined)vehicle.row[index]=rounded(report[key]);
+    if(Number.isFinite(report.health))vehicle.row[9]=Math.min(vehicle.row[9],Math.round(report.health));
+    if(typeof report.damage==='string'&&report.damage)vehicle.row[10]=report.damage;
+    if(Number.isFinite(report.w)) {
+      while(vehicle.row.length<17)vehicle.row.push(null);
+      vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,report.w)));
+    }
+    this.saveVehicleGarage(vehicle,condition!==`${vehicle.row[9]}:${vehicle.row[10]}`);
+    return true;
+  }
+
+  saveVehicleGarage(vehicle,force=false) {
+    const entry=vehicle.owner?.garage[vehicle.slot];
+    if(!entry)return;
+    entry.position=vehicle.row.slice(3,7);entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];
+    entry.health=vehicle.row[9];entry.damage=vehicle.row[10];entry.work=vehicle.row[16] || 0;
+    if(force || Date.now()-(vehicle.lastGarageSave || 0)>=5000) {
+      vehicle.lastGarageSave=Date.now();this.save();
+    }
+  }
+
+  finishVehicleReport(peer,message,change) {
+    if(change.claim) {
+      const claim=change.claim,vehicle=claim.vehicle;
+      if(peer.player.health<=0) {this.releaseVehicleClaim(claim,{removeActor:claim.driving});return;}
+      claim.driving=true;
+      vehicle.row[11]=String(peer.player.number);
+      // An explicit browser exit supplies the final body pose before the next
+      // foot report. Do not overwrite that snapshot with a queued drive frame.
+      if(!claim.exitPose)this.writeVehiclePose(vehicle,message);
+      if(change.start) {
+        // Original parked-row slot11 is the driver marker. Publish it before
+        // the driving row; the real manager keeps a stand-in until handed(id)
+        // confirms the driven body exists. vgone would create a60s tombstone.
+        this.publishVehicle(vehicle);
+        this.publishPlayerRows();
+      }
+    }
+    if(change.release) {
+      const claim=change.release,vehicle=claim.vehicle;
+      const parked=message.vehicle===vehicle.id&&message.car===vehicle.row[2] ? message.parked : null;
+      if(claim.driving)this.writeVehiclePose(vehicle,this.validVehiclePose(parked) ? parked : claim.exitPose);
+      this.releaseVehicleClaim(claim);
+    }
+  }
+
+  reportVehicleExit(peer,message) {
+    const vehicle=typeof message.v==='string' ? this.vehicles.get(message.v) : null;
+    const claim=this.vehicleClaim(vehicle);
+    if(!claim || claim.peer!==peer)return;
+    if(!claim.driving) {this.releaseVehicleClaim(claim,{publish:false});return;}
+    const report=message.parked || {x:message.x,y:message.y,z:message.z,
+      heading:message.h,pitch:message.p,roll:message.r,health:message.hp,damage:message.d,w:message.w};
+    if(this.validVehiclePose(report))claim.exitPose={...report};
+    // Actual foot state, disconnect or death completes release. The request
+    // itself is not proof that the actor/get-out animation has finished.
+  }
+
   assertVehicleUnoccupied(vehicle) {
-    if (vehicle && [...this.peers].some(peer => peer.ready &&
+    if (vehicle && (this.vehicleClaim(vehicle) || [...this.peers].some(peer => peer.ready &&
         peer.state?.vehicle === vehicle.id &&
-        (peer.state.driving === true || peer.state.passenger === true)))
+        peer.state.passenger === true)))
       throw new Error('Wait until everyone leaves this vehicle.');
   }
 
@@ -1403,6 +1574,8 @@ class LocalGame {
 
   deleteVehicle(id) {
     if(!this.vehicles.has(id))return false;
+    const claim=this.vehicleClaim(this.vehicles.get(id));
+    if(claim)this.releaseVehicleClaim(claim,{publish:false});
     if(this.coupling?.removeVehicle(id))this.broadcastCouplings();
     return this.vehicles.delete(id);
   }
@@ -1465,77 +1638,13 @@ class LocalGame {
     return vehicle;
   }
 
-  updateOwnedVehicle(peer, message) {
-    if (typeof message.vehicle !== 'string') return;
-    const vehicle = this.vehicles.get(message.vehicle);
-    if (!vehicle || vehicle.owner !== peer.player || message.car !== vehicle.row[2]) return;
-    const parked = message.walking === true && message.parked &&
-      typeof message.parked === 'object' ? message.parked : null;
-    const driving = message.driving === true;
-    const report = parked || (driving ? message : null);
-    if (!report || ![report.x, report.y, report.z].every(Number.isFinite) ||
-        Math.abs(report.x) > 6000 || Math.abs(report.y) > 6000 ||
-        report.z < -200 || report.z > 1000) return;
-    const entry = peer.player.garage[vehicle.slot];
-    const before = `${entry.health}:${entry.damage}`;
-    const position = [rounded(report.x), rounded(report.y), rounded(report.z),
-      rounded(report.heading)];
-    vehicle.row[3] = position[0]; vehicle.row[4] = position[1];
-    vehicle.row[5] = position[2]; vehicle.row[6] = position[3];
-    vehicle.row[7] = rounded(report.pitch); vehicle.row[8] = rounded(report.roll);
-    if(Number.isFinite(report.w)) {
-      while(vehicle.row.length<17)vehicle.row.push(null);
-      vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,report.w)));entry.work=vehicle.row[16];
-    }
-    entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];
-    if (Number.isFinite(report.health))
-      entry.health = Math.min(entry.health,
-        Math.max(0, Math.min(1000, Math.round(report.health))));
-    if (typeof report.damage === 'string' && report.damage)
-      entry.damage = report.damage.slice(0, 512);
-    vehicle.row[9] = entry.health; vehicle.row[10] = entry.damage;
-    entry.position = position;
-    if (parked || before !== `${entry.health}:${entry.damage}` ||
-        Date.now() - vehicle.lastGarageSave > 5000) {
-      vehicle.lastGarageSave = Date.now();
-      this.save();
-    }
-  }
-
-  updateMissionVehicle(peer, message) {
-    if (typeof message.vehicle !== 'string') return;
-    const vehicle = this.vehicles.get(message.vehicle);
-    if (!vehicle || vehicle.missionOwner !== peer.player ||
-        message.car !== vehicle.row[2]) return;
-    const parked = message.walking === true && message.parked &&
-      typeof message.parked === 'object' ? message.parked : null;
-    const report = parked || (message.driving === true ? message : null);
-    if (!report || ![report.x, report.y, report.z].every(Number.isFinite) ||
-        Math.abs(report.x) > 6000 || Math.abs(report.y) > 6000 ||
-        report.z < -200 || report.z > 1000) return;
-    vehicle.row[3] = rounded(report.x);
-    vehicle.row[4] = rounded(report.y);
-    vehicle.row[5] = rounded(report.z);
-    vehicle.row[6] = rounded(report.heading);
-    vehicle.row[7] = rounded(report.pitch);
-    vehicle.row[8] = rounded(report.roll);
-    if(Number.isFinite(report.w)) {
-      while(vehicle.row.length<17)vehicle.row.push(null);
-      vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,report.w)));
-    }
-    if (Number.isFinite(report.health))
-      vehicle.row[9] = Math.min(vehicle.row[9],Math.max(0, Math.min(1000, Math.round(report.health))));
-    if (typeof report.damage === 'string' && report.damage)
-      vehicle.row[10] = report.damage.slice(0,512);
-    if (parked) for (const other of this.peers)
-      if (other.ready) other.send({t: 'spawned', v: vehicle.row});
-  }
-
   updateUnattendedVehicle(peer, message) {
     // The public client reports nearby unoccupied physics using eI/vmove.
     // These authority checks belong to this independent local server.
     if (!peer.ready || peer.player.insideHome || typeof message.v !== 'string') return;
     const vehicle = this.vehicles.get(message.v), at = this.position(peer.player);
+    const claim=this.vehicleClaim(vehicle);
+    if(claim && (claim.driving || claim.peer!==peer))return;
     if (!vehicle || !at || this.coupling && !this.coupling.canMove(peer,vehicle.id) || vehicle.missionOwner && vehicle.missionOwner !== peer.player ||
         [...this.peers].some(other => other.ready && other.state?.vehicle === vehicle.id &&
           (other.state.driving === true || other.state.passenger === true))) return;
@@ -1932,8 +2041,9 @@ class LocalGame {
         throw new Error(final ? 'Finish at the final checkpoint.' : 'Pass the next checkpoint first.');
       const home = homeAt(race.points[member.index]);
       if (!pos || pos.peer.state.driving !== true ||
+          this.vehicleDriver(this.vehicles.get(member.carId))!==pos.peer ||
           Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS)
-        throw new Error('Drive within 12 m of your active race checkpoint.');
+        throw new Error('Drive your marked race loaner within 12 m of your active race checkpoint.');
       if (!final) {
         member.index++;
         message = `Checkpoint ${member.index} passed. Next: ${homeAt(race.points[member.index]).name}.`;
@@ -2719,6 +2829,8 @@ class LocalGame {
 
   onMessage(peer, message) {
     if (!message || typeof message !== 'object') return;
+    if(!this.peers.has(peer) || peer.closed)return;
+    this.pruneVehicleClaims();
     if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
     if (peer.ready && peer.player.health<=0 && (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)) {
       peer.player.flightGear={parachute:false,jetpack:false};
@@ -2773,10 +2885,13 @@ class LocalGame {
       return;
     }
     if (!peer.ready) return;
+    if(message.t==='exit') {this.reportVehicleExit(peer,message);return;}
     if (message.t === 'ping') return peer.send({t: 'pong', c: message.c, s: Date.now()});
     if (message.t === 'shot') return this.handleShot(peer, message);
     if (message.t === 'hit') return this.handleHit(peer, message);
     if (message.t === 'me') {
+      const vehicleChange=this.prepareVehicleReport(peer,message);
+      if(!vehicleChange)return;
       const previous = peer.state;
       if (peer.player.job && !peer.player.job.mode && previous && Date.now() - peer.lastSeen < 5000 &&
           (message.walking === true || message.driving === true) &&
@@ -2903,8 +3018,7 @@ class LocalGame {
           this.save();
         }
       }
-      this.updateOwnedVehicle(peer, message);
-      this.updateMissionVehicle(peer, message);
+      this.finishVehicleReport(peer,message,vehicleChange);
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
     }
@@ -2924,9 +3038,8 @@ class LocalGame {
       return;
     }
     if (message.t === 'enter' || message.t === 'jack') {
-      const vehicle = this.vehicles.get(message.v);
       return peer.send({t: message.t, v: message.v,
-        ok: !!vehicle && (!vehicle.missionOwner || vehicle.missionOwner === peer.player)});
+        ok: this.requestVehicleEntry(peer,message.v)});
     }
     if (message.t === 'who' && Array.isArray(message.ids))
       return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer &&
@@ -3092,6 +3205,7 @@ class LocalGame {
     const s = peer.state;
     if (!s || Date.now() - peer.lastSeen > 10000) return null;
     const driving = s.driving === true && typeof s.car === 'string';
+    if(driving && !this.unboundVehicleReport(s) && this.vehicleDriver(this.vehicles.get(s.vehicle))!==peer)return null;
     const walking = !driving && s.walking === true && Number.isInteger(s.skin);
     if (!driving && !walking) return null;
     const point = Array.isArray(s.at) ? s.at : Array.isArray(s.position) ? s.position : null;
@@ -3200,10 +3314,15 @@ class LocalGame {
   }
 
   broadcastPositions() {
+    this.pruneVehicleClaims();
     this.expireRace();
     this.policeTick();
     this.turfTick();
     this.mechanicTick();
+    this.publishPlayerRows();
+  }
+
+  publishPlayerRows() {
     for (const p of this.peers) {
       if (!p.ready) continue;
       const rows = [...this.peers].filter(other => other !== p &&
@@ -3214,12 +3333,13 @@ class LocalGame {
 
   remove(peer) {
     if (!this.peers.delete(peer)) return;
+    for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
+    for(const claim of this.vehicleClaims.values())if(claim.peer===peer)this.releaseVehicleClaim(claim);
     if(this.coupling?.releasePeer(peer))this.broadcastCouplings();
     if (![...this.peers].some(other => other.player === peer.player)) {
       this.partyInvites.delete(peer.player);
       this.leaveParty(peer.player);
     }
-    for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
   }
 }
 

@@ -121,6 +121,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let vehiclePipeline: MTLRenderPipelineState?
+    private let vehiclePaintPipeline: MTLRenderPipelineState?
     private let vehicleMaskPipeline:MTLRenderPipelineState?
     private let animatedPipeline: MTLRenderPipelineState
     private let skeletalPipeline: MTLRenderPipelineState?
@@ -494,6 +495,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var vehicleHandling: [String: VehicleHandling] = [:]
     private var vehicleInfo: [String: [String: String]] = [:]
     private var activeVehicleModel = ""
+    private var ownedVehicleAppearance:(id:String,code:String)?
+    private var ownVehicleAppearanceCode:String {
+        if let id=currentVehicleID,let row=remoteVehicles.first(where:{$0.id==id}){return row.code}
+        if let value=ownedVehicleAppearance,value.id==currentVehicleID{return value.code}
+        return activeVehicleModel.isEmpty ? "420":activeVehicleModel
+    }
     private var activeHandling: VehicleHandling?
     private var activeModelOrigin: Float = 0
     private var pendingVehicleBodyPose:NativeUnattendedVehicle.Pose?
@@ -726,6 +733,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].writeMask = .all
         descriptor.fragmentFunction = library.makeFunction(name:"vehicleFragment")
         let vehiclePipeline = descriptor.fragmentFunction.flatMap {_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        descriptor.fragmentFunction = library.makeFunction(name:"vehiclePaintFragment")
+        let vehiclePaintPipeline = descriptor.fragmentFunction.flatMap {_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
         descriptor.fragmentFunction = fragment
         descriptor.vertexFunction = animatedVertex
         guard let animatedPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
@@ -768,6 +777,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.queue = queue
         self.pipeline = pipeline
         self.vehiclePipeline = vehiclePipeline
+        self.vehiclePaintPipeline = vehiclePaintPipeline
         self.vehicleMaskPipeline = vehicleMaskPipeline
         self.animatedPipeline = animatedPipeline
         self.skeletalPipeline = skeletalPipeline
@@ -2073,6 +2083,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehicleFallbackRoll = vehicle.roll
         steeringInput = 0
         activeVehicleModel = String(vehicle.code.split(separator: ".").first ?? "")
+        ownedVehicleAppearance=(vehicle.id,vehicle.code)
         // Browser vehicle packets carry the rigid-body/root position; its
         // visible model is a child translated up by this original DFF offset.
         activeModelOrigin = groundVehicle?.modelOrigin(activeVehicleModel) ?? 0
@@ -2728,7 +2739,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             self.actorMeshes[name] = Mesh(vertices: vertices, indices: indices,
                                           indexCount: world.indices.count, atlas: atlas)
             if let rigBinary,let rigImage,let rigMetadata,let rig=NativeVehicleRig(data:rigMetadata),
-               let geometry=try? WorldBinary(data:rigBinary),rig.document.draws.allSatisfy({$0.start+$0.count<=geometry.indices.count}),
+               rig.validatesAssetFamily(binary:rigBinary,atlas:rigImage),
+               let meshData=rig.meshData(rigBinary),let geometry=try? WorldBinary(data:meshData),rig.document.draws.allSatisfy({$0.start+$0.count<=geometry.indices.count}),
                let atlas=try? self.textureLoader.newTexture(data:rigImage,options:[.SRGB:false]),
                let vertices=self.device.makeBuffer(bytes:geometry.vertices,length:geometry.vertices.count*MemoryLayout<NativeVertex>.stride),
                let indices=self.device.makeBuffer(bytes:geometry.indices,length:geometry.indices.count*4) {
@@ -3640,6 +3652,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         flightCanopyPoses=flightCanopyPoses.filter{flightIDs.contains($0.key)}
         flightCanopyLanded=flightCanopyLanded.filter{flightIDs.contains($0.key)}
         var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int)] = []
+        // Keep wire appearance with each occurrence, including two identical
+        // models at identical positions. Shared geometry is never recoloured.
+        var vehicleAppearanceCodes:[String:[String]] = [:]
+        var vehicleAppearanceOffsets:[String:Int] = [:]
         var driverPose: NativeSkeletalActor.Pose?
         // An ordered queue preserves independent instances even when two players
         // have the same skin and exact position (including passengers).
@@ -3652,9 +3668,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon))
         }
         if driving && !legacySpectating {
-            let code = remoteVehicles.first(where: { $0.id == currentVehicleID })?.code ?? "420.6.1.0."
+            let code = ownVehicleAppearanceCode
             if let name = actorName(code: code) {
                 modelInstances.append((name, camera, heading, vehiclePitch, "", 0, 0))
+                vehicleAppearanceCodes[key(name,camera),default:[]].append(code)
                 if let seat = vehicleSeats[name], let ped = pedModels[String(localSkin)] {
                     let time = ProcessInfo.processInfo.systemUptime - entryStarted
                     let definition = seating?.models[activeVehicleModel]
@@ -3805,6 +3822,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 continue
             }
             modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0))
+            vehicleAppearanceCodes[key(name,player.position),default:[]].append(player.code)
             guard let ped=pedModels[String(player.skin)] else {continue}
             guard let actor=skeletalActors[ped],let library=skeletalLibrary else {loadActor(ped);continue}
             let model=String(player.code.split(separator:".").first ?? "")
@@ -3865,6 +3883,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let vehicle=predictedVehicle(source)
             guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
             modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0))
+            vehicleAppearanceCodes[key(name,vehicle.position),default:[]].append(vehicle.code)
             parkedTrainCandidates.append(vehicle)
             if let exact=groundVehicle?.otherVehicle(vehicle.id)?.transform{parkedTransforms[key(name,vehicle.position)]=exact}
         }
@@ -3875,6 +3894,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             for (index,carriage) in carriages.enumerated() {
                 guard let name=actorName(code:carriage.model) else{continue}
                 modelInstances.append((name,carriage.position,0,0,"",0,0))
+                vehicleAppearanceCodes[key(name,carriage.position),default:[]].append(carriage.model)
                 let token=key(name,carriage.position)
                 carriageTransforms[token]=carriage.transform
                 carriageIdentifiers[token]=identity=="own" ? "carriage:\(index):\(name)":"carriage:\(identity):\(index):\(name)"
@@ -3971,13 +3991,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentTexture(mesh.atlas, index: 0)
             if clip.isEmpty,let rig=vehicleRigs[name],vehicleRigMeshes[name] != nil {
-                let frame=vehicleRigFrame(name:name,position:position,rig:rig,carriage:carriageIdentifiers[key(name,position)])
-                encoder.setRenderPipelineState(vehiclePipeline ?? pipeline)
+                let appearanceOffset=vehicleAppearanceOffsets[token,default:0]
+                let appearance=vehicleAppearanceCodes[token].flatMap{$0.indices.contains(appearanceOffset) ? $0[appearanceOffset]:nil}
+                if appearance != nil{vehicleAppearanceOffsets[token]=appearanceOffset+1}
+                let frame=vehicleRigFrame(name:name,position:position,rig:rig,carriage:carriageIdentifiers[key(name,position)],appearanceCode:appearance)
+                if rig.hasDynamicPaint {
+                    guard let vehiclePaintPipeline else{onStatus?("VEHICLE PAINT SHADER IS UNAVAILABLE");continue}
+                    encoder.setRenderPipelineState(vehiclePaintPipeline)
+                }else{encoder.setRenderPipelineState(vehiclePipeline ?? pipeline)}
                 for part in frame.draws {
                     uniforms.viewProjection=matrix*transform*part.transform
                     var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
                     encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+                    encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
                     encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
+                    if rig.hasDynamicPaint {
+                        var paint=part.paint
+                        encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
+                    }
                     encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
                 }
                 if let vehicleMaskPipeline {
@@ -4157,7 +4188,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private func vehicleRigFrame(name:String,position:SIMD3<Float>,rig:NativeVehicleRig,carriage:String?)->NativeVehicleRig.Frame {
+    private func vehicleRigFrame(name:String,position:SIMD3<Float>,rig:NativeVehicleRig,carriage:String?,appearanceCode:String?=nil)->NativeVehicleRig.Frame {
         let now=ProcessInfo.processInfo.systemUptime
         let player=remotePlayers.first{$0.vehicleID != nil && $0.position==position && actorName(code:$0.code)==name}
         let parked=parkedVehicle(name:name,position:position)
@@ -4165,6 +4196,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let token=carriage ?? (own ? "own:\(currentVehicleID ?? name):\(name)":"remote:\(player?.vehicleID ?? parked?.id ?? name):\(name)")
         let delta=min(0.1,max(0,now-(vehicleRigTimes[token] ?? now)));vehicleRigTimes[token]=now
         var input=NativeVehicleRig.Input()
+        input.appearanceCode=appearanceCode
         if own {
             input.work=groundVehicle?.workingRenderValue ?? 0
             input.steering = -(groundVehicle?.output?.steering ?? 0)

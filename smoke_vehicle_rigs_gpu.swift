@@ -19,7 +19,7 @@ import simd
         for scenario in references["cases"] as! [[String:Any]] {
             let name=scenario["model"] as! String,base=root.appendingPathComponent("local-only/site/game/native/models/\(name).rig")
             let rig=NativeVehicleRig(data:try Data(contentsOf:base.appendingPathExtension("json")))!
-            let world=try WorldBinary(data:Data(contentsOf:base.appendingPathExtension("bin"))),frames=scenario["frames"] as! [[String:Any]]
+            let world=try WorldBinary(data:rig.meshData(Data(contentsOf:base.appendingPathExtension("bin")))!),frames=scenario["frames"] as! [[String:Any]]
             let target=min(75,frames.count-1);var state=NativeVehicleRig.State(),pose:NativeVehicleRig.Frame?
             for frame in frames[0...target]{pose=rig.pose(input(frame["input"] as! [String:Any]),state:&state,delta:number(frame,"delta"))}
             let original=frames[target]["matrices"] as! [[Double]],offset=matrices.count

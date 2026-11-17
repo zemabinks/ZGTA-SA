@@ -94,7 +94,7 @@ def main():
         'test_native_renderware_txd.py', 'test_native_renderware_model.py', 'smoke_native_renderware_ped.py',
         'test_samp_artwork_session.py', 'test_samp_object_materials.py', 'test_samp_game_camera.py', 'test_samp_stock_models.py',
         'smoke_original_auth.py', 'smoke_samp_vehicle_coordinates.py', 'smoke_samp_combat_sync.py',
-        'test_native_skin_namespace.py', 'test_native_skin_network.py',
+        'test_native_skin_namespace.py', 'test_native_skin_network.py', 'test_native_vehicle_paint.py',
         'test_stock_asset_access.py', 'smoke_native_stock_collision.py', 'test_samp_stock_runtime.py',
         'test_stock_img_assets.py',
         'smoke_samp_controls.py', 'smoke_samp_vitals.py',
@@ -131,6 +131,11 @@ def main():
         raise SystemExit('ZGTA_CORE_WORKERS must be1..4')
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(pool.map(run, cases))
+
+    # The archived browser replays the exact packets produced by the server
+    # fixture. Keep that producer/consumer pair sequential and outside the pool.
+    for script in ['smoke_selfhost_vehicle_presence.js', 'smoke_selfhost_vehicle_presence_browser.js']:
+        results.append(run((script.removesuffix('.js'), ['node', script])))
 
     # The raw and catalog-aware controls fixtures deliberately use the same
     # matching UDP port. Run this second profile after the pool has released it.

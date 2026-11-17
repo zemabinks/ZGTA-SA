@@ -46,14 +46,15 @@ print("PASS working vehicle rigs: \(checks) matrix checks, \(frames) actual arch
 '''
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
-    paths=[ROOT/'ios/App/NativeVehicleRig.swift',ROOT/'prepare_native_vehicle_rigs.js',ROOT/'prepare_native_vehicle_coupling.js',Path(__file__)]
+    paths=[ROOT/'ios/App/NativeVehicleRig.swift',ROOT/'ios/App/NativeVehiclePaint.swift',ROOT/'prepare_native_vehicle_rigs.js',ROOT/'prepare_native_vehicle_coupling.js',Path(__file__)]
     snapshot={str(p.relative_to(ROOT)):p.read_bytes() for p in paths}
     with tempfile.TemporaryDirectory(prefix='snapshot-',dir=OUT) as temp:
         work=Path(temp)
         subprocess.run(['node','-e',JS,str(work)],cwd=ROOT,check=True)
         (work/'main.swift').write_text(SWIFT)
         rig=work/'NativeVehicleRig.swift';rig.write_bytes(snapshot['ios/App/NativeVehicleRig.swift']);exe=work/'verify'
-        result=subprocess.run(['xcrun','swiftc','-module-cache-path',str(OUT/'modules'),str(rig),str(work/'main.swift'),'-o',str(exe)],capture_output=True,text=True)
+        paint=work/'NativeVehiclePaint.swift';paint.write_bytes(snapshot['ios/App/NativeVehiclePaint.swift'])
+        result=subprocess.run(['xcrun','swiftc','-module-cache-path',str(OUT/'modules'),str(paint),str(rig),str(work/'main.swift'),'-o',str(exe)],capture_output=True,text=True)
         (OUT/'compile.log').write_text(result.stdout+result.stderr);result.check_returncode()
         result=subprocess.run([str(exe),str(work)],capture_output=True,text=True)
         unchanged=all((ROOT/name).read_bytes()==data for name,data in snapshot.items())

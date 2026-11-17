@@ -26,6 +26,14 @@ function createLibrary(options={}) {
   for(const id of Object.keys(load.factories).sort((a,b)=>Number(a)-Number(b)))sourceHash.update(id+':'+load.factories[id].toString()+'\n');
   for(const file of [__filename,path.join(__dirname,'prepare_native_vehicle_rig_atlas.py'),path.join(__dirname,'smoke_vehicle_dynamics.js'),path.join(__dirname,'prepare_native_vehicle_coupling.js')])sourceHash.update(fs.readFileSync(file));
   const sourceSHA256=sourceHash.digest('hex'),rig=rigFactory(load),T=load(85339),geometry=load(88711),catalogue=load(72197),coupling=couplingReference(load);
+  const palette=Array.from({length:catalogue.mg},(_,index)=>{
+    const hex=catalogue.W_(index);
+    if(!/^#[0-9a-f]{6}$/i.test(hex))throw Error('Invalid original car palette colour');
+    return [1,3,5].map(at=>parseInt(hex.slice(at,at+2),16));
+  });
+  const variantsSource=load.factories[72197].toString().match(/let u=JSON\.parse\('([^']*)'\)/);
+  if(!variantsSource)throw Error('Original four-colour catalogue signature changed');
+  const colorVariants=JSON.parse(variantsSource[1]);
   const game=options.game??path.join(__dirname,'local-only/site/game'),hashes=new Map(),decodedTextures=new Map();
   const filename=url=>path.join(game,url.split('/').pop());
   function inputHash(file){if(!hashes.has(file))hashes.set(file,createHash('sha256').update(fs.readFileSync(file)).digest('hex'));return hashes.get(file)}
@@ -33,7 +41,7 @@ function createLibrary(options={}) {
     const assets=catalogue.yc(catalogue.AX({id:Number(definition.id)}));
     const files=[definition.model+'.dff',...assets.txds.map(url=>url.split('/').pop()),...assets.parts.flatMap(part=>part.url?[part.url.split('/').pop()]:[])];
     const inputs=files.map(file=>({file,sha256:inputHash(path.join(game,file))}));
-    return {sha256:createHash('sha256').update(JSON.stringify({version:2,sourceSHA256,assets,inputs})).digest('hex'),sourceSHA256,inputs};
+    return {sha256:createHash('sha256').update(JSON.stringify({version:3,sourceSHA256,assets,inputs})).digest('hex'),sourceSHA256,inputs};
   }
   function cached(definition,output){
     const base=path.join(output,definition.model+'.rig');
@@ -64,7 +72,10 @@ function createLibrary(options={}) {
     // time. This is the same original pose function, with explicit inputs.
     motion.pose?.(0,0,0,{drop:[0,0],lean:0,crank:0,rotor:0,spin:0,gearUp:false,nozzle:5000},[0,0,0,0]);
     const damage=load(39851).k({root,body,wheels});
-    const built={id:Number(id),definition,parsed,bytes,root,body,wheels,table,bounds,size,motion,damage,textures,T,geometry,rig,coupling,cache:signature(definition)};
+    const defaults=catalogue.AX({id:Number(id)}).colors;
+    const paint={version:1,vertexRGB:'neutral-paint-slot-rgb',palette,defaults,colorVariants:colorVariants[Number(id)]??[],
+      customFlag:0x1000000,customLimit:0x2000000};
+    const built={id:Number(id),definition,parsed,bytes,root,body,wheels,table,bounds,size,motion,damage,textures,T,geometry,rig,coupling,paint,cache:signature(definition)};
     // Prepare original working-part groups at their rest pose before exporting
     // hierarchy indices. Runtime working controls then rotate these same groups.
     coupling.prepare(built);root.updateMatrixWorld(true);return built;
@@ -106,7 +117,10 @@ function exportRig(built,output,options={}) {
           cache.set(source,positions.length/3);positions.push(p.getX(source),p.getY(source),p.getZ(source));
           normals.push(normal?normal.getX(source):0,normal?normal.getY(source):0,normal?normal.getZ(source):0);
           uvs.push(uv?uv.getX(source):0,uv?uv.getY(source):0);layers.push(slot);
-          const tint=[material.color.r,material.color.g,material.color.b];
+          // Never bake the instance's fallback body paint into its mesh.
+          // Preserve original geometry/prelit RGB, including zero channels.
+          const painted=Number.isInteger(material.userData.slot)&&material.userData.slot>=0&&material.userData.slot<4;
+          const tint=painted?[1,1,1]:[material.color.r,material.color.g,material.color.b];
           for(let axis=0;axis<3;axis++)colors.push(Math.round(255*Math.min(1,Math.max(0,(color?color.array[source*color.itemSize+axis]/(color.normalized?255:1):1)*tint[axis]))));
           colors.push(Math.round(255*material.opacity));
         }
@@ -121,7 +135,9 @@ function exportRig(built,output,options={}) {
   }
   const count=positions.length/3,textureCount=textureRows.length+1;
   const bytes=Buffer.alloc(16+count*12+count*8+triangles.length*4+count*4+count*2+(count%2?2:0)+count*4+textureCount*2);
-  let at=0;for(const value of [0x324c5257,count,triangles.length,textureCount]){bytes.writeUInt32LE(value,at);at+=4}
+  // Distinguish neutral painted RGB from legacy WRL2 baked material colour.
+  // The native rig loader verifies this family before adapting the header.
+  let at=0;for(const value of [0x32435056,count,triangles.length,textureCount]){bytes.writeUInt32LE(value,at);at+=4}
   for(const value of positions){bytes.writeFloatLE(value,at);at+=4}for(const value of uvs){bytes.writeFloatLE(value,at);at+=4}
   for(const value of triangles){bytes.writeUInt32LE(value,at);at+=4}Buffer.from(colors).copy(bytes,at);at+=count*4;
   for(const value of layers){bytes.writeUInt16LE(value,at);at+=2}if(count%2)at+=2;Buffer.from(colors).copy(bytes,at);at+=count*4;
@@ -130,18 +146,21 @@ function exportRig(built,output,options={}) {
   const joints=loadJoints(built,objects,indices);
   const waterMasks=objects.filter(object=>object.isMesh&&object.userData.keepsWaterOut).map(object=>({
     node:indices.get(object),positions:[...object.geometry.attributes.position.array],indices:[...object.geometry.index.array]}));
-  const metadata={version:1,id:built.id,model:definition.model,kind:motion.kind,axes:'GTA DFF x,y,z; local geometry + hierarchical matrices',
+  const metadata={version:2,id:built.id,model:definition.model,kind:motion.kind,axes:'GTA DFF x,y,z; local geometry + hierarchical matrices',
     cacheSignature:options.atlas===false?null:built.cache.sha256,cacheSourceSHA256:built.cache.sourceSHA256,cacheInputs:built.cache.inputs,
     dffSHA256:createHash('sha256').update(built.bytes).digest('hex'),rigFactorySHA256:built.rig.sha256,
     origin:root.position.y,nodes,frames,draws,joints,waterMasks,textures:textureRows.map(({name,width,height},index)=>({name,width,height,layer:index+1})),
-    vertices:count,indices:triangles.length};
+    vertices:count,indices:triangles.length,paint:built.paint,binaryEncoding:'VPC2',
+    binarySHA256:createHash('sha256').update(bytes).digest('hex'),atlasSHA256:null,normalsSHA256:null};
   fs.mkdirSync(output,{recursive:true});const base=path.join(output,definition.model+'.rig');
   fs.writeFileSync(base+'.bin.tmp',bytes,{mode:0o600});fs.renameSync(base+'.bin.tmp',base+'.bin');
   const normalBytes=Buffer.alloc(normals.length*4);normals.forEach((value,index)=>normalBytes.writeFloatLE(value,index*4));
+  metadata.normalsSHA256=createHash('sha256').update(normalBytes).digest('hex');
   fs.writeFileSync(base+'.normals.bin.tmp',normalBytes,{mode:0o600});fs.renameSync(base+'.normals.bin.tmp',base+'.normals.bin');
   if(options.atlas!==false) {
     const atlas=spawnSync(process.env.PYTHON??'python3',[path.join(__dirname,'prepare_native_vehicle_rig_atlas.py'),base+'.png'],{input:JSON.stringify(textureRows),encoding:'utf8'});
     if(atlas.status!==0)throw Error('Atlas creation failed: '+atlas.stderr);
+    metadata.atlasSHA256=createHash('sha256').update(fs.readFileSync(base+'.png')).digest('hex');
   }
   // Publish the cache marker last, only after all geometry/atlas writes pass.
   fs.writeFileSync(base+'.json.tmp',JSON.stringify(metadata),{mode:0o600});fs.renameSync(base+'.json.tmp',base+'.json');

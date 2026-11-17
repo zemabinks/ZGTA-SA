@@ -35,7 +35,7 @@ function inbox(ws) {
     return new Promise((resolve, reject) => {
       const wait = {match, resolve, timer: setTimeout(() => {
         waiting.splice(waiting.indexOf(wait), 1);
-        reject(new Error('Timed out waiting for a multiplayer message'));
+        reject(new Error('Timed out waiting for a multiplayer message: '+String(match)));
       }, timeout)};
       waiting.push(wait);
     });
@@ -55,6 +55,8 @@ async function main() {
   const local = path.join(temporary, 'local-only');
   fs.mkdirSync(local);
   fs.symlinkSync(path.join(__dirname, 'local-only', 'site'), path.join(local, 'site'));
+  fs.mkdirSync(path.join(local,'selfhost'));
+  fs.copyFileSync(path.join(__dirname,'local-only/selfhost/client-catalog.json'),path.join(local,'selfhost/client-catalog.json'));
   for (const file of ['serve_local.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
@@ -137,10 +139,14 @@ async function main() {
     const passenger = await fromA(message => message.t === 'cars' &&
       message.c.some(row => row[0] === allB.id && row[2] === 's23'));
     assert.deepEqual(passenger.c.find(row => row[0] === allB.id)[34], ['car-1', 1]);
-    a.send(JSON.stringify({t: 'me', driving: true, car: '400', skin: 7,
+    a.send(JSON.stringify({t:'me',walking:true,skin:7,x:1480.5,y:-1738.25,z:13,health:86,say:'/job taxi'}));
+    const loaner=(await fromA(message=>message.t==='spawned'&&message.v[2]==='420.6.1.0.')).v;
+    a.send(JSON.stringify({t:'enter',v:loaner[0]}));
+    assert.equal((await fromA(message=>message.t==='enter'&&message.v===loaner[0])).ok,true,'Driver must enter an actual nearby server vehicle');
+    a.send(JSON.stringify({t: 'me', driving: true, car: loaner[2], vehicle:loaner[0], skin: 7,
       x: 1485, y: -1738, z: 13, health: 910, life: 75, smoke: 0.5, kit: [1, 2]}));
     const driving = await fromB(message => message.t === 'cars' &&
-      message.c.some(row => row[0] === allA.id && row[2] === '400'));
+      message.c.some(row => row[0] === allA.id && row[2] === loaner[2]));
     const car = driving.c.find(row => row[0] === allA.id);
     assert.equal(car[18], 910);
     assert.equal(car[43], 75);
@@ -148,7 +154,8 @@ async function main() {
     const board = await fromB(message => message.t === 'board');
     assert.equal(board.rows.length, 2);
     a.send(JSON.stringify({t: 'me', walking: true, skin: 7,
-      x: 1485, y: -1738, z: 13, health: 75, weapon: 0}));
+      x: 1485, y: -1738, z: 13, health: 75, weapon: 0,say:'/canceljob'}));
+    await fromA(message=>message.t==='vgone'&&message.id===loaner[0]);
     b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
       x: 1482, y: -1738, z: 13, health: 100, weapon: 0}));
     await new Promise(resolve => setTimeout(resolve, 100));

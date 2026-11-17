@@ -5,9 +5,21 @@ var checks=0,readyCount=0,phase=0,finished=false,guestEstablished=false,uncertai
 var root:RemoteVehicle!,firstNonce:String?,callbacks:[Bool]=[],baselineNonces:[String]=[]
 func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}
 func publishDriver(_ work:Int=1234){client.sendPosition(SIMD3<Float>(100,100,20),heading:0,moving:false,running:false,vehicle:root,vehicleWork:work)}
+func board(_ work:Int,_ ready:@escaping()->Void){
+ root=client.vehicles[root.id]!
+ client.sendPosition(root.position,heading:0,moving:false,running:false)
+ client.onEnter={id,accepted in
+  check(id==root.id && accepted,"Actual server rejected native nearby entry")
+  client.onEnter=nil
+  client.sendPosition(root.position,heading:0,moving:false,running:false,vehicle:root,vehicleWork:work)
+  publishDriver(work);ready()
+ }
+ client.requestEnter(root)
+}
 func move(_ id:String,_ y:Double){client.sendVehicleMove(id,state:["x":100,"y":y,"z":20,"h":0,"p":0,"r":0,"hp":1000,"d":"","w":432])}
 func request(_ parent:String,_ target:String?,_ completion:@escaping(Bool)->Void){check(client.requestCoupling(parent:parent,trailer:target,kind:"trailer",completion:completion),"Ready valid request did not enqueue")}
 check(!client.requestCoupling(parent:"unavailable",trailer:nil,kind:"trailer"){_ in preconditionFailure("Offline callback")},"Offline request queued")
+client.onVehicleRemoved={_ in preconditionFailure("An occupancy transition deleted the native logical vehicle")}
 client.onCouplings={links,revision,connection in
  check(client.couplingRevision==revision && client.couplingLinks==links,"Callback before stored topology")
  if !client.isReady {
@@ -24,7 +36,7 @@ client.onConnectionState={state in
  check(root != nil,"Synthetic owned tractor absent from actual fullState")
  if readyCount==1 {
   firstNonce=client.inventoryConnection;phase=1
-  publishDriver();move("a",95);move("b",90);move("c",85)
+  board(1234){move("a",95);move("b",90);move("c",85)
   request(root.id,"a"){accepted in
    callbacks.append(accepted);check(accepted && client.couplingLinks.count==1,"Authority rejected aligned first link")
    request("a","b"){accepted in
@@ -43,15 +55,17 @@ client.onConnectionState={state in
     }
    }
   }
+  }
  }else if readyCount==2 {
   check(phase==3 && uncertainCallbacks==0,"Uncertain ACK callback escaped disconnect")
   check(client.inventoryConnection != firstNonce && baselineNonces.count==2,"Reconnect did not establish fresh nonce/baseline")
   check(root.work==1876,"Real fullState lost saved parked work")
-  publishDriver(2500);move("a",95)
+  board(2500){move("a",95)
   request(root.id,"a"){accepted in
    callbacks.append(accepted);check(accepted && uncertainCallbacks==0 && client.couplingLinks.count==1,"Fresh sequence one failed or old pending replayed")
    phase=4
    client.sendExit(SIMD3<Float>(101,100,20),parked:SIMD3<Float>(100,100,20),heading:0,pitch:0,roll:0,vehicle:root,vehicleHealth:1000,vehicleWork:2000)
+  }
   }
  }else{preconditionFailure("Unexpected third peer")}
 }
@@ -60,10 +74,11 @@ client.onStatus={text in
   check(phase==2,"Parking marker out of order")
   // Real authoritative trailer cooldown; do not change Date.now or source constants.
   DispatchQueue.main.asyncAfter(deadline:.now()+2.6){
-   check(client.isReady,"Transport lost during cooldown");phase=3;publishDriver(1876);move("a",95);move("b",90)
+   check(client.isReady,"Transport lost during cooldown");phase=3;board(1876){move("a",95);move("b",90)
    request(root.id,"a"){accepted in
     callbacks.append(accepted);check(accepted,"Reacquire after real cooldown failed")
     request("a","b"){_ in uncertainCallbacks+=1}
+   }
    }
   }
  }else if text=="FIXTURE COMPLETE" {
