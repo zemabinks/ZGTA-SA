@@ -87,7 +87,7 @@ final class NativeWeaponState {
 
     convenience init(server: ServerAddress, policy: Policy = .acknowledgedSelfHost) {
         self.init(policy: policy)
-        URLSession.shared.dataTask(with: server.path("game/native/weapons.json")) { [weak self] data, _, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/weapons.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let definitions = doc["definitions"] as? [[String: Any]],
@@ -106,7 +106,7 @@ final class NativeWeaponState {
             DispatchQueue.main.async { if !entries.isEmpty { self.catalog = entries }; self.onChange?() }
         }.resume()
         if policy != .acknowledgedSelfHost {
-            URLSession.shared.dataTask(with: server.path("game/native/original-weapons.json")) { [weak self] data, _, _ in
+            NativeResourceTransport.dataTask(with: server.path("game/native/original-weapons.json")) { [weak self] data, _, _ in
                 guard let data, let document=try? JSONSerialization.jsonObject(with:data) as? [String:Any] else{return}
                 DispatchQueue.main.async {_=self?.installClientWeaponCatalog(document)}
             }.resume()

@@ -106,6 +106,7 @@ final class HomeViewController: NativeDEPanelViewController, UITextFieldDelegate
     }
     @objc private func connectLegacyWorld() {
         guard active,!checking,presentedViewController==nil else{return}
+        guard requireInstalledResources() else{return}
         guard let assets=ServerAddress(address.text ?? "")else{status.text="ENTER YOUR MAC'S GAME FILES SERVER ABOVE FIRST.";return}
         let form=NativeSAMPConnectViewController(assets:assets,joinCode:code.text ?? "");form.modalPresentationStyle = .fullScreen
         form.onConnection = { [weak self,weak form] connection in
@@ -120,6 +121,7 @@ final class HomeViewController: NativeDEPanelViewController, UITextFieldDelegate
     }
     @objc private func connectOriginalWorld() {
         guard active,!checking,presentedViewController==nil else{return}
+        guard requireInstalledResources() else{return}
         guard let assets=ServerAddress(address.text ?? ""),assets.url.host?.lowercased() != "play.samp.directory" else{
             status.text="ENTER YOUR MAC'S GAME FILES SERVER ABOVE. THE ORIGINAL WORLD USES ITS OWN SIGN IN.";return
         }
@@ -150,6 +152,7 @@ final class HomeViewController: NativeDEPanelViewController, UITextFieldDelegate
     }
     @objc private func connect() {
         guard active,!checking else{return}
+        guard requireInstalledResources() else{return}
         guard let server=ServerAddress(address.text ?? "") else{
             status.text="ENTER A VALID SERVER ADDRESS.";status.textColor = .systemOrange;return
         }
@@ -169,6 +172,17 @@ final class HomeViewController: NativeDEPanelViewController, UITextFieldDelegate
                 self.present(game,animated:!self.menuMotionReduced)
             }
         }
+    }
+
+    private func requireInstalledResources()->Bool {
+        let resources=NativeResourceStore.shared.snapshot
+        guard resources.mode == .installed,!resources.hasPlayableInstallation else{return true}
+        guard presentedViewController==nil else{return false}
+        view.endEditing(true)
+        let files=NativeGameFilesViewController(coordinator:.shared)
+        files.modalPresentationStyle = .fullScreen
+        present(files,animated:!menuMotionReduced)
+        return false
     }
 
 }

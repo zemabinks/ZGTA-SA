@@ -1,0 +1,4 @@
+module CZGTAInstaller {
+    header "zgtasa_installer.h"
+    export *
+}

@@ -44,7 +44,7 @@ final class NativeWeatherParticles {
     }
     enum Error: Swift.Error { case invalidTable }
     private var table: Document?
-    private var request: URLSessionDataTask?
+    private var request: NativeResourceTask?
     private var clock: Double = 0, accumulator: Double = 0
     private var rain: Double = 0, sand: Double = 0, wind: Double = 0, fog: Double = 0
     private var fogIn: Double = 0, hazeAlpha: Double = 0
@@ -73,7 +73,7 @@ final class NativeWeatherParticles {
     deinit { request?.cancel() }
     func load(server: ServerAddress,completion: (() -> Void)? = nil) {
         request?.cancel()
-        request = URLSession.shared.dataTask(with: server.path("game/native/atmosphere.json")) { [weak self] data,response,_ in
+        request = NativeResourceTransport.dataTask(with: server.path("game/native/atmosphere.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async { guard let self,(try? self.install(data)) != nil else { return }; completion?() }
         }

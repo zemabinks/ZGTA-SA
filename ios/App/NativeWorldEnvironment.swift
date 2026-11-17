@@ -21,7 +21,7 @@ final class NativeWorldEnvironment {
     private var hours: [Float] = []
     private var colors: [[[Float]]] = []
     private(set) var weatherNames: [String] = []
-    private var request: URLSessionDataTask?
+    private var request: NativeResourceTask?
     var isLoaded: Bool { !colors.isEmpty }
 
     init() {}
@@ -35,7 +35,7 @@ final class NativeWorldEnvironment {
 
     func load(server: ServerAddress, completion: (() -> Void)? = nil) {
         request?.cancel()
-        request = URLSession.shared.dataTask(with: server.path("game/native/environment.json")) { [weak self] data, response, _ in
+        request = NativeResourceTransport.dataTask(with: server.path("game/native/environment.json")) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async {
                 guard let self, (try? self.install(data)) != nil else { return }

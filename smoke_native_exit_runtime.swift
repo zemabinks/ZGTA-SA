@@ -132,3 +132,34 @@ do {
  check(abs(app.heading-(-2.4))<0.00001 && abs(app.actorHeading-1.9)<0.00001,"Camera/actor heading roles collapsed")
 }
 print("PASS first exit packet facing: \(checks) combined runtime checks; separate actor/body/camera angles")
+
+// A passenger exits the existing shared hull without acquiring, parking or
+// removing it, using the same actual collision/clearance search as a driver.
+for model in ["420","411","522"] {
+ let app=try instance(model);app.groundVehicle!.parkCurrentVehicle(id:"bike",code:model+".0.0.0.",health:875,damage:"",work:0)
+ app.passengerSeat=1;app.passengerFrame=1;app.passengerAccumulator=0.125;app.ownRiderSide=1;app.ownRiderPlayback=nil;app.ownRiderFeet=nil
+ app.character!.otherColliders=app.groundVehicle!.otherColliders
+ let controller=BikeExitController();controller.renderer=app
+ let shared=app.groundVehicle!.otherColliders.first.flatMap{app.groundVehicle!.world.colliderInfo($0)?.body}!
+ let before=app.groundVehicle!.world.bodyState(shared)!
+ let cameraExcluded=app.groundVehicle!.otherVehicleColliders(id:"bike")
+ check(!cameraExcluded.isEmpty && cameraExcluded.allSatisfy{app.groundVehicle!.world.colliderInfo($0)?.body==shared},"Passenger camera excludes foreign walls/vehicles or misses shared colliders")
+ check(app.groundVehicle!.otherVehicleColliders(id:"missing").isEmpty,"Missing seat vehicle excludes unrelated physical geometry")
+ let centre=app.groundVehicle!.world.colliderInfo(cameraExcluded.first!)!.translation
+ let start=centre-SIMD3<Float>(10,0,0),direction=SIMD3<Float>(1,0,0)
+ check(app.groundVehicle!.world.raycast(origin:start,direction:direction,distance:20,groups:0xffff0083) != nil,"Shared chassis ceased physical/query collision")
+ let wall=app.groundVehicle!.world.addBox(halfExtents:SIMD3(0.25,2,2),position:centre+SIMD3(6,0,0))!
+ app.groundVehicle!.world.setColliderGroups(wall,collision:131071,solver:0xffffffff)
+ app.configureCameraTrace()
+ let cameraHit=app.gameCamera.trace!(SwiftRapierWorld.rapierToGTA(start),SwiftRapierWorld.rapierToGTA(direction),20)
+ check(cameraHit != nil && cameraHit!>12,"Actual passenger camera hit its own car or ignored an unrelated wall")
+ _=app.groundVehicle!.world.removeCollider(wall)
+ controller.leave(nil)
+ check(!app.driving && !app.isPassenger && app.passengerFrame==nil && app.passengerAccumulator==0,"Passenger exit retained seat or stale frame")
+ check(!app.groundVehicle!.active && app.groundVehicle!.world.bodyState(shared) != nil,"Passenger exit acquired or removed shared chassis")
+ let after=app.groundVehicle!.world.bodyState(shared)!
+ check(before.position==after.position && before.rotation==after.rotation,"Passenger exit moved shared chassis")
+ check(controller.network.packets.isEmpty && controller.network.passengerPackets==[app.camera],"Passenger exit published a driver parked snapshot")
+ check(app.character!.motor.fits(SIMD3<Double>(SwiftRapierWorld.gtaToRapier(app.camera)),excludingBody:shared),"Passenger exits into original hull or wall")
+}
+print("PASS passenger exit keeps shared chassis and publishes foot/seat release only: \(checks) total actual runtime checks")

@@ -6,6 +6,13 @@ import Foundation
 /// WKWebsiteDataStore, original-game login or Discord cookie sources.
 /// This value cannot authorize a different origin or a non-stock request.
 struct NativeStockAssetAccess {
+    private static let preparedLock=NSLock()
+    private static var preparedReader:((URL,Int)throws->Data?)?
+    static func installPreparedReader(_ reader:@escaping(URL,Int)throws->Data?){preparedLock.lock();preparedReader=reader;preparedLock.unlock()}
+    static func preparedData(for url:URL,maximumBytes:Int)throws->Data?{
+        preparedLock.lock();let reader=preparedReader;preparedLock.unlock()
+        return try reader?(url,maximumBytes)
+    }
     private struct Origin:Equatable {
         let scheme,host:String
         let port:Int

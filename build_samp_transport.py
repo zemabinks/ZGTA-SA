@@ -21,6 +21,13 @@ def main():
     args=parser.parse_args();out=args.output.resolve()
     try:out.relative_to((ROOT/'local-only').resolve())
     except ValueError:parser.error('Archive output must stay inside owner-local local-only/')
+    if not args.check:
+        # Read-only archive reuse may follow a link. Rebuilding must never
+        # replace a previous checkpoint's libraries, wrappers or build cache.
+        for name in ('ios-device','ios-simulator','ios-simulator-x86_64','ios-simulator-arm64','macos-x86_64','macos-arm64','go-cache','go-path'):
+            folder=out/name
+            if folder.is_symlink():parser.error('Refusing to rebuild through linked output '+name+'; use a fresh local directory or private copies')
+            if folder.is_dir() and any(p.is_symlink() for p in folder.iterdir()):parser.error('Refusing linked build files in '+name)
     out.mkdir(parents=True,exist_ok=True)
     paths=[p for p in sorted(SOURCE.rglob('*'))if p.is_file()]+[Path(__file__).resolve()]
     hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths}

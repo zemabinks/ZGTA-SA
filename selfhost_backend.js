@@ -17,6 +17,22 @@ let couplingCatalog=null;
 try {couplingCatalog=JSON.parse(fs.readFileSync(path.join(__dirname,'local-only/selfhost/coupling-catalog.json'),'utf8'));}
 catch(error){if(error.code!=='ENOENT')console.error('Could not load coupling geometry:',error.message);}
 const VehicleCoupling=couplingCatalog ? require('./vehicle_coupling'):null;
+// Exact seat indices from the existing owner-local bv/DFF preparation. A
+// missing/invalid model does not silently become a four-seat car.
+const passengerSeats=new Map();
+try {
+  const file=path.join(__dirname,'local-only/site/game/native/riders.json');
+  if(fs.statSync(file).size>2*1024*1024)throw Error('Seat catalog exceeds2MiB');
+  const catalog=JSON.parse(fs.readFileSync(file,'utf8'));
+  if(catalog.version!==2 || !catalog.models || Object.keys(catalog.models).length>1024)
+    throw Error('Invalid seat catalog');
+  for(const [model,definition] of Object.entries(catalog.models)) {
+    if(!/^\d{1,6}$/.test(model) || !Array.isArray(definition.seats) || definition.seats.length>16 ||
+       !definition.seats.every(seat=>Array.isArray(seat.at)&&seat.at.length===3&&
+         seat.at.every(value=>Number.isFinite(value)&&Math.abs(value)<=100)))continue;
+    passengerSeats.set(Number(model),definition.seats.length);
+  }
+} catch(error) {if(error.code!=='ENOENT')console.error('Could not load exact vehicle seats:',error.message);}
 
 const MAX_FRAME = 64 * 1024;
 const MAX_PEERS = 32;
@@ -434,6 +450,7 @@ class LocalGame {
     // A claim refers to this particular vehicle object and transport peer;
     // neither an account number nor a reused wire ID grants driving rights.
     this.vehicleClaims = new Map();
+    this.passengerClaims = new Map(); // transport -> {vehicle incarnation, seat}
     this.coupling=VehicleCoupling?.create(couplingCatalog) || null;
     this.nextVehicle = 1;
     this.race = null;
@@ -594,11 +611,18 @@ class LocalGame {
     return !!match && crypto.timingSafeEqual(Buffer.from(match[1], 'hex'), Buffer.from(ACCESS_TOKEN, 'hex'));
   }
 
+  onFoot(peer) {
+    // The original wire uses walking:true for seated characters too.
+    return peer?.state?.walking===true&&!this.passengerClaim(peer)?.active;
+  }
+
   position(player) {
     const peer = [...this.peers].find(item => item.player === player && item.ready &&
       Date.now() - item.lastSeen < 10000 && item.state &&
       (item.state.walking === true || item.state.driving === true) &&
       Number.isFinite(item.state.x) && Number.isFinite(item.state.y));
+    const passenger=peer && this.passengerClaim(peer);
+    if(passenger?.active)peer.state=this.passengerPose(passenger);
     return peer ? {x: peer.state.x, y: peer.state.y,
       z: finite(peer.state.z, 13), peer} : null;
   }
@@ -727,7 +751,7 @@ class LocalGame {
     for (const [id, capture] of this.turfCaptures) {
       const home = homeAt(id);
       const leader = this.position(capture.player);
-      if (!home || !leader || leader.peer.state.walking !== true ||
+      if (!home || !leader || !this.onFoot(leader.peer) ||
           capture.player.health <= 0 || capture.player.passive ||
           capture.player.gang !== capture.gang ||
           Math.hypot(leader.x - home.out[0], leader.y - home.out[1]) > 20) {
@@ -912,7 +936,7 @@ class LocalGame {
 
   applyExtinguisher(peer,shot,now) {
     const player=peer.player,from=this.position(player),fire=player.job,target=fireSpot(fire);
-    if (!from || player.health<=0 || player.passive || from.peer.state.walking!==true ||
+    if (!from || player.health<=0 || player.passive || !this.onFoot(from.peer) ||
         fire?.mode!=='fire' || fire.stage!=='extinguish' || now-fire.started>FIRE_MS || !target ||
         shot.dimension!==(player.insideHome || null) || shot.dimension!==null ||
         !areaCylinder(shot.origin,shot.direction,target,AREA_EFFECTS[42].range,1) ||
@@ -1111,7 +1135,7 @@ class LocalGame {
       .filter(item => item.at && Math.hypot(pos.x - item.at.x, pos.y - item.at.y) <= 15)
       .map(item => ({number: item.player.number, name: item.player.name,
         distance: Math.ceil(Math.hypot(pos.x - item.at.x, pos.y - item.at.y)),
-        onFoot: item.at.peer.state.walking === true})) : [];
+        onFoot: this.onFoot(item.at.peer)})) : [];
     const leaderboard = [...this.players.values()].filter(entry => entry.xp > 0 ||
       [...this.peers].some(peer => peer.ready && peer.player === entry))
       .sort((a, b) => b.xp - a.xp ||
@@ -1239,7 +1263,7 @@ class LocalGame {
           distance: pos && x !== undefined && y !== undefined ?
             Math.ceil(Math.hypot(pos.x - x, pos.y - y)) : null};
       }),
-      onFoot: pos?.peer.state.walking === true,
+      onFoot: this.onFoot(pos?.peer),
       driving: pos?.peer.state.driving === true,
       drivingVehicle: typeof pos?.peer.state.vehicle === 'string' ?
         pos.peer.state.vehicle : null,
@@ -1397,6 +1421,102 @@ class LocalGame {
     return claim?.vehicle === vehicle ? claim : null;
   }
 
+  passengerClaim(peer) {
+    const claim=this.passengerClaims.get(peer);
+    return claim && this.vehicles.get(claim.vehicle.id)===claim.vehicle ? claim : null;
+  }
+
+  validPassengerSeat(vehicle,seat) {
+    const model=Number(vehicle?.row[2]?.split('.')[0]);
+    return Number.isInteger(seat)&&seat>0&&seat<(passengerSeats.get(model) || 0);
+  }
+
+  passengerPose(claim,state=claim.peer.state) {
+    const vehicle=claim.vehicle,driver=this.vehicleDriver(vehicle)?.state;
+    return {...state,walking:true,driving:false,passenger:true,riding:vehicle.id,seat:claim.seat,
+      // Internal occupied-body membership also protects coupling/garage rules.
+      // row35 remains absent for passengers; only row34 carries that attachment.
+      vehicle:vehicle.id,parked:undefined,x:vehicle.row[3],y:vehicle.row[4],z:vehicle.row[5],
+      // An aimed passenger's world-space gun heading remains actor input;
+      // the row34 seat attachment still owns their body transformation.
+      heading:Number.isFinite(state?.aim)&&Number.isFinite(state.heading)?state.heading:vehicle.row[6],
+      pitch:vehicle.row[7],roll:vehicle.row[8],move:0,air:false,
+      vx:driver?.vx || 0,vy:driver?.vy || 0,vz:driver?.vz || 0,
+      speed:driver?.speed || 0};
+  }
+
+  releasePassengerClaim(claim,{correct=false,publish=false}={}) {
+    if(this.passengerClaims.get(claim.peer)!==claim)return;
+    this.passengerClaims.delete(claim.peer);
+    const peer=claim.peer;
+    if(claim.active && peer.state) {
+      peer.state={...peer.state,riding:undefined,seat:undefined,passenger:false,
+        vehicle:undefined,parked:undefined,driving:false,walking:true,move:0,air:false};
+    }
+    if(correct && !peer.closed && this.peers.has(peer)) {
+      peer.send({t:'enter',v:claim.vehicle.id,seat:claim.seat,ok:false});
+      if(peer.player.health>0 && !peer.player.insideHome && claim.active) {
+        const row=claim.vehicle.row;
+        peer.send({t:'tp',x:row[3],y:row[4],z:row[5],h:finite(row[6])*180/Math.PI,g:1});
+      }
+    }
+    if(publish)this.publishPlayerRows();
+  }
+
+  prunePassengerClaims() {
+    const now=Date.now();
+    for(const claim of this.passengerClaims.values()) {
+      const peer=claim.peer;
+      if(this.vehicles.get(claim.vehicle.id)!==claim.vehicle || !this.peers.has(peer) || peer.closed ||
+         !peer.ready || peer.player.health<=0 || peer.player.insideHome || claim.vehicle.row[9]<=0 ||
+         !this.validPassengerSeat(claim.vehicle,claim.seat) ||
+         (claim.active ? now-peer.lastSeen>10000 : now>=claim.until))
+        this.releasePassengerClaim(claim,{correct:true});
+    }
+  }
+
+  requestPassengerEntry(peer,id,seat) {
+    this.prunePassengerClaims();
+    const vehicle=typeof id==='string'&&id.length>0&&id.length<=64 ? this.vehicles.get(id) : null;
+    if(!vehicle || !this.validPassengerSeat(vehicle,seat) || !this.peers.has(peer) || peer.closed ||
+       !peer.ready || peer.player.health<=0 || peer.player.insideHome || vehicle.row[9]<=0 ||
+       !this.validVehiclePose(peer.state) || Date.now()-peer.lastSeen>10000 ||
+       [...this.vehicleClaims.values()].some(claim=>claim.peer===peer))return false;
+    const current=this.passengerClaim(peer);
+    if(current)return current.vehicle===vehicle&&current.seat===seat;
+    if([...this.passengerClaims.values()].some(claim=>claim.vehicle===vehicle&&claim.seat===seat) ||
+       Math.hypot(peer.state.x-vehicle.row[3],peer.state.y-vehicle.row[4],peer.state.z-vehicle.row[5])>8)
+      return false;
+    this.passengerClaims.set(peer,{vehicle,peer,seat,until:Date.now()+12000,active:false});
+    return true;
+  }
+
+  preparePassengerReport(peer,message) {
+    const current=this.passengerClaim(peer);
+    const riding=typeof message.riding==='string' ? message.riding : null;
+    if(!riding) {
+      // Foot frames during get-in do not cancel a pending seat reservation.
+      if(current?.active)this.releasePassengerClaim(current);
+      return message;
+    }
+    if(message.driving===true || message.walking!==true || !Number.isInteger(message.skin) ||
+       message.skin<0 || message.skin>20000 || !this.validVehiclePose(message) ||
+       !this.requestPassengerEntry(peer,riding,message.seat)) {
+      if(!current && Date.now()>=(peer.lastSeatRejection || 0)+1000) {
+        peer.lastSeatRejection=Date.now();
+        peer.send({t:'enter',v:riding,seat:Number.isInteger(message.seat)?message.seat:-1,ok:false});
+        const at=peer.state;
+        // The archive has no passenger reservation RPC. Its normal tp handler
+        // cancels ub and restores foot ownership after a rejected implicit seat.
+        if(this.validVehiclePose(at))peer.send({t:'tp',x:at.x,y:at.y,z:at.z,h:finite(at.heading)*180/Math.PI,g:1});
+      }
+      return null;
+    }
+    const claim=this.passengerClaim(peer);
+    claim.active=true;
+    return this.passengerPose(claim,message);
+  }
+
   validVehiclePose(value) {
     return value && typeof value === 'object' &&
       [value.x,value.y,value.z].every(Number.isFinite) &&
@@ -1445,12 +1565,13 @@ class LocalGame {
          (claim.driving && now-peer.lastSeen>10000))
         this.releaseVehicleClaim(claim,{removeActor:claim.driving});
     }
+    this.prunePassengerClaims();
   }
 
   requestVehicleEntry(peer,id) {
     this.pruneVehicleClaims();
     const vehicle=typeof id==='string'&&id.length>0&&id.length<=64 ? this.vehicles.get(id) : null;
-    if(!vehicle || !this.peers.has(peer) || peer.closed || !peer.ready || peer.player.health<=0 ||
+    if(!vehicle || this.passengerClaim(peer) || !this.peers.has(peer) || peer.closed || !peer.ready || peer.player.health<=0 ||
        peer.player.insideHome || vehicle.row[9]<=0 ||
        vehicle.missionOwner && vehicle.missionOwner!==peer.player ||
        !this.validVehiclePose(peer.state) || Date.now()-peer.lastSeen>10000 ||
@@ -1510,6 +1631,8 @@ class LocalGame {
       vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,report.w)));
     }
     this.saveVehicleGarage(vehicle,condition!==`${vehicle.row[9]}:${vehicle.row[10]}`);
+    for(const passenger of this.passengerClaims.values())if(passenger.vehicle===vehicle&&passenger.active)
+      passenger.peer.state=this.passengerPose(passenger);
     return true;
   }
 
@@ -1546,9 +1669,16 @@ class LocalGame {
       if(claim.driving)this.writeVehiclePose(vehicle,this.validVehiclePose(parked) ? parked : claim.exitPose);
       this.releaseVehicleClaim(claim);
     }
+    this.prunePassengerClaims();
   }
 
   reportVehicleExit(peer,message) {
+    const passenger=this.passengerClaim(peer);
+    if(passenger && passenger.vehicle.id===message.v) {
+      if(message.seat===undefined || message.seat===passenger.seat)
+        this.releasePassengerClaim(passenger,{publish:passenger.active});
+      return;
+    }
     const vehicle=typeof message.v==='string' ? this.vehicles.get(message.v) : null;
     const claim=this.vehicleClaim(vehicle);
     if(!claim || claim.peer!==peer)return;
@@ -1561,7 +1691,7 @@ class LocalGame {
   }
 
   assertVehicleUnoccupied(vehicle) {
-    if (vehicle && (this.vehicleClaim(vehicle) || [...this.peers].some(peer => peer.ready &&
+    if (vehicle && (this.vehicleClaim(vehicle) || [...this.passengerClaims.values()].some(claim=>claim.vehicle===vehicle) || [...this.peers].some(peer => peer.ready &&
         peer.state?.vehicle === vehicle.id &&
         peer.state.passenger === true)))
       throw new Error('Wait until everyone leaves this vehicle.');
@@ -1576,6 +1706,8 @@ class LocalGame {
     if(!this.vehicles.has(id))return false;
     const claim=this.vehicleClaim(this.vehicles.get(id));
     if(claim)this.releaseVehicleClaim(claim,{publish:false});
+    for(const passenger of this.passengerClaims.values())if(passenger.vehicle.id===id)
+      this.releasePassengerClaim(passenger,{correct:true});
     if(this.coupling?.removeVehicle(id))this.broadcastCouplings();
     return this.vehicles.delete(id);
   }
@@ -1641,11 +1773,11 @@ class LocalGame {
   updateUnattendedVehicle(peer, message) {
     // The public client reports nearby unoccupied physics using eI/vmove.
     // These authority checks belong to this independent local server.
-    if (!peer.ready || peer.player.insideHome || typeof message.v !== 'string') return;
+    if (!peer.ready || this.passengerClaim(peer) || peer.player.insideHome || typeof message.v !== 'string') return;
     const vehicle = this.vehicles.get(message.v), at = this.position(peer.player);
     const claim=this.vehicleClaim(vehicle);
     if(claim && (claim.driving || claim.peer!==peer))return;
-    if (!vehicle || !at || this.coupling && !this.coupling.canMove(peer,vehicle.id) || vehicle.missionOwner && vehicle.missionOwner !== peer.player ||
+    if (!vehicle || !at || [...this.passengerClaims.values()].some(claim=>claim.vehicle===vehicle&&claim.active) || this.coupling && !this.coupling.canMove(peer,vehicle.id) || vehicle.missionOwner && vehicle.missionOwner !== peer.player ||
         [...this.peers].some(other => other.ready && other.state?.vehicle === vehicle.id &&
           (other.state.driving === true || other.state.passenger === true))) return;
     if (![message.x,message.y,message.z,message.h,message.p,message.r].every(Number.isFinite) ||
@@ -1731,7 +1863,7 @@ class LocalGame {
       const home = DISCOVERY_IDS.includes(id) && homeAt(id);
       if (!home) throw new Error('Choose a listed discovery to claim.');
       if (player.discoveries.includes(id)) throw new Error('You already found this location.');
-      if (!pos || pos.peer.state.walking !== true ||
+      if (!pos || !this.onFoot(pos.peer) ||
           Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > MISSION_RADIUS)
         throw new Error('Stand on foot within 12 m of the marked location.');
       player.discoveries.push(id);
@@ -1835,7 +1967,7 @@ class LocalGame {
       const item = SUPPLIES.find(entry => entry.id === input.item);
       if (!item) throw new Error('Choose a listed workshop supply.');
       const dealer = nearestGroundDealer(pos);
-      if (!dealer || !pos || pos.peer.state.walking !== true ||
+      if (!dealer || !pos || !this.onFoot(pos.peer) ||
           Math.hypot(pos.x - dealer.stand[0], pos.y - dealer.stand[1]) > 100)
         throw new Error('Visit a ground dealership on foot to buy workshop supplies.');
       if (player.supplies[item.id] >= item.capacity)
@@ -1853,7 +1985,7 @@ class LocalGame {
       if (!Number.isInteger(slot) || slot < 0 || slot >= player.cars.length)
         throw new Error('Choose one of your vehicles.');
       const vehicle = this.ownedVehicle(player, slot);
-      if (!vehicle || !pos || pos.peer.state.walking !== true ||
+      if (!vehicle || !pos || !this.onFoot(pos.peer) ||
           Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > 18)
         throw new Error('Stand on foot within 18 m of your active vehicle.');
       this.assertVehicleUnoccupied(vehicle);
@@ -1880,8 +2012,8 @@ class LocalGame {
       const target = [...this.peers].find(peer => peer.ready && peer.player !== player &&
         peer.player.number === Number(input.number));
       const at = target && this.position(target.player);
-      if (!pos || pos.peer.state.walking !== true || !at ||
-          at.peer.state.walking !== true ||
+      if (!pos || !this.onFoot(pos.peer) || !at ||
+          !this.onFoot(at.peer) ||
           Math.hypot(pos.x - at.x, pos.y - at.y) > 8)
         throw new Error('Both players must stand on foot within 8 m.');
       if (target.player.supplies[item.id] >= item.capacity)
@@ -1909,7 +2041,7 @@ class LocalGame {
       const home = TURFS.includes(id) && homeAt(id);
       if (!home) throw new Error('Unknown territory.');
       if (!player.gang) throw new Error('Join a crew first.');
-      if (!pos || pos.peer.state.walking !== true || player.health <= 0 || player.passive ||
+      if (!pos || !this.onFoot(pos.peer) || player.health <= 0 || player.passive ||
           Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 20)
         throw new Error('Stand on foot within 20 m of the territory marker with passive mode off.');
       if (player.job || (this.race?.members.has(player) && this.race.stage !== 'finished'))
@@ -1955,14 +2087,14 @@ class LocalGame {
       message = player.policeDuty ? 'Police duty on. Arrest nearby wanted players from F6.' :
         'Police duty off.';
     } else if (action === 'police.arrest') {
-      if (!player.policeDuty || !pos || pos.peer.state.walking !== true)
+      if (!player.policeDuty || !pos || !this.onFoot(pos.peer))
         throw new Error('Go on police duty and stand on foot to arrest someone.');
       const number = Number(input.number);
       const suspect = [...this.peers].find(peer => peer.ready &&
         peer.player !== player && peer.player.number === number);
       const at = suspect && this.position(suspect.player);
       if (!suspect || !at || suspect.player.wanted < 1 ||
-          at.peer.state.walking !== true ||
+          !this.onFoot(at.peer) ||
           Math.hypot(pos.x - at.x, pos.y - at.y) > 4)
         throw new Error('The wanted player must be on foot within 4 m.');
       const level = suspect.player.wanted;
@@ -2223,7 +2355,7 @@ class LocalGame {
       if (Date.now() - heist.started > HEIST_MS)
         throw new Error('The heist window closed. Cancel and start again.');
       const site = homeAt(heist.site);
-      if (!pos || !site || pos.peer.state.walking !== true || player.health <= 0 ||
+      if (!pos || !site || !this.onFoot(pos.peer) || player.health <= 0 ||
           Math.hypot(pos.x - site.out[0], pos.y - site.out[1]) > MISSION_RADIUS)
         throw new Error('Enter the marked robbery site on foot.');
       heist.stage = 'escape';
@@ -2259,7 +2391,7 @@ class LocalGame {
         const target = fireSpot(fire);
         const distance = pos && target ? Math.hypot(pos.x - target[0], pos.y - target[1]) : Infinity;
         if (!(inTruck && distance <= 23) &&
-            !(pos?.peer.state.walking === true && distance <= 8))
+            !(this.onFoot(pos?.peer) && distance <= 8))
           throw new Error('Get the marked fire truck within 23 m, or approach the fire on foot within 8 m.');
         message = advanceFireSpot(fire);
       }
@@ -2351,7 +2483,7 @@ class LocalGame {
         const home = homeAt(player.job.incidentHome);
         if (player.job.stage !== 'rescue') throw new Error('Put out all three fires first.');
         if (!home || Math.hypot(pos.x - home.out[0], pos.y - home.out[1]) > 10 ||
-            pos.peer.state.walking !== true)
+            !this.onFoot(pos.peer))
           throw new Error('Reach the rescue point on foot.');
       } else if (player.job.mode === 'route') {
         if (player.job.stage !== 'delivery') throw new Error('Complete the pickup first.');
@@ -2397,7 +2529,7 @@ class LocalGame {
         const vehicle = this.vehicles.get(player.job.vehicleId);
         if (!vehicle || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > 8)
           throw new Error('Go to the stranded vehicle to repair it.');
-        if (pos.peer.state.walking !== true)
+        if (!this.onFoot(pos.peer))
           throw new Error('Get out and repair the vehicle on foot.');
         if ((player.job.repairStep || 0) < MECHANIC_STAGES.length)
           throw new Error('Keep working beside the vehicle until the engine, tyres, and bodywork are repaired.');
@@ -2599,7 +2731,7 @@ class LocalGame {
       if (!vehicle) throw new Error('Spawn this car first.');
       if (!pos || Math.hypot(pos.x - vehicle.row[3], pos.y - vehicle.row[4]) > 18)
         throw new Error('Stand near your car to manage it.');
-      if (pos.peer.state.walking !== true)
+      if (!this.onFoot(pos.peer))
         throw new Error('Get out of the car first.');
       this.assertVehicleUnoccupied(vehicle);
       const entry = player.garage[slot];
@@ -2665,7 +2797,7 @@ class LocalGame {
     } else if (action === 'home.enter') {
       const home = homeAt(input.home);
       if (!home || !player.homes.includes(home.id)) throw new Error('You do not own this home.');
-      if (!pos || pos.peer.state.walking !== true) throw new Error('Enter the house on foot.');
+      if (!pos || !this.onFoot(pos.peer)) throw new Error('Enter the house on foot.');
       if (player.insideHome) throw new Error('Leave your current house first.');
       if (Math.hypot(pos.x - home.out[0], pos.y - home.out[1], pos.z - home.out[2]) > 8)
         throw new Error('Stand within 8 m of your home entrance.');
@@ -2890,6 +3022,12 @@ class LocalGame {
     if (message.t === 'shot') return this.handleShot(peer, message);
     if (message.t === 'hit') return this.handleHit(peer, message);
     if (message.t === 'me') {
+      message=this.preparePassengerReport(peer,message);
+      if(!message)return;
+      // Driver reports may omit the actor skin while an animation/model is
+      // loading. Keep the last accepted identity; never infer it from car ID.
+      if(message.driving===true && !Number.isInteger(message.skin) && Number.isInteger(peer.lastSkin))
+        message={...message,skin:peer.lastSkin};
       const vehicleChange=this.prepareVehicleReport(peer,message);
       if(!vehicleChange)return;
       const previous = peer.state;
@@ -2906,6 +3044,7 @@ class LocalGame {
       }
       peer.state = message;
       peer.lastSeen = Date.now();
+      if(Number.isInteger(message.skin)&&message.skin>=0&&message.skin<=20000)peer.lastSkin=message.skin;
       if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
       const surface = [message.x,message.y,message.z].every(Number.isFinite) ? waterHeight(message.x,message.y,message.z) : null;
       if (peer.inventoryEnabled) {
@@ -3038,7 +3177,14 @@ class LocalGame {
       return;
     }
     if (message.t === 'enter' || message.t === 'jack') {
+      if(message.t==='enter' && (message.passenger===true || message.seat>0)) {
+        const seat=message.seat;
+        return peer.send({t:'enter',v:message.v,seat,
+          ...(Number.isSafeInteger(message.request)&&message.request>0?{request:message.request}:{}),
+          ok:this.requestPassengerEntry(peer,message.v,seat)});
+      }
       return peer.send({t: message.t, v: message.v,
+        ...(Number.isSafeInteger(message.request)&&message.request>0?{request:message.request}:{}),
         ok: this.requestVehicleEntry(peer,message.v)});
     }
     if (message.t === 'who' && Array.isArray(message.ids))
@@ -3059,7 +3205,7 @@ class LocalGame {
       const state=peer.state,action=Number.isInteger(state?.act) ? state.act&63:0;
       // Personal-flight and swim packets deliberately clear the generic air
       // flag, so their action code must also exclude an airborne/water drop.
-      if (peer.player.health<=0 || !peer.ready || !state || state.walking!==true ||
+      if (peer.player.health<=0 || !peer.ready || !state || !this.onFoot(peer) ||
           state.driving===true || !!state.air ||
           (action>=61 && action<=62) || (action>=50 && action<=58) || (action>=10 && action<=16) ||
           !Number.isFinite(peer.lastSeen) || Date.now()-peer.lastSeen>10000)
@@ -3202,7 +3348,8 @@ class LocalGame {
   }
 
   row(peer) {
-    const s = peer.state;
+    const passenger=this.passengerClaim(peer);
+    const s = passenger?.active ? this.passengerPose(passenger) : peer.state;
     if (!s || Date.now() - peer.lastSeen > 10000) return null;
     const driving = s.driving === true && typeof s.car === 'string';
     if(driving && !this.unboundVehicleReport(s) && this.vehicleDriver(this.vehicles.get(s.vehicle))!==peer)return null;
@@ -3243,8 +3390,7 @@ class LocalGame {
     row[30] = Math.round(Math.max(0, Math.min(100, finite(peer.player.armour))));
     row[31] = driving && Number.isInteger(s.skin) ? s.skin : 0;
     row[32] = Number.isInteger(s.act) ? s.act : 0;
-    const riding = walking && typeof s.riding === 'string' ?
-      [s.riding.slice(0, 64), Number.isInteger(s.seat) ? s.seat : 0] : null;
+    const riding = walking && passenger?.active ? [passenger.vehicle.id,passenger.seat] : null;
     row[33] = walking && !riding && typeof s.car === 'string' && s.parked &&
       typeof s.parked === 'object' ? [s.car.slice(0, 64),
         rounded(s.parked.x), rounded(s.parked.y), rounded(s.parked.z),
@@ -3252,7 +3398,7 @@ class LocalGame {
         Math.round(finite(s.parked.health, 1000)),
         typeof s.parked.damage === 'string' ? s.parked.damage.slice(0, 512) : ''] : null;
     row[34] = riding;
-    row[35] = typeof s.vehicle === 'string' ? s.vehicle.slice(0, 64) : null;
+    row[35] = !riding && typeof s.vehicle === 'string' ? s.vehicle.slice(0, 64) : null;
     row[36] = s.paused ? 1 : 0;
     row[37] = peer.player.number;
     row[38] = walking && !riding && Number.isInteger(s.down) ? s.down : 0;
@@ -3290,7 +3436,7 @@ class LocalGame {
       if (!previous) continue;
       const vehicle = this.vehicles.get(job.vehicleId);
       const pos = this.position(player);
-      const besideCar = vehicle && pos && pos.peer.state.walking === true &&
+      const besideCar = vehicle && pos && this.onFoot(pos.peer) &&
         player.health > 0 && Math.hypot(pos.x - vehicle.row[3],
           pos.y - vehicle.row[4]) <= 8;
       if (!besideCar) {
@@ -3335,6 +3481,8 @@ class LocalGame {
     if (!this.peers.delete(peer)) return;
     for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
     for(const claim of this.vehicleClaims.values())if(claim.peer===peer)this.releaseVehicleClaim(claim);
+    const passenger=this.passengerClaims.get(peer);
+    if(passenger)this.releasePassengerClaim(passenger);
     if(this.coupling?.releasePeer(peer))this.broadcastCouplings();
     if (![...this.peers].some(other => other.player === peer.player)) {
       this.partyInvites.delete(peer.player);

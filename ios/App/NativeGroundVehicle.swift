@@ -214,6 +214,11 @@ final class NativeGroundVehicle {
         others.synchronize(poses,excluding:excluding,near:position,promoteNear:promoteNear,delta:delta)
     }
     func otherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.snapshot(id)}
+    /// Exclusion is for camera queries only; colliders remain physically live.
+    func otherVehicleColliders(id:String)->Set<UInt64>{
+        guard let body=others.bodyID(id)else{return []}
+        return Set(others.colliders.filter{world.colliderInfo($0)?.body==body})
+    }
     func takeOtherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.take(id)}
     /// Explicit disappearance differs from omission in a streamed full list.
     /// It must revoke even a moving/pushed parked hull immediately.
@@ -528,6 +533,19 @@ final class NativeGroundVehicle {
         return SwiftRapierWorld.rapierToGTA(SIMD3<Float>(feet))
     }
     func modelOrigin(_ model: String) -> Float? { definitions[model].map { Float($0.configuration.origin) } }
+    /// Query another peer's existing chassis without acquiring or parking it.
+    func passengerExitPosition(id:String,model:String,wanted:SIMD3<Float>?,seat:SIMD3<Double>?,side:Int,
+                              below:(SIMD3<Double>,Double)throws->Double?,
+                              along:(SIMD3<Double>,SIMD3<Double>,Double)throws->Double?,
+                              fits:(SIMD3<Double>,Double,UInt64)throws->Bool)throws->SIMD3<Float>? {
+        guard let body=others.bodyID(id),let state=world.bodyState(body),let geometry=definitions[model]?.exitGeometry else{return nil}
+        let q=state.rotation
+        let feet=try NativeVehicleExitPlanner.place(geometry:geometry,
+            pose:.init(position:SIMD3<Double>(state.position),rotation:simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))),
+            seat:seat,side:side,wanted:wanted.map{SIMD3<Double>(SwiftRapierWorld.gtaToRapier($0))},
+            below:below,along:along,fits:{try fits($0,$1,body)})
+        return SwiftRapierWorld.rapierToGTA(SIMD3<Float>(feet))
+    }
     func modelFlags(_ model:String)->Int {definitions[model]?.configuration.table.modelFlags ?? 0}
     func handlingFlags(_ model:String)->Int {definitions[model]?.configuration.table.flags ?? 0}
     func remoteAudioTop(model:String)->Double? {

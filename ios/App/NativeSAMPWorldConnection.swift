@@ -42,13 +42,13 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
         self.client=client;self.vehicleCoordinates=vehicleCoordinates
         requiresVehicleCoordinates=assetServer != nil || vehicleCoordinates != nil
         install()
-        if let assetServer {URLSession.shared.dataTask(with:assetServer.path("game/native/samp-skins.json")){[weak self] data,response,_ in
+        if let assetServer {NativeResourceTransport.dataTask(with:assetServer.path("game/native/samp-skins.json")){[weak self] data,response,_ in
             DispatchQueue.main.async {
                 guard let self,let data,(response as?HTTPURLResponse)?.statusCode==200,let catalog=try?NativeSAMPSkinCatalog(data:data)else{return}
                 self.skinCatalog=catalog;self.client.onPlayers?(self.client.players.values.sorted{$0.id<$1.id})
             }
         }.resume()}
-        if let assetServer{URLSession.shared.dataTask(with:assetServer.path("game/native/vehicles.physics.json")){[weak self]data,response,_ in
+        if let assetServer{NativeResourceTransport.dataTask(with:assetServer.path("game/native/vehicles.physics.json")){[weak self]data,response,_ in
             DispatchQueue.main.async {
                 guard let self,let data,(response as?HTTPURLResponse)?.statusCode==200,
                       let catalog=try?NativeSAMPVehicleCoordinates(metadata:data)else{self?.onStatus?("NATIVE VEHICLE ORIGIN METADATA IS UNAVAILABLE");return}

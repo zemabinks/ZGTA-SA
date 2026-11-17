@@ -4,11 +4,17 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import importlib.util
 
 CHECK = Path(__file__).resolve().parent / 'check_public_source.py'
 
 
 def main():
+    spec = importlib.util.spec_from_file_location('release_guard', CHECK)
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    assert not guard.allowed('smoke_selfhost_vehicle_seats_browser.js')
+    assert not guard.allowed('tests/smoke_selfhost_vehicle_seats_browser.js')
     with tempfile.TemporaryDirectory(prefix='zgta-release-history-') as temporary:
         root = Path(temporary)
 

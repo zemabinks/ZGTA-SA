@@ -74,11 +74,11 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var footstepSettings: Footsteps?
     private var footstepAudio: NativeFootstepAudio?
     private var contactAudio:NativeContactAudio?
-    private var pendingContactManifest:URLSessionDataTask?
+    private var pendingContactManifest:NativeResourceTask?
     private var flightPackIdle:[String:Double]=[:]
     private var explosionIndex = 0
     private var data: [String: Data] = [:]
-    private var requests: [String: URLSessionDataTask] = [:]
+    private var requests: [String: NativeResourceTask] = [:]
     private var completions: [String: [(Data?) -> Void]] = [:]
     private var loops=Set<String>()
     private var oneShots: [ObjectIdentifier: AVAudioPlayer] = [:]
@@ -86,7 +86,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var settingsGain:Float=1
     private var fadeTimer: DispatchSourceTimer?
     private var notifications: [NSObjectProtocol] = []
-    private var pendingManifest: URLSessionDataTask?
+    private var pendingManifest: NativeResourceTask?
     private var suspended = false
     private var distanceSinceStep: Float = 0
     private var vehicleModel: Int?
@@ -137,7 +137,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     func prepare() {
         configureSession()
         pendingContactManifest?.cancel()
-        pendingContactManifest=URLSession.shared.dataTask(with:server.path("game/native/contact-audio.json")) { [weak self] bytes,response,_ in
+        pendingContactManifest=NativeResourceTransport.dataTask(with:server.path("game/native/contact-audio.json")) { [weak self] bytes,response,_ in
             guard let bytes,(response as? HTTPURLResponse)?.statusCode==200,
                   let configuration=try? JSONDecoder().decode(NativeContactAudio.Configuration.self,from:bytes) else{return}
             DispatchQueue.main.async {
@@ -147,7 +147,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         }
         pendingContactManifest?.resume()
         pendingManifest?.cancel()
-        pendingManifest = URLSession.shared.dataTask(with: server.path("game/native/audio.json")) { [weak self] bytes, response, _ in
+        pendingManifest = NativeResourceTransport.dataTask(with: server.path("game/native/audio.json")) { [weak self] bytes, response, _ in
             guard let bytes, (response as? HTTPURLResponse)?.statusCode == 200,
                   let document = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                   let sampleDocument = document["samples"],
@@ -244,7 +244,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         if let bytes = data[name] { completion(bytes); return }
         completions[name, default: []].append(completion)
         guard requests[name] == nil else { return }
-        let request = URLSession.shared.dataTask(with: server.path("game/sound/b\(name).wav")) { [weak self] bytes, response, _ in
+        let request = NativeResourceTransport.dataTask(with: server.path("game/sound/b\(name).wav")) { [weak self] bytes, response, _ in
             DispatchQueue.main.async {
                 guard let self else { return }
                 let valid = (response as? HTTPURLResponse)?.statusCode == 200 ? bytes : nil

@@ -1,0 +1,7 @@
+{
+  "upstream": "twogood/unshield@3914dffb32ad05ebcb3e7f64a033e69b59127f47",
+  "path": "lib/internal.h",
+  "reason": "Ensure little-endian byte assembly shifts unsigned32 values. UBSan found signed-int left-shift overflow in the pinned reader on actual owner ISO metadata. Intended bit values and accepted extraction hashes remain unchanged.",
+  "before": "return p[0] | p[1] << 8 | p[2] << 16 | p[3] << 24;",
+  "after": "return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;"
+}

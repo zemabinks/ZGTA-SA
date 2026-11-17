@@ -45,6 +45,7 @@ FIELDS
         view=ProbeRootView(size:geometry.size,insets:geometry.insets)
         gameHUD.syntheticWindowSize=geometry.size
         currentVehicle=mode.kind == nil ? nil:ProbeVehicle()
+        renderer?.isPassenger=mode.passenger
         renderer?.vehicleKind=mode.kind ?? "car";renderer?.hasVehicleWorkingControls=mode.working
         renderer?.vehicleWorkingIsTow=mode.tow;renderer?.hasJetNozzle=mode.nozzle;renderer?.canUnhitchVehicle=mode.unhitch
         renderer?.hasLandingGear=mode.gear;renderer?.hasVehicleHorn=mode.horn;renderer?.isChuting=mode.deploy
@@ -67,7 +68,7 @@ def verify(path):
  report=json.loads(path.read_text());meta=report['metadata']
  assert report['status']=='PASS',json.dumps(report['current']['failures'],indent=2)
  assert not report['current']['failures'] and report['historicalOverlapHits']>0
- assert len(report['current']['cases'])==16*9,'Matrix coverage changed'
+ assert len(report['current']['cases'])==18*9,'Matrix coverage changed'
  assert report['current']['checks']>10000,'Insufficient ownership/overlap checks'
  assert meta['controllerSourceSHA256']==sha((ROOT/'ios/App/NativeGameViewController.swift').read_bytes()),'Runtime carrier used another App source'
  assert meta['hudSourceSHA256']==sha((ROOT/'ios/App/NativeGameHUD.swift').read_bytes()),'Runtime carrier used another HUD source'

@@ -441,7 +441,30 @@ final class NativeGameViewController: UIViewController {
             self.radio.enter(model:Int(vehicle.code.split(separator:".").first ?? "") ?? 0)
             self.radioButton.setTitle(self.radio.stationName.uppercased(),for:.normal)
         }
+        network.onPassengerEnter = { [weak self] id,seat,accepted in
+            guard let self,let renderer=self.renderer else{return}
+            if !accepted {
+                if self.currentVehicle?.id==id,renderer.isPassenger {
+                    renderer.revokePassenger();self.currentVehicle=nil;self.setDrivingControls(false)
+                    self.vehicleButton.setTitle("ENTER CAR",for:.normal);self.gameHUD.updateVehicle(name:nil,speed:0);self.radio.stop()
+                }
+                self.status.text="PASSENGER SEAT UNAVAILABLE";return
+            }
+            guard let vehicle=self.network.vehicles[id],renderer.enterPassenger(vehicle,seat:seat,kind:self.vehicleModelType(vehicle))else{
+                self.network.sendPassengerExit(renderer.position,heading:renderer.direction);self.status.text="PASSENGER RESOURCES ARE NOT READY";return
+            }
+            self.currentVehicle=vehicle;self.vehicleButton.setTitle("EXIT CAR",for:.normal)
+            self.status.text="PASSENGER · \(self.vehicleModelName(vehicle).uppercased())"
+            self.gameHUD.updateVehicle(name:self.vehicleModelName(vehicle),speed:0);self.setDrivingControls(true)
+            self.radio.enter(model:Int(vehicle.code.split(separator:".").first ?? "") ?? 0)
+            self.radioButton.setTitle(self.radio.stationName.uppercased(),for:.normal)
+        }
         network.onTeleport = { [weak self] point, heading in
+            if let self,self.renderer?.isPassenger==true {
+                self.network.sendPassengerExit(point,heading:heading ?? self.renderer?.direction ?? 0)
+                self.renderer?.revokePassenger(at:point);self.currentVehicle=nil;self.setDrivingControls(false)
+                self.vehicleButton.setTitle("ENTER CAR",for:.normal);self.gameHUD.updateVehicle(name:nil,speed:0);self.radio.stop()
+            }
             self?.resetControls()
             self?.renderer?.teleport(x: point.x, y: point.y, z: point.z, direction: heading)
         }
@@ -1055,13 +1078,14 @@ final class NativeGameViewController: UIViewController {
         vehicleButton.isHidden = false
         radioButton.isHidden = !driving
         runButton.isHidden = driving
-        let roadVehicle = driving && !["plane","helicopter","boat","train"].contains(renderer?.vehicleKind ?? "car")
+        let controls=driving && renderer?.isPassenger != true
+        let roadVehicle = controls && !["plane","helicopter","boat","train"].contains(renderer?.vehicleKind ?? "car")
         // Brake/reverse occupies the old Jump frame. A separate road-only
         // handbrake keeps both controls hittable, including working/tow modes.
         jumpButton.isHidden = driving
         handbrakeButton.isHidden = !roadVehicle
-        gasButton.isHidden = !driving
-        brakeButton.isHidden = !driving
+        gasButton.isHidden = !controls
+        brakeButton.isHidden = !controls
         let helicopter = driving && renderer?.vehicleKind == "helicopter"
         styleControl(gasButton, icon: helicopter ? nil : "Touch_gas",
                      fallback: helicopter ? "arrow.up" : "pedal.accelerator.fill",
@@ -1078,7 +1102,7 @@ final class NativeGameViewController: UIViewController {
     /// Metadata and confirmed links can arrive after entry. Refresh only the
     /// contextual controls; setDrivingControls owns the one-time input reset.
     private func updateAuxiliaryControls() {
-        let driving=currentVehicle != nil,working=driving && renderer?.hasVehicleWorkingControls == true
+        let driving=currentVehicle != nil && renderer?.isPassenger != true,working=driving && renderer?.hasVehicleWorkingControls == true
         let nozzle=driving && !working && renderer?.hasJetNozzle == true
         let tow=working && renderer?.vehicleWorkingIsTow == true
         let mode="\(currentVehicle?.id ?? "foot"):\(working ? (tow ? "tow":"working") : nozzle ? "nozzle":"normal")"
@@ -1087,6 +1111,12 @@ final class NativeGameViewController: UIViewController {
             renderer?.vehicleWorkingControl=0;renderer?.vehicleJetControl=0
         }
         let dead=network.health<=0
+        if renderer?.isPassenger==true {
+            weaponButton.isHidden=true;reloadButton.isHidden=true;aimButton.isHidden=true;crouchButton.isHidden=true
+            attackButton.isHidden = !dead
+            if dead{styleControl(attackButton,icon:nil,fallback:"arrow.clockwise",accessibility:"Respawn")}
+            return
+        }
         if driving {
             let bicycle=renderer?.vehicleKind == "bicycle",unhitch=renderer?.canUnhitchVehicle == true
             weaponButton.isHidden = !working && !nozzle
@@ -1603,6 +1633,7 @@ final class NativeGameViewController: UIViewController {
         guard let renderer else { return }
         if renderer.isClimbing {renderer.letGoOfLedge();return}
         if renderer.canDropJetpack {network.sendChat("/dropjetpack");return}
+        if network.pendingVehicleEntry != nil{network.cancelVehicleEntry();status.text="VEHICLE ENTRY CANCELLED";return}
         if currentVehicle != nil {
             if [1,3].contains(renderer.riderWireAction) {status.text="ENTERING VEHICLE";return}
             if renderer.beginVehicleExit(onReady:{[weak self] in self?.completeVehicleExit()}) {return}
@@ -1614,13 +1645,21 @@ final class NativeGameViewController: UIViewController {
             status.text = "MOVE WITHIN 8 M OF A VEHICLE"
             return
         }
-        network.requestEnter(nearest)
+        let occupied=nearest.driverID != nil || network.orderedPlayers.contains{$0.vehicleID==nearest.id}
+        if occupied {
+            guard let seat=renderer.availablePassengerSeat(vehicle:nearest)else{status.text="NO PASSENGER SEAT AVAILABLE";return}
+            _=network.requestEnter(nearest,seat:seat)
+        }else{_=network.requestEnter(nearest)}
     }
 
     private func sendCurrentPosition(moving:Bool,running:Bool,tuck:Double,paused:Bool) {
         guard network.isReady,let renderer else{return}
         if network.legacySpectating {
             if let eye=renderer.legacySpectatorPosition{_=network.sendSpectatorPosition(point:eye,keys:legacyKeys,axes:legacyAxes)}
+            return
+        }
+        if renderer.isPassenger {
+            network.sendPassengerPosition(renderer.passengerWirePosition,heading:renderer.direction,action:renderer.riderWireAction,velocity:renderer.passengerVelocity,paused:paused)
             return
         }
             network.sendPosition(currentVehicle == nil ? renderer.position : renderer.vehicleWirePosition, heading: renderer.direction, moving: moving,
@@ -1671,6 +1710,7 @@ final class NativeGameViewController: UIViewController {
 
     private func completeVehicleExit(ejection:NativeBikeEjection.Event?=nil,wrecked:Bool=false,water:Bool=false,afterExit:(()->Void)?=nil) {
         guard let renderer,currentVehicle != nil else{return}
+        let passenger=renderer.isPassenger
         let parked = renderer.vehicleWirePosition, heading = renderer.direction
         let pitch = renderer.vehicleNose, roll = renderer.vehicleRoll
         let damage = renderer.vehicleDamage,work=renderer.vehicleWorkingValue,health=renderer.vehicleHealth
@@ -1684,9 +1724,9 @@ final class NativeGameViewController: UIViewController {
             return
         }
         if let currentVehicle {
-            network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
+            if passenger{network.sendPassengerExit(renderer.position,heading:renderer.direction)}else{network.sendExit(renderer.position, parked: parked, heading: heading, pitch: pitch, roll: roll,
                              vehicle: currentVehicle, vehicleHealth:health,vehicleDamage:damage,vehicleWork:work,
-                             footHeading:renderer.direction,legacyRotation:legacyRotation)
+                             footHeading:renderer.direction,legacyRotation:legacyRotation)}
         }
         currentVehicle = nil
         vehicleButton.setTitle("ENTER CAR", for: .normal)

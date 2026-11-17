@@ -57,7 +57,7 @@ async function main() {
   fs.symlinkSync(path.join(__dirname, 'local-only', 'site'), path.join(local, 'site'));
   fs.mkdirSync(path.join(local,'selfhost'));
   fs.copyFileSync(path.join(__dirname,'local-only/selfhost/client-catalog.json'),path.join(local,'selfhost/client-catalog.json'));
-  for (const file of ['serve_local.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
+  for (const file of ['serve_local.js', 'native_resource_server.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   const child = spawn(process.execPath, ['serve_local.js'], {
@@ -135,12 +135,21 @@ async function main() {
     await fromB(message => message.t === 'chat' &&
       message.lines.some(line => line[2] === 'smoke hello'));
     b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
+      x: 1482, y: -1738, z: 13}));
+    b.send(JSON.stringify({t: 'me', walking: true, skin: 23,
       x: 1482, y: -1738, z: 13, riding: 'car-1', seat: 1}));
+    assert.equal((await fromB(message=>message.t==='enter'&&message.v==='car-1'&&message.seat===1)).ok,
+      false,'A nonexistent vehicle cannot grant passenger authority');
     const passenger = await fromA(message => message.t === 'cars' &&
       message.c.some(row => row[0] === allB.id && row[2] === 's23'));
-    assert.deepEqual(passenger.c.find(row => row[0] === allB.id)[34], ['car-1', 1]);
+    assert.equal(passenger.c.find(row => row[0] === allB.id)[34], null);
     a.send(JSON.stringify({t:'me',walking:true,skin:7,x:1480.5,y:-1738.25,z:13,health:86,say:'/job taxi'}));
     const loaner=(await fromA(message=>message.t==='spawned'&&message.v[2]==='420.6.1.0.')).v;
+    b.send(JSON.stringify({t:'me',walking:true,driving:false,skin:23,
+      x:loaner[3],y:loaner[4],z:loaner[5],riding:loaner[0],seat:1}));
+    const aboard=await fromA(message=>message.t==='cars'&&
+      message.c.some(row=>row[0]===allB.id&&row[34]?.[0]===loaner[0]));
+    assert.deepEqual(aboard.c.find(row=>row[0]===allB.id)[34],[loaner[0],1]);
     a.send(JSON.stringify({t:'enter',v:loaner[0]}));
     assert.equal((await fromA(message=>message.t==='enter'&&message.v===loaner[0])).ok,true,'Driver must enter an actual nearby server vehicle');
     a.send(JSON.stringify({t: 'me', driving: true, car: loaner[2], vehicle:loaner[0], skin: 7,

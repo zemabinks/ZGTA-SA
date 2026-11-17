@@ -35,6 +35,42 @@ struct NativeIncomingHit {
     }
 }
 
+/// Connection-scoped request/seat identity. A passenger never owns a vehicle
+/// body; its only authority is the confirmed seat in that logical vehicle.
+struct NativeVehicleSeatSession {
+    struct Seat:Equatable {let vehicle:String;let index:Int}
+    struct Entry:Equatable {let seat:Seat;let request:Int}
+    struct Acknowledgement {let seat:Seat;let accepted:Bool;let revoked:Bool}
+    private(set) var pending:Entry?
+    private(set) var passenger:Seat?
+    private var issued=0
+    static func validID(_ id:String)->Bool{!id.isEmpty && id.utf8.count<=128 && !id.unicodeScalars.contains{CharacterSet.controlCharacters.contains($0)}}
+    mutating func request(vehicle:String,seat:Int)->Entry? {
+        guard Self.validID(vehicle),(0...15).contains(seat),passenger==nil,pending==nil,issued<9_007_199_254_740_991 else{return nil}
+        issued+=1;let entry=Entry(seat:Seat(vehicle:vehicle,index:seat),request:issued);pending=entry;return entry
+    }
+    mutating func receive(vehicle:String,seat:Int,accepted:Bool,request:Int?)->Acknowledgement? {
+        let target=Seat(vehicle:vehicle,index:seat)
+        guard Self.validID(vehicle),(0...15).contains(seat)else{return nil}
+        if let request {
+            guard let entry=pending,entry.seat==target,entry.request==request else{return nil}
+            pending=nil;if accepted && seat>0{passenger=target}
+            return .init(seat:target,accepted:accepted,revoked:false)
+        }
+        // An unsolicited negative ACK can revoke exactly the current seat.
+        if !accepted,passenger==target{passenger=nil;return .init(seat:target,accepted:false,revoked:true)}
+        if !accepted,pending?.seat==target{pending=nil;return .init(seat:target,accepted:false,revoked:false)}
+        // Earlier independent hosts do not echo driver request IDs. This
+        // compatibility path does not silently grant uncorrelated passengers.
+        if seat==0,let entry=pending,entry.seat==target{pending=nil;return .init(seat:target,accepted:accepted,revoked:false)}
+        return nil
+    }
+    mutating func cancel()->Entry?{let old=pending;pending=nil;return old}
+    mutating func leavePassenger()->Seat?{let old=passenger;passenger=nil;return old}
+    mutating func remove(vehicle:String){if pending?.seat.vehicle==vehicle{pending=nil};if passenger?.vehicle==vehicle{passenger=nil}}
+    mutating func reset(){pending=nil;passenger=nil;issued=0}
+}
+
 struct RemotePlayer {
     let id: String
     let name: String
@@ -90,6 +126,7 @@ struct RemoteVehicle {
     var health: Int
     var damage = ""
     var work = 0
+    var driverID:String?
 
     init?(row: [Any]) {
         guard row.count >= 7, let id = row[0] as? String,
@@ -107,6 +144,7 @@ struct RemoteVehicle {
         health = max(0, min(1000, (row.count > 9 ? row[9] as? NSNumber : nil)?.intValue ?? 1000))
         damage = row.count > 10 ? row[10] as? String ?? "" : ""
         work = row.count > 16 ? (row[16] as? NSNumber)?.intValue ?? 0 : 0
+        driverID = row.count>11 ? (row[11] as? String).flatMap{NativeVehicleSeatSession.validID($0) ? $0:nil}:nil
     }
 }
 
@@ -325,6 +363,10 @@ final class NativeMultiplayerClient {
     /// Explicit despawn differs from omission in a streamed vehicle list.
     var onVehicleRemoved: ((String) -> Void)?
     var onEnter: ((String, Bool) -> Void)?
+    var onPassengerEnter:((String,Int,Bool)->Void)?
+    private var vehicleSeats=NativeVehicleSeatSession()
+    var pendingVehicleEntry:NativeVehicleSeatSession.Entry?{vehicleSeats.pending}
+    var passengerSeat:NativeVehicleSeatSession.Seat?{vehicleSeats.passenger}
     var onTeleport: ((SIMD3<Float>, Float?) -> Void)?
     var onEnvironment: ((Int?, Double?, Double?) -> Void)?
     var onInventory: (([String: Any]) -> Void)?
@@ -490,6 +532,7 @@ final class NativeMultiplayerClient {
         deliveredHitRevision=nil;deliveredHitSequence=nil
         couplingAcknowledgements=false;couplingRevision=nil;couplingLinks=[]
         couplingIssued=0;couplingProcessed=0;pendingCouplings.removeAll()
+        vehicleSeats.reset()
         onInventoryConnection?(nil)
         // A fresh peer has a fresh row/clock/shot namespace. Never carry a
         // previous driver, remote actor, projectile or queued command into it.
@@ -685,9 +728,40 @@ final class NativeMultiplayerClient {
         }
     }
 
-    func requestEnter(_ vehicle: RemoteVehicle) {
-        if let legacy{onEnter?(vehicle.id,legacy.send(["t":"enter","v":vehicle.id]));return}
-        send(["t":"enter","v":vehicle.id])
+    @discardableResult func requestEnter(_ vehicle: RemoteVehicle,seat:Int=0)->Bool {
+        guard isReady,(0...15).contains(seat)else{return false}
+        if seat>0,(legacy != nil || usesOriginalWorldProtocol){onStatus?("PASSENGER CONTROL IS NOT AVAILABLE ON THIS SERVER ADAPTER YET");return false}
+        if let legacy{let accepted=legacy.send(["t":"enter","v":vehicle.id]);onEnter?(vehicle.id,accepted);return accepted}
+        if usesOriginalWorldProtocol{send(["t":"enter","v":vehicle.id]);return true}
+        guard let entry=vehicleSeats.request(vehicle:vehicle.id,seat:seat)else{return false}
+        var packet:[String:Any]=["t":"enter","v":vehicle.id,"seat":seat,"request":entry.request]
+        if seat>0{packet["passenger"]=true};send(packet);return true
+    }
+    func cancelVehicleEntry(){
+        guard let entry=vehicleSeats.cancel()else{return}
+        send(["t":"exit","v":entry.seat.vehicle,"seat":entry.seat.index])
+    }
+    func sendPassengerPosition(_ position:SIMD3<Float>,heading:Float,action:Int,velocity:SIMD3<Float>,paused:Bool){
+        guard isReady,let seat=vehicleSeats.passenger,[position.x,position.y,position.z,heading,velocity.x,velocity.y,velocity.z].allSatisfy(\.isFinite)else{return}
+        var packet:[String:Any]=["t":"me","walking":true,"driving":false,"skin":localSkin,
+            "riding":seat.vehicle,"seat":seat.index,"x":position.x,"y":position.y,"z":position.z,"heading":-heading,
+            "health":wireHealth,"armour":wireArmour,"weapon":0,"move":0,"air":false,"crouch":false,"act":action,
+            "vx":velocity.x,"vy":velocity.y,"vz":velocity.z,"paused":paused,"clock":Date().timeIntervalSince1970*1000]
+        addPendingChat(to:&packet);send(packet)
+    }
+    func sendPassengerExit(_ feet:SIMD3<Float>,heading:Float){
+        guard let seat=vehicleSeats.leavePassenger()else{return}
+        send(["t":"exit","v":seat.vehicle,"seat":seat.index])
+        sendPosition(feet,heading:heading,moving:false,running:false)
+    }
+    private func receiveVehicleEntry(_ message:[String:Any]){
+        guard let id=message["v"]as?String,let accepted=message["ok"]as?Bool else{return}
+        if usesOriginalWorldProtocol{onEnter?(id,accepted);return}
+        let seat=NativeHealthPrediction.integer(message["seat"]) ?? 0
+        let request=NativeHealthPrediction.integer(message["request"])
+        guard (message["request"]==nil || request != nil),(message["seat"]==nil || NativeHealthPrediction.integer(message["seat"]) != nil),
+              let result=vehicleSeats.receive(vehicle:id,seat:seat,accepted:accepted,request:request)else{return}
+        if result.seat.index==0{onEnter?(id,result.accepted)}else{onPassengerEnter?(id,result.seat.index,result.accepted)}
     }
     func sendVehicleMove(_ id:String, state:[String:Any]) {
         var packet=state
@@ -1352,18 +1426,19 @@ final class NativeMultiplayerClient {
             }
         case "vgone":
             if let id = message["id"] as? String {
+                vehicleSeats.remove(vehicle:id)
                 vehicles.removeValue(forKey: id)
                 vehicleOrder.removeAll{$0==id}
                 onVehicleRemoved?(id)
                 onVehicles?(orderedVehicles)
             }
         case "enter":
-            if let id = message["v"] as? String { onEnter?(id, message["ok"] as? Bool == true) }
+            receiveVehicleEntry(message)
         case "tp":
             if let x = (message["x"] as? NSNumber)?.floatValue,
                let y = (message["y"] as? NSNumber)?.floatValue,
                let z = (message["z"] as? NSNumber)?.floatValue {
-                onTeleport?(SIMD3(x, y, z), (message["h"] as? NSNumber).map { -$0.floatValue })
+                onTeleport?(SIMD3(x, y, z), (message["h"] as? NSNumber).map { -$0.floatValue * .pi/180 })
             }
         default: break
         }
@@ -1383,6 +1458,12 @@ final class NativeMultiplayerClient {
             let code = row[2] as? String ?? "s7"
             let driving = !code.hasPrefix("s")
             let vehicleID = driving && row.count > 35 ? row[35] as? String : nil
+            let riding:(String,Int)? = {
+                guard !driving,row.count>34,let value=row[34] as? [Any],value.count==2,
+                      let id=value[0] as? String,NativeVehicleSeatSession.validID(id),
+                      let seat=NativeHealthPrediction.integer(value[1]),(1...15).contains(seat)else{return nil}
+                return (id,seat)
+            }()
             let wireAnimation = row.count > 41 ? row[41] as? String ?? "" : ""
             let mappedAnimation = NativePedestrianMotion.clip(forWire: wireAnimation,
                 weapon: row.count > 27 ? (row[27] as? NSNumber)?.intValue ?? 0 : 0,
@@ -1422,8 +1503,8 @@ final class NativeMultiplayerClient {
                                        paused:row.count>36 && (row[36] as? NSNumber)?.boolValue == true,
                                        down:row.count>38 ? (row[38] as? NSNumber)?.intValue ?? 0:0,
                                        scriptAnimation:wireAnimation.isEmpty ? nil:wireAnimation,
-                                       ridingVehicleID:row.count>34 ? (row[34] as? [Any])?.first as? String:nil,
-                                       ridingSeat:row.count>34 ? (row[34] as? [Any]).flatMap{$0.count>1 ? ($0[1] as? NSNumber)?.intValue:nil} ?? 0:0,
+                                       ridingVehicleID:riding?.0,
+                                       ridingSeat:riding?.1 ?? 0,
                                        supportVehicleID:row.count>39 ? (row[39] as? [Any])?.first as? String:nil,
                                        supportOffset:row.count>39 ? (row[39] as? [Any]).flatMap {v in guard v.count>=4,let x=(v[1] as? NSNumber)?.floatValue,let y=(v[2] as? NSNumber)?.floatValue,let z=(v[3] as? NSNumber)?.floatValue else{return nil};return SIMD3(x,y,z)} ?? .zero:.zero,
                                        kit:row.count>42 ? (row[42] as? [NSNumber])?.map(\.floatValue):nil,

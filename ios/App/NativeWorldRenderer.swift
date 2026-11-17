@@ -316,6 +316,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var flightCanopyLanded:[String:simd_float4x4]=[:]
     private var actorAttachments: [String: NativeActorAttachment] = [:]
     private var actorLoading: Set<String> = []
+    private var actorRetryAfter:[String:Date]=[:]
     private var objectiveMarker: Mesh?
     private var waterMesh: Mesh?
     private let weaponEffects = NativeWeaponEffects()
@@ -554,7 +555,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var vehicleHop = false
     var vehicleControllerInput = false
     var vehicleJetControl: Float = 0
-    var nativeVehicleTransform: simd_float4x4? { groundVehicle?.active == true ? groundVehicle?.modelTransform : nil }
+    var nativeVehicleTransform: simd_float4x4? { isPassenger ? passengerFrame?.transform:groundVehicle?.active == true ? groundVehicle?.modelTransform : nil }
     var nativeVehicleOrientation: simd_quatf? { groundVehicle?.active == true ? groundVehicle?.orientation : nil }
     /// Read the live owned Rapier body, including pitch/roll and immediate
     /// server changes. Convert the rotation axis once from Y-up to GTA Z-up;
@@ -607,7 +608,19 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         _ = ground.world.setVelocities(body, linear: state.linearVelocity + move, angular: state.angularVelocity + turn)
         return true
     }
-    var vehicleWirePosition: SIMD3<Float> { groundVehicle?.active == true ? groundVehicle!.bodyPosition : camera }
+    var vehicleWirePosition: SIMD3<Float> { isPassenger ? passengerFrame?.vehicle.position ?? camera:groundVehicle?.active == true ? groundVehicle!.bodyPosition : camera }
+    private(set) var passengerSeat:Int?
+    var isPassenger:Bool{passengerSeat != nil}
+    private struct SharedVehicleFrame {let vehicle:RemoteVehicle;let transform:simd_float4x4;let speed:Float;let velocity:SIMD3<Float>}
+    private var passengerFrame:SharedVehicleFrame?
+    private var passengerAccumulator=0.0
+    var passengerWirePosition:SIMD3<Float>{
+        if let feet=ownRiderFeet{return feet.position}
+        guard let frame=passengerFrame,let seat=passengerSeat,
+              let definition=riderDefinitions?.models[activeVehicleModel],definition.seats.indices.contains(seat),let point=definition.seats[seat].position else{return camera}
+        let at=frame.transform*SIMD4(point,1);return SIMD3(at.x,at.y,at.z)
+    }
+    var passengerVelocity:SIMD3<Float>{passengerFrame?.velocity ?? .zero}
     var vehicleRoll: Float { groundVehicle?.active == true ? groundVehicle!.roll : vehicleFallbackRoll }
     func vehicleModelOrigin(_ code: String) -> Float { groundVehicle?.modelOrigin(String(code.split(separator: ".").first ?? "")) ?? 0 }
     var nativeVehicleWheels: [NativeVehicleDynamics.WheelSnapshot] { groundVehicle?.output?.wheels ?? [] }
@@ -628,7 +641,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var nativeLandingGearUp: Bool { groundVehicle?.landingGearUp ?? false }
     var hasLandingGear: Bool { [476,519,577,520,553,592].contains(Int(activeVehicleModel) ?? 0) }
     var hasJetNozzle: Bool { activeVehicleModel == "520" }
-    var hasVehicleHorn: Bool { driving && !["plane","helicopter","bicycle"].contains(vehicleKind) }
+    var hasVehicleHorn: Bool { driving && !isPassenger && !["plane","helicopter","bicycle"].contains(vehicleKind) }
     func toggleLandingGear() { groundVehicle?.setLandingGear(!(groundVehicle?.landingGearUp ?? false)) }
     private(set) var vehicleKind = "car"
     private var vehiclePitch: Float = 0
@@ -838,6 +851,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let self else { return nil }
             let groups: UInt32 = self.driving ? 0xffff0083 : 0xffff0001
             var excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : Set<UInt64>()
+            if self.isPassenger,let id=self.currentVehicleID{excluded.formUnion(self.groundVehicle?.otherVehicleColliders(id:id) ?? [])}
             if let queries=self.character?.queries {excluded.formUnion([queries.walker,queries.probe])}
             excluded.formUnion(self.legacyCollisionWorld?.cameraExcludedColliderIDs ?? [])
             switch self.worldRay(from:origin,direction:direction,distance:distance,groups:groups,excluding:excluded) {
@@ -1208,6 +1222,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             return
         }
+        if isPassenger {
+            passengerAccumulator+=min(0.25,max(0,Double(delta)))
+            while passengerAccumulator+1e-10>=1.0/60{groundVehicle?.world.step();passengerAccumulator=max(0,passengerAccumulator-1.0/60)}
+            if let id=currentVehicleID,let frame=sharedVehicleFrame(id:id){
+                passengerFrame=frame;camera=SIMD3(frame.transform.columns.3.x,frame.transform.columns.3.y,frame.transform.columns.3.z)
+                heading=frame.vehicle.heading;actorHeading=heading;vehiclePitch=frame.vehicle.pitch;vehicleFallbackRoll=frame.vehicle.roll
+                drivingSpeed=frame.speed;vehicleHealth=frame.vehicle.health;activeVehicleDamage=frame.vehicle.damage
+            }
+            dispatchOwnedVehicleExit();loadNearby();return
+        }
         if !driving && gameCamera.isLoaded {
             gameCamera.lookAnalog(x: turn,y: -lookVertical,delta: delta,
                                   sensitivity: Float(appPreferences.cameraSensitivity), inverted: appPreferences.invertY)
@@ -1505,7 +1529,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             poses[id] = .init(id:id,code:player.code,position:player.position,
                 heading:player.heading,pitch:player.pitch,roll:player.roll,health:player.vehicleHealth,damage:player.vehicleDamage,occupied:true)
         }
-        groundVehicle.synchronizeOtherVehicles(order.compactMap{poses[$0]},excluding:currentVehicleID,near:camera,
+        groundVehicle.synchronizeOtherVehicles(order.compactMap{poses[$0]},excluding:isPassenger ? nil:currentVehicleID,near:camera,
             promoteNear:driving && groundVehicle.active ? vehicleWirePosition:nil,delta:delta,wetness:Double(roadWetness))
         character?.otherColliders = groundVehicle.otherColliders
     }
@@ -2055,7 +2079,59 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private func parkedVehicle(name:String,position:SIMD3<Float>)->RemoteVehicle? {
         remoteVehicles.lazy.map{self.predictedVehicle($0)}.first{self.actorName(code:$0.code)==name && $0.position==position}
     }
+    /// The same frame is used by the shared vehicle and every attached rider.
+    /// Passenger walking reports never become a second vehicle transform.
+    private func sharedVehicleFrame(id:String)->SharedVehicleFrame? {
+        if driving,!isPassenger,currentVehicleID==id,let vehicle=remoteVehicles.first(where:{$0.id==id}) {
+            var value=vehicle;value.position=vehicleWirePosition;value.heading=heading;value.pitch=vehiclePitch;value.roll=vehicleRoll
+            let matrix=nativeVehicleTransform ?? (Self.translation(camera)*Self.rotationZ(-heading)*Self.rotationX(vehiclePitch)*Self.rotationY(vehicleRoll))
+            return .init(vehicle:value,transform:matrix,speed:drivingSpeed,velocity:currentWireVelocity)
+        }
+        if let driver=remotePlayers.first(where:{$0.vehicleID==id}),
+           let vehicle=RemoteVehicle(row:[id,driver.name,driver.code,driver.position.x,driver.position.y,driver.position.z,-driver.heading,driver.pitch,-driver.roll,driver.vehicleHealth,driver.vehicleDamage]) {
+            let matrix=Self.translation(driver.position)*Self.rotationZ(-driver.heading)*Self.rotationX(driver.pitch)*Self.rotationY(driver.roll)*Self.translation(SIMD3(0,0,vehicleModelOrigin(driver.code)))
+            return .init(vehicle:vehicle,transform:matrix,speed:driver.speed,velocity:driver.velocity)
+        }
+        guard let source=remoteVehicles.first(where:{$0.id==id})else{return nil}
+        let vehicle=predictedVehicle(source),matrix=groundVehicle?.otherVehicle(id)?.transform ??
+            (Self.translation(vehicle.position)*Self.rotationZ(-vehicle.heading)*Self.rotationX(vehicle.pitch)*Self.rotationY(vehicle.roll)*Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code))))
+        return .init(vehicle:vehicle,transform:matrix,speed:0,velocity:.zero)
+    }
+    func availablePassengerSeat(vehicle:RemoteVehicle)->Int? {
+        let model=String(vehicle.code.split(separator:".").first ?? "")
+        guard let definition=riderDefinitions?.models[model],definition.seats.count>1 else{return nil}
+        let taken=Set(remotePlayers.filter{$0.ridingVehicleID==vehicle.id}.map(\.ridingSeat))
+        return (1..<min(16,definition.seats.count)).first{!taken.contains($0)}
+    }
+    private static func sharedDoorOpen(_ part:Int?,damage:String)->Bool {
+        guard let part,let state=NativeVehicleDamage.decode(damage),state.open.indices.contains(part)else{return false}
+        return state.open[part]
+    }
+    @discardableResult func enterPassenger(_ source:RemoteVehicle,seat:Int,kind:String)->Bool {
+        let model=String(source.code.split(separator:".").first ?? "")
+        guard seat>0,let definition=riderDefinitions?.models[model],definition.seats.indices.contains(seat),definition.seats[seat].position != nil else{return false}
+        guard !driving else{return false}
+        ownCameraVisibility.reset();personalFlight.stop();swimController.stop();swimming=false;underwater=false
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        footAnimator?.rest(cut:true);footAnimationFrame=nil;footLaunchRemaining=nil
+        character?.setActive(false);characterActive=false;pendingNativeJump=0
+        entryOrigin=camera;entryStarted=ProcessInfo.processInfo.systemUptime
+        passengerSeat=seat;passengerFrame=nil;passengerAccumulator=0;currentVehicleID=source.id
+        activeVehicleModel=model;activeModelOrigin=Float(definition.origin);vehicleKind=kind;driving=true
+        ownRiderPlayback=nil;ownRiderCapture=nil;ownRiderPrevious=nil;ownRiderFeet=nil;pendingVehicleExit=nil;pendingExitPlacement=nil;vehicleExitSerial &+= 1
+        ownRiderAnimation=nil;vehicleHorn=false;vehicleSiren=false;steeringInput=0
+        if let frame=sharedVehicleFrame(id:source.id){passengerFrame=frame;camera=SIMD3(frame.transform.columns.3.x,frame.transform.columns.3.y,frame.transform.columns.3.z);heading=frame.vehicle.heading}
+        loadNearby();return true
+    }
+    /// A server revocation/despawn is not a driver's park operation. Retain
+    /// the last attached feet until the server's following foot correction.
+    func revokePassenger(at point:SIMD3<Float>?=nil) {
+        guard isPassenger else{return}
+        let feet=point ?? passengerWirePosition
+        discardOwnedVehicle();teleport(x:feet.x,y:feet.y,z:feet.z)
+    }
     func enter(_ source: RemoteVehicle, kind: String) {
+        passengerSeat=nil;passengerFrame=nil;passengerAccumulator=0
         let snapshot=groundVehicle?.takeOtherVehicle(source.id)
         pendingVehicleBodyPose=snapshot?.physicalPose
         let vehicle=applying(snapshot,to:source)
@@ -2111,8 +2187,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     @discardableResult func beginVehicleExit(onReady:@escaping()->Void)->Bool {
         guard driving,pendingVehicleExit==nil,pendingExitPlacement==nil,let playback=ownRiderPlayback,playback.inside else{return pendingVehicleExit != nil || pendingExitPlacement != nil}
         pendingVehicleExit=onReady;ownRiderFeet=nil
-        let part=riderDefinitions?.models[activeVehicleModel]?.seats.first?.door
-        let leaveOpen=part.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
+        let seats=riderDefinitions?.models[activeVehicleModel]?.seats
+        let part=seats.flatMap{$0.indices.contains(passengerSeat ?? 0) ? $0[passengerSeat ?? 0].door:nil}
+        let leaveOpen=isPassenger ? Self.sharedDoorOpen(part,damage:passengerFrame?.vehicle.damage ?? "") : part.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
         playback.leave(side:ownRiderSide,leaveOpen:leaveOpen)
         return true
     }
@@ -2127,8 +2204,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
     private func resolveVehicleExit(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement {
-        guard let groundVehicle,groundVehicle.active,let character else{return .ready(wanted)}
-        let seat=riderDefinitions?.models[activeVehicleModel]?.seats.first?.position.map{SIMD3<Double>($0)}
+        guard let groundVehicle,(groundVehicle.active || isPassenger),let character else{return .ready(wanted)}
+        let seats=riderDefinitions?.models[activeVehicleModel]?.seats
+        let seat=seats.flatMap{$0.indices.contains(passengerSeat ?? 0) ? $0[passengerSeat ?? 0].position:nil}.map{SIMD3<Double>($0)}
         func ray(_ p:SIMD3<Double>,_ way:SIMD3<Double>,_ distance:Double)throws->Double? {
             switch worldRay(from:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(p)),
                             direction:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(way)),distance:Float(distance),groups:0xffff0001) {
@@ -2138,7 +2216,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         }
         do {
-            let feet=try groundVehicle.exitPosition(wanted:wanted,seat:seat,side:ownRiderSide,
+            func fits(_ p:SIMD3<Double>,_ widening:Double,_ body:UInt64)throws->Bool {
+                let radius=0.35+widening
+                for x in [-radius,radius]{for z in [-radius,radius]{_=try ray(p+SIMD3(x,0,z),SIMD3(0,1,0),0.001)}}
+                return character.motor.fits(p,widening:widening,excludingBody:body)
+            }
+            let feet:SIMD3<Float>?
+            if isPassenger,let id=currentVehicleID {
+                feet=try groundVehicle.passengerExitPosition(id:id,model:activeVehicleModel,wanted:wanted,seat:seat,side:ownRiderSide,below:{try ray($0,SIMD3(0,-1,0),$1)},along:ray,fits:fits)
+            }else{feet=try groundVehicle.exitPosition(wanted:wanted,seat:seat,side:ownRiderSide,
                 below:{try ray($0,SIMD3(0,-1,0),$1)},along:ray,
                 fits:{p,widening,body in
                     // A capsule can cross a cell boundary even when its centre
@@ -2148,7 +2234,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         _ = try ray(p+SIMD3(x,0,z),SIMD3(0,1,0),0.001)
                     }}
                     return character.motor.fits(p,widening:widening,excludingBody:body)
-                })
+                })}
             guard let feet else{return .unavailable}
             return .ready(feet)
         }catch{return .unavailable}
@@ -2193,12 +2279,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let floor = collision?.height(x: camera.x, y: camera.y,
                                       near: camera.z, maxDrop: 1000)
         let falling = floor.map { camera.z > $0 + 3 } ?? false
-        if let id=currentVehicleID,groundVehicle?.active == true {
+        if !isPassenger,let id=currentVehicleID,groundVehicle?.active == true {
             let code=remoteVehicles.first{$0.id==id}?.code ?? "\(activeVehicleModel).6.1.0."
             let work=groundVehicle?.workingValue ?? remoteVehicles.first{$0.id==id}?.work ?? 0
             activeVehicleDamage=vehicleDamage
             groundVehicle?.parkCurrentVehicle(id:id,code:code,health:vehicleHealth,damage:activeVehicleDamage,work:work)
-        } else{groundVehicle?.exit()}
+        } else if !isPassenger{groundVehicle?.exit()}
+        passengerSeat=nil;passengerFrame=nil;passengerAccumulator=0
         driving = false
         currentVehicleID = nil
         drivingSpeed = 0
@@ -2267,6 +2354,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private func discardOwnedVehicle() {
         vehicleCoupling?.setOwnedVehicle(nil)
         groundVehicle?.exit()
+        passengerSeat=nil;passengerFrame=nil;passengerAccumulator=0
         driving=false;currentVehicleID=nil;drivingSpeed=0;flightVerticalSpeed=0
         vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleBodyPose=nil
         activeVehicleModel="";activeHandling=nil;vehicleKind="car"
@@ -2394,7 +2482,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard collisions[name]==nil,!collisionLoading.contains(name),
               Date()>=(collisionRetryAfter[name] ?? .distantPast),let server else{return}
         collisionLoading.insert(name)
-        URLSession.shared.dataTask(with:server.path("game/world/\(name).col.bin")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/world/\(name).col.bin")) { [weak self] data,response,_ in
             DispatchQueue.main.async {
                 guard let self else{return};self.collisionLoading.remove(name)
                 guard self.desiredPhysicsCells.contains(name) else{return}
@@ -2420,7 +2508,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var fetchError: Error?
         let lock = NSLock()
         group.enter()
-        URLSession.shared.dataTask(with: binURL) { data, response, error in
+        NativeResourceTransport.dataTask(with: binURL) { data, response, error in
             lock.lock()
             if let response = response as? HTTPURLResponse, response.statusCode == 200 { bin = data }
             else { fetchError = error ?? NSError(domain: "World", code: (response as? HTTPURLResponse)?.statusCode ?? -1) }
@@ -2428,7 +2516,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             group.leave()
         }.resume()
         group.enter()
-        URLSession.shared.dataTask(with: imageURL) { data, response, error in
+        NativeResourceTransport.dataTask(with: imageURL) { data, response, error in
             lock.lock()
             if let response = response as? HTTPURLResponse, response.statusCode == 200 { png = data }
             else { fetchError = error ?? NSError(domain: "World", code: (response as? HTTPURLResponse)?.statusCode ?? -1) }
@@ -2476,32 +2564,32 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         loadFlightAssets();loadParticleEffects()
         guard let server else { return }
         loadLegacyStockCatalogs()
-        URLSession.shared.dataTask(with:server.path("game/native/weapons.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/weapons.json")) { [weak self] data,response,_ in
             guard (response as? HTTPURLResponse)?.statusCode==200,let data,
                   let catalog=try? NativeWeaponMuzzle.Catalog(data:data) else{return}
             DispatchQueue.main.async {self?.weaponMuzzleCatalog=catalog}
         }.resume()
-        URLSession.shared.dataTask(with:server.path("game/native/riders.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/riders.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let definitions = try? JSONDecoder().decode(NativeRiderDefinitions.self,from:data) else { return }
             DispatchQueue.main.async { self?.riderDefinitions = definitions }
         }.resume()
-        URLSession.shared.dataTask(with:server.path("game/world/peds.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/world/peds.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let definitions = try? NativeFootAnimationDefinitions(data:data) else { return }
             DispatchQueue.main.async { self?.footDefinitions = definitions;self?.prepareFootAnimation() }
         }.resume()
-        URLSession.shared.dataTask(with:server.path("game/native/foot-animation.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/foot-animation.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let definitions = try? NativeFootWeaponAnimation.load(data:data) else { return }
             DispatchQueue.main.async { self?.footWeaponDefinitions = definitions }
         }.resume()
-        URLSession.shared.dataTask(with:server.path("game/native/melee.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/melee.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200,
                   let definitions=try? NativeMeleeDefinitions(data:data) else{return}
             DispatchQueue.main.async {self?.meleeDefinitions=definitions}
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/native/seating.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/seating.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let seating = try? JSONDecoder().decode(NativeVehicleSeating.self,from:data) else { return }
             DispatchQueue.main.async { self?.seating = seating }
@@ -2519,7 +2607,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let self,let water = self.worldWater else { return }
             self.waterMesh = self.makeWater(water); self.nearWaterOrigin = nil
         }
-        URLSession.shared.dataTask(with: server.path("game/native/effects/waterclear256.png")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/effects/waterclear256.png")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -2530,7 +2618,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var spriteData: Data?, spriteImage: Data?
         for name in ["index.json","atlas.png"] {
             effectsGroup.enter()
-            URLSession.shared.dataTask(with: server.path("game/native/effects/\(name)")) { data,response,_ in
+            NativeResourceTransport.dataTask(with: server.path("game/native/effects/\(name)")) { data,response,_ in
                 effectsLock.lock()
                 if (response as? HTTPURLResponse)?.statusCode == 200 {
                     if name == "index.json" { spriteData=data } else { spriteImage=data }
@@ -2544,17 +2632,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             self.effectSprites = document["sprites"] as? [String:Int] ?? [:]
             self.effectAtlas = try? self.textureLoader.newTexture(data:spriteImage,options:[.SRGB:false])
         }
-        URLSession.shared.dataTask(with: server.path("game/native/models/animations.clips.bin")) { [weak self] data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/models/animations.clips.bin")) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let library = NativeSkeletalAnimationLibrary(data: data)
             DispatchQueue.main.async { self?.skeletalLibrary = library;self?.prepareFootAnimation() }
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/native/models/pedestrians.json")) { [weak self] data, _, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/models/pedestrians.json")) { [weak self] data, _, _ in
             guard let data, let document = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]] else { return }
             let anchors = document.mapValues { $0.compactMapValues { ($0 as? [NSNumber])?.map(\.floatValue) } }
             DispatchQueue.main.async { self?.pedestrianAnchors = anchors }
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/world/index.json")) { [weak self] data, _, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/world/index.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let rows = document["water"] as? [[NSNumber]] else { return }
@@ -2566,7 +2654,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.loadNearby()
             }
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/native/models/index.json")) { [weak self] data, _, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/models/index.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let index = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
             DispatchQueue.main.async {
@@ -2580,11 +2668,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.loadActor("colt45")
             }
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/native/samp-skins.json")) { [weak self] data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/samp-skins.json")) { [weak self] data, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200, let data else { return }
             DispatchQueue.main.async { _ = self?.loadLegacySkinCatalog(data) }
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/native/handling.json")) { [weak self] data, _, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/handling.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let rows = document["rows"] as? [String: [Any]] else { return }
@@ -2596,7 +2684,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.activeHandling = handling[self.activeVehicleModel]
             }
         }.resume()
-        URLSession.shared.dataTask(with: server.path("game/native/vehicles.physics.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/vehicles.physics.json")) { [weak self] data,response,_ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let cameraDefinitions = (try? JSONDecoder().decode(CameraVehicleDocument.self,from: data))?.models ?? [:]
             DispatchQueue.main.async {
@@ -2609,7 +2697,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.loadVehicleTreads()
             }
         }.resume()
-        URLSession.shared.dataTask(with:server.path("game/native/trains.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/trains.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
             DispatchQueue.main.async {self?.groundVehicle?.loadTracks(data)}
         }.resume()
@@ -2617,7 +2705,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func loadVehicleCouplingDefinitions() {
         guard let server else{return}
-        URLSession.shared.dataTask(with:server.path("game/native/vehicle-coupling.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/vehicle-coupling.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
             DispatchQueue.main.async {
                 guard let self else{return}
@@ -2630,7 +2718,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func loadVehicleTreads() {
         guard let server else{return}
-        URLSession.shared.dataTask(with:server.path("game/native/vehicle-treads.json")) { [weak self] data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/native/vehicle-treads.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
             DispatchQueue.main.async { _ = self?.supportScene?.load(data) }
         }.resume()
@@ -2653,7 +2741,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func loadActor(_ name: String) {
         if let custom=legacyPedModels[name]{skeletalActors[name]=custom.actor;return}
-        guard !name.isEmpty, actorMeshes[name] == nil, !actorLoading.contains(name),
+        let isPed=pedModels.values.contains(name),isVehicle=vehicleModels.values.contains(name)
+        let complete=actorMeshes[name] != nil && (!isPed || skeletalActors[name] != nil) &&
+            (!isVehicle || (vehicleRigs[name] != nil && vehicleRigMeshes[name] != nil))
+        guard !name.isEmpty,!complete,!actorLoading.contains(name),
+              Date()>=(actorRetryAfter[name] ?? .distantPast),
               let server else { return }
         actorLoading.insert(name)
         let group = DispatchGroup()
@@ -2665,14 +2757,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var attachment: Data?
         var parts: Data?
         var rigBinary:Data?,rigImage:Data?,rigMetadata:Data?
-        if vehicleModels.values.contains(name) {
+        if isVehicle {
             for suffix in ["bin","png","json"] {
                 group.enter()
                 // Rig hierarchy export can change draw traversal, indices and
                 // texture layers together. Never combine a fresh hierarchy
                 // with an older cached binary/atlas from the same URL.
                 let request=URLRequest(url:server.path("game/native/models/\(name).rig.\(suffix)"),cachePolicy:.reloadIgnoringLocalCacheData)
-                URLSession.shared.dataTask(with:request) { data,response,_ in
+                NativeResourceTransport.dataTask(with:request) { data,response,_ in
                     lock.lock()
                     if (response as? HTTPURLResponse)?.statusCode==200 {
                         if suffix=="bin" {rigBinary=data} else if suffix=="png" {rigImage=data} else {rigMetadata=data}
@@ -2682,36 +2774,36 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         }
         group.enter()
-        URLSession.shared.dataTask(with: server.path("game/native/models/\(name).parts.json")) { data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/models/\(name).parts.json")) { data, response, _ in
             lock.lock()
             if (response as? HTTPURLResponse)?.statusCode == 200 { parts = data }
             lock.unlock()
             group.leave()
         }.resume()
         group.enter()
-        URLSession.shared.dataTask(with: server.path("game/native/models/\(name).bin")) { data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/models/\(name).bin")) { data, response, _ in
             lock.lock()
             if (response as? HTTPURLResponse)?.statusCode == 200 { binary = data }
             lock.unlock()
             group.leave()
         }.resume()
         group.enter()
-        URLSession.shared.dataTask(with: server.path("game/native/models/\(name).png")) { data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("game/native/models/\(name).png")) { data, response, _ in
             lock.lock()
             if (response as? HTTPURLResponse)?.statusCode == 200 { image = data }
             lock.unlock()
             group.leave()
         }.resume()
-        if pedModels.values.contains(name) {
+        if isPed {
             group.enter()
-            URLSession.shared.dataTask(with: server.path("game/native/models/\(name).skel.bin")) { data, response, _ in
+            NativeResourceTransport.dataTask(with: server.path("game/native/models/\(name).skel.bin")) { data, response, _ in
                 lock.lock()
                 let usable = (response as? HTTPURLResponse)?.statusCode == 200
                 if usable { skeleton = data }
                 lock.unlock()
                 if usable { group.leave() }
                 else {
-                    URLSession.shared.dataTask(with: server.path("game/native/models/\(name).anim.bin")) { data, response, _ in
+                    NativeResourceTransport.dataTask(with: server.path("game/native/models/\(name).anim.bin")) { data, response, _ in
                         lock.lock()
                         if (response as? HTTPURLResponse)?.statusCode == 200 { animation = data }
                         lock.unlock(); group.leave()
@@ -2719,7 +2811,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
             }.resume()
             group.enter()
-            URLSession.shared.dataTask(with: server.path("game/native/models/\(name).hand.bin")) { data, response, _ in
+            NativeResourceTransport.dataTask(with: server.path("game/native/models/\(name).hand.bin")) { data, response, _ in
                 lock.lock()
                 if (response as? HTTPURLResponse)?.statusCode == 200 { attachment = data }
                 lock.unlock()
@@ -2729,6 +2821,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.actorLoading.remove(name)
+            // A partial mesh must not permanently suppress skeleton/rig retry.
+            // Publish the required family together only after all stages pass.
+            self.actorRetryAfter[name]=Date().addingTimeInterval(2)
             guard let binary, let image,
                   let world = try? WorldBinary(data: binary),
                   let atlas = try? self.textureLoader.newTexture(data: image, options: [.SRGB: false]),
@@ -2736,17 +2831,19 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                                        length: world.vertices.count * MemoryLayout<NativeVertex>.stride),
                   let indices = self.device.makeBuffer(bytes: world.indices,
                                                       length: world.indices.count * MemoryLayout<UInt32>.stride) else { return }
-            self.actorMeshes[name] = Mesh(vertices: vertices, indices: indices,
-                                          indexCount: world.indices.count, atlas: atlas)
+            let stagedMesh=Mesh(vertices:vertices,indices:indices,indexCount:world.indices.count,atlas:atlas)
+            let stagedActor=skeleton.flatMap{NativeSkeletalActor(data:$0,vertexCount:world.vertices.count,device:self.device)}
+            guard !isPed || stagedActor != nil else{return}
+            var stagedRig:NativeVehicleRig?,stagedRigMesh:Mesh?,stagedMasks:[(Int,Mesh)]=[]
             if let rigBinary,let rigImage,let rigMetadata,let rig=NativeVehicleRig(data:rigMetadata),
                rig.validatesAssetFamily(binary:rigBinary,atlas:rigImage),
                let meshData=rig.meshData(rigBinary),let geometry=try? WorldBinary(data:meshData),rig.document.draws.allSatisfy({$0.start+$0.count<=geometry.indices.count}),
                let atlas=try? self.textureLoader.newTexture(data:rigImage,options:[.SRGB:false]),
                let vertices=self.device.makeBuffer(bytes:geometry.vertices,length:geometry.vertices.count*MemoryLayout<NativeVertex>.stride),
                let indices=self.device.makeBuffer(bytes:geometry.indices,length:geometry.indices.count*4) {
-                self.vehicleRigs[name]=rig
-                self.vehicleRigMeshes[name]=Mesh(vertices:vertices,indices:indices,indexCount:geometry.indices.count,atlas:atlas)
-                self.vehicleWaterMasks[name]=(rig.document.waterMasks ?? []).compactMap { mask -> (Int,Mesh)? in
+                stagedRig=rig
+                stagedRigMesh=Mesh(vertices:vertices,indices:indices,indexCount:geometry.indices.count,atlas:atlas)
+                stagedMasks=(rig.document.waterMasks ?? []).compactMap { mask -> (Int,Mesh)? in
                     let vertices=stride(from:0,to:mask.positions.count,by:3).map { index in
                         NativeVertex(position:SIMD4(mask.positions[index],mask.positions[index+1],mask.positions[index+2],1),uvLayer:.zero,tint:SIMD4(repeating:1),dusk:SIMD4(repeating:1))
                     }
@@ -2755,11 +2852,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                           let indexBuffer=self.device.makeBuffer(bytes:mask.indices,length:mask.indices.count*4) else{return nil}
                     return (mask.node,Mesh(vertices:vertexBuffer,indices:indexBuffer,indexCount:mask.indices.count,atlas:atlas))
                 }
-                if self.activeVehicleModel==String(rig.document.id) {self.groundVehicle?.setDamageHinges(rig.damageHinges)}
             }
-            if let skeleton, let actor = NativeSkeletalActor(data: skeleton, vertexCount: world.vertices.count, device: self.device) {
-                self.skeletalActors[name] = actor
+            guard !isVehicle || (stagedRig != nil && stagedRigMesh != nil) else{return}
+            self.actorMeshes[name]=stagedMesh
+            if let stagedActor{self.skeletalActors[name]=stagedActor}
+            if let rig=stagedRig,let mesh=stagedRigMesh{
+                self.vehicleRigs[name]=rig;self.vehicleRigMeshes[name]=mesh;self.vehicleWaterMasks[name]=stagedMasks
+                if self.activeVehicleModel==String(rig.document.id){self.groundVehicle?.setDamageHinges(rig.damageHinges)}
             }
+            self.actorRetryAfter.removeValue(forKey:name)
             if let parts, let decoded = try? JSONDecoder().decode(ActorParts.self, from: parts) {
                 if let seat = decoded.driverSeat, seat.count == 3 { self.vehicleSeats[name] = SIMD3(seat[0],seat[1],seat[2]) }
                 self.actorParts[name] = decoded.parts.filter {
@@ -3226,7 +3327,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         legacyTextureLoads.insert(request);let epoch=legacyAssetEpoch
         // Only the owner's exact raw dictionary path is considered. Server
         // strings cannot supply paths, hosts or a similarly named dictionary.
-        URLSession.shared.dataTask(with:server.path("game/\(request.dictionary).txd")){[weak self]data,response,_ in
+        NativeResourceTransport.dataTask(with:server.path("game/\(request.dictionary).txd")){[weak self]data,response,_ in
             let result:Result<NativeRenderWareTXD.Texture,Error>=Result {
                 guard (response as?HTTPURLResponse)?.statusCode==200,let data,data.count<=64*1024*1024 else{throw NativeSAMPObjectMaterials.Failure.unresolvedTexture(request.dictionary,request.texture)}
                 let dictionary=try NativeRenderWareTXD.decode(data)
@@ -3667,12 +3768,38 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             actorOverrides[key(name,at),default:[]].append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon))
         }
-        if driving && !legacySpectating {
+        if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
+           let ped=pedModels[String(localSkin)] {
+            loadActor(ped)
+            if let actor=skeletalActors[ped],let library=skeletalLibrary,let definition=riderDefinitions?.models[activeVehicleModel],definition.seats.indices.contains(seat) {
+                let sourceSeat=definition.seats[seat]
+                if ownRiderPlayback==nil,let playback=NativeRiderPlayback(definition:definition,seat:seat,library:library) {
+                    ownRiderSide=sourceSeat.side==0 ? 1:sourceSeat.side
+                    playback.enter(side:ownRiderSide,doorOpen:Self.sharedDoorOpen(sourceSeat.door,damage:frame.vehicle.damage) ? 1:0);ownRiderPlayback=playback
+                }
+                if let sample=ownRiderPlayback?.update(delta:riderDelta,input:.init(dead:health<=0)) {
+                    if let capture=sample.capture {
+                        switch capture {
+                        case .current:ownRiderCapture=ownRiderPrevious
+                        case .sample(let value):ownRiderCapture=actor.riderPose(frame:value.pose,library:library,figurePosition:SIMD3<Float>(value.anchor))
+                        }
+                    }
+                    let pose=actor.riderPose(frame:sample.sample.pose,library:library,figurePosition:SIMD3<Float>(sample.sample.anchor),figureTurn:Float(sample.turn),previous:sample.transitioning ? ownRiderCapture:nil,transition:sample.transition)
+                    ownRiderPrevious=pose;ownRiderFeet=actor.riderFeet(pose:pose,model:frame.transform,origin:Float(definition.origin))
+                    if let id=currentVehicleID,let part=sample.doorPart{riderDoorHolds[id,default:[:]][part]=sample.doorOpen}
+                    appendPed(ped,frame.vehicle.position,frame.vehicle.heading,0,"",0,0,pose:pose,transform:frame.transform,original:true)
+                    if sample.state == .stood,let ready=pendingVehicleExit{pendingVehicleExit=nil;DispatchQueue.main.async(execute:ready)}
+                }
+            }
+        }else if driving && !legacySpectating {
             let code = ownVehicleAppearanceCode
             if let name = actorName(code: code) {
                 modelInstances.append((name, camera, heading, vehiclePitch, "", 0, 0))
                 vehicleAppearanceCodes[key(name,camera),default:[]].append(code)
-                if let seat = vehicleSeats[name], let ped = pedModels[String(localSkin)] {
+                if let seat = riderDefinitions?.models[activeVehicleModel]?.seats.first?.position ?? vehicleSeats[name], let ped = pedModels[String(localSkin)] {
+                    // A pose cannot be the prerequisite for loading its actor:
+                    // eviction or fast boarding would otherwise hide it forever.
+                    loadActor(ped)
                     let time = ProcessInfo.processInfo.systemUptime - entryStarted
                     let definition = seating?.models[activeVehicleModel]
                     let entry = definition?.clip("entry") ?? "ped/car_getin_lhs"
@@ -3756,33 +3883,53 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let handWeapon = climb != nil || footAnimationFrame?.handWeaponVisible == false ? 0:effectiveWireWeapon
             appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own")
         }
-        for player in remotePlayers where simd_distance(player.position, scenePosition) < 130 {
+        for player in remotePlayers {
             // A passenger's public carText is still a pedestrian; draw its
             // source seat inside the referenced car instead of a second walker.
             if let vehicleID = player.ridingVehicleID {
-                let driver = remotePlayers.first { $0.vehicleID == vehicleID }
-                let parked = remoteVehicles.first { $0.id == vehicleID }.map{predictedVehicle($0)}
-                let own = driving && currentVehicleID == vehicleID
-                let code = own ? (parked?.code ?? "\(activeVehicleModel).6.1.0.") : driver?.code ?? parked?.code
-                guard let code,let name=actorName(code:code),let ped=pedModels[String(player.skin)] else {continue}
+                guard let shared=sharedVehicleFrame(id:vehicleID),simd_distance(shared.vehicle.position,scenePosition)<130,
+                      let ped=pedModels[String(player.skin)]else{continue}
+                let code=shared.vehicle.code
                 guard let actor=skeletalActors[ped],let library=skeletalLibrary else {loadActor(ped);continue}
                 let model=String(code.split(separator:".").first ?? "")
                 guard let definition=riderDefinitions?.models[model],definition.seats.indices.contains(player.ridingSeat),
                       let seat=definition.seats[player.ridingSeat].position else {continue}
                 let animator=remoteRiderAnimations[player.id] ?? NativeRiderAnimation(duration:{ [weak self] in self?.skeletalLibrary?.duration(of:$0) })
                 remoteRiderAnimations[player.id]=animator
-                let frame=animator.update(delta:riderDelta,configuration:definition.configuration(seat:player.ridingSeat),input:.init(dead:player.life<=0))
-                let pose=actor.riderPose(frame:frame,library:library,figurePosition:seat,figureTurn:Float(definition.seats[player.ridingSeat].turn ?? 0))
-                let position=own ? camera:driver?.position ?? parked?.position ?? player.position
-                let angle=own ? heading:driver?.heading ?? parked?.heading ?? 0
-                let pitch=own ? vehiclePitch:driver?.pitch ?? parked?.pitch ?? 0
-                let roll=own ? vehicleRoll:driver?.roll ?? parked?.roll ?? 0
-                let transform=own && nativeVehicleTransform != nil ? nativeVehicleTransform! :
-                    Self.translation(position)*Self.rotationZ(-angle)*Self.rotationX(pitch)*Self.rotationY(roll)*Self.translation(SIMD3(0,0,vehicleModelOrigin(code)))
-                _ = name
-                appendPed(ped,position,angle,0,"",0,0,pose:pose,transform:transform,original:true)
+                let input=NativeRiderAnimation.Input(dead:player.life<=0),playbackKey="\(vehicleID):\(model):\(player.ridingSeat):\(ObjectIdentifier(actor))"
+                let playback:NativeRiderPlayback?
+                if let cached=remoteRiderPlayback[player.id],cached.0==playbackKey{playback=cached.1}
+                else {
+                    playback=NativeRiderPlayback(definition:definition,seat:player.ridingSeat,library:library)
+                    if let playback{remoteRiderPlayback[player.id]=(playbackKey,playback);remoteRiderActions[player.id]=nil;remoteRiderCapture[player.id]=nil;remoteRiderPrevious[player.id]=nil}
+                }
+                let pose:NativeSkeletalActor.Pose
+                if let playback {
+                    let action=player.action&63,sourceSeat=definition.seats[player.ridingSeat]
+                    if remoteRiderActions[player.id] != action {
+                        remoteRiderActions[player.id]=action
+                        switch action {
+                        case 1,3:playback.enter(side:action==1 ? -1:1)
+                        case 2,4:playback.leave(side:action==2 ? -1:1,leaveOpen:sourceSeat.door.map{NativeVehicleDamage.decode(shared.vehicle.damage)?.open[$0] ?? false} ?? false)
+                        default:if playback.state != .entering{playback.sit()}
+                        }
+                    }
+                    if let frame=playback.update(delta:riderDelta,input:input) {
+                        if let capture=frame.capture {
+                            switch capture {
+                            case .current:remoteRiderCapture[player.id]=remoteRiderPrevious[player.id]
+                            case .sample(let value):remoteRiderCapture[player.id]=actor.riderPose(frame:value.pose,library:library,figurePosition:SIMD3<Float>(value.anchor))
+                            }
+                        }
+                        pose=actor.riderPose(frame:frame.sample.pose,library:library,figurePosition:SIMD3<Float>(frame.sample.anchor),figureTurn:Float(frame.turn),previous:frame.transitioning ? remoteRiderCapture[player.id]:nil,transition:frame.transition)
+                        remoteRiderPrevious[player.id]=pose
+                        if let part=frame.doorPart{riderDoorHolds[vehicleID,default:[:]][part]=frame.doorOpen}
+                    }else{pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat)}
+                }else{pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat,figureTurn:Float(definition.seats[player.ridingSeat].turn ?? 0))}
+                appendPed(ped,shared.vehicle.position,shared.vehicle.heading,0,"",0,0,pose:pose,transform:shared.transform,original:true)
                 continue
             }
+            guard simd_distance(player.position,scenePosition)<130 else{continue}
             guard let name=actorName(code:player.code) else {continue}
             if player.vehicleID == nil {
                 let footPosition=remoteSupportPosition(player) ?? player.position
@@ -3837,7 +3984,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 input.lean=frame.lean;input.tuck=frame.tuck;input.pedal=frame.pedal;input.crank=frame.crank;input.hop=frame.hop
             }
             var pose:NativeSkeletalActor.Pose
-            let playbackKey="\(player.vehicleID ?? ""):\(model):0"
+            let playbackKey="\(player.vehicleID ?? ""):\(model):0:\(ObjectIdentifier(actor))"
             let playback:NativeRiderPlayback?
             if let cached=remoteRiderPlayback[player.id],cached.0==playbackKey{playback=cached.1}
             else {
@@ -3866,7 +4013,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     if let part=frame.doorPart,let vehicle=player.vehicleID {riderDoorHolds[vehicle,default:[:]][part]=frame.doorOpen}
                 } else {pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
             } else {pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
-            let car = Self.translation(player.position) * Self.rotationZ(-player.heading) *
+            let car = player.vehicleID.flatMap{sharedVehicleFrame(id:$0)?.transform} ?? Self.translation(player.position) * Self.rotationZ(-player.heading) *
                 Self.rotationX(player.pitch) * Self.rotationY(player.roll) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
             appendPed(ped,player.position,player.heading,0,"",0,0,pose:pose,transform:car,original:true)
@@ -3879,7 +4026,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         var parkedTransforms:[String:simd_float4x4] = [:]
         var parkedTrainCandidates:[RemoteVehicle] = []
-        for source in remoteVehicles where source.id != currentVehicleID && !drivenVehicleIDs.contains(source.id) {
+        for source in remoteVehicles where (isPassenger || source.id != currentVehicleID) && !drivenVehicleIDs.contains(source.id) {
             let vehicle=predictedVehicle(source)
             guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
             modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0))
@@ -4092,7 +4239,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         particleLoading=true
         let group=DispatchGroup(),lock=NSLock();var metadata:Data?,definitions:Data?
         for (name,url) in [("metadata",server.path("game/native/effects/fx-textures.json")),("definitions",server.path("game/world/fx.json"))] {
-            group.enter();URLSession.shared.dataTask(with:url){data,response,_ in
+            group.enter();NativeResourceTransport.dataTask(with:url){data,response,_ in
                 lock.lock();if (response as? HTTPURLResponse)?.statusCode==200{if name=="metadata"{metadata=data}else{definitions=data}};lock.unlock();group.leave()
             }.resume()
         }
@@ -4105,7 +4252,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let loaded=DispatchGroup()
             for(index,sheet)in renderer.document.sheets.enumerated() {
                 guard !sheet.file.isEmpty,sheet.file.count<64,sheet.file.utf8.allSatisfy({(48...57).contains($0)||(65...90).contains($0)||(97...122).contains($0)||[45,46,95].contains($0)}) else{continue}
-                loaded.enter();URLSession.shared.dataTask(with:server.path("game/native/effects/"+sheet.file)){data,response,_ in
+                loaded.enter();NativeResourceTransport.dataTask(with:server.path("game/native/effects/"+sheet.file)){data,response,_ in
                     DispatchQueue.main.async {
                         if (response as? HTTPURLResponse)?.statusCode==200,let data{_ = renderer.install(sheet:index,data:data)}
                         loaded.leave()
@@ -4126,7 +4273,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var files:[String:Data]=[:]
         for name in ["parachute.bin","parachute.png","parachute.skel.bin","jetpack.bin","jetpack.png","jetpack.flight.json"] {
             group.enter()
-            URLSession.shared.dataTask(with:server.path("game/native/models/"+name)){data,response,_ in
+            NativeResourceTransport.dataTask(with:server.path("game/native/models/"+name)){data,response,_ in
                 lock.lock();if (response as? HTTPURLResponse)?.statusCode==200,let data{files[name]=data};lock.unlock();group.leave()
             }.resume()
         }

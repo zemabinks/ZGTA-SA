@@ -112,6 +112,11 @@ final class NativeGameManagementController: NativeDEPanelViewController, UITextF
 
     private func buildIndex() {
         column.addArrangedSubview(label(server?.display ?? "NO SERVER SELECTED"))
+        button("GAME FILES") { [weak self] in
+            guard let self,self.active,self.presentedViewController == nil else{return}
+            let next=NativeGameFilesViewController();next.modalPresentationStyle = .fullScreen
+            self.present(next,animated:!self.menuMotionReduced)
+        }
         for (title, page) in [("LOCAL PROFILE", Page.profile), ("STATISTICS", .statistics),
                               ("SERVER INFORMATION", .server), ("LEARN TO PLAY", .learn), ("CREDITS", .credits)] {
             button(title) { [weak self] in self?.open(page) }

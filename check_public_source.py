@@ -9,8 +9,31 @@ import sys
 TEXT = {'.md', '.py', '.js', '.swift', '.metal', '.plist', '.h', '.c', '.cpp', '.hpp', '.pwn', '.rs', '.sh',
         '.command', '.yml', '.yaml', '.toml', '.lock', '.modulemap', '.pbxproj',
         '.xcworkspacedata', '.xcscheme', '.txt', '.go', '.mod'}
+# This owner-only carrier executes archived client code and stays outside releases.
+PRIVATE_SOURCE_NAMES = {'smoke_selfhost_vehicle_seats_browser.js',
+                        'test_native_actor_resources.py', 'test_native_prepared_runtime.py',
+                        'test_native_vehicle_occupants.py'}
 BAD_PARTS = {'local-only', '_next', 'node_modules', 'DerivedData', 'build',
              '__pycache__', 'xcuserdata', '.venv', '.git'}
+# Keep this independently authored bridge and its pinned MIT subset explicit.
+# In particular, admitting its two provenance/patch JSON files must not admit
+# archive inventories, owner fixtures, assets or additional vendored payloads.
+NATIVE_INSTALLER_SOURCE = {
+    'README.md', 'NOTICE.md',
+    'include/module.modulemap', 'include/zgtasa_installer.h',
+    'src/zgtasa_installer.c', 'src/md5/global.h', 'src/md5/md5.h',
+    'swift/NativeISOExtraction.swift', 'swift/NativeRawResourceSelection.swift',
+    'tests/link.swift', 'tests/main.swift', 'tests/sanitize.c', 'tests/split.swift',
+    'patches/unsigned-le32.json',
+    'vendor/unshield/LICENSE', 'vendor/unshield/PROVENANCE.json',
+    'vendor/unshield/lib/cabfile.h', 'vendor/unshield/lib/component.c',
+    'vendor/unshield/lib/converter.c', 'vendor/unshield/lib/converter.h',
+    'vendor/unshield/lib/directory.c', 'vendor/unshield/lib/file.c',
+    'vendor/unshield/lib/file_group.c', 'vendor/unshield/lib/helper.c',
+    'vendor/unshield/lib/internal.h', 'vendor/unshield/lib/libunshield.c',
+    'vendor/unshield/lib/libunshield.h', 'vendor/unshield/lib/log.c',
+    'vendor/unshield/lib/log.h',
+}
 PATTERNS = [
     ('private key', re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----')),
     ('GitHub token', re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{30,})\b')),
@@ -22,8 +45,12 @@ PATTERNS = [
 
 def allowed(name):
     path = PurePosixPath(name)
+    if path.name in PRIVATE_SOURCE_NAMES:
+        return False
     if path.is_absolute() or '..' in path.parts or any(part in BAD_PARTS for part in path.parts):
         return False
+    if path.parts and path.parts[0] == 'native-installer':
+        return path.relative_to('native-installer').as_posix() in NATIVE_INSTALLER_SOURCE
     if path.name in ('.gitignore', 'LICENSE'):
         return True
     if any(part.startswith('.env') for part in path.parts):
@@ -60,7 +87,7 @@ def source_files(root):
         for path in sorted((root / 'ios').iterdir()):
             if path.is_file() and allowed(path.relative_to(root).as_posix()):
                 yield path
-    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'tests', 'test-fixtures/native-menu', '.github'):
+    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'native-installer', 'tests', 'test-fixtures/native-menu', '.github'):
         base = root / directory
         if base.is_dir():
             for path in sorted(base.rglob('*')):

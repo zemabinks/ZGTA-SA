@@ -71,7 +71,14 @@ final class MainMenuViewController: UIViewController {
         guard presentedViewController==nil,UIApplication.shared.applicationState == .active else{return}
         select(index,sound:false);NativeMenuAudio.shared.play(.start)
         let next:UIViewController
-        switch index {case 0:next=HomeViewController();case 1:next=NativeGameManagementController();default:next=NativeOptionsViewController()}
+        switch index {
+        case 0:
+            let resources=NativeResourceStore.shared.snapshot
+            next = resources.mode == .installed && !resources.hasPlayableInstallation
+                ? NativeGameFilesViewController(coordinator:.shared) : HomeViewController()
+        case 1:next=NativeGameManagementController()
+        default:next=NativeOptionsViewController()
+        }
         next.modalPresentationStyle = .fullScreen;present(next,animated:!reduced)
     }
     override func pressesBegan(_ presses:Set<UIPress>,with event:UIPressesEvent?) {

@@ -34,6 +34,7 @@ struct ProbeWeapon {var name="Fixture",capacity=17,supportsAttack=true}
 final class ProbeWeapons {var current=ProbeWeapon(),selected=22,reloading=false}
 final class ProbeNetwork {var health=100}
 final class ProbeRenderer {
+    var isPassenger=false
     var vehicleKind="car",hasVehicleWorkingControls=false,hasJetNozzle=false,vehicleWorkingIsTow=false
     var canUnhitchVehicle=false,hasLandingGear=false,hasVehicleHorn=false,isChuting=false
     var canNativeFootMeleeGuard=false,supportsFootWeaponAim=true
@@ -41,7 +42,7 @@ final class ProbeRenderer {
 }
 struct ProbeMode {
     var name:String,kind:String?=nil,working=false,tow=false,nozzle=false,unhitch=false,gear=false,horn=false
-    var pistol=true,melee=false,guarding=false,attack=true,deploy=false,dead=false
+    var pistol=true,melee=false,guarding=false,attack=true,deploy=false,dead=false,passenger=false
 }
 struct ProbeGeometry {let name:String,size:CGSize,insets:UIEdgeInsets}
 let probeModes:[ProbeMode]=[
@@ -51,6 +52,7 @@ let probeModes:[ProbeMode]=[
     .init(name:"car-unhitch",kind:"car",unhitch:true,horn:true),.init(name:"motorcycle",kind:"bike",horn:true),
     .init(name:"bicycle",kind:"bicycle"),.init(name:"boat",kind:"boat",horn:true),
     .init(name:"plane",kind:"plane",gear:true),.init(name:"helicopter",kind:"helicopter",gear:true),
+    .init(name:"passenger-car",kind:"car",passenger:true),.init(name:"passenger-bike",kind:"bike",passenger:true),
     .init(name:"train",kind:"train",horn:true),.init(name:"working",kind:"car",working:true,horn:true),
     .init(name:"tow-unhitch",kind:"car",working:true,tow:true,unhitch:true,horn:true),
     .init(name:"vtol",kind:"plane",nozzle:true,gear:true)]
@@ -107,7 +109,7 @@ func runMatrix(make:()->ProbeController)->[String:Any]{
             check(overlap.isNull || overlap.width*overlap.height<0.01,"Visible controls overlap",mode.name,geometry.name,["first":a.0,"second":b.0])
         }}
         let byName=Dictionary(uniqueKeysWithValues:named)
-        let driving=mode.kind != nil,road=driving && !["plane","helicopter","boat","train"].contains(mode.kind!)
+        let aboard=mode.kind != nil,driving=aboard && !mode.passenger,road=driving && !["plane","helicopter","boat","train"].contains(mode.kind!)
         if let handbrake=byName["handbrakeButton"] {
             check(handbrake.isHidden == !road,"Handbrake visibility disagrees with road context",mode.name,geometry.name)
             if road {
@@ -125,7 +127,7 @@ func runMatrix(make:()->ProbeController)->[String:Any]{
                 }
             }
         }
-        check(byName["jumpButton"]!.isHidden==driving,"Driving reused visible Jump control",mode.name,geometry.name)
+        check(byName["jumpButton"]!.isHidden==aboard,"Driving reused visible Jump control",mode.name,geometry.name)
         check(byName["brakeButton"]!.isHidden == !driving,"Brake visibility disagrees with driving",mode.name,geometry.name)
         if driving {
             for release:UIControl.Event in [.touchUpInside,.touchUpOutside,.touchCancel] {

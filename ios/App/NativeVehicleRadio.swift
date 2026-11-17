@@ -26,9 +26,9 @@ final class NativeVehicleRadio {
     private var player: AVPlayer?
     private var itemObservation: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
-    private var request: URLSessionDataTask?
-    private var programRequest: URLSessionDataTask?
-    private var indexRequest: URLSessionDataTask?
+    private var request: NativeResourceTask?
+    private var programRequest: NativeResourceTask?
+    private var indexRequest: NativeResourceTask?
     private var generation = 0
     private var positions: [Int: Double] = [:]
     private var notifications: [NSObjectProtocol] = []
@@ -148,7 +148,7 @@ final class NativeVehicleRadio {
         player?.pause(); player = nil; loadedIndex = nil
     }
     private func loadProgram() {
-        programRequest = URLSession.shared.dataTask(with: server.path("game/native/radio.program.json")) { [weak self] data, response, _ in
+        programRequest = NativeResourceTransport.dataTask(with: server.path("game/native/radio.program.json")) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200,
                   let value = try? NativeRadioProgram(data: data) else { return }
             DispatchQueue.main.async {
@@ -157,7 +157,7 @@ final class NativeVehicleRadio {
                 else if self.wantsPlayback { self.tune() }
             }
         }
-        indexRequest = URLSession.shared.dataTask(with: server.path("game/radio/native/index")) { [weak self] data, response, _ in
+        indexRequest = NativeResourceTransport.dataTask(with: server.path("game/radio/native/index")) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200,
                   let value = try? JSONDecoder().decode(Index.self, from: data) else { return }
             DispatchQueue.main.async {
@@ -205,7 +205,19 @@ final class NativeVehicleRadio {
         play(url: url, token: token, tuningIndex: index, title: song.name.uppercased(), userSong: true)
     }
     private func play(url: URL, token: Int, tuningIndex: Int, title: String, userSong: Bool = false) {
-        let item = AVPlayerItem(url: url)
+        DispatchQueue.global(qos:.utility).async{[weak self] in
+            let source=Result{try NativeResourceTransport.localFile(for:url) ?? url}
+            DispatchQueue.main.async{[weak self] in
+                guard let self,token==self.generation else{return}
+                switch source {
+                case .failure:self.onStatus?("RADIO RESOURCE NEEDS REPAIR")
+                case .success(let resolved):self.playResolved(url:resolved,token:token,tuningIndex:tuningIndex,title:title,userSong:userSong)
+                }
+            }
+        }
+    }
+    private func playResolved(url source:URL,token:Int,tuningIndex:Int,title:String,userSong:Bool){
+        let item = AVPlayerItem(url: source)
         player = AVPlayer(playerItem: item); player?.volume = max(0, min(1, volume)); loadedIndex = tuningIndex
         onStatus?("LOADING \(title)")
         itemObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
@@ -244,7 +256,7 @@ final class NativeVehicleRadio {
         }
         let url = server.path("game/radio/custom/\(station.file).\(format)"), tuningIndex = index
         var head = URLRequest(url: url); head.httpMethod = "HEAD"
-        request = URLSession.shared.dataTask(with: head) { [weak self] _, response, _ in
+        request = NativeResourceTransport.dataTask(with: head) { [weak self] _, response, _ in
             DispatchQueue.main.async {
                 guard let self, token == self.generation else { return }
                 if (response as? HTTPURLResponse)?.statusCode == 200 {

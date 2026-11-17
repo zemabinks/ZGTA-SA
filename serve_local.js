@@ -10,6 +10,7 @@ const {pipeline} = require('stream/promises');
 const ROOT = path.join(__dirname, 'local-only', 'site');
 const LOCAL_ONLY = path.join(__dirname, 'local-only');
 const stockNative = require('./stock_native_assets').create({localOnly: LOCAL_ONLY});
+const preparedResources = require('./native_resource_server').create({localOnly: LOCAL_ONLY});
 const MANIFEST = path.join(LOCAL_ONLY, 'manifest.json');
 const CONNECTED = process.env.ZGTA_CONNECTED === '1';
 const SELFHOST = process.env.ZGTA_SELFHOST === '1';
@@ -20,7 +21,10 @@ if (SELFHOST && HOST !== '127.0.0.1' && HOST !== '::1' &&
     (!(process.env.ZGTA_JOIN_CODE || process.env.ZGTA_JOIN_CODE_FILE) || !process.env.ZGTA_ALLOWED_HOSTS))
   throw new Error('Network hosting requires a join code and ZGTA_ALLOWED_HOSTS.');
 const localGame = SELFHOST ? require('./selfhost_backend') : null;
-const nativeRadio = SELFHOST ? require('./native_radio_server').create({python: process.env.ZGTA_PYTHON || 'python3'}) : null;
+const nativeRadio = SELFHOST ? require('./native_radio_server').create({
+  python: process.env.ZGTA_PYTHON || 'python3',
+  cache: process.env.ZGTA_RADIO_CACHE || path.join(LOCAL_ONLY, 'native-radio-cache')
+}) : null;
 const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
   ...(process.env.ZGTA_ALLOWED_HOSTS || '').split(',').map(host => host.trim()).filter(Boolean)]);
 const UPSTREAM = 'play.samp.directory';
@@ -267,6 +271,8 @@ function serve(req, res) {
       res.writeHead(401); return res.end('Access code required');
     }
   }
+  // Prepared resource manifests/blobs retain the normal Host/Origin/join gate.
+  if (preparedResources.matches(pathname)) {preparedResources.handle(req,res,pathname);return;}
   // Reserved native stock routes always resolve locally, after access checks.
   // An unprepared checkout must never fetch these resources from the live site.
   if (stockNative.matches(pathname, req.url)) {

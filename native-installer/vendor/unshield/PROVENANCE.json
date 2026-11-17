@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/twogood/unshield",
+  "commit": "3914dffb32ad05ebcb3e7f64a033e69b59127f47",
+  "license": "MIT; LICENSE retained",
+  "scope": "Unmodified library C/headers only. No executables, CAB, ISO or assets. Upstream RSA MD5 implementation omitted; independent Apple CommonCrypto adapter supplies archive MD5.",
+  "files": {
+    "LICENSE": "3aaecd6f4440a1456c7d6fee4fe82a4d47af55646ae3daa1c806c717a9385bba",
+    "lib/log.c": "34b5bd4102c3ed079e3805f142cb525aa31059882b498919278b41b641db776c",
+    "lib/directory.c": "e9f194f75d98013e2909707376ac125ec74bf740559d80d4f9c3844bb91d122d",
+    "lib/internal.h": "1505db3334130a309cadfc25177f330d15b2b9fc9e4c2086e9a53ff625c7f5a3",
+    "lib/file_group.c": "ee9cfbbe09bd8212d0e6835653b9cd74edcbffde428e90363c0cd3e4d4ead9ab",
+    "lib/component.c": "af32acce5365591c42ba1485edbb2dad1e086c4fcf628a6df0f5a85a35326d1a",
+    "lib/libunshield.h": "099076a1ba79ec3664a2912392dff0118c22dbc88c85f44ce9c491507d93f18d",
+    "lib/converter.h": "2ea4a6074d3da4587e6be02c9a68524aa975554e53aab8145fb4f08c5e472cb9",
+    "lib/helper.c": "16e3655757341de443681f1fd5c732c45c135cda004b90bf94b643fdd2574bc0",
+    "lib/log.h": "2ac799212821aef8e58bc89906eab582d88747678bc13fd5ba96840fd0530846",
+    "lib/file.c": "505491287cd1c13f208618c7bc23d99083d12be2933f1e05989695160bda37be",
+    "lib/cabfile.h": "f19af6a3a4575bacd7ef6e10345db98ee66a50eec84fe3e477fdcc0be2d9359a",
+    "lib/converter.c": "5d10f0a0e4f0a51274c9957cbfd0eab5d00da9259576fef035bd89d85ec09e4a",
+    "lib/libunshield.c": "bd8a444f169fa4c67e081d34a4691c4b265dad3f0fce28ad28daa3a63c00be00"
+  }
+}

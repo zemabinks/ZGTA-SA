@@ -9,19 +9,35 @@ final class NativeGameplayIdleTimer {
     private let write:(Bool)->Void
     private var owner:UUID?
     private var previous:Bool?
+    private var gameplayActive=false
+    private var resourceOwners=Set<UUID>()
 
     init(read:@escaping()->Bool,write:@escaping(Bool)->Void){self.read=read;self.write=write}
     func claim(_ token:UUID,active:Bool){
-        if owner==nil{previous=read()}
-        owner=token;apply(active ? true:previous ?? false)
+        if owner==nil,resourceOwners.isEmpty{previous=read()}
+        owner=token;gameplayActive=active;refresh()
     }
     func setActive(_ token:UUID,_ active:Bool){
         guard owner==token else{return}
-        apply(active ? true:previous ?? false)
+        gameplayActive=active;refresh()
     }
     func release(_ token:UUID){
         guard owner==token else{return}
-        let restore=previous ?? false;owner=nil;previous=nil;apply(restore)
+        owner=nil;gameplayActive=false;refresh()
+    }
+    /// Installation has an independent foreground lease. Completing a cache
+    /// transfer cannot release a still-active game's display-sleep ownership.
+    func setResourceActive(_ token:UUID,_ active:Bool){
+        if active {
+            if owner==nil,resourceOwners.isEmpty{previous=read()}
+            resourceOwners.insert(token)
+        }else{resourceOwners.remove(token)}
+        refresh()
+    }
+    private func refresh(){
+        if owner==nil,resourceOwners.isEmpty {
+            if let restore=previous{previous=nil;apply(restore)}
+        }else{apply(gameplayActive || !resourceOwners.isEmpty ? true:previous ?? false)}
     }
     private func apply(_ value:Bool){if read() != value{write(value)}}
 }

@@ -7,6 +7,9 @@ final class Radio {var stops=0;func stop(){stops+=1}}
 final class Gameplay {var inventoryConnection:String?}
 final class Network {
  var legacySpectating=false
+ var passengerPublications:[SIMD3<Float>]=[]
+ func sendPassengerPosition(_ position:SIMD3<Float>,heading:Float,action:Int,velocity:SIMD3<Float>,paused:Bool){order.append("passenger");passengerPublications.append(position)}
+ func sendPassengerExit(_ feet:SIMD3<Float>,heading:Float){order.append("passenger-exit");exitFeet=feet}
  var isReady=true,health=100,couplingAcknowledgements=true,couplingRevision:Int?=0,inventoryConnection:String?="one"
  var onInventoryConnection:((String?)->Void)?,onCouplings:(([NativeCouplingLink],Int,String)->Void)?
  var order:[String]=[],pending:[(Bool)->Void]=[],requestResult=true,onMove:(()->Void)?
@@ -32,6 +35,8 @@ final class Network {
  }
 }
 final class Renderer {
+ var isPassenger=false
+ var passengerWirePosition=SIMD3<Float>(77,88,99),passengerVelocity=SIMD3<Float>(1,2,0)
  var legacySpectatorPosition:SIMD3<Float>?=SIMD3(123.375,-245.625,31.875)
  var legacyVehicleQuaternion:SIMD4<Float>?=SIMD4(0.1,0.2,0.3,0.9)
  var hasVehicleWorkingControls=false,hasJetNozzle=false,vehicleWorkingIsTow=false,canUnhitchVehicle=false
@@ -188,3 +193,12 @@ utility.select(40);utility.updateAuxiliaryControls();check(!utility.attackButton
 utility.select(46);utility.renderer!.isChuting=true;utility.updateAuxiliaryControls();check(!utility.attackButton.isHidden && utility.attackButton.title=="DEPLOY","Parachute utility lost real deploy action")
 utility.network.health=0;utility.updateAuxiliaryControls();check(!utility.attackButton.isHidden && utility.attackButton.title=="RESPAWN","Dead parachutist lost respawn action")
 print("PASS actual coupling controls: \(checks) full-pose/ACK-generation/exit/UI/working-touch/namespace/utility checks")
+
+let passengerGame=Game();passengerGame.renderer!.isPassenger=true
+passengerGame.publishSupport()
+check(passengerGame.network.order==["passenger"]&&passengerGame.network.passengerPublications==[SIMD3<Float>(77,88,99)],"Passenger published ordinary foot/driver/support authority")
+passengerGame.setDrivingControls(true)
+check(passengerGame.gasButton.isHidden&&passengerGame.brakeButton.isHidden&&passengerGame.handbrakeButton.isHidden && !passengerGame.vehicleButton.isHidden,"Passenger exposed driver pedals or lost exit control")
+
+check(passengerGame.weaponButton.isHidden&&passengerGame.reloadButton.isHidden&&passengerGame.aimButton.isHidden&&passengerGame.crouchButton.isHidden&&passengerGame.attackButton.isHidden,"Passenger exposed nonfunctional foot combat controls")
+print("PASS passenger role publication and controls: \(checks) total checks")

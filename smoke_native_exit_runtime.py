@@ -19,17 +19,21 @@ def main():
  harness=harness.replace('// ACTUAL_CONTROLLER_EXIT',function(vc,'    private func completeVehicleExit('))
  harness=harness.replace('var direction:Float{driving ? heading:actorHeading}',function(renderer,'    var direction:')).replace('var legacyVehicleQuaternion:SIMD4<Float>?{nil}',function(renderer,'    var legacyVehicleQuaternion:'))
  harness=harness.replace(' let collision:ExitCollision?=ExitCollision()', ''' var riderDefinitions:NativeRiderDefinitions?
+ struct LegacyCameraCollision {var cameraExcludedColliderIDs=Set<UInt64>()}
+ var legacyCollisionWorld:LegacyCameraCollision?
  var geometryReady=true,missingCells=Set<String>(),requestedCells=Set<String>()
  var riderDoorHolds:[String:[Int:Double]]=[:]
- func worldRay(from start:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,groups:UInt32)->NativeWorldRay.Result {
+ func worldRay(from start:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,groups:UInt32,excluding:Set<UInt64>=[])->NativeWorldRay.Result {
   if let coverage=NativeWorldRay.coverage(from:start,to:start+direction*distance,interior:false,loaded:{_ in true}){requestedCells.formUnion(coverage.cells)}
   let world=groundVehicle!.world
   return NativeWorldRay.query(from:start,direction:direction,distance:distance,interior:false,loaded:{self.geometryReady && !self.missingCells.contains($0)}) {p,way,d in
-   world.raycast(origin:SwiftRapierWorld.gtaToRapier(p),direction:SwiftRapierWorld.gtaToRapier(way),distance:d,groups:groups).map{.init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))}
+   world.raycast(origin:SwiftRapierWorld.gtaToRapier(p),direction:SwiftRapierWorld.gtaToRapier(way),distance:d,excludingColliders:excluding,groups:groups).map{.init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))}
   }
  }
  func resolve(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement{resolveVehicleExit(wanted:wanted)}
  let collision:ExitCollision?=ExitCollision()''')
+ camera=' func configureCameraTrace(){\n'+function(renderer,'        gameCamera.trace =')+'\n}\n'
+ harness=harness.replace(' func dispatch(){dispatchOwnedVehicleExit()}', ' func dispatch(){dispatchOwnedVehicleExit()}\n'+camera)
  source+='\n'+harness+'\n'+before['smoke_native_exit_runtime.swift'].decode()
  with tempfile.TemporaryDirectory(prefix='snapshot-',dir=out) as temp:
   work=Path(temp);sources=[]

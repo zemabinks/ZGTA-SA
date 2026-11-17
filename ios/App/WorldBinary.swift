@@ -15,8 +15,11 @@ struct WorldBinary {
     let vertices: [NativeVertex]
     let indices: [UInt32]
     let layers: Int
+    /// Malformed source UV components are mapped to zero before GPU upload.
+    /// This is a deterministic fallback, not recovery of an unknown original UV.
+    let repairedUVComponents: Int
 
-    enum Error: Swift.Error { case invalidHeader, invalidLength, invalidIndex }
+    enum Error: Swift.Error { case invalidHeader, invalidLength, invalidIndex, invalidVertex }
 
     init(data: Data) throws {
         let bytes = [UInt8](data)
@@ -43,15 +46,19 @@ struct WorldBinary {
         guard sharpEnd <= bytes.count else { throw Error.invalidLength }
         let unit: Float = 1 / 255
         var madeVertices: [NativeVertex] = []
+        var repairedUVs = 0
         madeVertices.reserveCapacity(count)
         for n in 0..<count {
             let p = positions + n * 12, uv = uvs + n * 8
             let t = tintStart + n * 4, d = duskStart + n * 4
             let layer = Int(u16(layerStart + n * 2))
             guard layer < layerCount else { throw Error.invalidIndex }
+            let x=f32(p),y=f32(p+4),z=f32(p+8),u=f32(uv),v=f32(uv+4)
+            guard x.isFinite,y.isFinite,z.isFinite else{throw Error.invalidVertex}
+            if !u.isFinite{repairedUVs+=1};if !v.isFinite{repairedUVs+=1}
             madeVertices.append(NativeVertex(
-                position: SIMD4(f32(p), f32(p + 4), f32(p + 8), 1),
-                uvLayer: SIMD4(f32(uv), f32(uv + 4), Float(layer), 0),
+                position: SIMD4(x,y,z,1),
+                uvLayer: SIMD4(u.isFinite ? u:0,v.isFinite ? v:0,Float(layer),0),
                 tint: SIMD4(Float(bytes[t]) * unit, Float(bytes[t + 1]) * unit,
                             Float(bytes[t + 2]) * unit, Float(bytes[t + 3]) * unit),
                 dusk: SIMD4(Float(bytes[d]) * unit, Float(bytes[d + 1]) * unit,
@@ -67,5 +74,6 @@ struct WorldBinary {
         vertices = madeVertices
         indices = madeIndices
         layers = layerCount
+        repairedUVComponents = repairedUVs
     }
 }

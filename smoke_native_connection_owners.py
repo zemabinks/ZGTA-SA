@@ -53,6 +53,7 @@ final class Renderer {
  let groundVehicle:Body?=Body(),personalFlight=Flight()
  let vehicleCoupling:Couplings?=Couplings()
  var couplingConnection:String?="old-connection",couplingSnapshot:Int?=1
+ var passengerSeat:Int?=1,passengerFrame:Int?=1,passengerAccumulator=0.25
  var driving=true,currentVehicleID:String?="old-car",drivingSpeed:Float=25,flightVerticalSpeed:Float=4
  var vehiclePitch:Float=0.2,vehicleFallbackRoll:Float=0.1,activeModelOrigin:Float=1
  var pendingVehicleBodyPose:Int?=1,activeVehicleModel="410",activeHandling:Int?=1,vehicleKind="car"
@@ -140,6 +141,7 @@ check(game.renderer!.remotePlayers.isEmpty && game.renderer!.remoteVehicles.isEm
 let world=game.renderer!
 check(world.vehicleRigStates.isEmpty && world.vehicleRigTimes.isEmpty && world.vehicleRigSpins.isEmpty,"old vehicle presentation survives new peer")
 check(world.remoteRiderPlayback.isEmpty && world.remoteRiderActions.isEmpty && world.remoteRiderCapture.isEmpty && world.remoteRiderPrevious.isEmpty && world.remoteRiderAnimations.isEmpty,"same-id rider reused an old session task/pose")
+check(world.passengerSeat==nil && world.passengerFrame==nil && world.passengerAccumulator==0,"new peer retains old passenger authority/frame/timing")
 check(world.remoteFootAnimations.isEmpty && world.remoteBikeAnimations.isEmpty && world.remoteBikeSamples.isEmpty && world.remoteBikeFrames.isEmpty,"same-id remote ped reused old animation samples")
 check(world.flightCanopyPoses.isEmpty && world.flightCanopyLanded.isEmpty && world.flightAudioVoices.isEmpty,"own landed canopy or old flight audio survives new world")
 check(world.lastRiderDraw==0 && world.remoteServerTimeOffsetMilliseconds==nil,"old animation/server clock survives")

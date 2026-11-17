@@ -23,7 +23,7 @@ def main():
  position=function(mp,'    func sendPosition(');position=position[:position.index('{')]
  exit_method=function(mp,'    func sendExit(');exit_method=exit_method[:exit_method.index('{')]
  spectator=function(mp,'    @discardableResult func sendSpectatorPosition(');spectator=spectator[:spectator.index('{')]
- types='\n'+function(mp,'struct RemoteVehicle {')+'\n'+function(mp,'struct NativeCouplingLink:')+'\nfinal class NativeVehicleCoupling {\n'+function(coupling,'    enum Kind:')+'\n'+function(coupling,'    struct Request:')+'\n}\n'
+ types='\n'+function(mp,'struct NativeVehicleSeatSession {')+'\n'+function(mp,'struct RemoteVehicle {')+'\n'+function(mp,'struct NativeCouplingLink:')+'\nfinal class NativeVehicleCoupling {\n'+function(coupling,'    enum Kind:')+'\n'+function(coupling,'    struct Request:')+'\n}\n'
  event=function(inputs['ios/App/NativeVehicleDamageController.swift'].decode(),'    struct Event {')
  types+='\nenum NativeBikeEjection {typealias V=SIMD3<Double>;'+event+'}\n'
  source='import Foundation\nimport simd\n'+types

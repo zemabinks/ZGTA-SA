@@ -11,7 +11,7 @@ async function main(){
   const local=path.join(temporary,'local-only'),catalog=path.join(local,'selfhost/coupling-catalog.json');
   const archive=path.join(local,'site/game/native/models'),stage=path.join(local,'native-working/models');
   for(const directory of [path.dirname(catalog),archive,stage])fs.mkdirSync(directory,{recursive:true});
-  for(const file of ['serve_local.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','vehicle_coupling.js','optional_discord.js',
+  for(const file of ['serve_local.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','vehicle_coupling.js','optional_discord.js',
     'weapon_inventory.js','world_collision.js','local_projectiles.js','native_radio_server.js','radio_streams.js'])
     fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
   for(const [name,value]of[['client-catalog.json',{vehicles:[],homes:[]}],['weapon-catalog.json',{items:[],shops:[]}]])

@@ -30,7 +30,7 @@ final class NativeHUDResources {
         var files: [String: Data] = [:]
         for name in ["font1-white.png", "font2-white.png", "font-layout.json", "sprites.png", "sprites.json", "places.json"] {
             group.enter()
-            URLSession.shared.dataTask(with: server.path("game/native/hud/\(name)")) { data, response, _ in
+            NativeResourceTransport.dataTask(with: server.path("game/native/hud/\(name)")) { data, response, _ in
                 if (response as? HTTPURLResponse)?.statusCode == 200, let data {
                     lock.lock(); files[name] = data; lock.unlock()
                 }
@@ -495,7 +495,7 @@ final class NativeGameHUD: UIView {
     }
     func loadWeaponIcon(server: ServerAddress, weapon id: Int) {
         weaponRequestID = id
-        URLSession.shared.dataTask(with: server.path("reference/weapons/\(id).png")) { [weak self] data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("reference/weapons/\(id).png")) { [weak self] data, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200, let data, let image = UIImage(data: data) else { return }
             DispatchQueue.main.async { if self?.weaponRequestID == id { self?.weaponIcon.image = image } }
         }.resume()
@@ -576,7 +576,7 @@ final class NativeRadarView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
     func loadMap(server: ServerAddress) {
-        URLSession.shared.dataTask(with: server.path("tools/map/radar.webp")) { [weak self] data, response, _ in
+        NativeResourceTransport.dataTask(with: server.path("tools/map/radar.webp")) { [weak self] data, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200, let data, let image = UIImage(data: data) else { return }
             DispatchQueue.main.async { self?.mapImage = image }
         }.resume()

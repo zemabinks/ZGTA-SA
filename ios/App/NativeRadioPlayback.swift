@@ -134,15 +134,28 @@ final class NativeRadioPlayback {
     }
     private func download(_ id: Int) {
         guard loading == nil, let url = tracks[id], let cache else { return }
+        loading=id;let token=generation
+        DispatchQueue.global(qos:.utility).async{[weak self] in
+            let resolved=Result{try NativeResourceTransport.localFile(for:url)}
+            DispatchQueue.main.async{[weak self] in
+                guard let self,token==self.generation,self.loading==id else{return}
+                switch resolved {
+                case .failure:self.loading=nil;self.failed.insert(id);self.onFailure?();self.pump()
+                case .success(let installed):
+                    if let installed{self.files[id]=installed;self.loading=nil;self.pump()}
+                    else{self.downloadRemote(id,url:url,cache:cache,token:token)}
+                }
+            }
+        }
+    }
+    private func downloadRemote(_ id:Int,url:URL,cache:URL,token:Int){
         let digest = SHA256.hash(data: Data(url.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
         let destination = cache.appendingPathComponent(digest + ".wav")
         if FileManager.default.fileExists(atPath: destination.path) {
-            files[id] = destination
+            files[id] = destination;loading=nil
             try? FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: destination.path)
-            return
+            pump();return
         }
-        loading = id
-        let token = generation
         request = URLSession.shared.downloadTask(with: url) { [weak self] temporary, response, _ in
             var saved: URL?
             if let temporary, (response as? HTTPURLResponse)?.statusCode == 200 {

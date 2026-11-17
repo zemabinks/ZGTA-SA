@@ -55,14 +55,20 @@ try {
   const before = game.ownedVehicle(first.player, 0);
   first.player.garage[0].health = 600;
   first.player.garage[0].damage = 'bent';
-  stateB.walking = false; stateB.driving = true; stateB.vehicle = before.id;
+  game.onMessage(secondPeer,{t:'enter',v:before.id});
+  game.onMessage(secondPeer,{t:'me',walking:false,driving:true,skin:7,
+    vehicle:before.id,car:before.row[2],x:before.row[3],y:before.row[4],z:before.row[5],
+    health:600,damage:'bent'});
+  assert.equal(game.vehicleDriver(before),secondPeer,'Workshop fixture must establish actual driver authority');
   assert.throws(() => game.action(first.player, 'supply.use',
     {item: 'repair_kit', slot: 0}), /until everyone leaves/);
   assert.throws(() => game.action(first.player, 'car.spawn', {slot: 0}),
     /until everyone leaves/);
   assert.equal(first.player.supplies.repair_kit, 1);
   assert.equal(game.ownedVehicle(first.player, 0).id, before.id);
-  stateB.walking = true; stateB.driving = false; delete stateB.vehicle;
+  game.onMessage(secondPeer,{t:'me',...stateB,skin:7});
+  assert.equal(game.vehicleClaim(before),null,'Workshop exit must release actual driver authority');
+  secondPeer.state=stateB;
   assert.match(game.action(first.player, 'supply.use', {item: 'repair_kit', slot: 0}).message,
     /used on Manana/);
   assert.equal(first.player.garage[0].health, 1000);

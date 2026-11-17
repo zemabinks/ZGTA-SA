@@ -106,6 +106,7 @@ def setup(args):
             ('prepare_native_foot_animation.js',),
             ('prepare_native_flight_assets.js', '--archive-missing'),
             ('prepare_native_radio.js',),
+            ('prepare_native_resource_package.py',),
         ]
         for command in scripts:
             run(*command)

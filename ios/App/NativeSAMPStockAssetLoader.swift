@@ -278,6 +278,13 @@ private final class StockAssetJob {
         if file.url.isFileURL {
             do { try consume(readLocal(file),index:index) } catch { finish(.failure(error)) };return
         }
+        do {
+            if let bytes=try NativeStockAssetAccess.preparedData(for:file.url,maximumBytes:file.metadata.bytes){
+                var sink=StockAssetSink(metadata:file.metadata)
+                try sink.append(bytes)
+                try consume(sink.finish(),index:index);return
+            }
+        } catch {finish(.failure(error));return}
         let current=StockAssetTransfer(file:file,limits:limits,access:access) { [weak self] result in
             guard let self else{return}
             self.queue.async {
