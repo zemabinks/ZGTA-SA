@@ -14,7 +14,8 @@ def main():
  assert 'let driving = !code.hasPrefix("s")'in network
  assert 'if Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID)'in renderer
  assert 'let drivenVehicleIDs = Set(remotePlayers.compactMap(\\.vehicleID))'in renderer
- assert 'let player=remotePlayers.first{Self.remoteAppearanceIsDriver'in renderer
+ assert 'let player=context.player,parked=context.parked,own=context.own,token=context.token'in renderer
+ assert 'let player=remotePlayers.first{Self.remoteAppearanceIsDriver'not in renderer
  source='''import Foundation
 import simd
 // ACTUAL_REMOTE_PLAYER
@@ -46,7 +47,7 @@ final class Carrier {
   check(remoteBikeSamples["bike"]!.0.speed==3 && remoteBikeSamples["bike"]!.0.serial==1000 && remoteBikeSamples["bike"]!.0.time==5)
   recordRemoteAnimationPackets();check(remoteBikeSamples["bike"]!.1==nil)
   check(Self.remoteDriverRenderKey(playerID:"car",vehicleID:nil) != Self.remoteDriverRenderKey(playerID:"bike",vehicleID:nil))
-  check(Self.remoteDriverRenderKey(playerID:"registered",vehicleID:"owned")=="owned")
+  check(Self.remoteDriverRenderKey(playerID:"registered",vehicleID:"owned")=="vehicle:5:owned")
   check(car.vehicleID==nil && bike.vehicleID==nil && passenger.vehicleID==nil)
   remotePlayers=[p("car","s7"),passenger]
   recordRemoteAnimationPackets();check(remoteBikeSamples.isEmpty)

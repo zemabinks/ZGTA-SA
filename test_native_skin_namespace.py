@@ -225,7 +225,10 @@ def main():
     helpers = '\n'.join(balanced(backend, marker) for marker in
                         ['function finite(', 'function limited(', 'function rounded('])
     row_function = balanced(backend, '  row(peer) {')
-    factory = '(function(){' + helpers + '\nclass Game{' + row_function + '}return new Game()})()'
+    row_dependencies = '\n'.join(balanced(backend, marker) for marker in
+                                ['  passengerClaim(', '  unboundVehicleReport(', '  validVehiclePose('])
+    factory = ('(function(){' + helpers + '\nclass Game{' + row_dependencies + '\n' + row_function +
+               '}return Object.assign(new Game(),{passengerClaims:new Map(),vehicles:new Map()})})()')
     js += 'const server=vm.runInNewContext(' + json.dumps(factory) + ',{Date,Math,Number});\n'
     js += 'const index=' + json.dumps(corrected['peds']) + ';let checks=0;\n'
     js += '''for(const [skin,model]of Object.entries(index)){

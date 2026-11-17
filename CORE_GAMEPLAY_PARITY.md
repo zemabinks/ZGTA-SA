@@ -34,6 +34,13 @@ Reference sources checked on 2026-11-15:
 
 ## Mechanic checklist
 
+Latest bounded checkpoint: [Core111 acceptance and regression disposition](CORE_NATIVE_ACCEPTANCE_111.md).
+Per-occurrence vehicle/cache ownership and local-foot fallback now have authored
+reproductions, complete SDK builds, and separate normal passenger/own-Taxi
+Simulator/browser acceptance. The initial broad regression remains149/166 PASS;
+qualified followups and an invalidated historical false positive are recorded
+separately. No checklist area becomes original-game verified by inference.
+
 Status: **audit** = implemented but original-game verification still required;
 **gap** = known missing/approximate behavior; **fixing** = a reproduced defect is
 being corrected. A row is only **verified** for a specifically named test and

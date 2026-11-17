@@ -78,7 +78,11 @@ def main():
         (OUT / 'runtime.log').write_text(result.stdout + result.stderr)
         unchanged = all((ROOT / name).read_bytes() == data for name, data in before.items())
         unchanged = unchanged and all((ROOT / name).read_bytes() == data for name, data in dependencies.items())
-        report = {'status': 'PASS' if result.returncode == 0 and unchanged else 'FAIL',
+        wire_report = json.loads((OUT / 'wire-report.json').read_text())
+        completed = (result.returncode == 0 and wire_report.get('status') == 'PASS' and
+                     wire_report.get('child') == {'code': 0, 'signal': None} and
+                     wire_report.get('nativeEntryGrants') == 8 and wire_report.get('browserEntryGrants') == 8)
+        report = {'status': 'PASS' if completed and unchanged else 'FAIL',
                   'sourceUnchanged': unchanged, 'output': result.stdout + result.stderr,
                   'sourceHashes': {name: hashlib.sha256(data).hexdigest() for name, data in
                                    {**before, **dependencies}.items()},
@@ -90,6 +94,7 @@ def main():
         (OUT / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
         print(result.stdout + result.stderr, end='')
         result.check_returncode()
+        assert completed, 'Actual native child and wire fixture did not both complete successfully'
         assert unchanged
 
 

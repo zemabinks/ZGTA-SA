@@ -4,7 +4,7 @@ from pathlib import Path
 import argparse,hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/game-files-107'
-SOURCES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+SOURCES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
 WRAPPERS=['NativeISOExtraction','NativeRawResourceSelection']
 def both32(n):return n.to_bytes(4,'little')+n.to_bytes(4,'big')
 def both16(n):return n.to_bytes(2,'little')+n.to_bytes(2,'big')

@@ -23,6 +23,25 @@ OWNER_CARRIERS = {
     'train_layout': ROOT / 'local-only/research/train-layout-107/smoke_train_layout.py',
     'vehicle_presence_browser': ROOT / 'local-only/research/vehicle-entry-108/smoke_selfhost_vehicle_presence_browser.cjs',
 }
+REFERENCE_HEADERS = tuple(ROOT / 'local-only/research' / name for name in (
+    'samp-artwork/openmp-network-bitstream.hpp',
+    'samp-artwork/openmp-custommodels.hpp',
+    'samp-artwork/openmp-crc32.hpp',
+    'samp-objects/openmp-network-bitstream.hpp',
+    'samp-objects/openmp-object.hpp',
+    'samp-objects/openmp-objects-impl.hpp',
+    'samp-combat/core.hpp',
+))
+OWNER_FIXTURE_ANCHORS = tuple(ROOT / 'local-only/research' / name for name in (
+    'stock-models/retail-ide/data/peds.ide',
+    'skin-identity-104/maccer-overlay/game/native/models/index.json',
+    'skin-identity-104/maccer-overlay/game/native/samp-skins.json',
+    'vehicle-paint-105/reference.json',
+    'stock-img/index.json',
+    'stock-img/stock-models.json',
+    'stock-collision/catalog.json',
+    'stock-collision-full/catalog.json',
+))
 
 
 def hashes():
@@ -44,7 +63,7 @@ def hashes():
             paths += sorted(p for p in base.rglob('*') if p.is_file()
                             and not any(part in excluded for part in p.relative_to(base).parts)
                             and (p.suffix in {'.go','.mod','.sum','.c','.cpp','.h','.hpp','.rs','.toml','.lock','.sh','.py','.js','.json','.swift','.pwn','.metal'} or p.name in {'go.mod','go.sum','COPYING','LICENSE'}))
-    paths += [ROOT/'ios/project.yml',ROOT/'ios/project-owner-menu.yml',ROOT/'ios/ZGTASA.xcodeproj/project.pbxproj',*OWNER_CARRIERS.values()]
+    paths += [ROOT/'ios/project.yml',ROOT/'ios/project-owner-menu.yml',ROOT/'ios/ZGTASA.xcodeproj/project.pbxproj',*OWNER_CARRIERS.values(),*REFERENCE_HEADERS,*OWNER_FIXTURE_ANCHORS]
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
 
@@ -57,10 +76,12 @@ def main():
                 ROOT / 'local-only/site/game/native/models/animations.clips.bin',
                 ROOT / 'local-only/original-world-assets/game/native/stock-models.json',
                 ROOT / 'local-only/research/samp-ped-height/mesh-observations.json',
+                *REFERENCE_HEADERS,
+                *OWNER_FIXTURE_ANCHORS,
                 *OWNER_CARRIERS.values()]
     missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
     if missing:
-        raise SystemExit('Prepare the owner-provided local assets/catalogs before this gate. Missing: ' + ', '.join(missing))
+        raise SystemExit('Prepare the local assets, catalogs and reference inputs before this gate. Missing: ' + ', '.join(missing))
     OUT.mkdir(parents=True, exist_ok=True)
     before = hashes()
     cases = [(p.removesuffix('.py'), ['python3', p]) for p in [
@@ -115,6 +136,7 @@ def main():
         'test_native_resource_loaders.py', 'smoke_native_local_radio.py',
         'smoke_native_camera_policy.py', 'test_native_remote_suspension.py',
         'smoke_native_vehicle_transparency.py', 'smoke_native_remote_appearance.py',
+        'smoke_native_vehicle_identity.py',
     ]]
     cases.append(('smoke_train_layout',['python3',str(OWNER_CARRIERS['train_layout'])]))
     cases.append(('native_audio_archives',['python3','build_native_audio.py','--check']))
@@ -128,7 +150,7 @@ def main():
     cases += [(p.removesuffix('.js'), ['node', p]) for p in [
         'smoke_browser_armour_sync.js', 'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_weapon_transport.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js', 'smoke_vehicle_departure.js', 'smoke_health_ack.js',
         'smoke_native_melee_server.js', 'smoke_native_melee_assets.js', 'smoke_native_parry.js',
-        'smoke_vehicle_coupling_server.js', 'smoke_native_terminal_vehicle.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
+        'smoke_vehicle_coupling_server.js', 'smoke_native_terminal_vehicle.js', 'smoke_native_skin_network_child.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
     ]]
     cases.append(('samp_ped_coordinate_calibration',['python3','smoke_samp_coordinates.py',str(ROOT/'local-only/research/samp-ped-height/mesh-observations.json')]))
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))
@@ -175,7 +197,9 @@ def main():
     # matching UDP port. Run this second profile after the pool has released it.
     results.append(run(('samp_vehicle_coordinate_udp',['python3','smoke_samp_controls.py','--vehicle-metadata',str(ROOT/'local-only/site/game/native/vehicles.physics.json')])))
 
-    # Compile integration boundaries against the actual helpers, not stand-ins.
+    # Compile the actual inventory/arsenal/prediction helpers. The catalog-only
+    # fixture fails immediately if its unused network initializer is invoked;
+    # Store/Session and HTTP behavior have separate integration cases above.
     for name in ['weapon_state']:
         source = ROOT / f'smoke_native_{name}.swift'
         with tempfile.TemporaryDirectory(prefix='zgta-core-' + name + '-') as temporary:

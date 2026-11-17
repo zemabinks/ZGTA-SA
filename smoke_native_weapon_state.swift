@@ -2,6 +2,14 @@ import Foundation
 
 // The helper's network initializer is compiled but never invoked by this test.
 struct ServerAddress {func path(_ path:String)->URL{URL(string:"http://127.0.0.1/"+path)!}}
+// Catalog-only inventory tests must fail if they unexpectedly cross into the
+// resource loader. Actual Store/Session transport has its own integration gate.
+enum NativeResourceTransport {
+    static func dataTask(with url:URL,
+                         completionHandler:@escaping(Data?,URLResponse?,Error?)->Void)->URLSessionDataTask {
+        preconditionFailure("Unexpected HTTP resource request in catalog-only weapon-state fixture")
+    }
+}
 
 @main enum WeaponStateSmoke {
     static func main() {

@@ -308,6 +308,35 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var original: Bool
         var flight:NativeFlightAnimation.Frame?
         var identity:String?
+        var ownFoot:Bool
+    }
+    /// A draw occurrence owns its source, even when another body has the same
+    /// model and position. None of these render identities grants body control.
+    private struct OwnVehicleDrawSnapshot {
+        let input:NativeVehicleRig.Input
+        let doors:[NativeVehicleDamage.Door]?
+        let wheelOffsets:[Int:Double],wheelAngles:[Float]
+        let speed:Float,steering:Double,rearSteering:Double,fallbackSteering:Float
+    }
+    private struct ParkedVehicleDrawSnapshot {
+        let work:Double,rotor:Double,gearUp:Bool,dynamic:Bool
+        let frontSpin:Double,rearSpin:Double,offsets:[Double]
+    }
+    private struct VehicleDrawContext {
+        enum Source {
+            case own(OwnVehicleDrawSnapshot)
+            case remote(RemotePlayer)
+            case parked(RemoteVehicle,ParkedVehicleDrawSnapshot?)
+            case carriage(speed:Float)
+        }
+        let source:Source,token:String,appearanceCode:String
+        let roll:Float,origin:Float,exactTransform:simd_float4x4?,heldDoorID:String?
+        var own:OwnVehicleDrawSnapshot? {if case .own(let value)=source{return value};return nil}
+        var player:RemotePlayer? {if case .remote(let value)=source{return value};return nil}
+        var parked:RemoteVehicle? {if case .parked(let value,_)=source{return value};return nil}
+        var parkedPhysical:ParkedVehicleDrawSnapshot? {if case .parked(_,let value)=source{return value};return nil}
+        var isCarriage:Bool {if case .carriage=source{return true};return false}
+        var carriageSpeed:Float {if case .carriage(let value)=source{return value};return 0}
     }
     private var lastRiderDraw: Double = 0
     struct FlightAudioVoice {var id:String;var sound:String;var position:SIMD3<Float>;var thrust:Float}
@@ -2162,8 +2191,71 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehicle.health=snapshot.health;vehicle.damage=snapshot.damage;vehicle.work=snapshot.work
         return vehicle
     }
-    private func parkedVehicle(name:String,position:SIMD3<Float>)->RemoteVehicle? {
-        remoteVehicles.lazy.map{self.predictedVehicle($0)}.first{self.actorName(code:$0.code)==name && $0.position==position}
+    private func ownVehicleDrawContext(name:String,code:String)->VehicleDrawContext {
+        var input=NativeVehicleRig.Input()
+        input.work=groundVehicle?.workingRenderValue ?? 0
+        input.steering = -(groundVehicle?.output?.steering ?? 0)
+        input.rearSteering = -(groundVehicle?.output?.rearSteering ?? 0)
+        let angles=groundVehicle?.wheelAnglesDouble ?? []
+        input.frontSpin=angles.first ?? 0
+        input.rearSpin=angles.count>1 ? angles[1]:0
+        input.offsets=[Double](repeating:0,count:4)
+        var wheelOffsets:[Int:Double]=[:]
+        for wheel in nativeVehicleWheels {
+            if input.offsets.indices.contains(wheel.index){input.offsets[wheel.index]=wheel.offset}
+            if wheelOffsets[wheel.index]==nil{wheelOffsets[wheel.index]=wheel.offset}
+        }
+        input.drop=nativeBikeDrop.map(Double.init);input.lean=Double(nativeBikeLean);input.crank=Double(nativeBicycleCrank)
+        input.rotor=Double(nativeRotorTurning);input.gearUp=nativeLandingGearUp;input.nozzle=Double(nativeAircraftNozzle ?? 5000)
+        let damage=groundVehicle?.damageController?.state
+        if let damage {
+            input.looks=damage.looks;input.tyres=damage.wheels;input.brokenLights=damage.lights
+            input.doorAngles=damage.doors.map(\.angle);input.doorAxes=damage.doors.map(\.axis)
+            input.scorched=damage.wrecked;input.lights=vehicleLights && !damage.wrecked
+        }else{input.lights=vehicleLights}
+        input.braking=(groundVehicle?.output?.brake ?? 0)>0
+        let own=OwnVehicleDrawSnapshot(input:input,doors:damage?.doors,wheelOffsets:wheelOffsets,wheelAngles:nativeVehicleWheelAngles,
+            speed:drivingSpeed,steering:groundVehicle?.output?.steering ?? 0,rearSteering:groundVehicle?.output?.rearSteering ?? 0,
+            fallbackSteering:steeringInput)
+        // The existing own fallback uses the base model matrix; the physical
+        // transform, when available, already includes its roll and origin.
+        let identity=Self.remoteDriverRenderKey(playerID:name,vehicleID:currentVehicleID)
+        return .init(source:.own(own),token:"own:\(identity):\(name)",appearanceCode:code,
+            roll:0,origin:0,exactTransform:nativeVehicleTransform,heldDoorID:currentVehicleID ?? "own")
+    }
+    private func remoteVehicleDrawContext(name:String,player:RemotePlayer)->VehicleDrawContext {
+        .init(source:.remote(player),token:"remote:\(Self.remoteDriverRenderKey(playerID:player.id,vehicleID:player.vehicleID)):\(name)",
+            appearanceCode:player.code,roll:player.roll,origin:vehicleModelOrigin(player.code),exactTransform:nil,heldDoorID:player.vehicleID)
+    }
+    private func parkedVehicleDrawContext(name:String,vehicle:RemoteVehicle)->VehicleDrawContext {
+        let frame=groundVehicle?.otherVehicle(vehicle.id)
+        let physical=frame.map{ParkedVehicleDrawSnapshot(work:Double($0.work),rotor:$0.rotor,gearUp:$0.gearUp,dynamic:$0.dynamic,
+            frontSpin:$0.frontSpin,rearSpin:$0.rearSpin,offsets:$0.offsets)}
+        let identity=Self.remoteDriverRenderKey(playerID:name,vehicleID:vehicle.id)
+        return .init(source:.parked(vehicle,physical),token:"remote:\(identity):\(name)",appearanceCode:vehicle.code,
+            roll:vehicle.roll,origin:vehicleModelOrigin(vehicle.code),exactTransform:frame?.transform,heldDoorID:vehicle.id)
+    }
+    private func carriageVehicleDrawContext(name:String,model:String,transform:simd_float4x4,identity:String?,own:Bool,index:Int)->VehicleDrawContext {
+        let parent=Self.remoteDriverRenderKey(playerID:name,vehicleID:identity)
+        let token="carriage:\(own ? "own":"remote"):\(parent):\(index):\(name)"
+        // Preserve the existing carriage spin timing while isolating each
+        // layout's identity and exact transform. This is not a train retune.
+        return .init(source:.carriage(speed:drivingSpeed),token:token,appearanceCode:model,
+            roll:0,origin:0,exactTransform:transform,heldDoorID:nil)
+    }
+    private static func vehicleDrawTransform(_ base:simd_float4x4,context:VehicleDrawContext?)->simd_float4x4 {
+        guard let context else{return base}
+        if let exact=context.exactTransform{return exact}
+        if context.roll==0 && context.origin==0{return base}
+        return base*Self.rotationY(context.roll)*Self.translation(SIMD3(0,0,context.origin))
+    }
+    private static func legacyVehicleWheel(index:Int,front:Bool,context:VehicleDrawContext?,time:Float)->(offset:Float,spin:Float,turn:Float) {
+        guard let context,let own=context.own else{return (0,0,0)}
+        if context.exactTransform != nil {
+            let spin=own.wheelAngles.indices.contains(index) ? own.wheelAngles[index]:0
+            return (Float(own.wheelOffsets[index] ?? 0),spin,Float(front ? own.steering:own.rearSteering))
+        }
+        return (0,time*own.speed/0.35,front && own.speed != 0 ? own.fallbackSteering*0.45:0)
     }
     /// The same frame is used by the shared vehicle and every attached rider.
     /// Passenger walking reports never become a second vehicle transform.
@@ -3823,7 +3915,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ridingVehicleID==nil && code.hasPrefix("s")
     }
     private static func remoteDriverRenderKey(playerID:String,vehicleID:String?)->String {
-        vehicleID ?? "player:"+playerID
+        // Length-tagging keeps arbitrary registry IDs distinct from the
+        // ID-less player fallback. These are private cache keys, not wire IDs.
+        if let vehicleID{return "vehicle:\(vehicleID.utf8.count):\(vehicleID)"}
+        return "player:\(playerID.utf8.count):\(playerID)"
     }
     private func recordRemoteAnimationPackets() {
         let now = ProcessInfo.processInfo.systemUptime
@@ -3887,12 +3982,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let flightIDs=Set(remotePlayers.map(\.id)).union(["own"])
         flightCanopyPoses=flightCanopyPoses.filter{flightIDs.contains($0.key)}
         flightCanopyLanded=flightCanopyLanded.filter{flightIDs.contains($0.key)}
-        var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int)] = []
+        var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int, VehicleDrawContext?)] = []
         var transparentVehicleDraws:[TransparentVehicleDraw]=[]
-        // Keep wire appearance with each occurrence, including two identical
-        // models at identical positions. Shared geometry is never recoloured.
-        var vehicleAppearanceCodes:[String:[String]] = [:]
-        var vehicleAppearanceOffsets:[String:Int] = [:]
+        // Vehicle source, appearance and physical transform stay with each
+        // occurrence; coordinates are never used as an ownership key.
         var driverPose: NativeSkeletalActor.Pose?
         // An ordered queue preserves independent instances even when two players
         // have the same skin and exact position (including passengers).
@@ -3900,9 +3993,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var actorOverrideOffsets: [String:Int] = [:]
         func key(_ name: String,_ position: SIMD3<Float>) -> String { "\(name):\(position)" }
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
-                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil) {
-            actorOverrides[key(name,at),default:[]].append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity))
-            modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon))
+                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false) {
+            actorOverrides[key(name,at),default:[]].append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot))
+            modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
            let ped=pedModels[String(localSkin)] {
@@ -3930,8 +4023,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }else if driving && !legacySpectating {
             let code = ownVehicleAppearanceCode
             if let name = actorName(code: code) {
-                modelInstances.append((name, camera, heading, vehiclePitch, "", 0, 0))
-                vehicleAppearanceCodes[key(name,camera),default:[]].append(code)
+                let context=ownVehicleDrawContext(name:name,code:code)
+                modelInstances.append((name,camera,heading,vehiclePitch,"",0,0,context))
                 if let seat = riderDefinitions?.models[activeVehicleModel]?.seats.first?.position ?? vehicleSeats[name], let ped = pedModels[String(localSkin)] {
                     // A pose cannot be the prerequisite for loading its actor:
                     // eviction or fast boarding would otherwise hide it forever.
@@ -4017,7 +4110,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 footAnimationFrame.flatMap { actor.originalPose(blends:$0.blends,library:library,aim:$0.aim,hiddenBones:$0.hiddenBones,figurePitch:$0.figurePitch,figureRoll:$0.figureRoll,legBend:$0.legBend) }
             } }
             let handWeapon = climb != nil || footAnimationFrame?.handWeaponVisible == false ? 0:effectiveWireWeapon
-            appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own")
+            appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own",ownFoot:true)
         }
         for player in remotePlayers {
             // A passenger's public carText is still a pedestrian; draw its
@@ -4104,8 +4197,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 appendPed(name,footPosition,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id)
                 continue
             }
-            modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0))
-            vehicleAppearanceCodes[key(name,player.position),default:[]].append(player.code)
+            let context=remoteVehicleDrawContext(name:name,player:player)
+            modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0,context))
             guard let ped=pedModels[String(player.skin)] else {continue}
             guard let actor=skeletalActors[ped],let library=skeletalLibrary else {loadActor(ped);continue}
             let model=String(player.code.split(separator:".").first ?? "")
@@ -4158,33 +4251,26 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for projectile in weaponEffects.projectiles {
             let direction = atan2(projectile.velocity.x,projectile.velocity.y)
             let pitch = atan2(projectile.velocity.z,hypot(projectile.velocity.x,projectile.velocity.y))
-            modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0))
+            modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0,nil))
         }
-        var parkedTransforms:[String:simd_float4x4] = [:]
         var parkedTrainCandidates:[RemoteVehicle] = []
         for source in remoteVehicles where (isPassenger || source.id != currentVehicleID) && !drivenVehicleIDs.contains(source.id) {
             let vehicle=predictedVehicle(source)
             guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
-            modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0))
-            vehicleAppearanceCodes[key(name,vehicle.position),default:[]].append(vehicle.code)
+            let context=parkedVehicleDrawContext(name:name,vehicle:vehicle)
+            modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0,context))
             parkedTrainCandidates.append(vehicle)
-            if let exact=groundVehicle?.otherVehicle(vehicle.id)?.transform{parkedTransforms[key(name,vehicle.position)]=exact}
         }
-        var carriageTransforms:[String:simd_float4x4] = [:]
-        var carriageIdentifiers:[String:String] = [:]
         var trainLayoutIDs:Set<String> = []
-        func appendCarriages(_ carriages:[NativeGroundVehicle.Carriage],identity:String) {
+        func appendCarriages(_ carriages:[NativeGroundVehicle.Carriage],identity:String?,own:Bool=false) {
             for (index,carriage) in carriages.enumerated() {
                 guard let name=actorName(code:carriage.model) else{continue}
-                modelInstances.append((name,carriage.position,0,0,"",0,0))
-                vehicleAppearanceCodes[key(name,carriage.position),default:[]].append(carriage.model)
-                let token=key(name,carriage.position)
-                carriageTransforms[token]=carriage.transform
-                carriageIdentifiers[token]=identity=="own" ? "carriage:\(index):\(name)":"carriage:\(identity):\(index):\(name)"
+                let context=carriageVehicleDrawContext(name:name,model:carriage.model,transform:carriage.transform,identity:identity,own:own,index:index)
+                modelInstances.append((name,carriage.position,0,0,"",0,0,context))
             }
         }
         if driving,let carriages=groundVehicle?.carriages {
-            appendCarriages(carriages,identity:"own")
+            appendCarriages(carriages,identity:currentVehicleID,own:true)
             if let currentVehicleID {trainLayoutIDs.insert(currentVehicleID)}
         }
         for vehicle in parkedTrainCandidates {
@@ -4203,11 +4289,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             appendCarriages(carriages,identity:id)
         }
         groundVehicle?.retainTrainCarriageLayouts(trainLayoutIDs)
-        for (name, position, angle, pitch, clip, elapsed, weapon) in modelInstances {
+        for (name, position, angle, pitch, clip, elapsed, weapon, vehicleContext) in modelInstances {
             let token=key(name,position),offset=actorOverrideOffsets[key(name,position),default:0]
             let queued=actorOverrides[token].flatMap { $0.indices.contains(offset) ? $0[offset]:nil }
             if queued != nil {actorOverrideOffsets[token]=offset+1}
-            let mesh = (clip.isEmpty ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
+            let mesh = (vehicleContext != nil ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
             let customPed=legacyPedModels[name]
             guard mesh != nil || customPed != nil else { loadActor(name); continue }
             let originalFoot = queued?.original ?? false
@@ -4224,24 +4310,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 SIMD4(c, -s, 0, 0), SIMD4(s * cp, c * cp, sp, 0),
                 SIMD4(-s * sp, -c * sp, cp, 0),
                 SIMD4(position.x, position.y, position.z, 1)))
-            if clip.isEmpty,let vehicle = remotePlayers.first(where: { $0.position == position && Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && actorName(code:$0.code)==name }) {
-                transform *= Self.rotationY(vehicle.roll)
-                transform *= Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code)))
-            } else if clip.isEmpty,let vehicle = parkedVehicle(name:name,position:position) {
-                transform *= Self.rotationY(vehicle.roll)
-                transform *= Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code)))
-            }
-            if driving && position == camera && clip.isEmpty, let exact = nativeVehicleTransform { transform = exact }
+            transform=Self.vehicleDrawTransform(transform,context:vehicleContext)
             if let exact=queued?.transform {transform=exact}
-            if let parked=parkedTransforms[key(name,position)] {transform=parked}
-            if let carriage=carriageTransforms[key(name,position)] {transform=carriage}
             var uniforms = Uniforms(viewProjection: matrix * transform,
                                     settings: SIMD4(Float(mesh?.atlas.width ?? 1), Float(mesh?.atlas.height ?? 1), night, 128))
             configureEnvironment(&uniforms)
             let opacity:Float = queued?.identity == "own" ? ownCameraVisibility.opacity:1
             uniforms.tintColor.w *= opacity
             encoder.setDepthStencilState(opacity<1 ? markerDepth:depth)
-            let locomotion = name == pedModels[String(localSkin)] && position == camera && !driving && actionTimeRemaining > 0 &&
+            let locomotion = queued?.ownFoot == true && name == pedModels[String(localSkin)] && position == camera && !driving && actionTimeRemaining > 0 &&
                 !swimming && health > 0 ? locomotionClip : nil
             let wire = clip.split(separator: "/")
             let loops: Bool? = wire.count >= 2 ? (wire.count < 3 || wire[2] == "l") : nil
@@ -4273,11 +4350,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentTexture(mesh.atlas, index: 0)
-            if clip.isEmpty,let rig=vehicleRigs[name],vehicleRigMeshes[name] != nil {
-                let appearanceOffset=vehicleAppearanceOffsets[token,default:0]
-                let appearance=vehicleAppearanceCodes[token].flatMap{$0.indices.contains(appearanceOffset) ? $0[appearanceOffset]:nil}
-                if appearance != nil{vehicleAppearanceOffsets[token]=appearanceOffset+1}
-                let completeFrame=vehicleRigFrame(name:name,position:position,modelTransform:transform,rig:rig,carriage:carriageIdentifiers[key(name,position)],appearanceCode:appearance)
+            if clip.isEmpty,let context=vehicleContext,let rig=vehicleRigs[name],vehicleRigMeshes[name] != nil {
+                let completeFrame=vehicleRigFrame(position:position,modelTransform:transform,rig:rig,context:context)
                 // Keep opaque hulls in the normal actor phase. Transparent
                 // materials must wait until every opaque rider has drawn.
                 let frame=completeFrame.opaque
@@ -4314,19 +4388,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     }
                 }
             } else if clip.isEmpty, let parts = actorParts[name], !parts.isEmpty {
-                let speed = position == camera && driving ? drivingSpeed : 0
+                let speed=vehicleContext?.own?.speed ?? 0
                 for part in parts {
                     let pivot = SIMD3<Float>(part.pivot[0], part.pivot[1], part.pivot[2])
                     var local = matrix_identity_float4x4
                     if let wheel = part.wheel {
                         let index = wheel.contains("lf_") ? 0 : wheel.contains("lb_") || wheel.contains("lr_") ? 1 : wheel.contains("rf_") ? 2 : 3
-                        let exact = position == camera && nativeVehicleTransform != nil
-                        let state = exact ? nativeVehicleWheels.first(where: { $0.index == index }) : nil
-                        let spin = exact ? nativeVehicleWheelAngles[index] : Float(ProcessInfo.processInfo.systemUptime)*speed/0.35
-                        let turn = exact ? (wheel.contains("f_dummy") ? (groundVehicle?.output?.steering ?? 0) : (groundVehicle?.output?.rearSteering ?? 0)) :
-                            Double(wheel.contains("f_dummy") && speed != 0 ? steeringInput*0.45 : 0)
-                        local = Self.translation(SIMD3(0,0,Float(state?.offset ?? 0))) * Self.translation(pivot) *
-                            Self.rotationZ(Float(turn)) * Self.rotationX(spin) * Self.translation(-pivot)
+                        let state=Self.legacyVehicleWheel(index:index,front:wheel.contains("f_dummy"),context:vehicleContext,time:Float(ProcessInfo.processInfo.systemUptime))
+                        local = Self.translation(SIMD3(0,0,state.offset)) * Self.translation(pivot) *
+                            Self.rotationZ(state.turn) * Self.rotationX(state.spin) * Self.translation(-pivot)
                     } else if part.name.hasPrefix("static_prop") && speed != 0 {
                         local = Self.translation(pivot) * Self.rotationY(Float(ProcessInfo.processInfo.systemUptime) * 35) * Self.translation(-pivot)
                     } else if part.name.hasPrefix("static_rotor") && speed != 0 {
@@ -4484,34 +4554,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private func vehicleRigFrame(name:String,position:SIMD3<Float>,modelTransform:simd_float4x4,rig:NativeVehicleRig,carriage:String?,appearanceCode:String?=nil)->NativeVehicleRig.Frame {
+    private func vehicleRigFrame(position:SIMD3<Float>,modelTransform:simd_float4x4,rig:NativeVehicleRig,context:VehicleDrawContext)->NativeVehicleRig.Frame {
         let now=ProcessInfo.processInfo.systemUptime
-        let player=remotePlayers.first{Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && $0.position==position && actorName(code:$0.code)==name}
-        let parked=parkedVehicle(name:name,position:position)
-        let own=driving && !isPassenger && position==camera && name==vehicleModels[activeVehicleModel]
-        let token=carriage ?? (own ? "own:\(currentVehicleID ?? name):\(name)":"remote:\(player.map{Self.remoteDriverRenderKey(playerID:$0.id,vehicleID:$0.vehicleID)} ?? parked?.id ?? name):\(name)")
+        let player=context.player,parked=context.parked,own=context.own,token=context.token
         let delta=min(0.1,max(0,now-(vehicleRigTimes[token] ?? now)));vehicleRigTimes[token]=now
-        var input=NativeVehicleRig.Input()
-        input.appearanceCode=appearanceCode
-        if own {
-            input.work=groundVehicle?.workingRenderValue ?? 0
-            input.steering = -(groundVehicle?.output?.steering ?? 0)
-            input.rearSteering = -(groundVehicle?.output?.rearSteering ?? 0)
-            let angles=groundVehicle?.wheelAnglesDouble ?? []
-            input.frontSpin=angles.first ?? 0
-            input.rearSpin=angles.count>1 ? angles[1]:0
-            input.offsets=[Double](repeating:0,count:4)
-            for wheel in nativeVehicleWheels where input.offsets.indices.contains(wheel.index) {input.offsets[wheel.index]=wheel.offset}
-            input.drop=nativeBikeDrop.map(Double.init);input.lean=Double(nativeBikeLean);input.crank=Double(nativeBicycleCrank)
-            input.rotor=Double(nativeRotorTurning);input.gearUp=nativeLandingGearUp;input.nozzle=Double(nativeAircraftNozzle ?? 5000)
-            if let damage=groundVehicle?.damageController?.state {
-                input.looks=damage.looks;input.tyres=damage.wheels;input.brokenLights=damage.lights
-                input.doorAngles=damage.doors.map(\.angle);input.doorAxes=damage.doors.map(\.axis)
-                input.scorched=damage.wrecked;input.lights=vehicleLights && !damage.wrecked
-            } else {input.lights=vehicleLights}
-            input.braking=(groundVehicle?.output?.brake ?? 0)>0
-        } else {
-            let speed=Double(carriage != nil ? drivingSpeed:player?.speed ?? 0)
+        var input=own?.input ?? NativeVehicleRig.Input()
+        input.appearanceCode=context.appearanceCode
+        if own==nil {
+            let speed=Double(context.isCarriage ? context.carriageSpeed:player?.speed ?? 0)
             input.steering=Double(player?.steer ?? 0)
             var spins=vehicleRigSpins[token] ?? .zero
             let front=rig.document.joints.bike?.hubs["front"]?.radius ?? 0.36
@@ -4525,8 +4575,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 if kit.indices.contains(5),rig.document.joints.working == nil,rig.document.id != 520,((groundVehicle?.handlingFlags(String(rig.document.id)) ?? 0)&64) != 0 {input.rearSteering=Double(kit[5])}
                 input.gearUp=kit.indices.contains(6) && kit[6] != 0
             }
-            if player==nil,let parked,let frame=groundVehicle?.otherVehicle(parked.id) {
-                input.work=Double(frame.work)
+            if let frame=context.parkedPhysical {
+                input.work=frame.work
                 input.rotor=frame.rotor;input.gearUp=frame.gearUp
                 if frame.dynamic {
                     input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin;input.offsets=frame.offsets
@@ -4544,15 +4594,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             input.lights=(player?.lights ?? false) && !input.scorched
             // Existing physical suspension, including working/hydraulic owners,
             // takes priority. Remote projection changes wheel locals only.
-            if input.offsets.isEmpty, carriage == nil, simd_distance(position,camera)<120,
+            if input.offsets.isEmpty, !context.isCarriage, simd_distance(position,camera)<120,
                let configuration=remoteSuspensionConfigurations[rig.document.id],
                let projected=NativeRemoteSuspension.sample(configuration,model:modelTransform,tyres:input.tyres,query:remoteSuspensionContact) {
                 input.offsets=projected.offsets
             }
         }
-        let heldID=own ? currentVehicleID ?? "own":player?.vehicleID ?? parked?.id
-        if let heldID,let held=riderDoorHolds[heldID] {
-            let doors=own ? groundVehicle?.damageController?.state.doors:NativeVehicleDamage(mass:1000,flags:groundVehicle?.modelFlags(String(rig.document.id)) ?? 0,model:rig.document.id).doors
+        if let heldID=context.heldDoorID,let held=riderDoorHolds[heldID] {
+            let doors=own != nil ? own?.doors:NativeVehicleDamage(mass:1000,flags:groundVehicle?.modelFlags(String(rig.document.id)) ?? 0,model:rig.document.id).doors
             if let doors {
                 for(part,fraction)in held where doors.indices.contains(part) && input.doorAngles.indices.contains(part){input.doorAngles[part]=doors[part].open*fraction}
             }

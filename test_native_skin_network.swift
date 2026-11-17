@@ -25,11 +25,20 @@ defer{client.disconnect();session.invalidateAndCancel()}
 client.connect();wait("Actual native client not ready"){client.isReady}
 check(client.localSkin==7,"Native default changed unexpectedly")
 let initial=request("__fixture"),browserID=String(initial["browserNumber"]as!Int)
-let vehicle=RemoteVehicle(row:["fixture-car","Synthetic vehicle","411.0.0.0.",1480,-1738,13,0])!
+let vehicle=RemoteVehicle(row:["fixture-native","Synthetic vehicle","411.0.0.0.",1480,-1738,13,0])!
+var entered:(String,Bool)?
+client.onEnter={entered=($0,$1)}
 var directions=0,unsupported=0
 let expected=[7:"male01",14:"bmori",9:"bfori",24:"wbdyg1",287:"army",2:"maccer",149:"ogloc",293:"ogloc"]
 for skin in [7,14,9,24,287,2,149,293]{for driving in [false,true]{
  if skin != 7 || driving {client.setLocalSkin(skin)}
+ if driving{
+  entered=nil
+  check(client.requestEnter(vehicle),"Actual native entry request was not emitted")
+  wait("Actual native driver entry ACK missing or rejected"){entered?.0==vehicle.id && entered?.1==true}
+ }else if directions>0{
+  client.sendExit(SIMD3(1480,-1738,13),parked:SIMD3(1480,-1738,13),heading:0,pitch:0,roll:0,vehicle:vehicle,vehicleHealth:1000)
+ }
  client.sendPosition(SIMD3(1480,-1738,13),heading:0,moving:false,running:false,vehicle:driving ? vehicle:nil)
  var snapshot:[String:Any]=[:]
  wait("Actual native packet not observed over browser WebSocket"){

@@ -5,6 +5,8 @@ project_dir="${0:A:h}"
 configuration=Release
 target=simulator
 derived_data="$project_dir/local-only/native-build"
+build_jobs="${ZGTA_BUILD_JOBS:-2}"
+swift_threads="${ZGTA_SWIFT_THREADS:-2}"
 usage() {
   print 'Usage: zsh build_native.sh [simulator|device|all] [--debug|--release] [--derived-data PATH]'
 }
@@ -19,6 +21,12 @@ while (( $# )); do
     -h|--help) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
+done
+for count in "$build_jobs" "$swift_threads"; do
+  [[ "$count" == <1-64> ]] || {
+    print -u2 'ZGTA_BUILD_JOBS and ZGTA_SWIFT_THREADS must be integers from 1 to 64.'
+    exit 2
+  }
 done
 # OWNER_MENU_SPEC_BEGIN
 project_spec=project.yml
@@ -50,8 +58,16 @@ fi
 (cd "$project_dir/ios" && xcodegen generate --spec "$project_spec")
 build_platform() {
   local platform="$1" suffix="$2"
+  local -a compiler_flags=()
+  if [[ "$configuration" == Release ]]; then
+    # Otherwise Xcode appends its logical-CPU count after -num-threads and
+    # silently overrides the requested compiler limit.
+    compiler_flags+=(SWIFT_COMPILATION_MODE=wholemodule SWIFT_USE_PARALLEL_WHOLE_MODULE_OPTIMIZATION=NO
+      "OTHER_SWIFT_FLAGS=\$(inherited) -num-threads $swift_threads")
+  fi
   xcodebuild -project "$project_dir/ios/ZGTASA.xcodeproj" -scheme ZGTASA -configuration "$configuration" \
-    -destination "generic/platform=$platform" -derivedDataPath "$derived_data" CODE_SIGNING_ALLOWED=NO build
+    -destination "generic/platform=$platform" -derivedDataPath "$derived_data" -jobs "$build_jobs" \
+    "${compiler_flags[@]}" CODE_SIGNING_ALLOWED=NO build
   print "Native $configuration bundle: $derived_data/Build/Products/$configuration-$suffix/ZGTASA.app"
 }
 if [[ "$target" != device ]]; then build_platform 'iOS Simulator' iphonesimulator; fi

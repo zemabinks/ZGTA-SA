@@ -1,5 +1,32 @@
 # Core gameplay audit journal
 
+## 2026-11-17 — Core111 vehicle identity and regression integrity
+
+Per-occurrence render context replaces ambiguous model/position owner searches;
+type/length-tagged cache keys and explicit local-foot ownership prevent related
+vehicle and animation-state leaks. Authored host gates pass69 identity,17 role
+and27 transparency checks. Complete Simulator Debug and unsigned device Release
+builds pass with202 frozen inputs unchanged; the actual public Release script
+uses effective2-thread compilation. A normal Simulator update preserves cache
+metadata and verifies all four installed payloads.
+
+After a retained failed out-of-range approach, a separate passenger continuation
+passes76.279s through actual entry, camera gestures, Exit and Jump. A native-owned
+Taxi case passes143.908s through normal job creation, driver entry, accelerator,
+brake/handbrake, camera, Exit and Jump. Fresh browser wire sees its distinct new
+ID move3.432m and park while the browser keeps its original Taxi. Reviewed
+captures show distinct drivers and wheels. The exact-coincident identity defect
+remains an authored reproduction, not a claimed live occurrence.
+
+The frozen109 aggregate finishes149 PASS/17 FAIL across166 cases and remains
+failed. Qualified followups address timeout, dependency, fixture-entry and real
+terminal-authority defects. The110 skin-network exit0 is explicitly invalidated
+as a false positive;111 requires strict child success, actual entry grants and
+completed wire evidence, with11 negative checks in free CI. All original failed
+artifacts remain. [Core111 acceptance](CORE_NATIVE_ACCEPTANCE_111.md) records all17
+dispositions, resource provenance and remaining physical/retail/parity limits.
+The unavailable phone is untouched.
+
 ## 2026-11-17 — Core110 terminal vehicle and rendering corrections
 
 A genuine accepted native driver reproduced the wrecked-hull loss separately

@@ -48,6 +48,17 @@ zsh build_native.sh all
 zsh build_native.sh simulator --debug
 ```
 
+The script defaults to two build jobs and, for Release, two Swift compiler
+threads. Set `ZGTA_BUILD_JOBS` or `ZGTA_SWIFT_THREADS` to an integer from 1 to 64
+when a different concurrency budget is appropriate. Automatic parallel whole
+module optimization is disabled explicitly: otherwise Xcode can append its
+logical-CPU count after the requested thread flag and override that limit.
+
+The complete frozen Core110 optimized Intel Simulator build passes in 1188.457s
+with the emitted driver actually using two threads and all 202 inputs unchanged.
+This establishes a complete optimized build, not iPhone FPS or a speed comparison
+against builds run under different system load.
+
 The [Definitive Edition menu](NATIVE_DE_MENU.md) optionally loads owner-provided
 art/fonts/sounds from ignored `local-only/menu-bundle/OwnerMenu`. Without that
 folder the source-only menu remains functional using text/color fallbacks.
