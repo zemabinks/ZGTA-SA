@@ -3,13 +3,14 @@ import Foundation
 import UIKit
 
 /// Original public station program with native PCM playback. Owner recordings
-/// remain on the Mac and are decoded lazily by native_radio_server.js.
+/// are decoded locally from verified raw packs, with development HTTP fallback.
 final class NativeVehicleRadio {
     private struct Station { let name: String; let file: String }
     private struct Track: Decodable { let id: Int; let url: String }
     private struct Song: Decodable { let name: String; let url: String }
     private struct Index: Decodable { let stations: [[Track]]; let adverts: [Track]; let songs: [Song] }
     private let server: ServerAddress
+    private let local:NativeLocalRadioProvider
     private let stations: [Station] = [
         Station(name: "Playback FM", file: "CH"), Station(name: "K-Rose", file: "CO"),
         Station(name: "K-DST", file: "CR"), Station(name: "Bounce FM", file: "DS"),
@@ -53,8 +54,8 @@ final class NativeVehicleRadio {
         volume=snapshot.validated().effectiveRadioGain
     }
 
-    init(server: ServerAddress) {
-        self.server = server
+    init(server: ServerAddress,local:NativeLocalRadioProvider=NativeLocalRadioProvider()) {
+        self.server = server;self.local=local
         if let saved = UserDefaults.standard.object(forKey: preferenceKey) as? Int,
            saved >= -1, saved < stations.count { index = saved }
         installNotifications()
@@ -65,6 +66,7 @@ final class NativeVehicleRadio {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         notifications.forEach { NotificationCenter.default.removeObserver($0) }
         player?.pause()
+        local.cancel()
     }
     private func installNotifications() {
         let center = NotificationCenter.default
@@ -73,11 +75,11 @@ final class NativeVehicleRadio {
                 guard let self, let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                       let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
                 self.interrupted = type == .began
-                if self.interrupted { self.player?.pause(); self.pcm?.stop() }
+                if self.interrupted { self.player?.pause(); self.pcm?.stop();self.local.cancel() }
                 else if self.wantsPlayback { self.tune() }
             },
             center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-                self?.interrupted = true; self?.player?.pause(); self?.pcm?.stop()
+                self?.interrupted = true; self?.player?.pause(); self?.pcm?.stop();self?.local.cancel()
             },
             center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }; self.interrupted = false
@@ -90,7 +92,7 @@ final class NativeVehicleRadio {
     func cycle(_ direction: Int) {
         guard direction != 0 else { return }
         guard vehicleType == 0 || vehicleType == 2 else { return }
-        let choices = following ? Array(1...11) + [13] : tracks.isEmpty && !songs.isEmpty ? [12, 13] : Array(1...13)
+        let choices = following ? Array(1...11) + [13] : program == nil && tracks.isEmpty && !songs.isEmpty ? [12, 13] : Array(1...13)
         guard let selected = NativeRadioSelection.cycle(stationID, choices: choices, direction: direction) else { return }
         specialStation = nil
         index = selected == 13 ? -1 : selected - 1
@@ -125,7 +127,6 @@ final class NativeVehicleRadio {
         else if let followedStation, (1...11).contains(followedStation) || followedStation == 13 { selected = followedStation }
         else if vehicleType == 0, let remembered, ProcessInfo.processInfo.systemUptime - remembered.at < 60,
                 remembered.station != defaults.station { selected = remembered.station }
-        if tracks.isEmpty && !songs.isEmpty && (1...11).contains(selected) { selected = 12 }
         specialStation = selected == 0 ? 0 : nil
         index = (1...12).contains(selected) ? selected - 1 : -1
         wantsPlayback = selected != 13
@@ -141,6 +142,7 @@ final class NativeVehicleRadio {
     }
     private func releasePlayback() {
         generation += 1; pcm?.stop(); pcm = nil; request?.cancel(); request = nil
+        local.cancel()
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }; endObserver = nil
         itemObservation = nil
         if let loadedIndex, let seconds = player?.currentTime().seconds,
@@ -183,14 +185,42 @@ final class NativeVehicleRadio {
         releasePlayback()
         guard stationID != 13 else { onStatus?("RADIO OFF"); return }
         guard !interrupted, wantsPlayback else { return }
-        if stationID <= 11, let program, !tracks.isEmpty {
-            let playback = NativeRadioPlayback(program: program, tracks: tracks, clock: { [weak self] in
-                self?.now() ?? Date().timeIntervalSince1970 * 1_000
-            })
-            playback.volume = volume
-            playback.onFailure = { [weak self] in self?.onStatus?("RADIO: OWNER AUDIO COULD NOT PLAY") }
-            do { try playback.start(station: stationID); pcm = playback; onStatus?("NOW PLAYING \(stationName)") }
-            catch { onStatus?("RADIO AUDIO COULD NOT START") }
+        let token=generation,selected=stationID
+        if selected<=11,let program {
+            onStatus?("TUNING \(stationName)")
+            // Canonical prepared resources need no generated native/index.
+            local.loadCatalogue{[weak self] result in
+                guard let self,token==self.generation,self.wantsPlayback,!self.interrupted,self.stationID==selected else{return}
+                switch result {
+                case .success(.available(let stations)):
+                    guard stations.contains(selected)else{self.onStatus?("LOCAL RADIO: STATION AUDIO IS NOT AVAILABLE");return}
+                    self.startPCM(program:program,local:self.local)
+                case .success(.absent):self.tuneFallback(token:token)
+                case .failure:self.onStatus?("LOCAL RADIO NEEDS VERIFICATION OR REPAIR")
+                }
+            }
+            return
+        }
+        tuneFallback(token:token)
+    }
+    private func startPCM(program:NativeRadioProgram,local:NativeRadioWindowSource?) {
+        let playback = NativeRadioPlayback(program: program, tracks: tracks,local:local, clock: { [weak self] in
+            self?.now() ?? Date().timeIntervalSince1970 * 1_000
+        })
+        playback.volume = volume
+        playback.onFailure = { [weak self] in self?.onStatus?("RADIO: OWNER AUDIO COULD NOT PLAY") }
+        do { try playback.start(station: stationID); pcm = playback; onStatus?("NOW PLAYING \(stationName)") }
+        catch { onStatus?("RADIO AUDIO COULD NOT START") }
+    }
+    private func tuneFallback(token:Int) {
+        guard token==generation,!interrupted,wantsPlayback else{return}
+        // A custom-only development index cannot pre-empt verified local
+        // station packs. This fallback runs only after local absence is known.
+        if (1...11).contains(stationID),tracks.isEmpty,!songs.isEmpty {
+            specialStation=nil;index=11;playUserSong(token:token);return
+        }
+        if stationID<=11,let program,!tracks.isEmpty {
+            startPCM(program:program,local:nil)
             return
         }
         if stationID == 12 && !songs.isEmpty { playUserSong(token: generation); return }

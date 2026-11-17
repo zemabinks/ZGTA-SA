@@ -58,3 +58,18 @@ concurrent caching and HTTP range handling. Offline AVAudioEngine checks cover
 sample-contiguous piece boundaries, stereo channels, mono duplication and EOF
 silence. These checks verify capability with synthetic audio; original full
 station recordings have not been available for end-to-end listening tests.
+
+
+Core109 also supports compressed playback directly from a verified local raw
+resource generation, without a Mac WAV server or a full decoded-track cache.
+The selected encrypted pack remains local. A bounded native libogg/libvorbis
+adapter reads at most8000 stereo frames per request; the existing station
+programme still owns piece IDs and sample clocks. See
+[local radio ownership and verification](CORE_LOCAL_RADIO_109.md) and
+[native audio source/build provenance](native-audio/README.md).
+
+The final codec passes strict ASan/UBSan and a private35-window comparison with
+local owner recordings is bit-identical against an independent decoder. Local
+routing, cancellation, delayed completions and PCM scheduling pass32177 authored
+checks. Those are separate from full-App audible playback, hardware audio-session
+interruptions and original-game listening acceptance, which remain open.

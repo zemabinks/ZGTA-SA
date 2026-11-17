@@ -34,6 +34,72 @@ NATIVE_INSTALLER_SOURCE = {
     'vendor/unshield/lib/libunshield.h', 'vendor/unshield/lib/log.c',
     'vendor/unshield/lib/log.h',
 }
+# Explicit independent decoder, pinned BSD source/licenses and authored tests.
+# The two JSON paths are source provenance/one upstream patch, not audio data.
+NATIVE_AUDIO_SOURCE = {
+    'README.md',
+    'THIRD_PARTY_NOTICES.md',
+    'build.py',
+    'include/module.modulemap',
+    'include/zgtasa_native_audio.h',
+    'patches/vorbis-sharedbook-unsigned.json',
+    'src/codec_alloc.h',
+    'src/zgtasa_native_audio.c',
+    'tests/api.c',
+    'tests/archive.swift',
+    'tests/fixtures.py',
+    'tests/window.c',
+    'vendor/libogg-1.3.6/COPYING',
+    'vendor/libogg-1.3.6/include/ogg/ogg.h',
+    'vendor/libogg-1.3.6/include/ogg/os_types.h',
+    'vendor/libogg-1.3.6/src/bitwise.c',
+    'vendor/libogg-1.3.6/src/crctable.h',
+    'vendor/libogg-1.3.6/src/framing.c',
+    'vendor/libvorbis-1.3.7/COPYING',
+    'vendor/libvorbis-1.3.7/include/vorbis/codec.h',
+    'vendor/libvorbis-1.3.7/include/vorbis/vorbisfile.h',
+    'vendor/libvorbis-1.3.7/lib/analysis.c',
+    'vendor/libvorbis-1.3.7/lib/backends.h',
+    'vendor/libvorbis-1.3.7/lib/bitrate.c',
+    'vendor/libvorbis-1.3.7/lib/bitrate.h',
+    'vendor/libvorbis-1.3.7/lib/block.c',
+    'vendor/libvorbis-1.3.7/lib/codebook.c',
+    'vendor/libvorbis-1.3.7/lib/codebook.h',
+    'vendor/libvorbis-1.3.7/lib/codec_internal.h',
+    'vendor/libvorbis-1.3.7/lib/envelope.c',
+    'vendor/libvorbis-1.3.7/lib/envelope.h',
+    'vendor/libvorbis-1.3.7/lib/floor0.c',
+    'vendor/libvorbis-1.3.7/lib/floor1.c',
+    'vendor/libvorbis-1.3.7/lib/highlevel.h',
+    'vendor/libvorbis-1.3.7/lib/info.c',
+    'vendor/libvorbis-1.3.7/lib/lookup.c',
+    'vendor/libvorbis-1.3.7/lib/lookup.h',
+    'vendor/libvorbis-1.3.7/lib/lookup_data.h',
+    'vendor/libvorbis-1.3.7/lib/lpc.c',
+    'vendor/libvorbis-1.3.7/lib/lpc.h',
+    'vendor/libvorbis-1.3.7/lib/lsp.c',
+    'vendor/libvorbis-1.3.7/lib/lsp.h',
+    'vendor/libvorbis-1.3.7/lib/mapping0.c',
+    'vendor/libvorbis-1.3.7/lib/masking.h',
+    'vendor/libvorbis-1.3.7/lib/mdct.c',
+    'vendor/libvorbis-1.3.7/lib/mdct.h',
+    'vendor/libvorbis-1.3.7/lib/misc.h',
+    'vendor/libvorbis-1.3.7/lib/os.h',
+    'vendor/libvorbis-1.3.7/lib/psy.c',
+    'vendor/libvorbis-1.3.7/lib/psy.h',
+    'vendor/libvorbis-1.3.7/lib/registry.c',
+    'vendor/libvorbis-1.3.7/lib/registry.h',
+    'vendor/libvorbis-1.3.7/lib/res0.c',
+    'vendor/libvorbis-1.3.7/lib/scales.h',
+    'vendor/libvorbis-1.3.7/lib/sharedbook.c',
+    'vendor/libvorbis-1.3.7/lib/smallft.c',
+    'vendor/libvorbis-1.3.7/lib/smallft.h',
+    'vendor/libvorbis-1.3.7/lib/synthesis.c',
+    'vendor/libvorbis-1.3.7/lib/vorbisfile.c',
+    'vendor/libvorbis-1.3.7/lib/window.c',
+    'vendor/libvorbis-1.3.7/lib/window.h',
+    'vendor/provenance.json',
+}
 PATTERNS = [
     ('private key', re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----')),
     ('GitHub token', re.compile(r'\b(?:gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{30,})\b')),
@@ -51,6 +117,8 @@ def allowed(name):
         return False
     if path.parts and path.parts[0] == 'native-installer':
         return path.relative_to('native-installer').as_posix() in NATIVE_INSTALLER_SOURCE
+    if path.parts and path.parts[0] == 'native-audio':
+        return path.relative_to('native-audio').as_posix() in NATIVE_AUDIO_SOURCE
     if path.name in ('.gitignore', 'LICENSE'):
         return True
     if any(part.startswith('.env') for part in path.parts):
@@ -87,7 +155,7 @@ def source_files(root):
         for path in sorted((root / 'ios').iterdir()):
             if path.is_file() and allowed(path.relative_to(root).as_posix()):
                 yield path
-    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'native-installer', 'tests', 'test-fixtures/native-menu', '.github'):
+    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'native-installer', 'native-audio', 'tests', 'test-fixtures/native-menu', '.github'):
         base = root / directory
         if base.is_dir():
             for path in sorted(base.rglob('*')):

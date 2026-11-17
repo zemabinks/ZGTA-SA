@@ -2,6 +2,16 @@ import Foundation
 import simd
 import ZGTARapier
 
+/// Camera-only counterpart of the archived world's `feelSolid` predicate.
+/// Membership is explicit: a native material number is not proof of presence
+/// in the original material registry, and a dynamic body alone is not `other`.
+enum NativeCameraCollisionPolicy {
+    static func excludes(otherMember: Bool, originalMaterialMember: Bool,
+                         dynamicBody: Bool) -> Bool {
+        otherMember && (dynamicBody || originalMaterialMember)
+    }
+}
+
 /// Native Rapier rigid bodies and shape queries. The linked Rust library is
 /// built from the official source commit used by the archived JS/Wasm engine.
 /// This owner is confined to its caller's thread (normally the game main loop).
@@ -156,6 +166,12 @@ final class SwiftRapierWorld {
         return true
     }
     func bodyKind(_ id:BodyID)->BodyKind? {bodyKinds[id]}
+    /// Identity-only admission check for an owner's cached collider handles.
+    /// Does not infer registry membership from a surface/material number.
+    func colliderBelongs(_ id:ColliderID,to body:BodyID)->Bool {
+        var position=[Float](repeating:0,count:3),owner:UInt64=0,dynamic:UInt32=0,material:Int32 = -1
+        return zgtaphys_collider_info(handle,id,&position,&owner,&dynamic,&material) != 0 && owner==body
+    }
     /// Anchors are local to each body in this world's axes. Towing uses a free
     /// spherical joint with connected-body contacts disabled; no spring or
     /// angular motor is introduced by this bridge.

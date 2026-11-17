@@ -103,3 +103,16 @@ real time. These are desktop audio CPU-wall measurements while other builds
 were running, not iPhone frame-rate results. Functional Debug builds remain
 useful for diagnostics; evaluate gameplay/audio performance in Release and
 profile the physical phone separately.
+
+
+Core109's build also checks or builds the pinned native compressed-radio bridge:
+
+```sh
+python3 build_native_audio.py --check --platform device --platform simulator
+```
+
+Ordinary builds reuse matching source-stamped archives. The bridge includes
+BSD-licensed Xiph source and one explicitly recorded upstream compatibility fix;
+no game recordings or decoded audio belong in source. See
+[native audio build provenance](native-audio/README.md). SDK links and CPU tests
+do not establish audible device playback or frame-rate performance.

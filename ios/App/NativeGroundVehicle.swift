@@ -202,6 +202,9 @@ final class NativeGroundVehicle {
     let world: SwiftRapierWorld
     private lazy var others = NativeOtherVehicles(world:world)
     var otherColliders: Set<SwiftRapierWorld.ColliderID> {others.colliders}
+    /// Only proven original-other dynamic vehicles. Kinematic neighbors stay
+    /// camera-solid; no native material ID is promoted to registry membership.
+    var cameraExcludedOtherColliders:Set<SwiftRapierWorld.ColliderID>{others.cameraExcludedColliderIDs}
     var onOtherMove:((String,[String:Any])->Void)?
     var onCouplingStep:((Double)->Void)?
     /// Stages external kinematic world geometry exactly once per native tick,

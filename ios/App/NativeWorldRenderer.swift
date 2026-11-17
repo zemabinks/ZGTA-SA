@@ -349,6 +349,37 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var appPreferences = NativeAppSettings.defaults
     private var ownCameraVisibility=NativeCameraVisibility()
     private var gameCameraFrame: NativeGameCamera.Frame?
+    private var passiveCameraTrace:NativePassiveCameraTrace?
+    private var passiveCameraTraceClosing=false
+    private var passiveCameraRay:NativePassiveCameraTrace.Ray?
+    /// Explicit diagnostic seam; no launch flag, settings migration, upload or
+    /// gameplay input is attached to it. Files stay in this app's own cache.
+    @discardableResult func beginPassiveCameraTrace(maximumRecords:Int=1800,maximumBytes:Int=2*1024*1024)->Bool {
+        guard Thread.isMainThread,passiveCameraTrace==nil,!passiveCameraTraceClosing,
+              let cache=FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask).first else{return false}
+        passiveCameraTrace=NativePassiveCameraTrace(directory:cache.appendingPathComponent("CameraAudit",isDirectory:true),
+            limits:.init(records:maximumRecords,bytes:maximumBytes,pending:32))
+        passiveCameraRay=nil
+        gameCamera.onVehicleObservation = {[weak self] observation in
+            guard let self else{return}
+            self.passiveCameraTrace?.submit(.init(camera:observation,ray:self.passiveCameraRay,draw:nil))
+            self.passiveCameraRay=nil
+        }
+        return true
+    }
+    func endPassiveCameraTrace(completion:@escaping(NativePassiveCameraTrace.Summary?)->Void) {
+        guard Thread.isMainThread else{
+            DispatchQueue.main.async{[weak self] in
+                guard let self else{completion(nil);return}
+                self.endPassiveCameraTrace(completion:completion)
+            }
+            return
+        }
+        guard let recorder=passiveCameraTrace else{completion(nil);return}
+        passiveCameraTrace=nil;passiveCameraTraceClosing=true;passiveCameraRay=nil
+        gameCamera.onVehicleObservation=nil
+        recorder.stop{[weak self] summary in self?.passiveCameraTraceClosing=false;completion(summary)}
+    }
     private var cameraVehicleDefinitions: [String:CameraVehicleDefinition] = [:]
     private var cameraWasDriving = false
     private var waterTexture: MTLTexture?
@@ -850,24 +881,19 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             self.synchronizeLegacyObjectPhysics(at:at)
         }
         gameCamera.trace = { [weak self] origin,direction,distance in
-            guard let self else { return nil }
-            let groups: UInt32 = self.driving ? 0xffff0083 : 0xffff0001
-            var excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : Set<UInt64>()
-            if self.isPassenger,let id=self.currentVehicleID{excluded.formUnion(self.groundVehicle?.otherVehicleColliders(id:id) ?? [])}
-            if let queries=self.character?.queries {excluded.formUnion([queries.walker,queries.probe])}
-            excluded.formUnion(self.legacyCollisionWorld?.cameraExcludedColliderIDs ?? [])
-            switch self.worldRay(from:origin,direction:direction,distance:distance,groups:groups,excluding:excluded) {
-            case .hit(let hit):return hit.distance
-            case .unavailable(let at):return at
-            case .clear:return nil
-            }
+            guard let self else{return nil}
+            return self.cameraRay(from:origin,direction:direction,distance:distance,originalVehiclePolicy:self.driving)
         }
         gameCamera.unavailableDistance = { [weak self] origin,direction,distance in
             guard let self,let vehicle=self.groundVehicle else {return 0}
             return NativeWorldRay.coverage(from:origin,to:origin+direction*distance,interior:self.isInterior,
                 loaded:vehicle.isCellLoaded)?.firstUnavailable
         }
-        legacyFollowCamera.trace=gameCamera.trace
+        // SA-MP camera ownership is a native adapter, not the archived driven
+        // vehicle callback. Preserve its previous solid-body collision policy.
+        legacyFollowCamera.trace = {[weak self] origin,direction,distance in
+            self?.cameraRay(from:origin,direction:direction,distance:distance,originalVehiclePolicy:false)
+        }
         legacyFollowCamera.unavailableDistance=gameCamera.unavailableDistance
         weaponEffects.trace = { [weak self] origin, direction, distance in
             guard let self else{return nil}
@@ -2047,8 +2073,60 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func cameraRay(from origin:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,originalVehiclePolicy:Bool)->Float? {
+        let groups: UInt32 = self.driving ? 0xffff0083 : 0xffff0001
+        var excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : Set<UInt64>()
+        if self.isPassenger,let id=self.currentVehicleID{excluded.formUnion(self.groundVehicle?.otherVehicleColliders(id:id) ?? [])}
+        let ownExcludedCount=excluded.count
+        let dynamicOthers=originalVehiclePolicy ? self.groundVehicle?.cameraExcludedOtherColliders ?? []:[]
+        excluded.formUnion(dynamicOthers)
+        if let queries=self.character?.queries {excluded.formUnion([queries.walker,queries.probe])}
+        let legacyExcluded=self.legacyCollisionWorld?.cameraExcludedColliderIDs ?? []
+        excluded.formUnion(legacyExcluded)
+        var exactHit:SwiftRapierWorld.Hit?
+        let observing=self.passiveCameraTrace != nil
+        let observer:((SwiftRapierWorld.Hit)->Void)?=observing ? {exactHit=$0}:nil
+        let result=self.worldRay(from:origin,direction:direction,distance:distance,groups:groups,excluding:excluded,onHit:observer)
+        if observing {
+            func array(_ v:SIMD3<Float>)->[Float]{[v.x,v.y,v.z]}
+            var record=NativePassiveCameraTrace.Ray(origin:array(origin),direction:array(direction),requestedDistance:distance,
+                groups:groups,vehiclePolicyApplied:originalVehiclePolicy,result:"clear",excludedDynamicOtherCount:dynamicOthers.count,excludedLegacyCount:legacyExcluded.count,
+                excludedOwnCount:ownExcludedCount,excludedDynamicOtherSample:Array(dynamicOthers.sorted().prefix(32)))
+            switch result {
+            case .hit(let hit):record.result="hit";record.resultDistance=hit.distance
+            case .unavailable(let distance):record.result="unavailable";record.resultDistance=distance
+            case .clear:break
+            }
+            if let hit=exactHit {
+                record.collider=hit.collider;record.body=hit.body;record.nativeMaterial=hit.material
+                record.point=array(SwiftRapierWorld.rapierToGTA(hit.point));record.normal=array(SwiftRapierWorld.rapierToGTA(hit.normal))
+                let other=self.groundVehicle?.otherColliders.contains(hit.collider) ?? false
+                record.originalOtherMember=other
+                // The proven native-other owner is vehicles only. Its
+                // material63 assignment is not original S-map membership.
+                record.originalMaterialMember=other ? false:nil
+                record.legacyObject=self.legacyCollisionWorld?.metadata(collider:hit.collider) != nil
+                if let body=hit.body {
+                    switch self.groundVehicle?.world.bodyKind(body) {
+                    case .fixed?:record.bodyKind="fixed"
+                    case .dynamic?:record.bodyKind="dynamic"
+                    case .kinematicPosition?:record.bodyKind="kinematic-position"
+                    case .kinematicVelocity?:record.bodyKind="kinematic-velocity"
+                    case nil:record.bodyKind="unknown"
+                    }
+                }else{record.bodyKind="unparented"}
+            }
+            self.passiveCameraRay=record
+        }
+        switch result {
+        case .hit(let hit):return hit.distance
+        case .unavailable(let at):return at
+        case .clear:return nil
+        }
+    }
+
     private func worldRay(from origin:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,
-                          groups:UInt32,excluding:Set<UInt64>=[]) -> NativeWorldRay.Result {
+                          groups:UInt32,excluding:Set<UInt64>=[],onHit:((SwiftRapierWorld.Hit)->Void)?=nil) -> NativeWorldRay.Result {
         guard let vehicle=groundVehicle else{return .unavailable(0)}
         let magnitude=simd_length(direction)
         guard magnitude.isFinite,magnitude>0.0001,distance.isFinite,distance>0 else{return .unavailable(0)}
@@ -2063,7 +2141,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return NativeWorldRay.query(from:origin,direction:unit,distance:distance,interior:isInterior,loaded:vehicle.isCellLoaded) { start,way,limit in
             vehicle.world.raycast(origin:SwiftRapierWorld.gtaToRapier(start),direction:SwiftRapierWorld.gtaToRapier(way),
                 distance:limit,excludingColliders:excluded,groups:groups).map {
-                    .init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))
+                    onHit?($0)
+                    return .init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))
                 }
         }
     }
@@ -3421,6 +3500,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // only once. Render positions are current poses, not retroactive input.
         for step in timing.steps.isEmpty ? [0]:timing.steps {
             if driving,let input = nativeCameraVehicle() {
+                if passiveCameraTrace != nil{passiveCameraRay=nil}
                 gameCameraFrame = gameCamera.followVehicle(input,delta:Float(step),look:cameraLookDirection,nowMilliseconds:now*1000)
             } else if !driving {
                 gameCamera.setDirection(heading:heading,pitch:cameraPitch)
@@ -3460,6 +3540,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         atmosphereAir = indoors ? 0 : eye.z < 900 ? min(1,atmosphereAir+delta) : max(0,atmosphereAir-delta)
         conditions = environment?.sample(weatherFrom: sampledWeatherFrom,to: sampledWeatherTo,blend: blend,hour: hour,altitude: eye.z)
         let planes = gameCamera.projection(air: atmosphereAir,farClip: conditions?.farClip ?? 25000)
+        if let recorder=passiveCameraTrace {
+            func array(_ v:SIMD3<Float>)->[Float]{[v.x,v.y,v.z]}
+            let subject=nativeVehicleTransform.map{matrix in (0..<4).flatMap{column in (0..<4).map{matrix[column][$0]}}}
+            recorder.submit(.init(camera:nil,ray:nil,draw:.init(monotonicMilliseconds:now*1000,eye:array(eye),target:array(target),
+                nearPlane:planes.near,farPlane:planes.far,verticalFov:gameCameraFrame?.verticalFov ?? 55.41293,aspect:aspect,
+                legacyCameraOverride:legacyCameraSample?.active == true,subjectTransform:subject)))
+        }
         ownCameraVisibility.update(eye:eye,feet:camera,nearPlane:planes.near,
             attachmentRadius:personalFlight.worn ? 0.2:0,presentationClearance:1)
         let projection=Self.perspective(aspect:aspect,verticalFov:gameCameraFrame?.verticalFov ?? 55.41293,near:planes.near,far:planes.far)
@@ -4570,6 +4657,15 @@ private final class LegacyStockMetadataTransfer:NSObject,URLSessionDataDelegate 
         guard (1...16*1024*1024).contains(self.maximumBytes),["http","https"].contains(self.url.scheme?.lowercased() ?? ""),
               self.url.user==nil,self.url.password==nil,self.url.query==nil,self.url.fragment==nil else {
             self.finish(.failure(NativeSAMPStockAssetLoader.Failure.invalidURL));return
+        }
+        do {
+            if let prepared=try NativeStockAssetAccess.preparedData(for:self.url,maximumBytes:self.maximumBytes) {
+                self.finish(.success(prepared));return
+            }
+        } catch {
+            // Installed misses/corruption must stay local failures. Only an
+            // explicit development cache miss may reach the bounded HTTP sink.
+            self.finish(.failure(error));return
         }
         let configuration=URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage=nil;configuration.httpShouldSetCookies=false;configuration.urlCredentialStorage=nil;configuration.urlCache=nil

@@ -29,21 +29,25 @@ targets:
           - $(SRCROOT)/../native-physics/include
           - $(SRCROOT)/../native-samp/include
           - $(SRCROOT)/../native-installer/include
+          - $(SRCROOT)/../native-audio/include
         LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
           - $(inherited)
           - $(SRCROOT)/../local-only/native-physics/ios-device
           - $(SRCROOT)/../local-only/native-samp/ios-device
           - $(SRCROOT)/../local-only/native-installer/device
+          - $(SRCROOT)/../local-only/native-audio/ios-device
         LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
           - $(inherited)
           - $(SRCROOT)/../local-only/native-physics/ios-simulator
           - $(SRCROOT)/../local-only/native-samp/ios-simulator
           - $(SRCROOT)/../local-only/native-installer/simulator
+          - $(SRCROOT)/../local-only/native-audio/ios-simulator
         OTHER_LDFLAGS:
           - $(inherited)
           - -lzgtasa_native_physics
           - -lzgtasa_samp
           - -lzgtasa_installer
+          - -lzgtasa_native_audio
           - -lz
           - -lresolv
     dependencies:

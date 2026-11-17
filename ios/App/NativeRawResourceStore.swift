@@ -40,6 +40,13 @@ final class NativeRawResourceStore {
             return result
         }
     }
+    /// Receipt metadata only. No pack is opened/hashed and no verification or
+    /// playable state is conferred. Consumers acquire requested files lazily.
+    struct ReceiptDescriptor {
+        let sourceID:String,contentID:String,generationID:String,selectionIdentity:String,sourceName:String
+        let sourceBytes:Int64
+        let resourcesByCasefoldedPath:[String:Resource]
+    }
     private struct Catalogue:Codable {
         var schema=1,activeSourceID:String?,sources:[String:String]=[:]
     }
@@ -62,16 +69,18 @@ final class NativeRawResourceStore {
     let root:URL
     private let extractor:Extractor,files=FileManager.default,lock=NSLock()
     private let worker=DispatchQueue(label:"org.zgtasa.raw-resources",qos:.userInitiated)
-    private var value=Snapshot.empty,busy=false
+    private let leaseWorker:OperationQueue={let queue=OperationQueue();queue.name="org.zgtasa.raw-resource-reads";queue.qualityOfService = .utility;queue.maxConcurrentOperationCount=2;return queue}()
+    private var value=Snapshot.empty,busy=false,leaseRequests=0,liveLeaseStorages=0,receiptRequests=0
+    private var snapshotRevision=UUID()
     init(root:URL,extractor:Extractor = .originalISO){
         self.root=root.standardizedFileURL.resolvingSymlinksInPath();self.extractor=extractor
         do{try prepareRoot();let catalogue=try loadCatalogue();value=try retained(catalogue)}
         catch{value.issues=[error.localizedDescription]}
     }
     var snapshot:Snapshot{lock.lock();defer{lock.unlock()};return value}
-    private func set(_ snapshot:Snapshot){lock.lock();value=snapshot;lock.unlock()}
+    private func set(_ snapshot:Snapshot){lock.lock();value=snapshot;snapshotRevision=UUID();lock.unlock()}
     private func prepareRoot()throws{
-        for directory in [root,root.appendingPathComponent("staging"),root.appendingPathComponent("generations")]{
+        for directory in [root,root.appendingPathComponent("staging"),root.appendingPathComponent("generations"),root.appendingPathComponent("lease-locks")]{
             try files.createDirectory(at:directory,withIntermediateDirectories:true)
             let info=try directory.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey])
             guard info.isDirectory==true,info.isSymbolicLink != true else{throw Failure.invalid("Raw resource storage is not an app-owned directory")}
@@ -187,7 +196,7 @@ final class NativeRawResourceStore {
                 }
                 let referenced=Set(try self.loadCatalogue().sources.values)
                 for path in try self.files.contentsOfDirectory(at:self.root.appendingPathComponent("generations"),includingPropertiesForKeys:nil){
-                    if UUID(uuidString:path.lastPathComponent) != nil,!referenced.contains(path.lastPathComponent){try self.files.removeItem(at:path)}
+                    if UUID(uuidString:path.lastPathComponent) != nil,!referenced.contains(path.lastPathComponent){try self.removeUnleasedGeneration(path.lastPathComponent)}
                 }
                 return try work(operation,update)
             }
@@ -221,7 +230,7 @@ final class NativeRawResourceStore {
             let total=members.reduce(Int64(0)){$0+Int64($1.bytes)};guard total<=32*1024*1024*1024 else{throw Failure.invalid("Raw extraction exceeds its output byte bound")}
             let id=UUID().uuidString,stage=self.root.appendingPathComponent("staging/"+id+".partial",isDirectory:true)
             try self.files.createDirectory(at:stage,withIntermediateDirectories:false);var moved:URL?
-            defer{try? self.files.removeItem(at:stage);if let moved{try? self.files.removeItem(at:moved)}}
+            defer{try? self.files.removeItem(at:stage);if let moved{try? self.removeUnleasedGeneration(moved.lastPathComponent)}}
             try input.extract(stage.appendingPathComponent("files",isDirectory:true)){value in
                 update(.init(phase:"Extracting original raw resources",completedFiles:Int(value.completedFiles),totalFiles:Int(value.totalFiles),completedBytes:Int64(value.completedBytes),totalBytes:Int64(value.totalBytes),currentPath:value.path))
             }
@@ -240,7 +249,7 @@ final class NativeRawResourceStore {
             try self.files.moveItem(at:stage,to:destination);moved=destination
             let prior=catalogue.sources[sourceID];catalogue.sources[sourceID]=id;catalogue.activeSourceID=sourceID
             try operation.check();try self.commit(catalogue);moved=nil
-            if let prior,prior != id,let previous=try? self.generation(prior){try? self.files.removeItem(at:previous)}
+            if let prior,prior != id{try? self.removeUnleasedGeneration(prior)}
             var snapshot=try self.retained(catalogue);snapshot.verified=true;return snapshot
         }
     }
@@ -250,6 +259,159 @@ final class NativeRawResourceStore {
             let stage=try self.generation(id),receipt=try self.receipt(at:stage,sourceID:source)
             try self.verify(receipt,at:stage,operation:operation,update:update)
             var snapshot=try self.retained(catalogue);snapshot.verified=true;return snapshot
+        }
+    }
+    /// Called only while the existing global exclusive operation lock is held.
+    /// Persistent lock files are deliberately retained to avoid inode races.
+    private func removeUnleasedGeneration(_ id:String)throws {
+        guard let exclusive=try NativeRawResourceGenerationLock.acquire(root:root,generation:id,exclusive:true) else{return}
+        defer{exclusive.close()}
+        let path=try generation(id);try files.removeItem(at:path)
+    }
+    /// Whole-file verification runs on a bounded worker queue. Progress is
+    /// immutable and synchronous on that worker; UI clients must marshal it.
+    /// Completion is main-queue, and reading never verifies the whole source.
+    @discardableResult func acquireLocalFile(path:String,expectedSourceID:String?=nil,expectedContentID:String?=nil,
+        expectedGenerationID:String?=nil,maximumBytes:Int64=Int64(UInt32.max),
+        verificationProgress:((NativeRawResourceLease.VerificationProgress)->Void)?=nil,
+        completion:@escaping(Result<NativeRawResourceLease,Error>)->Void)->NativeRawResourceLease.Request {
+        let request=NativeRawResourceLease.Request()
+        lock.lock();let admitted=leaseRequests<16;if admitted{leaseRequests+=1};lock.unlock()
+        guard admitted else{request.deliver(.failure(NativeRawResourceLease.Failure.invalid("Too many pending raw file acquisitions.")),fence:{},completion:completion);return request}
+        leaseWorker.addOperation {
+            var binding:NativeRawResourceLease.Binding?,catalogueStamp:NativeRawResourceFileStamp?,receiptStamp:NativeRawResourceFileStamp?
+            self.lock.lock();let observationRevision=self.snapshotRevision;self.lock.unlock()
+            let result=Result{()throws->NativeRawResourceLease in
+                self.lock.lock();let reserved=self.liveLeaseStorages<16;if reserved{self.liveLeaseStorages+=1};self.lock.unlock()
+                guard reserved else{throw NativeRawResourceLease.Failure.invalid("Too many live raw file leases.")}
+                var slotOwned=true;defer{if slotOwned{self.releaseLeaseStorage()}}
+                try request.check()
+                guard Self.validPath(path),!path.contains(":"),!path.contains("\\"),maximumBytes>=0,maximumBytes<=Int64(UInt32.max),
+                    expectedSourceID.map(Self.digest) ?? true,expectedContentID.map(Self.digest) ?? true,
+                    expectedGenerationID.map({UUID(uuidString:$0) != nil}) ?? true else{throw NativeRawResourceLease.Failure.invalid("Invalid raw file lease request.")}
+                try self.prepareRoot()
+                let catalogueLock=try NativeRawResourceFileIO.operationReadLock(root:self.root)
+                var shared:NativeRawResourceGenerationLock?,descriptor:Int32 = -1
+                defer{catalogueLock.close();if descriptor>=0{Darwin.close(descriptor)};shared?.close()}
+                let catalogue=try self.loadCatalogue()
+                guard let source=catalogue.activeSourceID,let id=catalogue.sources[source] else{throw NativeRawResourceLease.Failure.invalid("No saved raw resource source is selected.")}
+                guard expectedSourceID.map({$0==source}) ?? true,expectedGenerationID.map({$0==id}) ?? true else{throw NativeRawResourceLease.Failure.stale}
+                guard let held=try NativeRawResourceGenerationLock.acquire(root:self.root,generation:id,exclusive:false) else{throw NativeRawResourceLease.Failure.busy};shared=held
+                let stage=try self.generation(id),receipt=try self.receipt(at:stage,sourceID:source)
+                guard expectedContentID.map({$0==receipt.contentID}) ?? true else{throw NativeRawResourceLease.Failure.stale}
+                guard let item=try receipt.casefoldIndex()[path.lowercased()] else{throw NativeRawResourceLease.Failure.invalid("Requested file is absent from the selected raw receipt: "+path)}
+                guard item.bytes<=maximumBytes else{throw NativeRawResourceLease.Failure.invalid("Raw file exceeds this reader's byte budget.")}
+                let selected=NativeRawResourceLease.Binding(sourceID:source,contentID:receipt.contentID,generationID:id,selectionIdentity:receipt.selectionIdentity,path:item.path,bytes:item.bytes,sha256:item.sha256);binding=selected
+                receiptStamp=try NativeRawResourceFileIO.metadataStamp(root:self.root,components:["generations",id],name:"raw-resources.json")
+                descriptor=try NativeRawResourceFileIO.openResource(root:self.root,generation:id,path:item.path)
+                let before=try NativeRawResourceFileStamp.read(descriptor)
+                guard before.size==item.bytes else{throw NativeRawResourceLease.Failure.changed}
+                // The generation lock pins immutable bytes while repair/source
+                // replacement proceeds independently under operation.lock.
+                catalogueLock.close()
+                var hash=SHA256(),offset:Int64=0
+                while offset<item.bytes {
+                    try request.check()
+                    let count=Int(min(Int64(NativeRawResourceLease.maximumReadBytes),item.bytes-offset))
+                    var chunk=Data(count:count),done=0
+                    while done<count {
+                        try request.check()
+                        let read=chunk.withUnsafeMutableBytes{buffer in Darwin.pread(descriptor,buffer.baseAddress!.advanced(by:done),count-done,off_t(offset+Int64(done)))}
+                        if read<0{if errno==EINTR{continue};throw NativeRawResourceLease.Failure.io(errno)}
+                        guard read>0 else{throw NativeRawResourceLease.Failure.changed};done+=read
+                    }
+                    hash.update(data:chunk);offset+=Int64(count)
+                    verificationProgress?(.init(binding:selected,verifiedBytes:offset))
+                }
+                try request.check()
+                guard try NativeRawResourceFileStamp.read(descriptor)==before else{throw NativeRawResourceLease.Failure.changed}
+                guard hash.finalize().map({String(format:"%02x",$0)}).joined()==item.sha256 else{throw NativeRawResourceLease.Failure.checksum}
+                let finalLock=try NativeRawResourceFileIO.operationReadLock(root:self.root);defer{finalLock.close()}
+                let current=try self.loadCatalogue()
+                guard current.activeSourceID==source,current.sources[source]==id,
+                    try NativeRawResourceFileIO.metadataStamp(root:self.root,components:["generations",id],name:"raw-resources.json")==receiptStamp else{throw NativeRawResourceLease.Failure.stale}
+                catalogueStamp=try NativeRawResourceFileIO.catalogueStamp(root:self.root)
+                try request.check()
+                finalLock.close()
+                let storage=NativeRawResourceLease.Storage(binding:selected,fd:descriptor,generationLock:held,stamp:before,
+                    fault:{[weak self] in self?.noteLeaseFault($0,revision:observationRevision)},released:{[weak self] in self?.releaseLeaseStorage()})
+                descriptor = -1;shared=nil;slotOwned=false
+                verificationProgress?(.init(binding:selected,verifiedBytes:item.bytes,stage:.verified))
+                try request.check()
+                return NativeRawResourceLease(storage:storage)
+            }
+            if case .failure(let error)=result,let binding {
+                if let failure=error as? NativeRawResourceLease.Failure {
+                    switch failure{case .changed,.checksum:self.noteLeaseFault(binding,revision:observationRevision);default:break}
+                }
+            }
+            request.deliver(result,fence:{
+                guard case .success=result,let binding,let catalogueStamp,let receiptStamp else{return}
+                let current=try NativeRawResourceFileIO.operationReadLock(root:self.root);defer{current.close()}
+                guard try NativeRawResourceFileIO.catalogueStamp(root:self.root)==catalogueStamp,
+                    try NativeRawResourceFileIO.metadataStamp(root:self.root,components:["generations",binding.generationID],name:"raw-resources.json")==receiptStamp else{throw NativeRawResourceLease.Failure.stale}
+            },completion:{value in
+                self.lock.lock();self.leaseRequests-=1;self.lock.unlock();completion(value)
+            })
+        }
+        return request
+    }
+    private func releaseLeaseStorage(){lock.lock();liveLeaseStorages-=1;lock.unlock()}
+    @discardableResult func acquireLocalFile(path:String,matching descriptor:ReceiptDescriptor,maximumBytes:Int64=Int64(UInt32.max),
+        verificationProgress:((NativeRawResourceLease.VerificationProgress)->Void)?=nil,
+        completion:@escaping(Result<NativeRawResourceLease,Error>)->Void)->NativeRawResourceLease.Request {
+        acquireLocalFile(path:path,expectedSourceID:descriptor.sourceID,expectedContentID:descriptor.contentID,
+            expectedGenerationID:descriptor.generationID,maximumBytes:maximumBytes,
+            verificationProgress:verificationProgress,completion:completion)
+    }
+    /// Lightweight immutable index for radio catalogue construction. Only the
+    /// bounded receipt is decoded; stream/config bytes are verified on demand.
+    @discardableResult func readReceiptDescriptor(expectedSourceID:String?=nil,expectedContentID:String?=nil,
+        completion:@escaping(Result<ReceiptDescriptor,Error>)->Void)->NativeRawResourceLease.Request {
+        let request=NativeRawResourceLease.Request()
+        lock.lock();let admitted=receiptRequests<2;if admitted{receiptRequests+=1};lock.unlock()
+        guard admitted else{request.deliverValue(.failure(NativeRawResourceLease.Failure.invalid("Too many pending raw receipt reads.")),fence:{},completion:completion);return request}
+        leaseWorker.addOperation {
+            var catalogueStamp:NativeRawResourceFileStamp?,receiptStamp:NativeRawResourceFileStamp?
+            let result=Result{()throws->ReceiptDescriptor in
+                try request.check()
+                guard expectedSourceID.map(Self.digest) ?? true,expectedContentID.map(Self.digest) ?? true else{throw NativeRawResourceLease.Failure.invalid("Invalid expected raw receipt identity.")}
+                try self.prepareRoot();let global=try NativeRawResourceFileIO.operationReadLock(root:self.root);defer{global.close()}
+                let catalogue=try self.loadCatalogue()
+                guard let source=catalogue.activeSourceID,let id=catalogue.sources[source] else{throw NativeRawResourceLease.Failure.invalid("No saved raw resource source is selected.")}
+                guard expectedSourceID.map({$0==source}) ?? true else{throw NativeRawResourceLease.Failure.stale}
+                guard let shared=try NativeRawResourceGenerationLock.acquire(root:self.root,generation:id,exclusive:false) else{throw NativeRawResourceLease.Failure.busy};defer{shared.close()}
+                let before=try NativeRawResourceFileIO.metadataStamp(root:self.root,components:["generations",id],name:"raw-resources.json")
+                let receipt=try self.receipt(at:self.generation(id),sourceID:source)
+                guard expectedContentID.map({$0==receipt.contentID}) ?? true else{throw NativeRawResourceLease.Failure.stale}
+                guard try NativeRawResourceFileIO.metadataStamp(root:self.root,components:["generations",id],name:"raw-resources.json")==before else{throw NativeRawResourceLease.Failure.stale}
+                receiptStamp=before;catalogueStamp=try NativeRawResourceFileIO.catalogueStamp(root:self.root)
+                try request.check()
+                return ReceiptDescriptor(sourceID:source,contentID:receipt.contentID,generationID:id,selectionIdentity:receipt.selectionIdentity,
+                    sourceName:receipt.sourceName,sourceBytes:receipt.sourceBytes,resourcesByCasefoldedPath:try receipt.casefoldIndex())
+            }
+            request.deliverValue(result,fence:{
+                guard case .success(let descriptor)=result,let catalogueStamp,let receiptStamp else{return}
+                let current=try NativeRawResourceFileIO.operationReadLock(root:self.root);defer{current.close()}
+                guard try NativeRawResourceFileIO.catalogueStamp(root:self.root)==catalogueStamp,
+                    try NativeRawResourceFileIO.metadataStamp(root:self.root,components:["generations",descriptor.generationID],name:"raw-resources.json")==receiptStamp else{throw NativeRawResourceLease.Failure.stale}
+            },completion:{value in self.lock.lock();self.receiptRequests-=1;self.lock.unlock();completion(value)})
+        }
+        return request
+    }
+    private func noteLeaseFault(_ binding:NativeRawResourceLease.Binding,revision:UUID) {
+        worker.async {
+            do {
+                let current=try NativeRawResourceFileIO.operationReadLock(root:self.root);defer{current.close()}
+                let catalogue=try self.loadCatalogue()
+                guard catalogue.activeSourceID==binding.sourceID,catalogue.sources[binding.sourceID]==binding.generationID else{return}
+                self.lock.lock();defer{self.lock.unlock()}
+                guard self.snapshotRevision==revision,self.value.sourceID==binding.sourceID,self.value.contentID==binding.contentID else{return}
+                self.value.verified=false
+                self.snapshotRevision=UUID()
+                let message="Raw file changed; verify or repair: "+binding.path
+                if !self.value.issues.contains(message){self.value.issues.append(message)}
+            }catch{} // Stale/busy observations never revoke a newer generation.
         }
     }
     private func commit(_ catalogue:Catalogue)throws{try JSONEncoder().encode(catalogue).write(to:root.appendingPathComponent("catalogue.json"),options:.atomic)}

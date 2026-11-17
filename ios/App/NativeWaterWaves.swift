@@ -21,7 +21,7 @@ final class NativeWaterWaves {
     }
     enum Error: Swift.Error { case invalidTable }
     private var table: Document?
-    private var request: URLSessionDataTask?
+    private var request: NativeResourceTask?
     private var lastRegion: Int?
     private var phases = SIMD3<Double>.zero
     private var roughness: Double = 0
@@ -41,7 +41,7 @@ final class NativeWaterWaves {
     deinit { request?.cancel() }
     func load(server: ServerAddress, completion: (() -> Void)? = nil) {
         request?.cancel()
-        request = URLSession.shared.dataTask(with: server.path("game/native/water-waves.json")) { [weak self] data,response,_ in
+        request = NativeResourceTransport.dataTask(with: server.path("game/native/water-waves.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async {
                 guard let self,(try? self.install(data)) != nil else { return }; completion?()

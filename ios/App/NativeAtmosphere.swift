@@ -69,7 +69,7 @@ final class NativeAtmosphere {
     }
     enum Error: Swift.Error { case invalidTable }
     private var table: Document?
-    private var request: URLSessionDataTask?
+    private var request: NativeResourceTask?
     private var starClock: Double = 1.0 / 30
     private var lastStarLight = -1
     private var starLight = [Double](repeating: 0, count: 12)
@@ -85,7 +85,7 @@ final class NativeAtmosphere {
 
     func load(server: ServerAddress, completion: (() -> Void)? = nil) {
         request?.cancel()
-        request = URLSession.shared.dataTask(with: server.path("game/native/atmosphere.json")) { [weak self] data, response, _ in
+        request = NativeResourceTransport.dataTask(with: server.path("game/native/atmosphere.json")) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async {
                 guard let self, (try? self.install(data)) != nil else { return }

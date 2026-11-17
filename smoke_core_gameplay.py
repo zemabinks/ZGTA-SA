@@ -10,6 +10,8 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import platform
+import signal
 import subprocess
 import sys
 import tempfile
@@ -17,6 +19,10 @@ import time
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / 'local-only/native-physics/tests/core-gameplay-gate'
+OWNER_CARRIERS = {
+    'train_layout': ROOT / 'local-only/research/train-layout-107/smoke_train_layout.py',
+    'vehicle_presence_browser': ROOT / 'local-only/research/vehicle-entry-108/smoke_selfhost_vehicle_presence_browser.cjs',
+}
 
 
 def hashes():
@@ -30,12 +36,15 @@ def hashes():
              ROOT / 'native-physics/source_stamp.py']
     # Network/codec sources participate in the same frozen-source boundary.
     # Walk only source files, excluding downloaded build products and caches.
-    for directory in ['native-samp','native-menu-codec','tests']:
+    for directory in ['native-samp','native-menu-codec','native-installer','native-audio','tests']:
         base=ROOT/directory
         if base.exists():
+            excluded={'build','target','node_modules','.git','local-only','__pycache__'}
+            if directory not in {'native-installer','native-audio'}:excluded.add('vendor')
             paths += sorted(p for p in base.rglob('*') if p.is_file()
-                            and not any(part in {'build','target','vendor','node_modules','.git','local-only','__pycache__'} for part in p.relative_to(base).parts)
-                            and (p.suffix in {'.go','.mod','.sum','.c','.cpp','.h','.hpp','.rs','.toml','.lock','.sh','.py','.js','.json','.swift','.pwn','.metal'} or p.name in {'go.mod','go.sum'}))
+                            and not any(part in excluded for part in p.relative_to(base).parts)
+                            and (p.suffix in {'.go','.mod','.sum','.c','.cpp','.h','.hpp','.rs','.toml','.lock','.sh','.py','.js','.json','.swift','.pwn','.metal'} or p.name in {'go.mod','go.sum','COPYING','LICENSE'}))
+    paths += [ROOT/'ios/project.yml',ROOT/'ios/project-owner-menu.yml',ROOT/'ios/ZGTASA.xcodeproj/project.pbxproj',*OWNER_CARRIERS.values()]
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
 
@@ -47,7 +56,8 @@ def main():
                 ROOT / 'local-only/site/game/native/foot-animation.json',
                 ROOT / 'local-only/site/game/native/models/animations.clips.bin',
                 ROOT / 'local-only/original-world-assets/game/native/stock-models.json',
-                ROOT / 'local-only/research/samp-ped-height/mesh-observations.json']
+                ROOT / 'local-only/research/samp-ped-height/mesh-observations.json',
+                *OWNER_CARRIERS.values()]
     missing = [str(p.relative_to(ROOT)) for p in required if not p.is_file()]
     if missing:
         raise SystemExit('Prepare the owner-provided local assets/catalogs before this gate. Missing: ' + ', '.join(missing))
@@ -55,7 +65,7 @@ def main():
     before = hashes()
     cases = [(p.removesuffix('.py'), ['python3', p]) for p in [
         'smoke_native_fixed_velocity.py', 'smoke_native_task_handoffs.py', 'smoke_native_fall_damage.py', 'smoke_native_health.py',
-        'smoke_native_camera_motion.py', 'smoke_native_world_reset.py', 'smoke_vehicle_air_handoff.py', 'smoke_train_layout.py',
+        'smoke_native_camera_motion.py', 'smoke_native_world_reset.py', 'smoke_vehicle_air_handoff.py',
         'smoke_native_combat_transitions.py', 'smoke_native_combat_animation.py', 'smoke_native_fire_arrival.py', 'smoke_native_reload_dispatch.py', 'smoke_native_respawn_dispatch.py', 'smoke_native_connection_recovery.py', 'smoke_native_recovery.py', 'smoke_native_connection_owners.py', 'smoke_native_gameplay_idle.py',
         'smoke_native_weapon_roles.py', 'smoke_native_combat_eligibility.py',
         'smoke_native_combat_interruptions.py', 'smoke_native_combat_dispatch.py',
@@ -99,6 +109,21 @@ def main():
         'test_stock_img_assets.py',
         'smoke_samp_controls.py', 'smoke_samp_vitals.py',
     ]]
+    cases += [(p.removesuffix('.py'), ['python3', p]) for p in [
+        'smoke_native_project.py', 'smoke_native_raw_resources.py', 'smoke_native_raw_sdk.py',
+        'smoke_native_raw_leases.py', 'test_native_resources.py', 'smoke_native_game_files.py',
+        'test_native_resource_loaders.py', 'smoke_native_local_radio.py',
+        'smoke_native_camera_policy.py', 'test_native_remote_suspension.py',
+    ]]
+    cases.append(('smoke_train_layout',['python3',str(OWNER_CARRIERS['train_layout'])]))
+    cases.append(('native_audio_archives',['python3','build_native_audio.py','--check']))
+    audio=['python3','test_native_radio_audio.py','--all-platforms','--sanitize']
+    target_cache=ROOT/'local-only/native-audio/targets'
+    if target_cache.is_dir():audio += ['--library-root',str(target_cache)]
+    sanitizer_cache=ROOT/'local-only/native-audio/sanitized'
+    if (sanitizer_cache/('macos-'+platform.machine())/'source-stamp.json').is_file():
+        audio += ['--sanitized-library-root',str(sanitizer_cache)]
+    cases.append(('native_radio_decoder',audio))
     cases += [(p.removesuffix('.js'), ['node', p]) for p in [
         'smoke_browser_armour_sync.js', 'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_weapon_transport.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js', 'smoke_vehicle_departure.js', 'smoke_health_ack.js',
         'smoke_native_melee_server.js', 'smoke_native_melee_assets.js', 'smoke_native_parry.js',
@@ -115,10 +140,18 @@ def main():
         start = time.monotonic()
         with (OUT / (name + '.log')).open('w') as log:
             try:
-                result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=600)
-                code = result.returncode
+                budget=1800 if name in {'smoke_native_camera_policy','smoke_native_raw_sdk','smoke_native_local_radio','native_radio_decoder'} else 600
+                process=subprocess.Popen(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                code=process.wait(timeout=budget)
             except subprocess.TimeoutExpired:
-                log.write('\nFAIL: timed out after600s\n')
+                try:os.killpg(process.pid,signal.SIGTERM)
+                except ProcessLookupError:pass
+                try:process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    try:os.killpg(process.pid,signal.SIGKILL)
+                    except ProcessLookupError:pass
+                    process.wait(timeout=10)
+                log.write(f'\nFAIL: timed out after{budget}s\n')
                 code = 124
         row = {'name': name, 'command': command, 'returncode': code, 'seconds': round(time.monotonic()-start, 2)}
         print(('PASS ' if code == 0 else 'FAIL ') + name, flush=True)
@@ -134,8 +167,8 @@ def main():
 
     # The archived browser replays the exact packets produced by the server
     # fixture. Keep that producer/consumer pair sequential and outside the pool.
-    for script in ['smoke_selfhost_vehicle_presence.js', 'smoke_selfhost_vehicle_presence_browser.js']:
-        results.append(run((script.removesuffix('.js'), ['node', script])))
+    results.append(run(('smoke_selfhost_vehicle_presence',['node','smoke_selfhost_vehicle_presence.js'])))
+    results.append(run(('smoke_selfhost_vehicle_presence_browser',['node',str(OWNER_CARRIERS['vehicle_presence_browser'])])))
 
     # The raw and catalog-aware controls fixtures deliberately use the same
     # matching UDP port. Run this second profile after the pool has released it.

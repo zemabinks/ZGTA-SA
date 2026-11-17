@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """Native raw-stage/coordinator regressions. All data/results stay owner-local."""
 from pathlib import Path
-import hashlib,json,subprocess,tempfile
+import hashlib,json,subprocess,tempfile,os
+from native_raw_test_support import pinned_host_archive
 ROOT=Path(__file__).resolve().parent
-OUT=ROOT/'local-only/research/raw-iso-108'
-NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+OUT=ROOT/'local-only/research/raw-resource-compat'
+NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
 def main():
  OUT.mkdir(parents=True,exist_ok=True)
- checked=subprocess.run(['python3',str(ROOT/'build_installer_bridge.py'),'--check','--platform','host'],capture_output=True,text=True)
- if checked.returncode:subprocess.run(['python3',str(ROOT/'build_installer_bridge.py'),'--platform','host'],check=True)
- paths=[ROOT/'ios/App'/str(n+'.swift') for n in NAMES]+[ROOT/'native-installer/swift/NativeISOExtraction.swift',ROOT/'native-installer/swift/NativeRawResourceSelection.swift',ROOT/'smoke_native_raw_resources.swift',Path(__file__)]
+ library=pinned_host_archive(os.environ.get('ZGTA_RAW_TEST_ARCHIVE'))
+ paths=[ROOT/'ios/App'/str(n+'.swift') for n in NAMES]+[ROOT/'native-installer/swift/NativeISOExtraction.swift',ROOT/'native-installer/swift/NativeRawResourceSelection.swift',ROOT/'smoke_native_raw_resources.swift',Path(__file__),ROOT/'native_raw_test_support.py']
  captured={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
  with tempfile.TemporaryDirectory(prefix='run-',dir=OUT) as folder:
   work=Path(folder);sources=[]
   for path in paths:
    if path.suffix=='.swift':copy=work/path.name;copy.write_bytes(path.read_bytes());sources.append(copy)
-  command=['xcrun','swiftc','-parse-as-library','-I',str(ROOT/'native-installer/include'),'-module-cache-path',str(OUT/'modules'),*map(str,sources),str(ROOT/'local-only/native-installer/host/libzgtasa_installer.a'),'-lz','-o',str(work/'raw')]
+  command=['xcrun','swiftc','-parse-as-library','-I',str(ROOT/'native-installer/include'),'-module-cache-path',str(OUT/'modules'),*map(str,sources),str(library),'-lz','-o',str(work/'raw')]
   run=subprocess.run(command,capture_output=True,text=True);(OUT/'compile.log').write_text(run.stdout+run.stderr)
   if run.returncode:print(run.stdout+run.stderr);run.check_returncode()
   command=[str(work/'raw'),str(work)]

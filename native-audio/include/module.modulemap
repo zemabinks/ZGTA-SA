@@ -1,0 +1,4 @@
+module CZGTANativeAudio {
+  header "zgtasa_native_audio.h"
+  export *
+}

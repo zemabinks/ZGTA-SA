@@ -51,6 +51,33 @@ final class NativeGameCamera {
         /// Original model ped_frontseat frame in local GTA axes.
         var eye: SIMD3<Float>?
     }
+    /// Optional passive diagnostics. This reports observed inputs and results;
+    /// it does not apply controls, choose a view, or affect camera integration.
+    struct VehicleObservation: Codable {
+        let monotonicMilliseconds: Double
+        let delta: Float
+        let view: Int
+        let viewName: String
+        let lookOverride: String?
+        let orbitPixels: [Double]
+        let resetRequested: Bool
+        let kind: String
+        let subjectPosition, forward, right, moveSpeed, turnSpeed: [Float]
+        let up: [Float]?
+        let wheels: Int
+        let boundsMaxX, boundsMinY, boundsMaxZ: Float
+        let boundsMinimum, boundsMaximum: [Float]?
+        let heightAboveRoad: Float
+        let around, desiredEye, collisionResolvedEye, actualEye, target: [Float]
+        let requestedDistance, collisionDistance: Float?
+        let verticalFov: Float
+    }
+    var onVehicleObservation: ((VehicleObservation)->Void)?
+    private struct VehicleTraceGeometry {
+        let around, desired, resolved: SIMD3<Double>
+        let requestedDistance, hit: Double?
+    }
+    private var vehicleTraceGeometry: VehicleTraceGeometry?
     struct Sight: Decodable { let first: Double; let least: Double; let most: Double }
     private struct Document: Decodable {
         let vehicleProfiles: [String:[Double]]
@@ -65,7 +92,7 @@ final class NativeGameCamera {
     enum Error: Swift.Error { case invalidTable }
     private let persistViews: Bool
     private var table: Document?
-    private var request: URLSessionDataTask?
+    private var request: NativeResourceTask?
     var trace: ((SIMD3<Float>,SIMD3<Float>,Float) -> Float?)?
     /// Streaming boundaries are not solid surfaces. They may be closer than
     /// the original solid-wall minimum and must never be crossed by that clamp.
@@ -117,7 +144,7 @@ final class NativeGameCamera {
     deinit { request?.cancel() }
     func load(server: ServerAddress,completion: (() -> Void)? = nil) {
         request?.cancel()
-        request = URLSession.shared.dataTask(with: server.path("game/native/camera.json")) { [weak self] data,response,_ in
+        request = NativeResourceTransport.dataTask(with: server.path("game/native/camera.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async { guard let self,(try? self.install(data)) != nil else { return };completion?() }
         };request?.resume()
@@ -342,18 +369,34 @@ final class NativeGameCamera {
     func followVehicle(_ input: Vehicle,delta: Float,look: String? = nil,
                        nowMilliseconds: Double = ProcessInfo.processInfo.systemUptime*1000,
                        random: () -> Double = { Double.random(in: 0..<1) }) -> Frame? {
+        let observer=onVehicleObservation,orbit=carLook,reset=carReset || carLookReset
+        vehicleTraceGeometry=nil
         guard let frame = processVehicle(input,delta: delta,look: look) else { return nil }
+        var actual=frame
         let amplitude = shakeGain > 0 ? shakeGain*exp(-2.5*(nowMilliseconds-shakeSince)/1000) : 0
         if amplitude > 0.002 {
             let x = random()-0.5,z = random()-0.5,y = -(random()-0.5)
             let source = Self.double(frame.source)+SIMD3(x,y,z)*amplitude
             lastSource = source
             let direction = Self.normalized(Self.double(frame.target)-source)
-            return Frame(source: Self.float(source),target: frame.target,verticalFov: frame.verticalFov,
+            actual = Frame(source: Self.float(source),target: frame.target,verticalFov: frame.verticalFov,
                 heading: Float(atan2(direction.x,direction.y)),pitch: Float(asin(Self.clamp(direction.z,-1,1))),
                 hidesPlayer: frame.hidesPlayer,aimSource: frame.aimSource)
+        } else {shakeGain = 0}
+        if let observer,let geometry=vehicleTraceGeometry {
+            func array(_ v:SIMD3<Float>)->[Float]{[v.x,v.y,v.z]}
+            observer(.init(monotonicMilliseconds:nowMilliseconds,delta:delta,view:vehicleView,
+                viewName:vehicleViewName,lookOverride:look,orbitPixels:[orbit.x,orbit.y],resetRequested:reset,
+                kind:input.kind,subjectPosition:array(input.position),forward:array(input.forward),right:array(input.right),
+                moveSpeed:array(input.moveSpeed),turnSpeed:array(input.turnSpeed),up:input.up.map(array),wheels:input.wheels,
+                boundsMaxX:input.bounds.maxX,boundsMinY:input.bounds.minY,boundsMaxZ:input.bounds.maxZ,
+                boundsMinimum:input.bounds.min.map(array),boundsMaximum:input.bounds.max.map(array),
+                heightAboveRoad:input.heightAboveRoad,around:array(Self.float(geometry.around)),
+                desiredEye:array(Self.float(geometry.desired)),collisionResolvedEye:array(Self.float(geometry.resolved)),
+                actualEye:array(actual.source),target:array(actual.target),requestedDistance:geometry.requestedDistance.map(Float.init),
+                collisionDistance:geometry.hit.map(Float.init),verticalFov:actual.verticalFov))
         }
-        shakeGain = 0;return frame
+        return actual
     }
     private func processVehicle(_ input: Vehicle,delta: Float,look: String? = nil) -> Frame? {
         guard let table, delta.isFinite, delta >= 0, Self.finite(input.position), Self.finite(input.forward), Self.finite(input.right),
@@ -500,10 +543,18 @@ final class NativeGameCamera {
     }
     private func vehicleFrame(source: SIMD3<Double>,target: SIMD3<Double>,around: SIMD3<Double>,fov: Double) -> Frame {
         var source = source
+        let desired=source
+        var requested:Double?,contact:Double?
         let offset = source-around,distance = simd_length(offset)
         if distance > 0.0001 {
             let direction = offset/distance
-            if let hit = collision(around,direction,distance+0.3),hit < distance+0.3 { source = around+direction*max(0,hit-0.3) }
+            requested=distance+0.3
+            let hit=collision(around,direction,distance+0.3)
+            contact=hit
+            if let hit,hit < distance+0.3 { source = around+direction*max(0,hit-0.3) }
+        }
+        if onVehicleObservation != nil {
+            vehicleTraceGeometry = .init(around:around,desired:desired,resolved:source,requestedDistance:requested,hit:contact)
         }
         return frame(source: source,target: target,fov: Self.verticalFov(fov))
     }

@@ -80,6 +80,19 @@ final class NativeOtherVehicles {
     private var order:[String] = []
     private(set) var colliders:Set<SwiftRapierWorld.ColliderID> = []
     private(set) var rhinos:Set<SwiftRapierWorld.ColliderID> = []
+    /// These entries correspond to the original parked/remote `others` owner.
+    /// Vehicle material63 below supports damage queries; the browser did not
+    /// register these vehicle handles in its separate `materials` map.
+    var cameraExcludedColliderIDs:Set<SwiftRapierWorld.ColliderID> {
+        var result=Set<SwiftRapierWorld.ColliderID>()
+        for entry in entries.values {
+            guard let body=entry.bodyID,
+                  NativeCameraCollisionPolicy.excludes(otherMember:true,originalMaterialMember:false,
+                    dynamicBody:world.bodyKind(body) == .dynamic) else{continue}
+            result.formUnion(entry.colliderIDs.filter{world.colliderBelongs($0,to:body)})
+        }
+        return result
+    }
     var onMove:((String,[String:Any])->Void)?
     var onCollidersChanged:(()->Void)?
     var waterLevel:((V)->Double?)?

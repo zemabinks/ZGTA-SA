@@ -3,8 +3,8 @@
 from pathlib import Path
 import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
-OUT=ROOT/'local-only/research/raw-iso-108/sdk-final'
-NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+OUT=ROOT/'local-only/research/raw-resource-sdk'
+NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
 PANEL='''import UIKit
 class NativeDEPanelViewController:UIViewController {
  let contentView=UIView();var menuMotionReduced:Bool{false}

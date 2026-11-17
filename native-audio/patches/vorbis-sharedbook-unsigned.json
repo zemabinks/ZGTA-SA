@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "upstreamCommit": "bb4047de4c05712bf1fd49b9584c360b8e4e0adf",
+  "upstreamURL": "https://github.com/xiph/vorbis/commit/bb4047de4c05712bf1fd49b9584c360b8e4e0adf",
+  "path": "vendor/libvorbis-1.3.7/lib/sharedbook.c",
+  "originalSHA256": "a883767bf16552f5cf8686b58b86e55819dcb63487c5307fee5d45820b836a40",
+  "before": "          ogg_uint32_t word=i<<(32-c->dec_firsttablen);",
+  "after": "          ogg_uint32_t word=((ogg_uint32_t)i<<(32-c->dec_firsttablen));",
+  "patchedSHA256": "584dad151458e9c253af7105745466fed922ff3477904d983d121a78352e7d43",
+  "reason": "Use the upstream unsigned codebook-prefix shift fix; keep original release files pinned and retain strict UBSan checks."
+}

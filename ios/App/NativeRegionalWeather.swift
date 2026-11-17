@@ -12,7 +12,7 @@ final class NativeRegionalWeather {
     private struct Document: Decodable { let sequences: [String:[Int]] }
     enum Error: Swift.Error { case invalidSequences }
     private var sequences: [String:[Int]] = [:]
-    private var request: URLSessionDataTask?
+    private var request: NativeResourceTask?
     private var from = 0,to = 0
     private var blend: Double = 0
     private var lastMinute: Double = -1
@@ -24,7 +24,7 @@ final class NativeRegionalWeather {
     deinit { request?.cancel() }
     func load(server: ServerAddress,completion: (() -> Void)? = nil) {
         request?.cancel()
-        request = URLSession.shared.dataTask(with: server.path("game/native/environment.json")) { [weak self] data,response,_ in
+        request = NativeResourceTransport.dataTask(with: server.path("game/native/environment.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
             DispatchQueue.main.async { guard let self,(try? self.install(data)) != nil else { return };completion?() }
         };request?.resume()
