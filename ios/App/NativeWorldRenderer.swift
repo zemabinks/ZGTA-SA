@@ -48,6 +48,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let indexCount: Int
         let atlas: MTLTexture
     }
+    private struct TransparentVehicleDraw {
+        let mesh:Mesh,part:NativeVehicleRig.Draw,uniforms:Uniforms
+        let pipeline:MTLRenderPipelineState
+        let painted:Bool,depth:Float
+    }
     private struct ActorPart: Decodable {
         let name: String
         let start: Int
@@ -2928,6 +2933,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                let atlas=try? self.textureLoader.newTexture(data:rigImage,options:[.SRGB:false]),
                let vertices=self.device.makeBuffer(bytes:geometry.vertices,length:geometry.vertices.count*MemoryLayout<NativeVertex>.stride),
                let indices=self.device.makeBuffer(bytes:geometry.indices,length:geometry.indices.count*4) {
+                rig.installSortCenters(positions:geometry.vertices.map{SIMD3($0.position.x,$0.position.y,$0.position.z)},indices:geometry.indices)
                 stagedRig=rig
                 stagedRigMesh=Mesh(vertices:vertices,indices:indices,indexCount:geometry.indices.count,atlas:atlas)
                 stagedMasks=(rig.document.waterMasks ?? []).compactMap { mask -> (Int,Mesh)? in
@@ -3808,12 +3814,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                       indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: 0)
     }
 
+    /// Wire appearance determines rendering role. Optional registry IDs remain
+    /// optional: local/free-play driver rows have a vehicle code without one.
+    private static func remoteAppearanceIsDriver(code:String,ridingVehicleID:String?)->Bool {
+        ridingVehicleID==nil && !code.hasPrefix("s")
+    }
+    private static func remoteAppearanceIsFoot(code:String,ridingVehicleID:String?)->Bool {
+        ridingVehicleID==nil && code.hasPrefix("s")
+    }
+    private static func remoteDriverRenderKey(playerID:String,vehicleID:String?)->String {
+        vehicleID ?? "player:"+playerID
+    }
     private func recordRemoteAnimationPackets() {
         let now = ProcessInfo.processInfo.systemUptime
         let wallOffset = Date().timeIntervalSince1970-now
-        let live = Set(remotePlayers.map(\.id))
+        let live = Set(remotePlayers.filter{Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID)}.map(\.id))
         remoteBikeSamples = remoteBikeSamples.filter { live.contains($0.key) }
-        for player in remotePlayers where player.vehicleID != nil {
+        for player in remotePlayers where Self.remoteAppearanceIsDriver(code:player.code,ridingVehicleID:player.ridingVehicleID) {
             let serial = player.packetClockMilliseconds > 0 ? player.packetClockMilliseconds : player.packetReceivedAt
             if remoteBikeSamples[player.id]?.0.serial == serial { continue }
             let received = player.packetReceivedAt > 0 ? player.packetReceivedAt : now
@@ -3828,12 +3845,34 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func encodeTransparentVehicles(_ packets:[TransparentVehicleDraw],encoder:MTLRenderCommandEncoder) {
+        // Archived transparent vehicle materials retain depthWrite=true. Phase
+        // ordering and stable back-to-front compositing are the missing policy.
+        encoder.setDepthStencilState(depth)
+        for index in NativeVehicleRig.farToNear(packets.map(\.depth)) {
+            let packet=packets[index],part=packet.part,mesh=packet.mesh
+            var uniforms=packet.uniforms
+            var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
+            encoder.setRenderPipelineState(packet.pipeline)
+            encoder.setVertexBuffer(mesh.vertices,offset:0,index:0)
+            encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+            encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+            encoder.setFragmentTexture(mesh.atlas,index:0)
+            encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
+            if packet.painted {
+                var paint=part.paint
+                encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
+            }
+            encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
+        }
+        encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(depth)
+    }
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
         remoteSuspensionRayBudget = 64
         let riderTime = ProcessInfo.processInfo.systemUptime
         let riderDelta = lastRiderDraw > 0 ? min(0.1,max(0,riderTime-lastRiderDraw)) : 0
         lastRiderDraw = riderTime
-        let riderIDs = Set(remotePlayers.filter { $0.vehicleID != nil || $0.ridingVehicleID != nil }.map(\.id))
+        let riderIDs = Set(remotePlayers.filter { Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) || $0.ridingVehicleID != nil }.map(\.id))
         remoteRiderAnimations = remoteRiderAnimations.filter { riderIDs.contains($0.key) }
         remoteRiderPlayback=remoteRiderPlayback.filter{riderIDs.contains($0.key)}
         remoteRiderActions=remoteRiderActions.filter{riderIDs.contains($0.key)}
@@ -3842,13 +3881,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         riderDoorHolds.removeAll(keepingCapacity:true)
         flightAudioVoices.removeAll(keepingCapacity:true)
         remoteBikeAnimations = remoteBikeAnimations.filter { riderIDs.contains($0.key) }
-        let footIDs = Set(remotePlayers.filter { $0.vehicleID == nil && $0.ridingVehicleID == nil }.map(\.id))
+        let footIDs = Set(remotePlayers.filter { Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID) }.map(\.id))
         remoteFootAnimations = remoteFootAnimations.filter { footIDs.contains($0.key) }
         remoteBikeFrames.removeAll(keepingCapacity:true)
         let flightIDs=Set(remotePlayers.map(\.id)).union(["own"])
         flightCanopyPoses=flightCanopyPoses.filter{flightIDs.contains($0.key)}
         flightCanopyLanded=flightCanopyLanded.filter{flightIDs.contains($0.key)}
         var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int)] = []
+        var transparentVehicleDraws:[TransparentVehicleDraw]=[]
         // Keep wire appearance with each occurrence, including two identical
         // models at identical positions. Shared geometry is never recoloured.
         var vehicleAppearanceCodes:[String:[String]] = [:]
@@ -4027,7 +4067,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             guard simd_distance(player.position,scenePosition)<130 else{continue}
             guard let name=actorName(code:player.code) else {continue}
-            if player.vehicleID == nil {
+            if Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) {
                 let footPosition=remoteSupportPosition(player) ?? player.position
                 var pose:NativeSkeletalActor.Pose?
                 var original=false
@@ -4045,7 +4085,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         own:.init(id:"own",position:SIMD3<Double>(camera),walking:!driving,
                             down:footAnimator?.floored == true,life:Double(health)),
                         people:remotePlayers.map{.init(id:$0.id,position:SIMD3<Double>($0.position),
-                            walking:$0.vehicleID == nil && $0.ridingVehicleID == nil && $0.code.hasPrefix("s"),
+                            walking:Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID),
                             down:$0.down != 0,life:Double($0.life))})
                     let state=NativeRemoteFootAnimation.Snapshot(position:SIMD3<Double>(footPosition),heading:Double(player.heading),
                         velocity:SIMD3<Double>(player.velocity),movement:Double(player.movementRatio),airborne:player.airborne,crouching:player.crouching,
@@ -4184,7 +4224,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 SIMD4(c, -s, 0, 0), SIMD4(s * cp, c * cp, sp, 0),
                 SIMD4(-s * sp, -c * sp, cp, 0),
                 SIMD4(position.x, position.y, position.z, 1)))
-            if clip.isEmpty,let vehicle = remotePlayers.first(where: { $0.position == position && $0.vehicleID != nil }) {
+            if clip.isEmpty,let vehicle = remotePlayers.first(where: { $0.position == position && Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && actorName(code:$0.code)==name }) {
                 transform *= Self.rotationY(vehicle.roll)
                 transform *= Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code)))
             } else if clip.isEmpty,let vehicle = parkedVehicle(name:name,position:position) {
@@ -4237,11 +4277,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 let appearanceOffset=vehicleAppearanceOffsets[token,default:0]
                 let appearance=vehicleAppearanceCodes[token].flatMap{$0.indices.contains(appearanceOffset) ? $0[appearanceOffset]:nil}
                 if appearance != nil{vehicleAppearanceOffsets[token]=appearanceOffset+1}
-                let frame=vehicleRigFrame(name:name,position:position,modelTransform:transform,rig:rig,carriage:carriageIdentifiers[key(name,position)],appearanceCode:appearance)
+                let completeFrame=vehicleRigFrame(name:name,position:position,modelTransform:transform,rig:rig,carriage:carriageIdentifiers[key(name,position)],appearanceCode:appearance)
+                // Keep opaque hulls in the normal actor phase. Transparent
+                // materials must wait until every opaque rider has drawn.
+                let frame=completeFrame.opaque
                 if rig.hasDynamicPaint {
                     guard let vehiclePaintPipeline else{onStatus?("VEHICLE PAINT SHADER IS UNAVAILABLE");continue}
                     encoder.setRenderPipelineState(vehiclePaintPipeline)
                 }else{encoder.setRenderPipelineState(vehiclePipeline ?? pipeline)}
+                let alphaPipeline=rig.hasDynamicPaint ? vehiclePaintPipeline:(vehiclePipeline ?? pipeline)
+                if let alphaPipeline {
+                    for part in completeFrame.transparent {
+                        var partUniforms=uniforms
+                        partUniforms.viewProjection=matrix*transform*part.transform
+                        transparentVehicleDraws.append(.init(mesh:mesh,part:part,uniforms:partUniforms,pipeline:alphaPipeline,
+                            painted:rig.hasDynamicPaint,depth:NativeVehicleRig.projectedDepth(part.sortCenter,matrix:partUniforms.viewProjection)))
+                    }
+                }
                 for part in frame.draws {
                     uniforms.viewProjection=matrix*transform*part.transform
                     var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
@@ -4317,6 +4369,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             encoder.setDepthStencilState(depth)
         }
+        encodeTransparentVehicles(transparentVehicleDraws,encoder:encoder)
         let visible = Set(modelInstances.map { $0.0 } + modelInstances.compactMap { weaponModels[String($0.6)] })
         if actorMeshes.count > 32 {
             actorMeshes = actorMeshes.filter { visible.contains($0.key) }
@@ -4433,10 +4486,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func vehicleRigFrame(name:String,position:SIMD3<Float>,modelTransform:simd_float4x4,rig:NativeVehicleRig,carriage:String?,appearanceCode:String?=nil)->NativeVehicleRig.Frame {
         let now=ProcessInfo.processInfo.systemUptime
-        let player=remotePlayers.first{$0.vehicleID != nil && $0.position==position && actorName(code:$0.code)==name}
+        let player=remotePlayers.first{Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && $0.position==position && actorName(code:$0.code)==name}
         let parked=parkedVehicle(name:name,position:position)
         let own=driving && !isPassenger && position==camera && name==vehicleModels[activeVehicleModel]
-        let token=carriage ?? (own ? "own:\(currentVehicleID ?? name):\(name)":"remote:\(player?.vehicleID ?? parked?.id ?? name):\(name)")
+        let token=carriage ?? (own ? "own:\(currentVehicleID ?? name):\(name)":"remote:\(player.map{Self.remoteDriverRenderKey(playerID:$0.id,vehicleID:$0.vehicleID)} ?? parked?.id ?? name):\(name)")
         let delta=min(0.1,max(0,now-(vehicleRigTimes[token] ?? now)));vehicleRigTimes[token]=now
         var input=NativeVehicleRig.Input()
         input.appearanceCode=appearanceCode

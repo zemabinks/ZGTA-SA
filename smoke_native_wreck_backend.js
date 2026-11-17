@@ -26,7 +26,16 @@ game.onMessage=(peer,message)=>{
     check(peer.player.health===0&&peer.player.armour===25,'Fatal health owner lost armour or restored health');
    }else{check(message.kind==='respawn'&&message.s===2&&peer.player.health===100,'Respawn acknowledgement failed')}
   }
-  if(message.t==='me'&&message.driving===true){check(peer.player.health===100,'Driver started dead');native.send({t:'note',text:'WRECK NOW'})}
+  if(message.t==='me'&&message.driving===true){
+   check(peer.player.health===100,'Driver started dead');
+   check(game.vehicleClaim(game.vehicles.get('fixture-wreck'))?.peer===peer &&
+     game.vehicleClaim(game.vehicles.get('fixture-wreck'))?.driving===true &&
+     peer.state.driving===true && peer.state.vehicle==='fixture-wreck' &&
+     game.vehicles.get('fixture-wreck').row[11]===String(peer.player.number),
+     'No accepted real driver authority before fatal/exit');
+   console.log('WRECK_DIAG accepted driver claim and slot11 verified');
+   native.send({t:'note',text:'WRECK NOW'})
+  }
   if(message.t==='me'&&message.walking===true&&message.parked){
    check(peer.player.health===0&&peer.player.deaths===1,'Exit revived occupant or duplicated death');
    check(game.vehicles.get('fixture-wreck').row[9]===0&&peer.player.garage[0].health===0,'Exit lost authoritative wrecked hull');

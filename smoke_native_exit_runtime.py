@@ -7,11 +7,15 @@ ROOT=Path(__file__).resolve().parent
 def main():
  out=ROOT/'local-only/native-physics/tests/exit-runtime';out.mkdir(parents=True,exist_ok=True)
  names=['SwiftRapierWorld','NativeWorldRay','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeCharacterMotor','NativeRapierCharacterQueries','NativeCharacterController','NativePersonalFlightController','NativeFootLocomotion','NativeHeadingContinuity','NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativeRiderAnimation']
- paths=[f'ios/App/{n}.swift' for n in names]+['ios/App/NativeSkeletalActor.swift','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameViewController.swift','ios/App/NativeMultiplayerClient.swift','smoke_native_bike_exit.swift','smoke_native_exit_runtime.py','smoke_native_exit_runtime.swift']
+ paths=[f'ios/App/{n}.swift' for n in names]+['ios/App/NativeSkeletalActor.swift','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameViewController.swift','ios/App/NativeMultiplayerClient.swift','smoke_native_bike_exit.swift','smoke_native_exit_runtime.py','smoke_native_exit_runtime.swift','ios/App/NativeGameCamera.swift','ios/App/NativePassiveCameraTrace.swift']
  before={p:(ROOT/p).read_bytes() for p in paths};skeletal=before['ios/App/NativeSkeletalActor.swift'].decode()
  source=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')+'\nfinal class NativeSkeletalActor {\n'+skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]+'}\n'
  renderer=before['ios/App/NativeWorldRenderer.swift'].decode();vc=before['ios/App/NativeGameViewController.swift'].decode()
  source+='\nimport CoreFoundation\n'+function(before['ios/App/NativeMultiplayerClient.swift'].decode(),'struct NativeHealthPrediction {')
+ # The passive trace owner needs only the actual Codable observation type;
+ # camera follow/loading is outside this placement/collision carrier.
+ source+='\nenum NativeGameCamera {\n'+function(before['ios/App/NativeGameCamera.swift'].decode(),'    struct VehicleObservation:')+'\n}\n'
+ source+='\n'+before['ios/App/NativePassiveCameraTrace.swift'].decode()
  harness=before['smoke_native_bike_exit.swift'].decode().split('let root=URL(')[0]
  harness=harness.replace(' func resolveVehicleExit(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement{.ready(wanted)}',function(renderer,'    private func resolveVehicleExit('))
  harness=harness.replace(' func deferVehicleExit(_ retry:@escaping()->Void){pendingExitPlacement=retry}',function(renderer,'    func deferVehicleExit('))
@@ -19,20 +23,21 @@ def main():
  harness=harness.replace('// ACTUAL_CONTROLLER_EXIT',function(vc,'    private func completeVehicleExit('))
  harness=harness.replace('var direction:Float{driving ? heading:actorHeading}',function(renderer,'    var direction:')).replace('var legacyVehicleQuaternion:SIMD4<Float>?{nil}',function(renderer,'    var legacyVehicleQuaternion:'))
  harness=harness.replace(' let collision:ExitCollision?=ExitCollision()', ''' var riderDefinitions:NativeRiderDefinitions?
- struct LegacyCameraCollision {var cameraExcludedColliderIDs=Set<UInt64>()}
+ struct LegacyCameraCollision {var cameraExcludedColliderIDs=Set<UInt64>();func metadata(collider:UInt64)->Int?{nil}}
+ var passiveCameraTrace:NativePassiveCameraTrace?,passiveCameraRay:NativePassiveCameraTrace.Ray?
  var legacyCollisionWorld:LegacyCameraCollision?
  var geometryReady=true,missingCells=Set<String>(),requestedCells=Set<String>()
  var riderDoorHolds:[String:[Int:Double]]=[:]
- func worldRay(from start:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,groups:UInt32,excluding:Set<UInt64>=[])->NativeWorldRay.Result {
+ func worldRay(from start:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,groups:UInt32,excluding:Set<UInt64>=[],onHit:((SwiftRapierWorld.Hit)->Void)?=nil)->NativeWorldRay.Result {
   if let coverage=NativeWorldRay.coverage(from:start,to:start+direction*distance,interior:false,loaded:{_ in true}){requestedCells.formUnion(coverage.cells)}
   let world=groundVehicle!.world
   return NativeWorldRay.query(from:start,direction:direction,distance:distance,interior:false,loaded:{self.geometryReady && !self.missingCells.contains($0)}) {p,way,d in
-   world.raycast(origin:SwiftRapierWorld.gtaToRapier(p),direction:SwiftRapierWorld.gtaToRapier(way),distance:d,excludingColliders:excluding,groups:groups).map{.init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))}
+   world.raycast(origin:SwiftRapierWorld.gtaToRapier(p),direction:SwiftRapierWorld.gtaToRapier(way),distance:d,excludingColliders:excluding,groups:groups).map{onHit?($0);return .init(distance:$0.distance,normal:SwiftRapierWorld.rapierToGTA($0.normal))}
   }
  }
  func resolve(wanted:SIMD3<Float>?)->NativeVehicleExitPlanner.Placement{resolveVehicleExit(wanted:wanted)}
  let collision:ExitCollision?=ExitCollision()''')
- camera=' func configureCameraTrace(){\n'+function(renderer,'        gameCamera.trace =')+'\n}\n'
+ camera=' func configureCameraTrace(){\n'+function(renderer,'        gameCamera.trace =')+'\n}\n'+'\n'+function(renderer,'    private func cameraRay(')
  harness=harness.replace(' func dispatch(){dispatchOwnedVehicleExit()}', ' func dispatch(){dispatchOwnedVehicleExit()}\n'+camera)
  source+='\n'+harness+'\n'+before['smoke_native_exit_runtime.swift'].decode()
  with tempfile.TemporaryDirectory(prefix='snapshot-',dir=out) as temp:

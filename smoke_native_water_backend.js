@@ -26,7 +26,15 @@ game.onMessage=(peer,message)=>{
     check(peer.player.health===0&&peer.player.armour===25,'Fatal health owner lost armour or restored health');
    }else{check(message.kind==='respawn'&&message.s===2&&peer.player.health===100,'Respawn acknowledgement failed')}
   }
-  if(message.t==='me'&&message.driving===true){check(peer.player.health===100,'Driver started dead');native.send({t:'note',text:waterObserved?'WRECK NOW':'LEAVE SUNKEN VEHICLE'})}
+  if(message.t==='me'&&message.driving===true){
+   check(peer.player.health===100,'Driver started dead');
+   check(game.vehicleClaim(game.vehicles.get('fixture-wreck'))?.peer===peer &&
+     game.vehicleClaim(game.vehicles.get('fixture-wreck'))?.driving===true &&
+     peer.state.driving===true && peer.state.vehicle==='fixture-wreck' &&
+     game.vehicles.get('fixture-wreck').row[11]===String(peer.player.number),
+     'Water fixture bypassed actual accepted driver authority');
+   native.send({t:'note',text:waterObserved?'WRECK NOW':'LEAVE SUNKEN VEHICLE'})
+  }
   if(message.t==='me'&&message.walking===true&&message.parked){
    if(!waterObserved){
     check(peer.player.health===100&&peer.player.armour===25,'Water exit manufactured damage');

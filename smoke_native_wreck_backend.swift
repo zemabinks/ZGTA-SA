@@ -5,7 +5,13 @@ func check(_ ok:Bool,_ text:String){checks+=1;precondition(ok,text)}
 client.onConnectionState={state in if state == .ready && !started{
  started=true
  guard let vehicle=client.vehicles["fixture-wreck"] else{preconditionFailure("Synthetic owned car missing")}
- client.sendPosition(SIMD3(1570,-2460,13.6),heading:0,moving:true,running:false,vehicle:vehicle)
+ client.sendPosition(vehicle.position,heading:0,moving:false,running:false)
+ client.onEnter={id,accepted in
+  check(id==vehicle.id && accepted,"Real nearby driver claim was not acknowledged")
+  client.onEnter=nil
+  client.sendPosition(vehicle.position,heading:0,moving:true,running:false,vehicle:vehicle)
+ }
+ check(client.requestEnter(vehicle),"Actual native entry request did not enqueue")
 }}
 client.onRespawn={respawns+=1}
 client.onStatus={text in

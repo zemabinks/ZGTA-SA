@@ -16,6 +16,15 @@ stub=r'''
 import Foundation
 import simd
 struct ServerAddress {func path(_ path:String)->URL{URL(string:"http://127.0.0.1/"+path)!}}
+// This catalog-only VC dispatch carrier cannot load resources. Compiling the
+// full resource session would also admit Store/verifier/engine activation.
+// Any accidental convenience-init/server-loader call must fail, never return
+// a successful or no-op task. Production transport is tested separately.
+enum NativeResourceTransport {
+ static func dataTask(with url:URL,completion:@escaping(Data?,URLResponse?,Error?)->Void)->URLSessionDataTask {
+  preconditionFailure("Network resource loading is forbidden in the catalog-only melee dispatch fixture")
+ }
+}
 struct RemotePlayer {
  var id:String;var name="Fixture";var position:SIMD3<Float>;var heading:Float=0
  var code="s7";var ridingVehicleID:String?;var crouching=false;var down=0;var life=100
@@ -127,5 +136,5 @@ with tempfile.TemporaryDirectory(prefix='snapshot-',dir=OUT) as folder:
     binary=folder/'verify'
     subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'modules'),*[str(ROOT/'ios/App'/p) for p in files],str(source),'-o',str(binary)],check=True)
     result=subprocess.run([str(binary)],text=True,capture_output=True);print(result.stdout,end='');print(result.stderr,end='');result.check_returncode()
-    tracked=['ios/App/NativeGameViewController.swift','ios/App/NativeGunAnimation.swift',*[f'ios/App/{p}' for p in files]]
-    (OUT/'report.json').write_text(json.dumps({'pass':True,'sourceSHA256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in tracked},'result':result.stdout,'retailRuntimeParity':False},indent=2)+'\n')
+    tracked=['smoke_native_melee_delivery.py','ios/App/NativeGameViewController.swift','ios/App/NativeGunAnimation.swift',*[f'ios/App/{p}' for p in files]]
+    (OUT/'report.json').write_text(json.dumps({'pass':True,'sourceSHA256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in tracked},'result':result.stdout,'retailRuntimeParity':False,'transportBoundary':'Fail-fast test-only dataTask; any call preconditionFails. Actual catalog constructor/inventory/VC/attack logic compiled; resource loading is not exercised or replaced with successful data.'},indent=2)+'\n')

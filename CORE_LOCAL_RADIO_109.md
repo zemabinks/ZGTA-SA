@@ -79,3 +79,10 @@ The actual source compiled and linked for arm64 iOS16, arm64 iOS16 Simulator
 and x86_64 iOS16 Simulator. All three links are compile/link evidence only.
 A private negative control using the previous actual request-bookkeeping
 methods fails the new completion-before-return assertion as intended.
+
+
+The complete109 Debug App subsequently builds for Intel Simulator and arm64
+iPhone against unchanged sources. The normal Simulator update and rendered
+installed-resource scene also pass, but that scene does not play original local
+radio. Actual audible playback, retune/interruption behavior and hardware audio
+acceptance remain open; SDK/build and PCM tests do not replace those checks.

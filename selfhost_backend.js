@@ -451,6 +451,10 @@ class LocalGame {
     // neither an account number nor a reused wire ID grants driving rights.
     this.vehicleClaims = new Map();
     this.passengerClaims = new Map(); // transport -> {vehicle incarnation, seat}
+    // Death releases occupancy immediately. One final native get-out report
+    // may still be in flight behind the acknowledged fatal-health message.
+    // This record grants no seat, driving, reservation or repair authority.
+    this.terminalVehicleReports = new Map();
     this.coupling=VehicleCoupling?.create(couplingCatalog) || null;
     this.nextVehicle = 1;
     this.race = null;
@@ -1030,6 +1034,7 @@ class LocalGame {
       }
     } else if (message.kind==='respawn' && peer.player.health===0 &&
                Date.now()-(peer.player.lastDeath || 0)>2000) {
+      this.terminalVehicleReports.delete(peer);
       peer.player.health=100;peer.player.armour=0;
       peer.lastRespawnSequence=message.s;
       peer.nativeOxygen=1150;peer.nativeDrownFraction=0;peer.nativeOxygenTime=0;changed=true;
@@ -1487,6 +1492,7 @@ class LocalGame {
     if([...this.passengerClaims.values()].some(claim=>claim.vehicle===vehicle&&claim.seat===seat) ||
        Math.hypot(peer.state.x-vehicle.row[3],peer.state.y-vehicle.row[4],peer.state.z-vehicle.row[5])>8)
       return false;
+    this.invalidateTerminalVehicleReports(vehicle);
     this.passengerClaims.set(peer,{vehicle,peer,seat,until:Date.now()+12000,active:false});
     return true;
   }
@@ -1555,15 +1561,70 @@ class LocalGame {
     this.publishVehicle(claim.vehicle);
   }
 
+  terminalVehicleBody(vehicle) {
+    return [2,3,4,5,6,7,8,9,10,16].map(index=>vehicle.row[index]);
+  }
+
+  invalidateTerminalVehicleReports(vehicle) {
+    for(const [peer,record] of this.terminalVehicleReports)
+      if(record.vehicle===vehicle)this.terminalVehicleReports.delete(peer);
+  }
+
+  rememberTerminalVehicleReport(claim,now) {
+    const peer=claim.peer,vehicle=claim.vehicle;
+    if(!claim.driving || !peer.healthAckEnabled || !peer.inventoryEnabled ||
+       !peer.ready || peer.closed || !this.peers.has(peer) || peer.player.health!==0 ||
+       typeof peer.inventoryConnection!=='string' || !peer.inventoryConnection ||
+       !Number.isFinite(peer.lastSeen) || now>=peer.lastSeen+10000 ||
+       peer.state?.driving!==true || peer.state.vehicle!==vehicle.id ||
+       peer.state.car!==vehicle.row[2] || this.vehicles.get(vehicle.id)!==vehicle)return;
+    this.terminalVehicleReports.set(peer,{vehicle,owner:vehicle.owner,slot:vehicle.slot,
+      connection:peer.inventoryConnection,until:peer.lastSeen+10000,
+      body:this.terminalVehicleBody(vehicle)});
+  }
+
+  pruneTerminalVehicleReports(now=Date.now()) {
+    for(const [peer,record] of this.terminalVehicleReports) {
+      const vehicle=record.vehicle;
+      if(now>=record.until || !this.peers.has(peer) || peer.closed || !peer.ready ||
+         peer.player.health!==0 || peer.inventoryConnection!==record.connection ||
+         this.vehicles.get(vehicle.id)!==vehicle || vehicle.owner!==record.owner ||
+         vehicle.slot!==record.slot || this.vehicleClaim(vehicle) ||
+         !this.terminalVehicleBody(vehicle).every((value,index)=>Object.is(value,record.body[index])))
+        this.terminalVehicleReports.delete(peer);
+    }
+  }
+
+  completeTerminalVehicleReport(peer,message) {
+    const record=this.terminalVehicleReports.get(peer);
+    // A queued driver frame cannot reclaim its dead actor's seat. Only the
+    // next on-foot release can consume this one-shot completion record.
+    if(!record || message.walking!==true || message.driving===true)return;
+    this.terminalVehicleReports.delete(peer);
+    const vehicle=record.vehicle,parked=message.parked;
+    if(message.health!==0 || message.vehicle!==vehicle.id || message.car!==vehicle.row[2] ||
+       !this.validVehiclePose(parked) || !Number.isInteger(parked.health) ||
+       parked.health<0 || parked.health>vehicle.row[9] ||
+       Math.hypot(parked.x-vehicle.row[3],parked.y-vehicle.row[4],parked.z-vehicle.row[5])>16)return;
+    // Reuse the existing16-unit first-driver handoff envelope. The deadline
+    // remains the old driver's lastSeen+10s; retries never extend it.
+    this.writeVehiclePose(vehicle,parked);
+    this.publishVehicle(vehicle);
+    return true;
+  }
+
   pruneVehicleClaims() {
     const now=Date.now();
+    this.pruneTerminalVehicleReports(now);
     for(const claim of this.vehicleClaims.values()) {
       const peer=claim.peer,vehicle=claim.vehicle;
       if(this.vehicles.get(vehicle.id)!==vehicle || !this.peers.has(peer) || peer.closed ||
          !peer.ready || peer.player.health<=0 || peer.player.insideHome ||
          vehicle.row[9]<=0 || (!claim.driving && now>=claim.until) ||
-         (claim.driving && now-peer.lastSeen>10000))
+         (claim.driving && now-peer.lastSeen>10000)) {
+        this.rememberTerminalVehicleReport(claim,now);
         this.releaseVehicleClaim(claim,{removeActor:claim.driving});
+      }
     }
     this.prunePassengerClaims();
   }
@@ -1583,6 +1644,7 @@ class LocalGame {
     // The public enter promise times out after four seconds. Allow its asset
     // and get-in transition to finish, but do not let repeated requests extend
     // a reservation forever. An acknowledgement alone changes no appearance.
+    this.invalidateTerminalVehicleReports(vehicle);
     this.vehicleClaims.set(id,{vehicle,peer,until:Date.now()+12000,driving:false,exitPose:null});
     return true;
   }
@@ -1706,6 +1768,7 @@ class LocalGame {
 
   deleteVehicle(id) {
     if(!this.vehicles.has(id))return false;
+    this.invalidateTerminalVehicleReports(this.vehicles.get(id));
     const claim=this.vehicleClaim(this.vehicles.get(id));
     if(claim)this.releaseVehicleClaim(claim,{publish:false});
     for(const passenger of this.passengerClaims.values())if(passenger.vehicle.id===id)
@@ -2965,6 +3028,7 @@ class LocalGame {
     if (!message || typeof message !== 'object') return;
     if(!this.peers.has(peer) || peer.closed)return;
     this.pruneVehicleClaims();
+    const terminalCompleted=message.t==='me' && this.completeTerminalVehicleReport(peer,message)===true;
     if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
     if (peer.ready && peer.player.health<=0 && (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)) {
       peer.player.flightGear={parachute:false,jetpack:false};
@@ -3032,6 +3096,21 @@ class LocalGame {
         message={...message,skin:peer.lastSkin};
       const vehicleChange=this.prepareVehicleReport(peer,message);
       if(!vehicleChange)return;
+      if(message.walking===true && typeof message.vehicle==='string') {
+        const vehicle=this.vehicles.get(message.vehicle),claim=this.vehicleClaim(vehicle);
+        const matchingClaim=claim?.peer===peer && message.car===vehicle.row[2];
+        const release=vehicleChange.release;
+        const matchingRelease=release?.peer===peer && release.vehicle===vehicle && message.car===vehicle.row[2];
+        if(!matchingClaim && !matchingRelease && !terminalCompleted) {
+          // An explicit registry ID without current authority is not a local
+          // free-play car. Do not leak it into parked row33/vehicle row35 after
+          // rejecting its hull write. Valid passengers retain their internal
+          // membership only; row34 is their sole public attachment.
+          message={...message};delete message.parked;delete message.car;
+          const passenger=this.passengerClaim(peer);
+          if(!passenger?.active || passenger.vehicle!==vehicle)delete message.vehicle;
+        }
+      }
       const previous = peer.state;
       if (peer.player.job && !peer.player.job.mode && previous && Date.now() - peer.lastSeen < 5000 &&
           (message.walking === true || message.driving === true) &&
@@ -3480,6 +3559,7 @@ class LocalGame {
   }
 
   remove(peer) {
+    this.terminalVehicleReports.delete(peer);
     if (!this.peers.delete(peer)) return;
     for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
     for(const claim of this.vehicleClaims.values())if(claim.peer===peer)this.releaseVehicleClaim(claim);

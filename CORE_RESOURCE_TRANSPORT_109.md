@@ -65,5 +65,13 @@ check count, exact source hashes and any source invalidation.
 
 No original game fixtures, installed App data, Simulator or phone is read by the
 regression. No Core107/Core108 source, frozen build or running service changes.
-A future actual Core109 denial run with full scene review and real proxy counts
-is still required; passing offline tests cannot replace it.
+The separate actual Core109 denial case now passes213.820s through normal UI.
+A fresh normal-update/cache audit verifies all6700 blobs. Root reviewed the
+landscape city, native character, taxi, HUD and radar. Across the actual test
+command interval, the external proxy observes zero asset attempts,63 gameplay
+HTTP requests and two WebSocket upgrades. All three static route probes still
+return503. No cache reset, seeding or direct Store activation is used.
+
+This accepts resource routing for that prepared-profile scene; it does not
+supply absent stock catalogs, verify every scene or complete raw ISO conversion.
+The authored regression and actual rendered/proxy evidence remain separate.

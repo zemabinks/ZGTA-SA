@@ -24,6 +24,7 @@ jobs:
       - run: node smoke_inventory_ack.js
       - run: node smoke_weapon_transport.js
       - run: node smoke_health_ack.js
+      - run: node smoke_native_terminal_vehicle.js
       - run: node smoke_browser_armour_sync.js
       - run: node smoke_native_melee_server.js
       - run: node smoke_native_melee_assets.js

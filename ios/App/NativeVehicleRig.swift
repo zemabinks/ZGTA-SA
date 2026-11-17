@@ -23,19 +23,27 @@ final class NativeVehicleRig {
         let layerOverride:Float,emissive:Bool,scorched:Bool,alphaTest:Float
         /// Linear material RGB plus an explicit neutral-paint encoding flag.
         let paint:SIMD4<Float>
+        let transparent:Bool
+        let sortCenter:SIMD3<Float>
         init(start:Int,count:Int,node:Int,transform:simd_float4x4,layerOverride:Float,emissive:Bool,scorched:Bool,alphaTest:Float,
-             paint:SIMD4<Float> = SIMD4(1,1,1,0)) {
+             paint:SIMD4<Float> = SIMD4(1,1,1,0),transparent:Bool=false,sortCenter:SIMD3<Float> = .zero) {
             self.start=start;self.count=count;self.node=node;self.transform=transform
-            self.layerOverride=layerOverride;self.emissive=emissive;self.scorched=scorched;self.alphaTest=alphaTest;self.paint=paint
+            self.layerOverride=layerOverride;self.emissive=emissive;self.scorched=scorched;self.alphaTest=alphaTest;self.paint=paint;self.transparent=transparent;self.sortCenter=sortCenter
         }
     }
-    struct Frame {let matrices:[simd_double4x4];let visible:[Bool];let draws:[Draw]}
+    struct Frame {
+        let matrices:[simd_double4x4];let visible:[Bool];let draws:[Draw]
+        var opaque:Frame{Frame(matrices:matrices,visible:visible,draws:draws.filter{!$0.transparent})}
+        var transparent:[Draw]{draws.filter(\.transparent)}
+    }
     struct Node:Decodable {
         let name:String,parent:Int,position:[Double],rotation:[Double],scale:[Double],matrix:[Double]
         let matrixAutoUpdate:Bool,visible:Bool,wheel:Bool,damaged:Bool,lowDetail:Bool
         let hub:String?,node:String?,extra:Int?
     }
-    struct DrawDefinition:Decodable {let node:Int,start:Int,count:Int;let materialVisible:Bool;let lens:Int,texture:Int,litTexture:Int;let alphaTest:Double;let paint:Int?,color:[Double]?}
+    struct DrawDefinition:Decodable {let node:Int,start:Int,count:Int;let materialVisible:Bool;let lens:Int,texture:Int,litTexture:Int;let alphaTest:Double;let paint:Int?,color:[Double]?;let glass:Bool?,opacity:Double?
+        var transparent:Bool{glass == true || (opacity ?? 1)<1 || alphaTest>0}
+    }
     struct DamageJoint:Decodable {let part:Int,node:Int,rest:[Double],hinge:[Double]}
     struct WheelJoint:Decodable {let node:Int,hub:String?;let home:[Double],rest:[Double],lean:[Double];let front:Bool,left:Bool,bogie:Bool}
     struct RotorJoint:Decodable {let node:Int,name:String,rest:[Double]}
@@ -53,6 +61,7 @@ final class NativeVehicleRig {
     struct Document:Decodable {let version:Int,id:Int,kind:String,nodes:[Node],draws:[DrawDefinition],joints:Joints,waterMasks:[WaterMask]?;let paint:NativeVehiclePaint.Metadata?;let binarySHA256:String?,atlasSHA256:String?,normalsSHA256:String?,binaryEncoding:String?}
     let document:Document
     private let vehiclePaint:NativeVehiclePaint?
+    private var nodeSortCenters:[Int:SIMD3<Float>]=[:]
     var hasDynamicPaint:Bool{vehiclePaint != nil}
     var damageHinges:[Int:SIMD3<Double>] {Dictionary(uniqueKeysWithValues:document.joints.damage.map{($0.part,Self.v($0.hinge))})}
     init?(data:Data) {
@@ -60,7 +69,7 @@ final class NativeVehicleRig {
               document.nodes.count<4096,document.nodes.enumerated().allSatisfy({index,node in
                   node.parent<index && node.parent>=(-1) && node.position.count==3 && node.rotation.count==4 && node.scale.count==3 && node.matrix.count==16 &&
                   (node.position+node.rotation+node.scale+node.matrix).allSatisfy(\.isFinite)
-              }),document.draws.count<=50_000,document.draws.allSatisfy({document.nodes.indices.contains($0.node)&&$0.start>=0&&$0.count>=0&&$0.alphaTest.isFinite}),
+              }),document.draws.count<=50_000,document.draws.allSatisfy({document.nodes.indices.contains($0.node)&&$0.start>=0&&$0.count>=0&&$0.alphaTest.isFinite&&($0.opacity.map{$0.isFinite && (0...1).contains($0)} ?? true)}),
               (document.waterMasks ?? []).allSatisfy({mask in document.nodes.indices.contains(mask.node)&&mask.positions.count%3==0&&mask.positions.allSatisfy(\.isFinite)&&mask.indices.allSatisfy{Int($0)<mask.positions.count/3}}) else{return nil}
         if let working=document.joints.working {
             guard working.turn.isFinite,working.lift.isFinite,working.parts.allSatisfy({part in document.nodes.indices.contains(part.node)&&part.rest.count==4&&part.home.count==3&&(part.rest+part.home).allSatisfy(\.isFinite)}) else{return nil}
@@ -79,6 +88,35 @@ final class NativeVehicleRig {
         }else{paint=nil}
         self.document=document
         self.vehiclePaint=paint
+    }
+    /// Local indexed bounds share one centre per original mesh/node, so
+    /// material groups retain the same sort anchor while instance transforms
+    /// and moving parts stay independent. Called once after validated upload.
+    func installSortCenters(positions:[SIMD3<Float>],indices:[UInt32]) {
+        var bounds:[Int:(SIMD3<Float>,SIMD3<Float>)]=[:]
+        for draw in document.draws {
+            guard draw.start<=indices.count,draw.count<=indices.count-draw.start else{continue}
+            for at in draw.start..<draw.start+draw.count {
+                let index=Int(indices[at]);guard positions.indices.contains(index)else{continue}
+                let p=positions[index];guard p.x.isFinite,p.y.isFinite,p.z.isFinite else{continue}
+                if let old=bounds[draw.node]{bounds[draw.node]=(simd_min(old.0,p),simd_max(old.1,p))}
+                else{bounds[draw.node]=(p,p)}
+            }
+        }
+        nodeSortCenters=bounds.mapValues{($0.0+$0.1)/2}
+    }
+    static func projectedDepth(_ center:SIMD3<Float>,matrix:simd_float4x4)->Float {
+        let clip=matrix*SIMD4(center,1)
+        guard clip.z.isFinite,clip.w.isFinite,clip.w != 0 else{return -.infinity}
+        let value=clip.z/clip.w;return value.isFinite ? value:-.infinity
+    }
+    /// Stable far-to-near order, including equal-depth duplicate instances.
+    static func farToNear(_ depths:[Float])->[Int] {
+        depths.indices.sorted {a,b in
+            let x=depths[a].isFinite ? depths[a]:-Float.infinity
+            let y=depths[b].isFinite ? depths[b]:-Float.infinity
+            return x==y ? a<b:x>y
+        }
     }
     private static func digest(_ value:String)->Bool{value.utf8.count==64 && value.utf8.allSatisfy{(48...57).contains($0)||(97...102).contains($0)}}
     /// Version2 RGB meaning must never be combined with an older baked mesh.
@@ -209,14 +247,14 @@ final class NativeVehicleRig {
             let m=matrices[draw.node],transform=simd_float4x4(columns:(SIMD4<Float>(m[0]),SIMD4<Float>(m[1]),SIMD4<Float>(m[2]),SIMD4<Float>(m[3])))
             let rgb=vehiclePaint.flatMap{paint in colors.flatMap{paint.color(slot:draw.paint ?? -1,colors:$0)}}
             let paint=rgb.map{SIMD4($0,Float(1))} ?? SIMD4<Float>(1,1,1,0)
-            let packet=Draw(start:draw.start,count:draw.count,node:draw.node,transform:transform,layerOverride:lit ? Float(draw.litTexture):-1,emissive:lit,scorched:input.scorched,alphaTest:Float(draw.alphaTest),paint:paint)
+            let packet=Draw(start:draw.start,count:draw.count,node:draw.node,transform:transform,layerOverride:lit ? Float(draw.litTexture):-1,emissive:lit,scorched:input.scorched,alphaTest:Float(draw.alphaTest),paint:paint,transparent:draw.transparent,sortCenter:nodeSortCenters[draw.node] ?? .zero)
             // Preserve triangle order while joining adjacent groups with the
             // same actual draw state; texture/color stay in each vertex.
             if let previous=draws.last,previous.node==packet.node,previous.start+previous.count==packet.start,
                previous.layerOverride==packet.layerOverride,previous.emissive==packet.emissive,
-               previous.scorched==packet.scorched,previous.alphaTest==packet.alphaTest,previous.paint==packet.paint {
+               previous.scorched==packet.scorched,previous.alphaTest==packet.alphaTest,previous.paint==packet.paint,previous.transparent==packet.transparent {
                 draws[draws.count-1]=Draw(start:previous.start,count:previous.count+packet.count,node:packet.node,transform:packet.transform,
-                    layerOverride:packet.layerOverride,emissive:packet.emissive,scorched:packet.scorched,alphaTest:packet.alphaTest,paint:packet.paint)
+                    layerOverride:packet.layerOverride,emissive:packet.emissive,scorched:packet.scorched,alphaTest:packet.alphaTest,paint:packet.paint,transparent:packet.transparent,sortCenter:packet.sortCenter)
             } else {draws.append(packet)}
         }
         return Frame(matrices:matrices,visible:visible,draws:draws)

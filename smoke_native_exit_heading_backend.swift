@@ -6,7 +6,13 @@ func check(_ value:Bool,_ text:String){checks+=1;precondition(value,text)}
 func drive(_ i:Int){
  index=i;let item=cases[i]
  guard let car=client.vehicles["fixture-heading"] else{preconditionFailure("Fixture car missing")}
- client.sendPosition(SIMD3(1570,-2460,13.6),heading:item.0,moving:false,running:false,vehicle:car,vehicleHealth:1000)
+ client.sendPosition(car.position,heading:0,moving:false,running:false)
+ client.onEnter={id,accepted in
+  check(id==car.id && accepted,"Actual heading-case entry was not acknowledged")
+  client.onEnter=nil
+  client.sendPosition(car.position,heading:item.0,moving:false,running:false,vehicle:car,vehicleHealth:1000)
+ }
+ check(client.requestEnter(car),"Heading-case enter request did not enqueue")
 }
 client.onConnectionState={state in if state == .ready && !started {started=true;drive(0)}}
 client.onStatus={text in

@@ -114,6 +114,7 @@ def main():
         'smoke_native_raw_leases.py', 'test_native_resources.py', 'smoke_native_game_files.py',
         'test_native_resource_loaders.py', 'smoke_native_local_radio.py',
         'smoke_native_camera_policy.py', 'test_native_remote_suspension.py',
+        'smoke_native_vehicle_transparency.py', 'smoke_native_remote_appearance.py',
     ]]
     cases.append(('smoke_train_layout',['python3',str(OWNER_CARRIERS['train_layout'])]))
     cases.append(('native_audio_archives',['python3','build_native_audio.py','--check']))
@@ -127,7 +128,7 @@ def main():
     cases += [(p.removesuffix('.js'), ['node', p]) for p in [
         'smoke_browser_armour_sync.js', 'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_weapon_transport.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js', 'smoke_vehicle_departure.js', 'smoke_health_ack.js',
         'smoke_native_melee_server.js', 'smoke_native_melee_assets.js', 'smoke_native_parry.js',
-        'smoke_vehicle_coupling_server.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
+        'smoke_vehicle_coupling_server.js', 'smoke_native_terminal_vehicle.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
     ]]
     cases.append(('samp_ped_coordinate_calibration',['python3','smoke_samp_coordinates.py',str(ROOT/'local-only/research/samp-ped-height/mesh-observations.json')]))
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))

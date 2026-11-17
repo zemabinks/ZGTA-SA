@@ -116,3 +116,10 @@ BSD-licensed Xiph source and one explicitly recorded upstream compatibility fix;
 no game recordings or decoded audio belong in source. See
 [native audio build provenance](native-audio/README.md). SDK links and CPU tests
 do not establish audible device playback or frame-rate performance.
+
+
+The complete Core109 Debug build passes for x86_64 Simulator and arm64 iPhone
+with the same202 frozen build inputs. Only the dedicated Simulator is normally
+updated; all four actual code/Metal payloads and preserved cache metadata are
+verified. The device build remains unsigned/uninstalled. This is distinct from
+the prior optimized Core108 timeouts and supplies no iPhone FPS measurement.

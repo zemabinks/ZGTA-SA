@@ -1,5 +1,97 @@
 # Core gameplay audit journal
 
+## 2026-11-17 — Core110 terminal vehicle and rendering corrections
+
+A genuine accepted native driver reproduced the wrecked-hull loss separately
+from the older fixtures' missing entry handshake. Fatal health can release the
+driver before its final parked snapshot arrives. Core110 releases occupancy
+immediately while retaining one bounded, transport/incarnation-bound terminal
+completion that cannot grant driving rights or repair the hull. Unauthorized
+explicit-ID foot reports cannot publish duplicate parked stand-ins. The actual
+HTTP/WebSocket regression passes303 checks across17 scenarios. Corrected-entry
+native wreck and water fixtures pass their original hull/death/respawn
+assertions; an initial water compile timeout remains recorded separately. See
+[terminal vehicle evidence](CORE_TERMINAL_VEHICLE_110.md).
+
+Actual offscreen Metal tests reproduce a second defect: a depth-writing car
+window drawn before the remote driver can hide that driver. Core110 completes
+opaque actors before drawing stable far-to-near transparent vehicle packets,
+retaining original depth writes and all per-instance state. Classification
+matches15,422 material groups across212 archived browser models. A separate
+appearance/registry-ID mismatch prevented ID-less free-play drivers from
+reaching their rider-rendering path; rendering roles now follow the existing
+wire appearance contract without inventing IDs or changing authority. The
+focused gates pass80 actual Metal,27 Rig/encoder and17 packet/cache/role checks.
+See [rendering evidence and limits](CORE_VEHICLE_ALPHA_110.md).
+
+Thirteen separate source/hosting/authority regressions pass against unchanged
+Core110 backend source, including inventory, health, weapon, armour, melee,
+coupling and terminal-exit transport. The new terminal regression is also part
+of free source CI. Complete Core110 Debug SDK builds pass for Intel Simulator
+(1010.814s) and arm64 iPhone (742.367s), with all202 frozen inputs unchanged.
+The normal dedicated-Simulator update verifies four installed payloads and
+preserves all four cache metadata files. The device build is unsigned and is
+not installed on the unavailable phone. The actual shared-car UI case passes
+117.094s: Root-reviewed front-quarter captures now show both distinct occupants,
+side captures show the near-side wheels, and normal Exit/Jump retain the shared
+Taxi identity. Fresh wire confirms native118/skin7 in seat1 and back on foot,
+with browser driver1/skin2 unchanged. The live scene uses the isolated108 backend;
+110 terminal authority is tested separately through actual native HTTP/WS.
+[Acceptance and the seven original regression dispositions](CORE_NATIVE_ACCEPTANCE_110.md)
+retain these boundaries. No original-game parity or performance claim follows.
+
+The frozen Core109 optimized Simulator build separately passes in2963.207s.
+Xcode appended a12-thread compiler argument after the requested2-thread flag;
+the requested compiler-thread cap was not honored. Its202 source inputs stay
+unchanged. A successful optimized build alone is not an FPS measurement.
+
+
+## 2026-11-17 — Core109 built and installed-resource scene accepted
+
+The complete Debug App builds for Intel iPhone Simulator and arm64 iPhone
+against the same202 frozen inputs (2804.312s and1525.894s). The device product
+is unsigned and was not installed on the unavailable phone. A normal Simulator
+update verifies the actual debug dylib, Metal library, preview library and
+executable separately, preserving all four cache metadata files. A fresh
+read-only audit hashes every6700 unique blob backing6760 logical resources.
+No App reset, cache seeding or resource-store activation shortcut is used.
+
+The actual109 installed-resource denial UI case passes213.820s: normal main
+menu/Game Files status, Guest join, a normal Jump touch and a45-second interval
+without operator input. Reviewed landscape captures show the city, native
+skin7, taxi/wheels, HUD and radar. The external proxy records zero asset
+requests across the complete command interval while observing63 gameplay HTTP
+requests and two WebSocket upgrades. The wider baseline/final counter window
+contains91 HTTP requests and the same two upgrades, with zero asset attempts.
+The prior107 scene attempted seven metadata requests; those bypasses are now
+corrected for this actual scene. Missing stock coverage, all other scenes,
+complete ISO conversion and audible radio remain separate acceptance work.
+
+The108b actual camera probe passes one XCTest case with zero failed tests. It
+completes three ordinary camera gestures and normal passenger Exit, with fresh
+wire confirming native118 back on foot and browser1 retaining the same taxi ID.
+The native passenger and two near-side wheels are visible. Both occupied seats
+and driver skin2 are still not conclusively established by the selected views.
+A teardown attachment labels the interaction failed because it reads
+`hasSucceeded` before XCTest finalizes success; that discrepancy is retained
+alongside the authoritative finalized Passed result. Earlier failed probes stay
+failed. Recordings and screenshots remain private.
+
+The initial broad regression is still running. Its first health/network case
+reaches the600-second compile deadline under concurrent SDK work. After SDK
+completion, the unchanged command passes in179.12s under the same budget and
+sandbox, including the actual HTTP/WebSocket fixture. The original timeout is
+not relabeled as a pass. Source and202-input hashes stay unchanged.
+
+The independent source candidate is backed up on `codex/core109-foundations`
+at `5c222500f577a7dae2232bbef437593d1b968449`; its962-file tree and107 changed
+blobs are independently verified and free CI44126553765 passes. The public
+project is generated from the base spec without local owner-menu references,
+retaining176 compile members. The actual tested local owner project is
+unchanged. GitHub main remains the verified108 milestone. No original resources,
+owner recordings, private runtime carriers or captures are published, and no
+retail, physical-device, optimized-performance or1:1 claim is made.
+
 ## 2026-11-17 — Core109 local-runtime and camera audit
 
 The completed107 Game Files UI run passes normal cache/reuse, full native graph validation, explicit installed-file verification and process relaunch. A separate read-only audit hashes all6700 unique blobs backing6760 logical files. The following resource-denial scene run passes188.744 seconds of normal UI: its landscape captures show the city, character, taxi and HUD, and it receives real gameplay HTTP/WebSocket traffic. It also makes seven denied asset requests, so fully local resource routing is **not** accepted by that run.

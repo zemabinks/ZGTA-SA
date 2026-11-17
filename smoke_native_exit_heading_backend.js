@@ -16,7 +16,14 @@ game.onMessage=(peer,message)=>{try{
   game.vehicles.set('fixture-heading',{id:'fixture-heading',owner:peer.player,slot:0,lastGarageSave:0,row:['fixture-heading','Heading fixture','420.0.0.0.',1570,-2460,13.6,0,0,0,1000,'',null,null,null,null,null,0]});
  }
  original(peer,message);if(peer!==native)return;
- if(message.t==='me'&&message.driving===true){check(phase==='initial'||phase==='drive','Unexpected repeated drive');phase='exit';native.send({t:'note',text:'EXIT HEADING '+index})}
+ if(message.t==='me'&&message.driving===true){
+  check(phase==='initial'||phase==='drive','Unexpected repeated drive');
+  const car=game.vehicles.get('fixture-heading');
+  check(game.vehicleClaim(car)?.peer===peer && game.vehicleClaim(car).driving &&
+   peer.state.driving===true && peer.state.vehicle===car.id && car.row[11]===String(peer.player.number),
+   'Heading fixture bypassed actual accepted driver authority');
+  phase='exit';native.send({t:'note',text:'EXIT HEADING '+index})
+ }
  if(message.t==='me'&&message.walking===true&&message.parked){
   check(phase==='exit','Repeated/out-of-order exit');const item=cases[index],body=Math.fround(item.body),foot=Math.fround(item.foot??item.body);exits++;
   check(angle(message.heading,-foot),'First foot packet used parked body/camera heading');
