@@ -947,12 +947,14 @@ final class NativeGameViewController: UIViewController {
     }
     @objc private func controllerChanged() { resetControls(); status.text = GCController.controllers().isEmpty ? "TOUCH CONTROLS ACTIVE" : "CONTROLLER CONNECTED" }
     @objc private func toggleRun() {
+        guard acceptsHeldInput else { return }
         run.toggle()
         runButton.layer.borderColor = (run ? UIColor(red: 0.365, green: 0.714, blue: 0.898, alpha: 1) :
                                        UIColor.white.withAlphaComponent(0.3)).cgColor
         runButton.layer.borderWidth = run ? 2.5 : 1
     }
     @objc private func jump() {
+        guard acceptsHeldInput else { return }
         guard !(bindingContext.melee && bindingContext.guarding) else{return}
         renderer?.jump()
     }
@@ -973,7 +975,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func nextRadioStation() {
-        guard currentVehicle != nil else { return }
+        guard acceptsHeldInput, currentVehicle != nil else { return }
         radio.next()
         updateRadioControl()
     }
@@ -1399,18 +1401,23 @@ final class NativeGameViewController: UIViewController {
     }
 
     @objc private func toggleAim() {
+        guard acceptsHeldInput else { return }
         if currentVehicle != nil { renderer?.vehicleLights.toggle();return }
         if renderer?.canNativeFootMeleeGuard == true {
             touchMeleeGuard.toggle();setAiming(false)
             aimButton.backgroundColor=UIColor.black.withAlphaComponent(touchMeleeGuard ? 0.7:0.3)
         } else {setAiming(usingMelee ? false:!aiming)}
     }
-    @objc private func toggleGear() { if renderer?.hasLandingGear == true { renderer?.toggleLandingGear() } }
+    @objc private func toggleGear() {
+        guard acceptsHeldInput else { return }
+        if renderer?.hasLandingGear == true { renderer?.toggleLandingGear() }
+    }
     @objc private func pressNozzleUp() { if acceptsHeldInput && currentVehicle != nil && (renderer?.hasJetNozzle == true || renderer?.hasVehicleWorkingControls == true) { nozzleUpPressed = true } }
     @objc private func pressNozzleDown() { if acceptsHeldInput && currentVehicle != nil && (renderer?.hasJetNozzle == true || renderer?.hasVehicleWorkingControls == true) { nozzleDownPressed = true } }
     @objc private func releaseNozzleUp() { nozzleUpPressed = false }
     @objc private func releaseNozzleDown() { nozzleDownPressed = false }
     @objc private func toggleCrouch() {
+        guard acceptsHeldInput else { return }
         if currentVehicle != nil {if renderer?.canUnhitchVehicle == true {renderer?.releaseVehicleCoupling()}else{toggleGear()};return}
         guard currentVehicle == nil, let renderer, network.health > 0 else { return }
         legacyCrouchUntil=ProcessInfo.processInfo.systemUptime+0.12
@@ -1877,9 +1884,12 @@ final class NativeGameViewController: UIViewController {
             let pressed = [pad.buttonA,pad.buttonB,pad.buttonX,pad.buttonY,pad.leftShoulder,pad.rightShoulder,
                            pad.dpad.up,pad.dpad.down,pad.dpad.left,pad.dpad.right,pad.buttonMenu].contains { $0.isPressed } ||
                 pad.leftThumbstickButton?.isPressed == true || pad.rightThumbstickButton?.isPressed == true || pad.buttonOptions?.isPressed == true
-            controllerAllowed = controllerGate.accepts(active: active && presentedViewController == nil,
-                axes: [pad.leftThumbstick.xAxis.value,pad.leftThumbstick.yAxis.value,pad.rightThumbstick.xAxis.value,
-                       pad.rightThumbstick.yAxis.value,pad.leftTrigger.value,pad.rightTrigger.value], pressed: pressed)
+            // Server freezes, selection and connection loss require a fresh
+            // neutral state too; blocked polls must not silently rearm input.
+            controllerAllowed = controllerGate.accepts(active: acceptsInput,
+                left: SIMD2(pad.leftThumbstick.xAxis.value,pad.leftThumbstick.yAxis.value),
+                right: SIMD2(pad.rightThumbstick.xAxis.value,pad.rightThumbstick.yAxis.value),
+                triggers: SIMD2(pad.leftTrigger.value,pad.rightTrigger.value), pressed: pressed)
         } else { controllerGate.reset() }
         if controllerAllowed, let pad = controller {
             let buttons=NativeGameBindings.Pad(a:pad.buttonA.isPressed,b:pad.buttonB.isPressed,x:pad.buttonX.isPressed,y:pad.buttonY.isPressed,
@@ -1898,10 +1908,13 @@ final class NativeGameViewController: UIViewController {
             let lx = left.x, ly = left.y
             if abs(lx) + abs(ly) > 0.05 { forward = ly; sideways = lx }
             let right = NativeInputMath.stick(x: pad.rightThumbstick.xAxis.value, y: pad.rightThumbstick.yAxis.value)
-            let rx = right.x
-            if abs(rx) > 0.05 { if currentVehicle != nil { cameraLookX = rx } else { steering = rx } }
-            let ry = right.y
-            if abs(ry) > 0.05 { if currentVehicle != nil { cameraLookY = ry } else { lookVertical = ry } }
+            // The radial filter owns the deadzone. A second per-axis threshold
+            // drops valid diagonals and changes their direction. As with the
+            // left stick, an engaged stick supplies its complete vector.
+            if right != .zero {
+                if currentVehicle != nil { cameraLookX = right.x; cameraLookY = right.y }
+                else { steering = right.x; lookVertical = right.y }
+            }
             gamepadRunning = pad.buttonA.isPressed && context.mode != .vehicle("bicycle")
             gamepadHop = pad.buttonA.isPressed && context.mode == .vehicle("bicycle")
             gamepadJumping = pad.buttonX.isPressed

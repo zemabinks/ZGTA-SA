@@ -107,7 +107,7 @@ def main():
         'smoke_native_climb.py', 'smoke_native_climb_runtime.py',
         'smoke_native_ammo_reconciliation.py', 'smoke_native_inventory_wire.py',
         'smoke_native_camera_visibility.py',
-        'smoke_native_controls.py', 'smoke_native_horn.py', 'smoke_native_wire.py',
+        'smoke_native_controls.py', 'smoke_native_action_gate.py', 'smoke_native_horn.py', 'smoke_native_wire.py',
         'smoke_native_foot_locomotion.py', 'smoke_native_foot_animation.py',
         'smoke_native_gun_animation.py', 'smoke_native_swim_animation.py',
         'smoke_native_swim_sprint.py', 'smoke_native_world_water.py', 'smoke_native_personal_flight.py',

@@ -1,5 +1,33 @@
 # Core gameplay audit journal
 
+## 2026-11-17 — Core112 touch, controller and camera ownership
+
+The actual source reproduces direct touch actions bypassing the shared action
+gate, controller rearming during blocked gameplay, and mismatched radial versus
+per-axis deadzones. Both controller neutrality and camera vector delivery now
+follow the same radial input boundary. The focused1022-check gate passes with
+zero leaked blocked requests, zero out-of-deadzone rearming and zero dropped
+engaged camera vectors. The complete revised universal Simulator Debug and
+arm64 iPhone Release builds pass with all202 frozen source inputs unchanged.
+Historical failures and the initial universal build remain separately preserved.
+[Evidence and current validation boundaries](CORE_INPUT_OWNERSHIP_112.md).
+
+The earlier111 Release product is also normally updated on the now-available
+iPhone. Its actual LAN scene joins the isolated browser/Simulator world; saved
+footage visibly establishes walk/run and release, look, crouch/stand, jump and
+landing. Normal mission-Taxi access denial is directly captured, followed by
+a separate legitimate phone assignment/driver grant. This is physical111 scene
+evidence, not112 hardware acceptance or classic-retail1:1 verification.
+
+The final112 Simulator normal-Guest sequence passes213.969s through crouch,
+jump, camera, Pause and RESUME. Actual browser wire records718 native118
+samples and five airborne states, then neutral rest. Three saved Taxi job
+records and the browser driver baseline remain unchanged. Its move0.97 is a
+smoothed locomotion ratio, consistent with20.15-point displacement against
+44-point stick travel; it is not raw stick amplitude. Continuous gait and
+retail walking-threshold acceptance remain open. Core112 is subsequently normally installed on the physical iPhone; its
+installation alone does not establish hardware control correctness.
+
 ## 2026-11-17 — Core111 vehicle identity and regression integrity
 
 Per-occurrence render context replaces ambiguous model/position owner searches;

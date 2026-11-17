@@ -15,6 +15,12 @@ enum NativeInputMath {
 struct NativeControllerInputGate {
     private(set) var needsNeutral = true
     mutating func reset() { needsNeutral = true }
+    /// Use the radial movement boundary when deciding whether a stick is neutral.
+    mutating func accepts(active: Bool, left: SIMD2<Float>, right: SIMD2<Float>,
+                         triggers: SIMD2<Float>, pressed: Bool) -> Bool {
+        accepts(active: active, axes: [hypot(left.x, left.y), hypot(right.x, right.y),
+                                      triggers.x, triggers.y], pressed: pressed)
+    }
     mutating func accepts(active: Bool, axes: [Float], pressed: Bool) -> Bool {
         guard active else { reset(); return false }
         guard axes.allSatisfy(\.isFinite) else { reset(); return false }

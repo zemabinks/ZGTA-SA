@@ -41,6 +41,12 @@ Simulator/browser acceptance. The initial broad regression remains149/166 PASS;
 qualified followups and an invalidated historical false positive are recorded
 separately. No checklist area becomes original-game verified by inference.
 
+Current input audit: [Core112 touch/controller/camera ownership](CORE_INPUT_OWNERSHIP_112.md).
+Actual source regressions correct blocked touch actions, controller rearming
+and radial camera input delivery. Final SDK/runtime acceptance is recorded
+separately from the initial build and the physical111 scene. Original controller
+response curves and matched classic-retail gameplay still require verification.
+
 Status: **audit** = implemented but original-game verification still required;
 **gap** = known missing/approximate behavior; **fixing** = a reproduced defect is
 being corrected. A row is only **verified** for a specifically named test and
