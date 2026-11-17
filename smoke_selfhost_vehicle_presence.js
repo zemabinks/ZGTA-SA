@@ -81,6 +81,34 @@ async function main(){
   await b.wire.sync(foot());check(await enter(b,car),'Expired claim blocked next entrant');await b.wire.sync({t:'exit',v:car.id});
   const near=vehicle('simultaneous');await a.wire.sync(foot());const answer=await Promise.all([enter(a,near),enter(b,near)]);same(answer.filter(Boolean).length,1,'Two simultaneous enters acquired one car');await(answer[0]?a:b).wire.sync({t:'exit',v:near.id});
  });
+ await scenario('browser stand/get-in parked snapshots retain bounded pending authority',async()=>{
+  // The real browser controller is parked while stand() prepares its get-in
+  // animation; own() legitimately sends that snapshot in ordinary foot rows.
+  // These default bytes are authored. Optional private archive execution below
+  // supplies its unchanged getter+serializer output for the same exact shape.
+  const car=vehicle('serializer-logical');car.row[2]='420.6.1.0.';
+  await b.wire.sync(foot(98,100,20));check(await enter(b,car),'Browser ordinary entry denied');
+  const claim=game.vehicleClaim(car),at=observer.wire.messages.length;
+  const entering=archivedSerializer?.enteringReport || {...foot(98,100,20),car:car.row[2],vehicle:car.id,
+    parked:{x:100,y:100,z:20,heading:0,pitch:0,roll:0,health:1000,damage:''}};
+  check(entering.walking===true&&entering.driving!==true&&entering.vehicle===car.id&&entering.car===car.row[2]&&entering.parked,'Get-in fixture lacks the original foot/parked shape');
+  await b.wire.sync({t:'me',...entering});const accepted=[...game.peers].find(peer=>peer.player===b.player)?.state;check(accepted?.walking===true&&accepted.vehicle===car.id&&accepted.parked?.x===entering.parked.x,'Actual get-in foot report was not processed by backend');check(game.vehicleClaim(car)===claim,'Browser stand snapshot cancelled pending entry');
+  same(car.row[11],null,'Pending browser stand snapshot prematurely published a driver');same(car.row.slice(3,6),[100,100,20],'Pending snapshot changed parked body pose');
+  check(!(await enter(a,car)),'Browser get-in snapshot released its exclusive reservation');
+  // Repeated foot snapshots cannot extend the initial twelve-second lease.
+  const until=claim.until;await b.wire.sync({t:'me',...entering});same(claim.until,until,'Browser foot/get-in report extended pending lease');
+  await b.wire.sync(archivedSerializer?.drivingAfterEnteringReport ? {t:'me',...archivedSerializer.drivingAfterEnteringReport} : drive(car,{skin:7,x:101,health:1000}));
+  await observer.wire.wait(m=>m.t==='cars'&&m.c.some(r=>r[0]===String(b.number)&&r[35]===car.id&&r[2]===car.row[2]),at);
+  same(car.row[11],String(b.number),'Browser first drive did not publish its player ID');
+  const packets=observer.wire.messages.slice(at),occupied=packets.findIndex(m=>m.t==='veh'&&m.v[0]===car.id&&m.v[11]===String(b.number)),driven=packets.findIndex(m=>m.t==='cars'&&m.c.some(r=>r[0]===String(b.number)&&r[35]===car.id&&r[2]===car.row[2]));
+  check(occupied>=0&&driven>occupied,'Browser occupied registry marker did not precede driving actor');
+  same((await cars(observer)).find(v=>v[0]===car.id)[11],String(b.number),'HTTP lost browser occupied marker');
+  await parked(b,car,{x:102});same(car.row[11],null,'Completed browser exit did not restore parked representation');check(!game.vehicleClaim(car),'Completed browser exit retained driver authority');
+  await b.wire.sync(foot(98,100,20));check(await enter(b,car),'Browser explicit-cancel setup denied');await b.wire.sync({t:'me',...entering});await b.wire.sync({t:'exit',v:car.id});check(!game.vehicleClaim(car),'Explicit browser cancel retained pending authority');
+  await b.wire.sync(drive(car));same(car.row[11],null,'Late drive acquired explicitly cancelled browser entry');
+  await b.wire.sync(foot(98,100,20));check(await enter(b,car),'Browser expiry setup denied');await b.wire.sync({t:'me',...entering});offset+=12001;game.broadcastPositions();await b.wire.sync(drive(car));same(car.row[11],null,'Expired browser stand/get-in acquired driver authority');
+  await a.wire.sync(foot(98,100,20));check(await enter(a,car),'Expired browser stand/get-in blocked next native driver');await a.wire.sync({t:'exit',v:car.id});
+ });
  await scenario('only the claimed first valid drive publishes driver slot11 before its driving row',async()=>{
   const car=vehicle('publication');await a.wire.sync(foot());await b.wire.sync(foot());
   for(const bad of [{car:'9001'}, {x:null}, {x:6001}, {health:null}, {pitch:'zero'}]){
@@ -133,7 +161,7 @@ async function main(){
  });
  same(hashes(),before,'Source changed during integration fixture');
  const observedWire=observer.wire.messages.filter(m=>['veh','spawned','vgone','gone','cars'].includes(m.t));
- fs.writeFileSync(path.join(OUT,'server-report.json'),JSON.stringify({passed:true,checks,scenarios,sourceSHA256:before,observedWire,archivedSerializerReplayed:!!archivedSerializer,...(archivedSerializer?{archivedFactory19737SHA256:archivedSerializer.archivedFactory19737SHA256}:{}),listener:'Ephemeral127.0.0.1only;stoppedinfinally',originalAssets:false,limits:'RealHTTP/WebSocketandserverauthority;notGPU/retailphysicsverification'},null,2)+'\n');
+ fs.writeFileSync(path.join(OUT,'server-report.json'),JSON.stringify({passed:true,checks,scenarios,sourceSHA256:before,observedWire,archivedSerializerReplayed:!!archivedSerializer,archivedGetInReplayed:!!archivedSerializer?.enteringReport,...(archivedSerializer?{archivedFactory19737SHA256:archivedSerializer.archivedFactory19737SHA256}:{}),listener:'Ephemeral127.0.0.1only;stoppedinfinally',originalAssets:false,limits:'RealHTTP/WebSocketandserverauthority;notGPU/retailphysicsverification'},null,2)+'\n');
  console.log(`PASS real HTTP/WebSocket vehicle presence: ${checks} checks, ${scenarios.length} scenarios`);
 }
 main().catch(error=>{console.error(error.stack);process.exitCode=1;}).finally(async()=>{

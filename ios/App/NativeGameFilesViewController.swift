@@ -7,12 +7,13 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
     private let coordinator:NativeGameFilesCoordinator
     private let column=UIStackView(),statusTitle=UILabel(),statusDetail=UILabel(),issues=UILabel()
     private let progressTitle=UILabel(),progressDetail=UILabel(),result=UILabel(),inspection=UILabel()
+    private let rawDetail=UILabel()
     private let progress=UIProgressView(progressViewStyle:.default),spinner=UIActivityIndicatorView(style:.medium)
     private let origin=UITextField(),progressPanel=UIStackView()
     private var sourceButtons:[UIButton]=[],observer:UUID?
-    private var developmentButton:UIButton!,installedButton:UIButton!,verifyButton:UIButton!,cancelButton:UIButton!
+    private var developmentButton:UIButton!,installedButton:UIButton!,verifyButton:UIButton!,cancelButton:UIButton!,verifyRawButton:UIButton!
     private var active=false,originInitialized=false,pickerKind:PickerKind?
-    private enum PickerKind {case preparedFolder,iso}
+    private enum PickerKind {case preparedFolder,iso,extractISO}
 
     init(coordinator:NativeGameFilesCoordinator = .shared){self.coordinator=coordinator;super.init(title:"GAME FILES")}
     required init?(coder:NSCoder){fatalError("Programmatic menu")}
@@ -65,9 +66,14 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
 
         let inspect=menuButton("INSPECT ORIGINAL ISO"){[weak self] in self?.choose(.iso)}
         inspect.accessibilityIdentifier="gamefiles.inspectISO";sourceButtons.append(inspect)
+        let extract=menuButton("EXTRACT RAW RESOURCES FROM ISO"){[weak self] in self?.choose(.extractISO)}
+        extract.accessibilityIdentifier="gamefiles.extractRawISO";sourceButtons.append(extract)
+        verifyRawButton=menuButton("VERIFY SAVED RAW RESOURCES"){[weak self] in self?.coordinator.verifyRawResources()}
+        verifyRawButton.accessibilityIdentifier="gamefiles.verifyRaw";sourceButtons.append(verifyRawButton)
+        configure(rawDetail);rawDetail.accessibilityIdentifier="gamefiles.rawStatus"
         configure(inspection);inspection.isHidden=true
         column.addArrangedSubview(panel("ORIGINAL GAME SOURCE",[
-            note("Select your own original San Andreas ISO to inspect its ISO9660 file list. This step identifies installer containers only. InstallShield extraction and native conversion must finish before an ISO can become a playable installation. The ISO is never modified or deleted."),inspect,inspection]))
+            note("Select your own original San Andreas ISO. Extraction saves and checks original anim, data, models, text, audio and movies resources in app-owned storage. Windows components are excluded. The ISO is read directly and remains unchanged. RAW RESOURCES ARE NOT PLAYABLE: native conversion is a separate step and is not performed here."),extract,verifyRawButton,rawDetail,inspect,inspection]))
 
         progressPanel.axis = .vertical;progressPanel.spacing=8
         progressTitle.font=menuFont(size:23);progressTitle.textColor = .white;progressTitle.numberOfLines=0
@@ -105,7 +111,7 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
     }
     private func render(_ state:NativeGameFilesCoordinator.State){
         guard isViewLoaded else{return};let resources=state.resources
-        if !originInitialized {origin.text=resources.developmentOrigin ?? "";originInitialized=true}
+        if !originInitialized {origin.text=state.suggestedOrigin;originInitialized=true}
         let bytes:(Int64)->String={ByteCountFormatter.string(fromByteCount:max(0,$0),countStyle:.file)}
         statusTitle.text=resources.mode == .installed ? (resources.hasPlayableInstallation ? "LOCAL INSTALLATION VERIFIED":"LOCAL INSTALLATION NEEDS ATTENTION") : "DEVELOPMENT RESOURCES"
         let installation=resources.installedContentID.map{"Installed identity: \($0)"} ?? "No verified local installation selected."
@@ -115,6 +121,11 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         for button in sourceButtons {button.isEnabled = !state.busy}
         installedButton.isEnabled = !state.busy && resources.hasPlayableInstallation
         verifyButton.isEnabled = !state.busy && resources.installedContentID != nil
+        verifyRawButton.isEnabled = !state.busy && state.raw.sourceID != nil
+        if let source=state.raw.sourceID {
+            rawDetail.text="SAVED RAW RESOURCES · \(state.raw.files) files · \(bytes(state.raw.bytes))\n\(state.raw.sourceName ?? "Original ISO")\nSource identity: \(source)\n\(state.raw.verified ? "Raw file checks completed.":"Retained across restarts; verify to recheck raw file contents.") Native conversion is still required."
+        }else{rawDetail.text="No saved raw resource set. Prepared native installations and raw ISO extraction are separate."}
+        if !state.raw.issues.isEmpty{rawDetail.text=(rawDetail.text ?? "")+"\n"+state.raw.issues.prefix(6).joined(separator:"\n")}
         origin.isEnabled = !state.busy
         developmentButton.accessibilityValue=resources.mode == .development ? "Selected":""
         installedButton.accessibilityValue=resources.mode == .installed ? "Selected":""
@@ -147,6 +158,10 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         guard let source=urls.first,!coordinator.state.busy else{return}
         // The shared coordinator, rather than this temporary picker/screen,
         // retains security-scoped access for the complete asynchronous job.
-        if kind == .preparedFolder {coordinator.importPreparedFolder(source)}else{coordinator.inspectISO(source)}
+        switch kind {
+        case .preparedFolder:coordinator.importPreparedFolder(source)
+        case .iso:coordinator.inspectISO(source)
+        case .extractISO:coordinator.extractRawISO(source)
+        }
     }
 }

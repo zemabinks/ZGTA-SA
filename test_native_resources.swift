@@ -6,6 +6,21 @@ private struct ResourceTestFailure: Error, CustomStringConvertible { let descrip
 private struct ResourceTestResponse { let data:Data?;let response:HTTPURLResponse?;let error:Error? }
 // Operation.cancel is lock-protected; publish only this immutable handle.
 private final class ResourceCancelHandle:@unchecked Sendable {let operation:NativeResourceStore.Operation;init(_ value:NativeResourceStore.Operation){operation=value}}
+private final class ResourceIOGate:@unchecked Sendable {
+    let entered=DispatchSemaphore(value:0),release=DispatchSemaphore(value:0)
+    private let lock=NSLock();private var armed=false
+    func arm(){lock.lock();armed=true;lock.unlock()}
+    func pauseIfArmed()throws->Bool {
+        lock.lock();let pause=armed;armed=false;lock.unlock()
+        guard pause else{return false};entered.signal()
+        guard release.wait(timeout:.now()+15) == .success else{throw ResourceTestFailure(description:"Controlled resource I/O gate timed out")}
+        return true
+    }
+}
+private final class ResourceReadHandle:@unchecked Sendable {
+    let store:NativeResourceStore,url:URL
+    init(_ store:NativeResourceStore,_ url:URL){self.store=store;self.url=url}
+}
 private final class ResourceChecks {
     var count=0,failures:[String]=[],notes:[String]=[]
     func check(_ value:Bool,_ label:String){count+=1;if !value{failures.append(label);print("RESOURCE_CHECK_FAILED \(label)")}}
@@ -77,6 +92,15 @@ enum NativePreparedRuntimeVerifier {
         let checks=ResourceChecks();var summary:[String:Any]=[:]
         do {
             let args=CommandLine.arguments;guard args.count==3 else{throw ResourceTestFailure(description:"Expected config path and suite|reopen")}
+            if args[2]=="admission" {
+                let folder=URL(fileURLWithPath:args[1]);try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+                try await admissionRegression(folder,checks)
+                let result:[String:Any]=["passed":checks.failures.isEmpty,"checks":checks.count,"failures":checks.failures,
+                    "scope":"Actual Store with authored folder-only resources and explicit synthetic validator; controlled runtime-reader/validator gates test concurrency, no network or native-game playability claim"]
+                try JSONSerialization.data(withJSONObject:result,options:[.prettyPrinted,.sortedKeys]).write(to:folder.appendingPathComponent("admission-report.json"),options:.atomic)
+                print("RESOURCE_ADMISSION_RESULT \(checks.failures.isEmpty ? "PASS":"FAIL") \(checks.count) checks")
+                if !checks.failures.isEmpty{exit(1)};return
+            }
             let config=try JSONSerialization.jsonObject(with:Data(contentsOf:URL(fileURLWithPath:args[1]))) as! [String:Any]
             let output=URL(fileURLWithPath:config["output"] as! String),work=URL(fileURLWithPath:config["work"] as! String),a=URL(string:config["a"] as! String)!,b=URL(string:config["b"] as! String)!
             let packageA=URL(fileURLWithPath:config["packageA"] as! String),packageB=URL(fileURLWithPath:config["packageB"] as! String)
@@ -215,5 +239,173 @@ enum NativePreparedRuntimeVerifier {
             print("RESOURCE_TEST_RESULT \(checks.failures.isEmpty ? "PASS":"FAIL") \(checks.count) checks")
             if !checks.failures.isEmpty{exit(1)}
         }catch{print("RESOURCE_TEST_FATAL \(error)");exit(2)}
+    }
+}
+
+private extension NativeResourceRegression {
+    static func gateEntered(_ gate:ResourceIOGate)async->Bool {
+        await withCheckedContinuation{continuation in DispatchQueue.global().async{continuation.resume(returning:gate.entered.wait(timeout:.now()+15) == .success)}}
+    }
+    static func rejectedRead(_ store:NativeResourceStore,_ url:URL)async->Bool {
+        let handle=ResourceReadHandle(store,url)
+        return await withCheckedContinuation{continuation in DispatchQueue.global().async{
+            do{_=try handle.store.localResource(for:handle.url);continuation.resume(returning:false)}catch{continuation.resume(returning:true)}
+        }}
+    }
+    static func admissionRegression(_ output:URL,_ checks:ResourceChecks)async throws {
+        let files=FileManager.default,work=output.appendingPathComponent(UUID().uuidString),package=work.appendingPathComponent("authored-package")
+        try files.createDirectory(at:package.appendingPathComponent("blobs"),withIntermediateDirectories:true)
+        let payload="game/native/admission-payload.bin",url=URL(string:"https://authored.invalid/"+payload)!
+        var rows=[NativeResourceManifest.Resource]()
+        for path in Array(NativeResourceManifest.requiredPaths).sorted()+["game/world/synthetic.bin","game/world/synthetic.png",payload] {
+            let bytes:Data
+            if path.hasSuffix(".json"){bytes=try JSONSerialization.data(withJSONObject:["syntheticFixture":path])}
+            else if path.hasSuffix(".png"){bytes=Data([137,80,78,71,13,10,26,10])+Data("authored image carrier".utf8)}
+            else if path.hasSuffix("clips.bin"){bytes=Data("CLP1 authored transaction carrier".utf8)}
+            else if path.hasSuffix("synthetic.bin"){bytes=Data("WRL2 authored transaction carrier".utf8)}
+            else{bytes=Data("authored immutable payload bytes".utf8)}
+            let digest=hash(bytes);try bytes.write(to:package.appendingPathComponent("blobs/"+digest))
+            rows.append(.init(path:path,bytes:Int64(bytes.count),sha256:digest,required:true))
+        }
+        let unsigned=NativeResourceManifest(schema:1,profile:NativeResourceManifest.profileName,contentID:"",resources:rows)
+        let manifest=NativeResourceManifest(schema:1,profile:unsigned.profile,contentID:unsigned.identity,resources:rows)
+        try JSONEncoder().encode(manifest).write(to:package.appendingPathComponent(NativeResourceManifest.filename))
+        let item=rows.first{$0.path==payload}!,good=try Data(contentsOf:package.appendingPathComponent("blobs/"+item.sha256))
+        var bad=good;bad[0]^=1
+        let other=rows.first{$0.path != payload}!,otherGood=try Data(contentsOf:package.appendingPathComponent("blobs/"+other.sha256))
+        func blob(_ root:URL)->URL{root.appendingPathComponent("blobs/"+item.sha256)}
+        func receipt(_ root:URL)throws->[String:Any]{try JSONSerialization.jsonObject(with:Data(contentsOf:root.appendingPathComponent("active.json")))as![String:Any]}
+        func make(_ name:String,reader:NativeResourceStore.RuntimeDataReader?=nil,validator:NativeResourceStore.RuntimeValidator?=nil)async throws->(NativeResourceStore,URL) {
+            let root=work.appendingPathComponent(name),store=NativeResourceStore(root:root,validationIdentity:syntheticIdentity,runtimeValidator:validator ?? validateSynthetic,runtimeDataReader:reader)
+            try checks.success(await operation{store.importPreparedFolder(package,progress:{_ in},completion:$0)},name+" folder import")
+            try store.setMode(.installed);return(store,root)
+        }
+        func reopened(_ root:URL)->NativeResourceStore{NativeResourceStore(root:root,validationIdentity:syntheticIdentity,runtimeValidator:validateSynthetic)}
+        let (store,root)=try await make("checksum")
+        let originalID=try receipt(root)["admissionID"]as!String
+        try bad.write(to:blob(root),options:.atomic)
+        checks.rejects("runtime data checksum is rejected"){_=try store.localResource(for:url)}
+        checks.check(!store.snapshot.hasPlayableInstallation,"runtime checksum immediately revokes admission")
+        checks.check(store.snapshot.mode == .installed,"runtime fault never silently selects development")
+        checks.check(store.snapshot.cachedFiles==rows.count-1,"bad blob removed from cache accounting")
+        checks.check(store.snapshot.installedContentID==manifest.contentID,"fault retains active catalogue identity")
+        checks.check(try Data(contentsOf:root.appendingPathComponent("blobs/"+other.sha256))==otherGood,"unrelated good blob retained")
+        checks.check(try (receipt(root)["manifest"]as![String:Any])["contentID"]as?String==manifest.contentID,"fault retains receipt manifest")
+        try store.configureRuntimeValidation(identity:syntheticIdentity,validator:validateSynthetic)
+        checks.check(!store.snapshot.hasPlayableInstallation,"configure cannot erase observed corruption")
+        checks.check(!reopened(root).snapshot.hasPlayableInstallation,"same-sized corruption remains blocked after relaunch")
+        checks.check(reopened(root).snapshot.cachedFiles==rows.count-1,"corrupt cache accounting stays removed after relaunch")
+        try good.write(to:blob(root),options:.atomic)
+        try store.configureRuntimeValidation(identity:syntheticIdentity,validator:validateSynthetic)
+        checks.check(!store.snapshot.hasPlayableInstallation,"manual same-sized restoration still needs actual verification")
+        try checks.success(await operation{store.verifyInstalled(progress:{_ in},completion:$0)},"full verification restores admission")
+        checks.check(store.snapshot.hasPlayableInstallation && reopened(root).snapshot.hasPlayableInstallation,"verified repair persists admitted state")
+        checks.check(store.snapshot.cachedFiles==rows.count,"successful verification restores verified accounting")
+        checks.check(try receipt(root)["admissionID"]as?String != originalID,"successful verification publishes fresh admission generation")
+        try bad.write(to:blob(root),options:.atomic)
+        checks.rejects("file lookup detects checksum failure"){_=try store.installedURL(for:url)}
+        checks.check(!store.snapshot.hasPlayableInstallation && !reopened(root).snapshot.hasPlayableInstallation,"file checksum also persistently revokes admission")
+        try checks.success(await operation{store.importPreparedFolder(package,progress:{_ in},completion:$0)},"explicit folder repair")
+        try files.removeItem(at:blob(root))
+        checks.rejects("known missing data blob fails reader"){_=try store.localResource(for:url)}
+        checks.check(!store.snapshot.hasPlayableInstallation && !reopened(root).snapshot.hasPlayableInstallation,"known missing blob persistently revokes admission")
+        try checks.success(await operation{store.importPreparedFolder(package,progress:{_ in},completion:$0)},"repair missing known blob")
+        let (failedRepair,failedRoot)=try await make("failed-explicit-repair")
+        let badSource=work.appendingPathComponent("authored-bad-source");try files.copyItem(at:package,to:badSource)
+        try bad.write(to:blob(failedRoot),options:.atomic)
+        try bad.write(to:badSource.appendingPathComponent("blobs/"+item.sha256),options:.atomic)
+        if case .failure=await operation({failedRepair.importPreparedFolder(badSource,progress:{_ in},completion:$0)}){checks.check(true,"bad explicit repair source fails")}else{checks.check(false,"bad explicit repair source fails")}
+        checks.check(!failedRepair.snapshot.hasPlayableInstallation && !reopened(failedRoot).snapshot.hasPlayableInstallation,"repair's own observation cannot leave known bad old installation admitted")
+        let (policy,policyRoot)=try await make("request-policy");try bad.write(to:blob(policyRoot),options:.atomic)
+        for invalid in [URL(string:url.absoluteString+"?unsupported=1")!,URL(string:url.absoluteString+"#fragment")!,URL(string:"ftp://authored.invalid/"+payload)!,URL(string:"https://authored.invalid/game/native/space%20asset.bin")!] {
+            checks.rejects("invalid data request rejected without corruption observation"){_=try policy.localResource(for:invalid)}
+            checks.rejects("invalid file request rejected without corruption observation"){_=try policy.installedURL(for:invalid)}
+            checks.check(policy.snapshot.hasPlayableInstallation,"invalid URL/query is not blob corruption")
+        }
+        checks.rejects("reader byte budget rejected"){_=try policy.localResource(for:url,maximumBytes:1)}
+        checks.rejects("unknown installed path rejected"){_=try policy.localResource(for:URL(string:"https://authored.invalid/game/native/not-indexed.bin")!)}
+        checks.check(policy.snapshot.hasPlayableInstallation && policy.snapshot.cachedFiles==rows.count,"budget/unknown path cannot poison known blobs")
+        checks.rejects("valid request then observes real corruption"){_=try policy.localResource(for:url)}
+        checks.check(!policy.snapshot.hasPlayableInstallation,"only real known-blob observation invalidates")
+        let (development,devRoot)=try await make("development")
+        try development.setMode(.development)
+        // Authored persisted origin fixture, equivalent to an explicitly chosen
+        // development cache source. No network request or downloader is faked.
+        var devReceipt=try receipt(devRoot);devReceipt["developmentOrigin"]="https://authored.invalid"
+        try JSONSerialization.data(withJSONObject:devReceipt).write(to:devRoot.appendingPathComponent("active.json"),options:.atomic)
+        let dev=reopened(devRoot);try bad.write(to:blob(devRoot),options:.atomic)
+        checks.check(try dev.localResource(for:URL(string:"https://foreign.invalid/"+payload)!)==nil,"foreign development origin bypasses cache")
+        checks.check(dev.snapshot.hasPlayableInstallation,"foreign-origin miss did not observe local corruption")
+        checks.check(try dev.localResource(for:url)==nil,"corrupt development data becomes explicit source cache miss")
+        checks.check(!dev.snapshot.hasPlayableInstallation,"development corruption still revokes installed admission")
+        checks.check(try dev.installedURL(for:url)==nil,"corrupt development file becomes explicit source cache miss")
+        try checks.success(await operation{dev.importPreparedFolder(package,progress:{_ in},completion:$0)},"development cache explicit source repair")
+        checks.check(dev.snapshot.hasPlayableInstallation,"explicit development repair is verified")
+        let (legacy,legacyRoot)=try await make("legacy-v1");var legacyReceipt=try receipt(legacyRoot)
+        for key in ["admissionID","invalidAdmission","invalidDigests"]{legacyReceipt.removeValue(forKey:key)}
+        try JSONSerialization.data(withJSONObject:legacyReceipt).write(to:legacyRoot.appendingPathComponent("active.json"),options:.atomic)
+        let old=reopened(legacyRoot)
+        checks.check(old.snapshot.hasPlayableInstallation,"compatible v1 receipt requires no ISO reimport")
+        try bad.write(to:blob(legacyRoot),options:.atomic);checks.rejects("legacy fault detected"){_=try old.localResource(for:url)}
+        checks.check(!reopened(legacyRoot).snapshot.hasPlayableInstallation,"legacy invalidation survives relaunch")
+        _=legacy
+        for variant in ["malformed","unreadable","dangling-link","write-failure"] {
+            let (broken,brokenRoot)=try await make("marker-"+variant)
+            if variant=="write-failure"{
+                try files.removeItem(at:brokenRoot.appendingPathComponent("invalid-admissions"))
+                try Data("authored malformed metadata parent".utf8).write(to:brokenRoot.appendingPathComponent("invalid-admissions"))
+            }
+            try bad.write(to:blob(brokenRoot),options:.atomic);checks.rejects("marker case observes blob fault"){_=try broken.localResource(for:url)}
+            if variant != "write-failure" {
+                let marker=try files.contentsOfDirectory(at:brokenRoot.appendingPathComponent("invalid-admissions"),includingPropertiesForKeys:nil).first!
+                if variant=="malformed"{try Data("not-json".utf8).write(to:marker,options:.atomic)}
+                else if variant=="dangling-link"{try files.removeItem(at:marker);try files.createSymbolicLink(at:marker,withDestinationURL:brokenRoot.appendingPathComponent("authored-missing-target"))}
+                else{try files.removeItem(at:marker);try files.createDirectory(at:marker,withIntermediateDirectories:true)}
+            }
+            try good.write(to:blob(brokenRoot),options:.atomic)
+            let restart=reopened(brokenRoot)
+            checks.check(!restart.snapshot.hasPlayableInstallation,"\(variant) marker fails closed on restart")
+            try restart.configureRuntimeValidation(identity:syntheticIdentity,validator:validateSynthetic)
+            checks.check(!restart.snapshot.hasPlayableInstallation,"\(variant) marker cannot be cleared by configure")
+            checks.check(restart.snapshot.installedContentID==manifest.contentID,"\(variant) marker retains catalogue")
+            try checks.success(await operation{restart.verifyInstalled(progress:{_ in},completion:$0)},"\(variant) actual verify repairs admission metadata")
+            checks.check(reopened(brokenRoot).snapshot.hasPlayableInstallation,"\(variant) verified new receipt survives restart")
+        }
+        let readGate=ResourceIOGate()
+        let reader:NativeResourceStore.RuntimeDataReader={location in
+            var data=try Data(contentsOf:location)
+            if location.lastPathComponent==item.sha256,try readGate.pauseIfArmed(){data[0]^=1}
+            return data
+        }
+        let (stale,staleRoot)=try await make("stale-runtime-read",reader:reader)
+        let prior=try receipt(staleRoot)["admissionID"]as!String
+        readGate.arm();async let staleRead=rejectedRead(stale,url)
+        checks.check(await gateEntered(readGate),"controlled old runtime read reached I/O boundary")
+        try checks.success(await operation{stale.verifyInstalled(progress:{_ in},completion:$0)},"same-content replacement fully verifies while old read waits")
+        readGate.release.signal();checks.check(await staleRead,"old checksum read still reports failure to its own caller")
+        checks.check(stale.snapshot.hasPlayableInstallation && stale.snapshot.cachedFiles==rows.count,"stale failure cannot invalidate replacement or evict its cache")
+        checks.check(try receipt(staleRoot)["admissionID"]as?String != prior,"replacement really has a new persisted generation")
+        checks.check(reopened(staleRoot).snapshot.hasPlayableInstallation,"stale failure cannot poison replacement restart")
+        let replacement=reopened(staleRoot)
+        readGate.arm();async let otherStoreRead=rejectedRead(stale,url)
+        checks.check(await gateEntered(readGate),"old Store runtime I/O waits before another Store commits")
+        try checks.success(await operation{replacement.verifyInstalled(progress:{_ in},completion:$0)},"separate Store commits verified replacement generation")
+        readGate.release.signal();checks.check(await otherStoreRead,"old Store caller still sees its checksum error")
+        checks.check(replacement.snapshot.hasPlayableInstallation && reopened(staleRoot).snapshot.hasPlayableInstallation,"old Store cannot invalidate another Store's verified generation")
+        checks.check(reopened(staleRoot).snapshot.cachedFiles==rows.count,"old Store cannot evict replacement persistent accounting")
+        let sameReadGate=ResourceIOGate(),validationGate=ResourceIOGate()
+        let sameReader:NativeResourceStore.RuntimeDataReader={location in var data=try Data(contentsOf:location);if location.lastPathComponent==item.sha256,try sameReadGate.pauseIfArmed(){data[0]^=1};return data}
+        let validator:NativeResourceStore.RuntimeValidator={manifest,resolve in try validateSynthetic(manifest,resolve);_=try validationGate.pauseIfArmed()}
+        let (same,sameRoot)=try await make("same-generation",reader:sameReader,validator:validator)
+        sameReadGate.arm();async let pendingRead=rejectedRead(same,url)
+        checks.check(await gateEntered(sameReadGate),"same-generation read waits after reading actual bytes")
+        validationGate.arm();async let verifying=operation{same.verifyInstalled(progress:{_ in},completion:$0)}
+        checks.check(await gateEntered(validationGate),"verification waits after actual integrity/native-policy checks")
+        sameReadGate.release.signal();checks.check(await pendingRead,"same-generation corruption is observed during verification")
+        validationGate.release.signal()
+        if case .failure=await verifying{checks.check(true,"concurrent same-generation fault prevents verification commit")}else{checks.check(false,"concurrent same-generation fault prevents verification commit")}
+        checks.check(!same.snapshot.hasPlayableInstallation && !reopened(sameRoot).snapshot.hasPlayableInstallation,"concurrent fault cannot be revived by pending verification")
+        try checks.success(await operation{same.verifyInstalled(progress:{_ in},completion:$0)},"later complete verification restores admission")
+        checks.check(reopened(sameRoot).snapshot.hasPlayableInstallation,"later verified admission is durable")
     }
 }

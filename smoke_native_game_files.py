@@ -4,7 +4,8 @@ from pathlib import Path
 import argparse,hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/game-files-107'
-SOURCES=['NativeResourceManifest','NativeResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+SOURCES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+WRAPPERS=['NativeISOExtraction','NativeRawResourceSelection']
 def both32(n):return n.to_bytes(4,'little')+n.to_bytes(4,'big')
 def both16(n):return n.to_bytes(2,'little')+n.to_bytes(2,'big')
 def record(name,extent=21,length_bytes=1,directory=False):
@@ -41,16 +42,19 @@ def fixtures(folder):
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--iso',type=Path,help='Optional owner ISO; read-only metadata inspection, never copied or extracted');args=parser.parse_args()
  OUT.mkdir(parents=True,exist_ok=True)
- paths=[f'ios/App/{name}.swift' for name in SOURCES]+['smoke_native_game_files.swift','smoke_native_game_source.swift','smoke_native_game_files.py']
+ checked=subprocess.run(['python3',str(ROOT/'build_installer_bridge.py'),'--check','--platform','host'],capture_output=True,text=True)
+ if checked.returncode:subprocess.run(['python3',str(ROOT/'build_installer_bridge.py'),'--platform','host'],check=True)
+ paths=[f'ios/App/{name}.swift' for name in SOURCES]+[f'native-installer/swift/{name}.swift' for name in WRAPPERS]+['smoke_native_game_files.swift','smoke_native_game_source.swift','smoke_native_game_files.py']
  captured={path:(ROOT/path).read_bytes() for path in paths};logs=[]
  with tempfile.TemporaryDirectory(prefix='run-',dir=OUT) as temporary:
   work=Path(temporary);isoFolder=work/'iso';isoFolder.mkdir();fixtures(isoFolder)
   for path,data in captured.items():(work/Path(path).name).write_bytes(data)
   def compile_test(test,names,output):
-   result=subprocess.run(['xcrun','swiftc','-parse-as-library','-module-cache-path',str(OUT/'modules'),*[str(work/(name+'.swift')) for name in names],str(work/test),'-o',str(work/output)],capture_output=True,text=True)
+   bridge=['-I',str(ROOT/'native-installer/include'),str(ROOT/'local-only/native-installer/host/libzgtasa_installer.a'),'-lz'] if 'NativeRawResourceStore' in names else []
+   result=subprocess.run(['xcrun','swiftc','-parse-as-library','-module-cache-path',str(OUT/'modules'),*[str(work/(name+'.swift')) for name in names],str(work/test),*bridge,'-o',str(work/output)],capture_output=True,text=True)
    (OUT/(output+'-compile.log')).write_text(result.stdout+result.stderr)
    if result.returncode:print(result.stdout+result.stderr);result.check_returncode()
-  compile_test('smoke_native_game_files.swift',SOURCES,'coordinator')
+  compile_test('smoke_native_game_files.swift',SOURCES+WRAPPERS,'coordinator')
   run=subprocess.run([str(work/'coordinator'),str(work)],capture_output=True,text=True,timeout=50);logs.append(run.stdout+run.stderr)
   if run.returncode:print(logs[-1]);run.check_returncode()
   compile_test('smoke_native_game_source.swift',['NativeGameSourceInspector'],'inspector')

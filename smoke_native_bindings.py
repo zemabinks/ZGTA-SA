@@ -15,7 +15,7 @@ def extract(marker,source=vc):
     while depth:
         depth += (source[end]=='{')-(source[end]=='}');end += 1
     return source[start:end].replace('private ','').replace('@objc ','')
-methods='\n'.join(extract(x) for x in ['private var canNavigateMenus:','private var acceptsHeldInput:','private var bindingContext:','private func performBinding(','private func cycleWeapon(','private func sendWeaponSelection(','@objc private func jump()','override func pressesBegan(','override func pressesEnded('])
+methods='\n'.join(extract(x) for x in ['private var canNavigateMenus:','private var acceptsHeldInput:','private var bindingContext:','private func performBinding(','private func updateRadioControl(','private func cycleWeapon(','private func sendWeaponSelection(','@objc private func jump()','override func pressesBegan(','override func pressesEnded('])
 attack_start=vc.index('        if NativeGameBindings.shouldRequestAttack(')
 attack_end=vc.index('\n',vc.index('        lastAttackButton = gamepadAttacking',attack_start))
 attack_block=vc[attack_start:attack_end]
@@ -96,7 +96,7 @@ class FakeRenderer {
     func requestFootMeleeAttack(alternate:Bool=false)->Bool {if alternate{alternates += 1};return false}
 }
 enum State {case normal}
-class FakeButton {func setTitle(_ text:String,for state:State){}}
+class FakeButton {var accessibilityLabel:String?,accessibilityValue:String?,accessibilityIdentifier:String?;func setTitle(_ text:String,for state:State){}}
 class FakeRadio {var stationName="radio",previousCount=0;func previous(){previousCount += 1}}
 class FakeStatus {var text=""}
 class FakeView {var window:Int?=1}

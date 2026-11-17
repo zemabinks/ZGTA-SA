@@ -123,6 +123,40 @@ private final class FixtureService:NativeGameFilesService {
         check(cancelService.jobs[1].cancels==0,"Old cancellation cancelled reentrantly started replacement")
         cancelHandoff.removeObserver(cancelObserver);cancelService.jobs[1].completion(.success(makeSnapshot()))
 
+        // A requested address is a UI draft, not the installed catalogue's
+        // trusted resource origin. It must survive BACK/reopen, cancellation
+        // and an App-style coordinator recreation before the first commit.
+        var savedOrigin:String?,preferenceWrites=0
+        let preference=NativeGameFilesCoordinator.OriginPreference(read:{savedOrigin},write:{savedOrigin=$0;preferenceWrites+=1})
+        let originService=FixtureService()
+        let originCoordinator=NativeGameFilesCoordinator(service:originService,originPreference:preference)
+        check(originCoordinator.cacheDevelopment("  HTTP://Assets-B.invalid:8807/  "),"Normalized origin request was rejected")
+        check(originCoordinator.state.suggestedOrigin=="http://assets-b.invalid:8807" && savedOrigin=="http://assets-b.invalid:8807","Requested origin was not normalized/persisted as a separate UI draft")
+        check(originCoordinator.state.resources.developmentOrigin==nil,"Requested origin impersonated an uncommitted native resource source")
+        var reopenedField:String?
+        let fieldObserver=originCoordinator.observe{reopenedField=$0.suggestedOrigin}
+        check(reopenedField==savedOrigin,"A newly opened screen lost the active request address")
+        originCoordinator.removeObserver(fieldObserver)
+        check(!originCoordinator.cacheDevelopment("http://other.invalid") && preferenceWrites==1,"Busy request overwrote the active address draft")
+        originCoordinator.cancel();originService.jobs[0].completion(.failure(FixtureFailure.rejected))
+        check(originCoordinator.state.suggestedOrigin==savedOrigin && originCoordinator.state.resources.developmentOrigin==nil,"Cancellation lost the draft or committed its origin")
+        let recreated=NativeGameFilesCoordinator(service:FixtureService(),originPreference:preference)
+        check(recreated.state.suggestedOrigin=="http://assets-b.invalid:8807","App-style recreation lost the valid requested origin")
+        let writes=preferenceWrites
+        for address in ["https://user:secret@invalid.example","http://invalid.example/path","http://invalid.example?token=x","http://invalid.example:0"]{
+            check(!recreated.cacheDevelopment(address),"An invalid origin draft was accepted")
+        }
+        check(preferenceWrites==writes && recreated.state.suggestedOrigin==savedOrigin,"Rejected address overwrote the saved origin draft")
+        let rejectedSaved=NativeGameFilesCoordinator(service:FixtureService(),originPreference:.init(read:{"http://user:password@invalid.example"},write:{_ in preconditionFailure("Initializer must not publish invalid saved preferences")}))
+        check(rejectedSaved.state.suggestedOrigin.isEmpty,"A credential-bearing saved preference was exposed as an origin")
+        let committed=FixtureService()
+        committed.snapshot = .init(mode:.installed,installedContentID:String(repeating:"a",count:64),installedFiles:10,installedBytes:100,cachedFiles:10,cachedBytes:100,hasPlayableInstallation:true,developmentOrigin:"http://committed-a.invalid",issues:[])
+        let replacementDraft=NativeGameFilesCoordinator(service:committed,originPreference:preference)
+        check(replacementDraft.state.suggestedOrigin==savedOrigin && replacementDraft.state.resources.developmentOrigin=="http://committed-a.invalid","Requested UI address replaced the committed server binding")
+        check(replacementDraft.cacheDevelopment("http://requested-c.invalid"),"Replacement address did not start")
+        replacementDraft.cancel();committed.jobs[0].completion(.failure(FixtureFailure.rejected))
+        check(replacementDraft.state.suggestedOrigin=="http://requested-c.invalid" && replacementDraft.state.resources.mode == .installed && replacementDraft.state.resources.developmentOrigin=="http://committed-a.invalid","Cancelled replacement rewrote installed mode/catalogue origin")
+
         // Real production store and adapter, with invented resource bytes and a
         // disposable directory. This proves installation plumbing, not game assets.
         let prepared=root.appendingPathComponent("prepared"),blobs=prepared.appendingPathComponent("blobs")

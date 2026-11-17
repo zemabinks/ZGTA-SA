@@ -42,6 +42,7 @@
 		2D5996F044E464101B36DF1E /* NativeInventoryPrediction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6B89488CA230359A33DEFD /* NativeInventoryPrediction.swift */; };
 		2E785AC1BCFDD3FAD690FC59 /* NativeWeaponEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51295F86CE65E3927FA31C4C /* NativeWeaponEffects.swift */; };
 		2EC9167D6E73EA1A4BFF7363 /* NativeSAMPGameplayCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41173437D14963BD67924798 /* NativeSAMPGameplayCommands.swift */; };
+		2F1DC3508250924251AAE17A /* NativeISOExtraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9388F60B4020A35441B2389 /* NativeISOExtraction.swift */; };
 		301E66255DF4ABDD9FB4BC6E /* NativeSAMPProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 794DA9001B7A11B5B392FDC1 /* NativeSAMPProtocol.swift */; };
 		31D8D111A774EA69DE95E520 /* NativePausePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6945A20DE471AFFD0CC49AB3 /* NativePausePanel.swift */; };
 		31DBECB1FCB3E6ECF70C4875 /* NativeBoardingAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = F674F4F544611A1C89F76391 /* NativeBoardingAnimation.swift */; };
@@ -57,6 +58,7 @@
 		3B20D886FED8E285220943D7 /* NativeWeaponShotDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71B18DA5E2A1C83A92108893 /* NativeWeaponShotDelivery.swift */; };
 		3DF56650D1DDEC0560887D66 /* NativePersonalFlightController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53186CE890365391FC7540E7 /* NativePersonalFlightController.swift */; };
 		40A131C3A179A514FBDD00F9 /* NativeMeleeInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = D541C509F19659B9537F9A85 /* NativeMeleeInput.swift */; };
+		4461A5595D9753B3D2DD9953 /* NativeRawResourceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC57F4DA09940C8635800478 /* NativeRawResourceStore.swift */; };
 		459CE633298742BFE95A137E /* NativeWorldRay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C997172E8F7041ABEB93A87 /* NativeWorldRay.swift */; };
 		45D5E817F7127A7B5D5D2634 /* NativeSAMPAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D4E8BB95AA2A97A77FA207 /* NativeSAMPAddress.swift */; };
 		466FF56BA6F588F0BDC63575 /* NativeLocalHitReaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38CD9A85767EC0BEF5EB4DEA /* NativeLocalHitReaction.swift */; };
@@ -126,6 +128,7 @@
 		A735637C1C630175F04ADC07 /* NativeResourceManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F1BA289D7C0E61816D3501 /* NativeResourceManifest.swift */; };
 		ACD126EF6D1B8AB684EC440E /* NativeGameViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2326D5F1610E7F3B8859A41D /* NativeGameViewController.swift */; };
 		B1E81D7524D8265BE8CE84EE /* NativeRemoteBikeAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29EB71C0D443CDF945B17999 /* NativeRemoteBikeAnimation.swift */; };
+		B33FB4C873FDD190E86D78CE /* NativeRemoteSuspension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448985FE3A747FC2FA95E5FE /* NativeRemoteSuspension.swift */; };
 		B9B2B17A8626B6CC38E3B050 /* NativeRegionalWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426DBCAFCD69B30D0BB99ED4 /* NativeRegionalWeather.swift */; };
 		BA451010C659F881AF46800B /* NativeOriginalWorldCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = C69AC1F5B3C4C3C98FD7DFC6 /* NativeOriginalWorldCommands.swift */; };
 		BA715269118A65F18B3B342B /* NativeTrainDynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 560438572FBEBED3E12B268B /* NativeTrainDynamics.swift */; };
@@ -177,6 +180,7 @@
 		FB5EBE7FE0004A3588CFA229 /* NativeVehicleAudioSpatial.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09716AFE34EB334F442D99A3 /* NativeVehicleAudioSpatial.swift */; };
 		FBF7589533B5A4A87BA2A194 /* NativeVehicleCoupling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F21D9BA3DB131EEB43CCFF /* NativeVehicleCoupling.swift */; };
 		FDA81762D6B5FBEB0767BC61 /* NativeSAMPWorldConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21808037D5A8C1EAC34B5D6C /* NativeSAMPWorldConnection.swift */; };
+		FE3490CBED7FE80B8B3F7F80 /* NativeRawResourceSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DC6B5F5F8B025EE59B06E7 /* NativeRawResourceSelection.swift */; };
 		FEEE0106520E8068D6D1E2B2 /* WorldShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 1AF69E8CCF1AC866E1B91582 /* WorldShaders.metal */; };
 /* End PBXBuildFile section */
 
@@ -230,11 +234,13 @@
 		3C997172E8F7041ABEB93A87 /* NativeWorldRay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldRay.swift; sourceTree = "<group>"; };
 		3E6C536AED882DF9A6555DD1 /* NativeVehicleRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleRadio.swift; sourceTree = "<group>"; };
 		3E91597E6874AECCA343C50A /* NativeSAMPStockCollisionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPStockCollisionCatalog.swift; sourceTree = "<group>"; };
+		40DC6B5F5F8B025EE59B06E7 /* NativeRawResourceSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRawResourceSelection.swift; sourceTree = "<group>"; };
 		41173437D14963BD67924798 /* NativeSAMPGameplayCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPGameplayCommands.swift; sourceTree = "<group>"; };
 		422617B4FD560E3E71002C59 /* NativeAtmosphere.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAtmosphere.swift; sourceTree = "<group>"; };
 		426DBCAFCD69B30D0BB99ED4 /* NativeRegionalWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRegionalWeather.swift; sourceTree = "<group>"; };
 		427B9024362FE74EF9CB6A5D /* Security.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Security.framework; path = System/Library/Frameworks/Security.framework; sourceTree = SDKROOT; };
 		4282905C84C78E2605ADB1FD /* NativeSAMPSkinCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPSkinCatalog.swift; sourceTree = "<group>"; };
+		448985FE3A747FC2FA95E5FE /* NativeRemoteSuspension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRemoteSuspension.swift; sourceTree = "<group>"; };
 		45B4846180421489379816D5 /* NativeDEMenuStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDEMenuStyle.swift; sourceTree = "<group>"; };
 		48F21D9BA3DB131EEB43CCFF /* NativeVehicleCoupling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleCoupling.swift; sourceTree = "<group>"; };
 		49E1DB8E527A12C33170D18F /* NativeMenuProfileClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMenuProfileClient.swift; sourceTree = "<group>"; };
@@ -310,6 +316,7 @@
 		B2680FC89ECCCE70E9157C5F /* NativeMovingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMovingSupport.swift; sourceTree = "<group>"; };
 		B37788405BCD500BC0C4BC01 /* NativeWeaponShopPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWeaponShopPanel.swift; sourceTree = "<group>"; };
 		B3E50DA4B9256B0F78126AF8 /* NativeRateAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRateAudio.swift; sourceTree = "<group>"; };
+		B9388F60B4020A35441B2389 /* NativeISOExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeISOExtraction.swift; sourceTree = "<group>"; };
 		BBC82BCB75D5520EBAFB5BAE /* NativeStockAssetAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStockAssetAccess.swift; sourceTree = "<group>"; };
 		BBEEA20F7CADAA527F2CCCDC /* NativeOptionsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOptionsViewController.swift; sourceTree = "<group>"; };
 		BEC3159E0B6CE0CDDA1E14E8 /* NativeOtherVehicles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOtherVehicles.swift; sourceTree = "<group>"; };
@@ -322,6 +329,7 @@
 		C7BE36043CD948CA423D13B3 /* NativeVehicleLoopAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleLoopAudio.swift; sourceTree = "<group>"; };
 		C9E2F0F67E854149E69C092B /* NativeSAMPArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPArtwork.swift; sourceTree = "<group>"; };
 		CB20BE9496B4863AC86ABF67 /* NativeFlightAssets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFlightAssets.swift; sourceTree = "<group>"; };
+		CC57F4DA09940C8635800478 /* NativeRawResourceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRawResourceStore.swift; sourceTree = "<group>"; };
 		CD3B254232A2948E5E9B7B1C /* NativeAppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAppSettings.swift; sourceTree = "<group>"; };
 		CD574FE74BEC5CF4D2483FB6 /* NativeCameraVisibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCameraVisibility.swift; sourceTree = "<group>"; };
 		CE6EFA75EEFFCEE84931D577 /* NativeMenuSoundData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMenuSoundData.swift; sourceTree = "<group>"; };
@@ -459,10 +467,12 @@
 				68ECF76A29B2B319314833C7 /* NativeRapierCharacterQueries.swift */,
 				A3A994D21120E957D693396A /* NativeRapierClimbQueries.swift */,
 				B3E50DA4B9256B0F78126AF8 /* NativeRateAudio.swift */,
+				CC57F4DA09940C8635800478 /* NativeRawResourceStore.swift */,
 				426DBCAFCD69B30D0BB99ED4 /* NativeRegionalWeather.swift */,
 				29EB71C0D443CDF945B17999 /* NativeRemoteBikeAnimation.swift */,
 				A7E7E13224CBBD1BD7177C79 /* NativeRemoteFootAnimation.swift */,
 				1BF84EEC926D9870EC20D6FB /* NativeRemoteMeleeContext.swift */,
+				448985FE3A747FC2FA95E5FE /* NativeRemoteSuspension.swift */,
 				31AC14CE95B647949BA39489 /* NativeRenderWareCollision.swift */,
 				E50732CAC0459F1094ED1A0F /* NativeRenderWareCollisionWorld.swift */,
 				AF0FC0502E43D04093F0B47B /* NativeRenderWareDFF.swift */,
@@ -559,6 +569,7 @@
 			children = (
 				1427BD6C54973263F837ED99 /* OwnerMenu */,
 				4D0A37B6D6E822F3154211D1 /* App */,
+				ED67485DF5BEDD701CE29F5B /* swift */,
 				122D68E8195CB14A4CA17E65 /* Frameworks */,
 				8D56CF3A4BA973798578B30E /* Products */,
 			);
@@ -570,6 +581,16 @@
 				2EFB846F84FEA989E01BBD29 /* ZGTASA.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		ED67485DF5BEDD701CE29F5B /* swift */ = {
+			isa = PBXGroup;
+			children = (
+				B9388F60B4020A35441B2389 /* NativeISOExtraction.swift */,
+				40DC6B5F5F8B025EE59B06E7 /* NativeRawResourceSelection.swift */,
+			);
+			name = swift;
+			path = "../native-installer/swift";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -689,6 +710,7 @@
 				F05CB721E90D6F0B069D1602 /* NativeGroundVehicle.swift in Sources */,
 				6DDF956AD596AC0C149DD77E /* NativeGunAnimation.swift in Sources */,
 				BD4EE48DE87D661569ADF3BF /* NativeHeadingContinuity.swift in Sources */,
+				2F1DC3508250924251AAE17A /* NativeISOExtraction.swift in Sources */,
 				2D5996F044E464101B36DF1E /* NativeInventoryPrediction.swift in Sources */,
 				466FF56BA6F588F0BDC63575 /* NativeLocalHitReaction.swift in Sources */,
 				E6B1F433D4B0E3955553A6AD /* NativeMainMenuLayout.swift in Sources */,
@@ -721,10 +743,13 @@
 				2168C9A791950DF3561798A1 /* NativeRapierCharacterQueries.swift in Sources */,
 				018CA1BD5D90D205DDD49374 /* NativeRapierClimbQueries.swift in Sources */,
 				92CD1E508E2E26AB2E49FB64 /* NativeRateAudio.swift in Sources */,
+				FE3490CBED7FE80B8B3F7F80 /* NativeRawResourceSelection.swift in Sources */,
+				4461A5595D9753B3D2DD9953 /* NativeRawResourceStore.swift in Sources */,
 				B9B2B17A8626B6CC38E3B050 /* NativeRegionalWeather.swift in Sources */,
 				B1E81D7524D8265BE8CE84EE /* NativeRemoteBikeAnimation.swift in Sources */,
 				BF4E3599F51A612170DDECAB /* NativeRemoteFootAnimation.swift in Sources */,
 				D039497D742CA7F0D2F08DE6 /* NativeRemoteMeleeContext.swift in Sources */,
+				B33FB4C873FDD190E86D78CE /* NativeRemoteSuspension.swift in Sources */,
 				6897348A9C09CE4C90346A6D /* NativeRenderWareCollision.swift in Sources */,
 				D745C8603A349B1A1BF11798 /* NativeRenderWareCollisionWorld.swift in Sources */,
 				ED4DD7FE65FDEE4545CD6B92 /* NativeRenderWareDFF.swift in Sources */,
@@ -836,16 +861,20 @@
 					"$(inherited)",
 					"$(SRCROOT)/../local-only/native-physics/ios-device",
 					"$(SRCROOT)/../local-only/native-samp/ios-device",
+					"$(SRCROOT)/../local-only/native-installer/device",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"$(SRCROOT)/../local-only/native-physics/ios-simulator",
 					"$(SRCROOT)/../local-only/native-samp/ios-simulator",
+					"$(SRCROOT)/../local-only/native-installer/simulator",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lzgtasa_native_physics",
 					"-lzgtasa_samp",
+					"-lzgtasa_installer",
+					"-lz",
 					"-lresolv",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.zema.zgtasa;
@@ -854,6 +883,7 @@
 					"$(inherited)",
 					"$(SRCROOT)/../native-physics/include",
 					"$(SRCROOT)/../native-samp/include",
+					"$(SRCROOT)/../native-installer/include",
 				);
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -934,16 +964,20 @@
 					"$(inherited)",
 					"$(SRCROOT)/../local-only/native-physics/ios-device",
 					"$(SRCROOT)/../local-only/native-samp/ios-device",
+					"$(SRCROOT)/../local-only/native-installer/device",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" = (
 					"$(inherited)",
 					"$(SRCROOT)/../local-only/native-physics/ios-simulator",
 					"$(SRCROOT)/../local-only/native-samp/ios-simulator",
+					"$(SRCROOT)/../local-only/native-installer/simulator",
 				);
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lzgtasa_native_physics",
 					"-lzgtasa_samp",
+					"-lzgtasa_installer",
+					"-lz",
 					"-lresolv",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.zema.zgtasa;
@@ -952,6 +986,7 @@
 					"$(inherited)",
 					"$(SRCROOT)/../native-physics/include",
 					"$(SRCROOT)/../native-samp/include",
+					"$(SRCROOT)/../native-installer/include",
 				);
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

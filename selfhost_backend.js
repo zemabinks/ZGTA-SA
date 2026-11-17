@@ -1590,11 +1590,13 @@ class LocalGame {
   prepareVehicleReport(peer,message) {
     const current=[...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&claim.driving);
     if(message.driving!==true) {
-      // Ordinary foot reports continue during the get-in animation. A native
-      // final parked snapshot, unlike those reports, also cancels pending entry.
-      const pending=[...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&
+      // The browser's stand/get-in controller is itself parked until resume(),
+      // so its ordinary foot reports include a parked snapshot after entry ACK.
+      // That is not a cancellation. Native peers explicitly report their final
+      // parked state when cancelling; either client may also send t:exit.
+      const pending=peer.inventoryEnabled ? [...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&
         message.vehicle===claim.vehicle.id&&message.car===claim.vehicle.row[2]&&
-        this.validVehiclePose(message.parked));
+        this.validVehiclePose(message.parked)) : null;
       return {release:current || pending};
     }
     // The original serializer deliberately omits vehicle for cG.local free-play

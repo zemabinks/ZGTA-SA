@@ -35,6 +35,12 @@ if ! python3 "$project_dir/build_samp_transport.py" --check --platform device --
   command -v go >/dev/null || { print -u2 'Go 1.26.4 or newer is required for native SA-MP networking.'; exit 1; }
   python3 "$project_dir/build_samp_transport.py" --platform device --platform simulator
 fi
+if [[ "$target" != device ]] && ! python3 "$project_dir/build_installer_bridge.py" --check --platform simulator; then
+  python3 "$project_dir/build_installer_bridge.py" --platform simulator
+fi
+if [[ "$target" != simulator ]] && ! python3 "$project_dir/build_installer_bridge.py" --check --platform device; then
+  python3 "$project_dir/build_installer_bridge.py" --platform device
+fi
 (cd "$project_dir/ios" && xcodegen generate --spec "$project_spec")
 build_platform() {
   local platform="$1" suffix="$2"

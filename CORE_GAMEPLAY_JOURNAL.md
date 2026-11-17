@@ -1,5 +1,29 @@
 # Core gameplay audit journal
 
+## 2026-11-17 — Core108 transition and resource corrections in progress
+
+The browser-entry cancellation defect is fixed with a bounded independent-backend change: legacy browser stand/get-in reports retain the existing driver reservation, while native final-park cancellation, explicit exit and the original lease remain enforced. The portable presence regression passes94 checks and the existing seat regression82. Private archived-getter/serializer replay and manager checks remain distinct. A fresh real browser normal Taxi/F entry now publishes its actual driver1 in registry slot11; native passenger/rendered acceptance still remains open.
+
+Remote car/trailer wheel projection now uses the final authoritative model transform, imported wheel dimensions/travel and loaded static collision, excluding vehicle bodies. It preserves owned/dynamic suspension and body/rider/network transforms. Portable native90 and browser59 checks plus private original-reference queries pass; whole-App rendered and retail suspension feel remain separate. Explicitly unsupported specialized/hydraulic paths retain their owners.
+
+The native Files flow adds separate raw ISO resource extraction and verification. Raw source-SHA receipts, reuse/repair/cancellation and security-scope lifecycle are separate from prepared native installation; raw files never enable Play. Public synthetic raw checks53 and private six-path original-source checks9 pass. Complete source409-file extraction through Files and native conversion are not yet verified.
+
+Actual107 Game Files continuation confirms advancing cache progress, leave/reopen and normal cancellation while retaining cached files. A later full-page scroll carrier failed to reach its field; target-directed normal drags subsequently reach/type the field and restart real caching. No UI geometry patch is inferred. Core108 separately retains the validated requested Mac origin in a UI-only preference, without changing the active resource catalogue origin. Native radio keeps an action accessibility label with the current station as its value.
+
+The current prepared profile still omits lazy radio index/tracks. Full offline radio/native decoding, all original resources, installed rendered acceptance, physical input/performance and matched original-game mechanics remain required. No1:1 claim is made.
+
+## 2026-11-17 — Core107 occupants, persistent resources and live-test findings
+
+Core107 compiles the complete Debug App for iPhone arm64 and Intel Simulator against frozen sources. Its source-only development branch passes GitHub hosting/source checks; original resources, archived-client carriers and owner captures stay local. These checks do not establish rendered gameplay or original-game parity.
+
+The actual native-driver/browser-passenger continuation passes through normal controls: a single shared taxi moves4.413m, the browser stays attached in seat2, native driver exit restores the same parked ID, and the browser subsequently exits. The earlier full-flow attempts remain failed setup/coordination runs. The motion capture contains actual browser frames and native UI input; its long-lived wire event buffer had already truncated, so no complete motion trajectory or maximum speed is inferred. Default rear views and dark windows do not establish that every occupant was visible.
+
+The reverse attempt failed. Native chose its nearer own parked taxi; that is valid nearest-vehicle selection and requires a corrected test setup. Independently, normal browser entry revealed an authority defect: the original get-in state sends a parked stand snapshot, and the server cancelled its pending driver reservation before the first driving report. A bounded108 correction and repeat live acceptance are required; the failed run is not a passenger pass.
+
+Persistent prepared resources have6760 logical files in6700 verified content-addressed blobs (2.46GB). Host tests cover repair/reuse, offline reads, native graph validation and atomic actor recovery. Real Game Files UI download testing reached partial progress; its first carrier failed by reading one changing accessibility label twice for a regex. The failed result and cached files are retained. A separate corrected carrier resumes the actual operation for cancellation/full verification/restart; it is not yet acceptance of the complete installed scene.
+
+The native ISO bridge has bounded raw extraction and real owned-resource checks. Raw extraction is not native conversion or a playable installation. Standalone full ISO conversion, matched retail mechanics, physical input/performance and complete external-server interoperability remain open. The physical107 App installed without deleting user data, but UI automation could not start; the user cannot check the phone now, so further work uses the dedicated Simulator.
+
 ## 2026-11-17 — Core106 touch ownership and paired acceptance
 
 The real Core105 UI run exposed a covered handbrake: its reused Jump button

@@ -494,6 +494,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var vehicleSiren=false
     private var verticalSpeed: Float = 0
     private var vehicleHandling: [String: VehicleHandling] = [:]
+    private var remoteSuspensionConfigurations = [Int: NativeRemoteSuspension.Configuration]()
+    private var remoteSuspensionRayBudget = 0
     private var vehicleInfo: [String: [String: String]] = [:]
     private var activeVehicleModel = ""
     private var ownedVehicleAppearance:(id:String,code:String)?
@@ -2687,10 +2689,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         NativeResourceTransport.dataTask(with: server.path("game/native/vehicles.physics.json")) { [weak self] data,response,_ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let cameraDefinitions = (try? JSONDecoder().decode(CameraVehicleDocument.self,from: data))?.models ?? [:]
+            let suspensionRows = ((try? JSONSerialization.jsonObject(with:data)) as? [String:Any])?["models"] as? [String:[String:Any]] ?? [:]
+            var suspension = [Int:NativeRemoteSuspension.Configuration]()
+            if suspensionRows.count<=1024 {for(key,row)in suspensionRows {
+                if let value=NativeRemoteSuspension.Configuration(row),String(value.model)==key{suspension[value.model]=value}
+            }}
             DispatchQueue.main.async {
                 guard let self else{return}
                 self.vehicleCoupling?.reset(connection:self.couplingConnection)
                 self.groundVehicle?.loadDefinitions(data);self.cameraVehicleDefinitions = cameraDefinitions
+                self.remoteSuspensionConfigurations = suspension
                 self.supportScene?.clear()
                 if let snapshot=self.couplingSnapshot {self.applyVehicleCouplings(snapshot.links,revision:snapshot.revision,connection:snapshot.connection)}
                 self.loadVehicleCouplingDefinitions()
@@ -3734,6 +3742,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
+        remoteSuspensionRayBudget = 64
         let riderTime = ProcessInfo.processInfo.systemUptime
         let riderDelta = lastRiderDraw > 0 ? min(0.1,max(0,riderTime-lastRiderDraw)) : 0
         lastRiderDraw = riderTime
@@ -4141,7 +4150,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 let appearanceOffset=vehicleAppearanceOffsets[token,default:0]
                 let appearance=vehicleAppearanceCodes[token].flatMap{$0.indices.contains(appearanceOffset) ? $0[appearanceOffset]:nil}
                 if appearance != nil{vehicleAppearanceOffsets[token]=appearanceOffset+1}
-                let frame=vehicleRigFrame(name:name,position:position,rig:rig,carriage:carriageIdentifiers[key(name,position)],appearanceCode:appearance)
+                let frame=vehicleRigFrame(name:name,position:position,modelTransform:transform,rig:rig,carriage:carriageIdentifiers[key(name,position)],appearanceCode:appearance)
                 if rig.hasDynamicPaint {
                     guard let vehiclePaintPipeline else{onStatus?("VEHICLE PAINT SHADER IS UNAVAILABLE");continue}
                     encoder.setRenderPipelineState(vehiclePaintPipeline)
@@ -4335,11 +4344,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    private func vehicleRigFrame(name:String,position:SIMD3<Float>,rig:NativeVehicleRig,carriage:String?,appearanceCode:String?=nil)->NativeVehicleRig.Frame {
+    private func vehicleRigFrame(name:String,position:SIMD3<Float>,modelTransform:simd_float4x4,rig:NativeVehicleRig,carriage:String?,appearanceCode:String?=nil)->NativeVehicleRig.Frame {
         let now=ProcessInfo.processInfo.systemUptime
         let player=remotePlayers.first{$0.vehicleID != nil && $0.position==position && actorName(code:$0.code)==name}
         let parked=parkedVehicle(name:name,position:position)
-        let own=driving && position==camera && name==vehicleModels[activeVehicleModel]
+        let own=driving && !isPassenger && position==camera && name==vehicleModels[activeVehicleModel]
         let token=carriage ?? (own ? "own:\(currentVehicleID ?? name):\(name)":"remote:\(player?.vehicleID ?? parked?.id ?? name):\(name)")
         let delta=min(0.1,max(0,now-(vehicleRigTimes[token] ?? now)));vehicleRigTimes[token]=now
         var input=NativeVehicleRig.Input()
@@ -4393,6 +4402,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             input.scorched=(player?.vehicleHealth ?? parked?.health ?? 1000)<=0
             input.lights=(player?.lights ?? false) && !input.scorched
+            // Existing physical suspension, including working/hydraulic owners,
+            // takes priority. Remote projection changes wheel locals only.
+            if input.offsets.isEmpty, carriage == nil, simd_distance(position,camera)<120,
+               let configuration=remoteSuspensionConfigurations[rig.document.id],
+               let projected=NativeRemoteSuspension.sample(configuration,model:modelTransform,tyres:input.tyres,query:remoteSuspensionContact) {
+                input.offsets=projected.offsets
+            }
         }
         let heldID=own ? currentVehicleID ?? "own":player?.vehicleID ?? parked?.id
         if let heldID,let held=riderDoorHolds[heldID] {
@@ -4409,6 +4425,36 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             vehicleRigSpins=vehicleRigSpins.filter{vehicleRigTimes[$0.key] != nil}
         }
         return frame
+    }
+
+    private func remoteSuspensionContact(_ ray:NativeRemoteSuspension.Ray)->NativeRemoteSuspension.Contact {
+        guard remoteSuspensionRayBudget>0,let vehicle=groundVehicle else{return .unavailable}
+        remoteSuspensionRayBudget-=1
+        let origin=SIMD3<Float>(ray.origin),direction=SIMD3<Float>(ray.direction),distance=Float(ray.distance)
+        guard let coverage=NativeWorldRay.coverage(from:origin,to:origin+direction*distance,interior:isInterior,loaded:{_ in true})else{return .unavailable}
+        collisionRequests.request(coverage.cells,now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
+        desiredPhysicsCells=collisionRequests.retained(now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
+        for name in desiredPhysicsCells {loadCollision(name:name)}
+        var excluded=vehicle.otherColliders.union(vehicle.chassisColliders)
+        if let queries=character?.queries{excluded.formUnion([queries.walker,queries.probe])}
+        var exhausted=false
+        let result=NativeWorldRay.query(from:origin,direction:direction,distance:distance,interior:isInterior,loaded:vehicle.isCellLoaded) {start,way,limit in
+            // Query only authored static supports. A parked/kinematic/remote
+            // chassis or a pedestrian must never become its own tire contact.
+            for _ in 0..<16 {
+                guard let hit=vehicle.world.queryRay(origin:SwiftRapierWorld.gtaToRapier(start),direction:SwiftRapierWorld.gtaToRapier(way),
+                    distance:limit,groups:0xffff0001,excludingColliders:excluded)else{return nil}
+                if let body=hit.collider.body,vehicle.world.bodyKind(body) != .fixed {excluded.insert(hit.collider.id);continue}
+                return .init(distance:hit.distance,normal:SwiftRapierWorld.rapierToGTA(hit.normal))
+            }
+            exhausted=true;return nil
+        }
+        if exhausted{return .unavailable}
+        switch result {
+        case .unavailable:return .unavailable
+        case .clear:return .clear
+        case .hit(let hit):return .hit(distance:Double(hit.distance),normal:SIMD3<Double>(hit.normal))
+        }
     }
 
     private func configureEnvironment(_ uniforms: inout Uniforms) {

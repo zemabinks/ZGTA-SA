@@ -224,7 +224,7 @@ final class NativeGameViewController: UIViewController {
         case .lights:renderer?.vehicleLights.toggle()
         case .gear:toggleGear()
         case .unhitch:renderer?.releaseVehicleCoupling()
-        case .radioPrevious:radio.previous();radioButton.setTitle(radio.stationName,for:.normal)
+        case .radioPrevious:radio.previous();updateRadioControl()
         case .radioNext:nextRadioStation()
         case .pause:openPause()
         case .attack:attack()
@@ -439,7 +439,7 @@ final class NativeGameViewController: UIViewController {
             self.gameHUD.updateVehicle(name: modelName, speed: 0)
             self.setDrivingControls(true)
             self.radio.enter(model:Int(vehicle.code.split(separator:".").first ?? "") ?? 0)
-            self.radioButton.setTitle(self.radio.stationName.uppercased(),for:.normal)
+            self.updateRadioControl()
         }
         network.onPassengerEnter = { [weak self] id,seat,accepted in
             guard let self,let renderer=self.renderer else{return}
@@ -457,7 +457,7 @@ final class NativeGameViewController: UIViewController {
             self.status.text="PASSENGER · \(self.vehicleModelName(vehicle).uppercased())"
             self.gameHUD.updateVehicle(name:self.vehicleModelName(vehicle),speed:0);self.setDrivingControls(true)
             self.radio.enter(model:Int(vehicle.code.split(separator:".").first ?? "") ?? 0)
-            self.radioButton.setTitle(self.radio.stationName.uppercased(),for:.normal)
+            self.updateRadioControl()
         }
         network.onTeleport = { [weak self] point, heading in
             if let self,self.renderer?.isPassenger==true {
@@ -504,7 +504,7 @@ final class NativeGameViewController: UIViewController {
             self.maybeAdvanceCheckpoint(state)
         }
         gameplay.onResult = { [weak self] result in self?.status.text = result.uppercased() }
-        radio.onStatus = { [weak self] message in self?.status.text = message }
+        radio.onStatus = { [weak self] message in self?.status.text = message;self?.updateRadioControl() }
         configureLegacyArtwork()
         network.connect()
         gameplay.refresh()
@@ -722,7 +722,7 @@ final class NativeGameViewController: UIViewController {
         vehicleButton.addTarget(self, action: #selector(toggleVehicle), for: .touchUpInside)
         vehicleButton.isHidden = true
         view.addSubview(vehicleButton)
-        radioButton.setTitle("RADIO OFF", for: .normal)
+        updateRadioControl()
         radioButton.setTitleColor(.white, for: .normal)
         radioButton.titleLabel?.font = .systemFont(ofSize: 12, weight: .black, width: .condensed)
         radioButton.titleLabel?.adjustsFontSizeToFitWidth = true
@@ -964,10 +964,18 @@ final class NativeGameViewController: UIViewController {
     @objc private func releaseFlightBrake() {flightBrakePressed=false}
     @objc private func pressBrake() { if acceptsHeldInput { brakePressed = true } }
     @objc private func releaseBrake() { brakePressed = false }
+    private func updateRadioControl() {
+        radioButton.setTitle(radio.stationName, for: .normal)
+        // The icon keeps its action name; the selected station is its value.
+        radioButton.accessibilityLabel = "Change radio station"
+        radioButton.accessibilityValue = radio.stationName
+        radioButton.accessibilityIdentifier = "gameplay.radio"
+    }
+
     @objc private func nextRadioStation() {
         guard currentVehicle != nil else { return }
         radio.next()
-        radioButton.setTitle(radio.stationName, for: .normal)
+        updateRadioControl()
     }
     @objc private func performNearbyMissionAction() {
         guard let nearbyMissionAction else { return }

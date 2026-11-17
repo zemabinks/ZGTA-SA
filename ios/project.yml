@@ -14,6 +14,7 @@ targets:
     platform: iOS
     sources:
       - path: App
+      - path: ../native-installer/swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.zema.zgtasa
@@ -27,18 +28,23 @@ targets:
           - $(inherited)
           - $(SRCROOT)/../native-physics/include
           - $(SRCROOT)/../native-samp/include
+          - $(SRCROOT)/../native-installer/include
         LIBRARY_SEARCH_PATHS[sdk=iphoneos*]:
           - $(inherited)
           - $(SRCROOT)/../local-only/native-physics/ios-device
           - $(SRCROOT)/../local-only/native-samp/ios-device
+          - $(SRCROOT)/../local-only/native-installer/device
         LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]:
           - $(inherited)
           - $(SRCROOT)/../local-only/native-physics/ios-simulator
           - $(SRCROOT)/../local-only/native-samp/ios-simulator
+          - $(SRCROOT)/../local-only/native-installer/simulator
         OTHER_LDFLAGS:
           - $(inherited)
           - -lzgtasa_native_physics
           - -lzgtasa_samp
+          - -lzgtasa_installer
+          - -lz
           - -lresolv
     dependencies:
       - sdk: Security.framework

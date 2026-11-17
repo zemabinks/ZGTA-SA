@@ -36,7 +36,10 @@ def main():
     assert 'type: folder' in owner and 'buildPhase: resources' in owner
     original_app=app_hashes(ROOT/'ios/App')
     assert original_app,'Actual App sources missing'
-    source_names=sorted(Path(name).name for name in original_app if Path(name).suffix in SOURCE_SUFFIXES)
+    bridge_root=ROOT/'native-installer/swift'
+    original_bridge=app_hashes(bridge_root)
+    assert original_bridge,'Native installer Swift bridge missing'
+    source_names=sorted([Path(name).name for name in original_app if Path(name).suffix in SOURCE_SUFFIXES]+[Path(name).name for name in original_bridge if Path(name).suffix in SOURCE_SUFFIXES])
     assert source_names and len(set(source_names))==len(source_names),'Source names must be unambiguous for this generator check'
     protected=[ROOT/'build_native.sh',ROOT/'ios/project.yml',ROOT/'ios/project-owner-menu.yml']
     before={str(p.relative_to(ROOT)):digest(p) for p in protected}
@@ -60,6 +63,7 @@ def main():
             row={'case':name,'selected':chosen,'selectionPass':True,'generation':'unavailable'}
             if generator:
                 shutil.copytree(ROOT/'ios/App',ios/'App')
+                shutil.copytree(bridge_root,work/'native-installer/swift')
                 result=subprocess.run([generator,'generate','--spec',chosen,'--cache-path',str(work/'generator-cache')],cwd=ios,text=True,capture_output=True)
                 assert result.returncode==0,(name,result.stdout,result.stderr)
                 project=(ios/'ZGTASA.xcodeproj/project.pbxproj').read_text()
@@ -79,9 +83,10 @@ def main():
                 row.update(generation='pass',compiledSourceFiles=len(source_names),resourcePhase=resources)
             cases.append(row)
     assert app_hashes(ROOT/'ios/App')==original_app,'Checkout App source bytes changed'
+    assert app_hashes(bridge_root)==original_bridge,'Installer Swift bridge changed during generation'
     assert {str(p.relative_to(ROOT)):digest(p) for p in protected}==before,'Spec/wrapper bytes changed during the test'
     assert (live_project.read_bytes() if live_project.exists() else None)==live_before,'Checkout Xcode project was regenerated'
-    report={'pass':True,'selectionCases':cases,'xcodegen':generator,'sourceFiles':len(source_names),'appFileHashes':original_app,
+    report={'pass':True,'selectionCases':cases,'xcodegen':generator,'sourceFiles':len(source_names),'appFileHashes':original_app,'installerSwiftHashes':original_bridge,
             'checkoutProjectUnchanged':True,'ownerGenerationMatchesExistingProject':None if owner_bytes is None or live_before is None else owner_bytes==live_before,
             'scope':'Disposable project generation only; no build, original assets or live project mutation'}
     (output/'report.json').write_text(json.dumps(report,indent=2)+'\n')
