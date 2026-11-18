@@ -18,8 +18,10 @@ def main():
     assert guard.allowed('native-audio/vendor/libvorbis-1.3.7/COPYING')
     assert guard.allowed('native-audio/vendor/libvorbis-1.3.7/lib/sharedbook.c')
     assert guard.allowed('native-audio/vendor/provenance.json')
+    assert guard.allowed('native-audio/tools/radio_wav.c')
     assert guard.allowed('native-audio/patches/vorbis-sharedbook-unsigned.json')
-    for name in ['native-audio/owner.json', 'native-audio/recording.ogg',
+    for name in ['native-audio/tools/recording.wav', 'native-audio/tools/owner.json',
+                 'native-audio/tools/original.c', 'native-audio/owner.json', 'native-audio/recording.ogg',
                  'native-audio/vendor/libvorbis-1.3.7/recording.c',
                  'native-audio/tests/original-track.bin', 'local-only/native-audio/source-stamp.json']:
         assert not guard.allowed(name), name

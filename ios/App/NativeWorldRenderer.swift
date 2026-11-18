@@ -145,6 +145,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var legacyPedPipelines:NativeRenderWarePedModel.Pipelines?
     private var legacyModels:[Int32:NativeRenderWareModel.Uploaded]=[:]
     private var legacyPedModels:[String:NativeRenderWarePedModel.Uploaded]=[:]
+    private var fixedCJ:NativeCJRuntimeModel?
+    private var fixedCJObserver:UUID?
     private var legacyPedStyles:[String:String]=[:]
     private var legacyModelDefinitions:[Int32:NativeSAMPArtwork.Model]=[:]
     private var legacyModelCosts:[Int32:Int]=[:]
@@ -485,6 +487,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     /// SA-MP IDs refer to retail peds.ide, not the browser's compact array.
     @discardableResult func setLegacySkin(_ skin: Int) -> Bool {
+        if skin == 0 {
+            guard fixedCJ?.isReady == true,pedModels["0"] == "null" else {
+                pendingLegacySkin=0;pendingLocalSkin=nil;ensureFixedCJ();return false
+            }
+            guard setLocalSkin(0) else{pendingLegacySkin=0;return false}
+            localLegacySkin=0;pendingLegacySkin=nil;return true
+        }
         if (20001...30000).contains(skin) {
             guard legacyPedModels["samp-dl-\(skin)"] != nil else{pendingLegacySkin=skin;return false}
             guard setLocalSkin(skin)else{pendingLegacySkin=skin;return false}
@@ -508,6 +517,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     @discardableResult func setLocalSkin(_ skin: Int) -> Bool {
         guard (0...65535).contains(skin) else { return false }
         pendingLegacySkin = nil; localLegacySkin = nil
+        if skin == 0,(fixedCJ?.isReady != true || pedModels["0"] != "null") {
+            pendingLocalSkin=0;ensureFixedCJ();return false
+        }
         guard !pedModels.isEmpty else { pendingLocalSkin = skin; return false }
         guard let model = pedModels[String(skin)] else {
             pendingLocalSkin = nil
@@ -776,7 +788,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var aiming = false
     var driving = false
     var remoteServerTimeOffsetMilliseconds: Double?
-    var remotePlayers: [RemotePlayer] = [] { didSet { recordRemoteAnimationPackets() } }
+    var remotePlayers: [RemotePlayer] = [] { didSet {
+        recordRemoteAnimationPackets()
+        if remotePlayers.contains(where:{$0.skin==0}){ensureFixedCJ()}
+    } }
     var remoteVehicles: [RemoteVehicle] = []
     var currentVehicleID: String?
     var objective: SIMD2<Float>?
@@ -869,6 +884,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.markerDepth = markerDepth
         textureLoader = MTKTextureLoader(device: device)
         super.init()
+        fixedCJObserver=NativeResourceStore.shared.observe {[weak self] _ in
+            guard let self else{return}
+            if self.fixedCJ?.invalidateIfSourceChanged()==true,self.needsFixedCJ{self.ensureFixedCJ()}
+        }
         configureMovingSupport()
         groundVehicle?.onOtherMove = {[weak self] id,state in self?.onVehicleMove?(id,state)}
         groundVehicle?.onCouplingStep = {[weak self] _ in self?.updateVehicleCoupling()}
@@ -2736,7 +2755,60 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
-    var server: ServerAddress?
+    var server: ServerAddress? {didSet{
+        if oldValue != server {fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+    }}
+
+    deinit {if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    private var needsFixedCJ:Bool {
+        localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
+    }
+    private func fixedCJSourceIdentity()->String {
+        let binding=NativeResourceStore.shared.runtimeBinding
+        return [server?.display ?? "",binding.generation.uuidString,binding.mode.rawValue,
+            binding.contentID ?? "",binding.developmentOrigin ?? "",binding.playable ? "ready":"unverified"].joined(separator:"|")
+    }
+    private func ensureFixedCJ() {
+        guard let server else{return}
+        if fixedCJ==nil {
+            do {
+                let owner=try NativeCJRuntimeModel(assetBaseURL:server.url,
+                    sourceIdentity:{[weak self]in self?.fixedCJSourceIdentity() ?? ""},
+                    accessProvider:{[weak self]in self?.legacyStockAccess()},upload:{[weak self] plan in
+                        guard let self,let library=self.device.makeDefaultLibrary() else{throw NativeRenderWarePedModel.Failure.gpu("player shader library missing")}
+                        let pipelines=try NativeRenderWarePedModel.Pipelines(device:self.device,library:library,
+                            color:self.view.colorPixelFormat,depth:self.view.depthStencilPixelFormat)
+                        return .init(uploaded:try NativeRenderWarePedModel.Uploaded(plan:plan,device:self.device),pipelines:pipelines)
+                    })
+                owner.onInvalidated={[weak self]in
+                    guard let self else{return}
+                    if self.pedModels["0"]=="null"{self.pedModels.removeValue(forKey:"0")}
+                    self.skeletalActors.removeValue(forKey:"null")
+                    if self.localSkin==0,self.pendingLegacySkin != 0{self.pendingLocalSkin=0}
+                    self.ownRiderCapture=nil;self.ownRiderPrevious=nil
+                    self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
+                }
+                owner.onReady={[weak self,weak owner] ready in
+                    guard let self,let owner,self.fixedCJ === owner,owner.isReady,
+                          ready.sourceIdentity==self.fixedCJSourceIdentity() else{return}
+                    guard self.pedModels["0"]==nil || self.pedModels["0"]=="null" else {
+                        self.onStatus?("FIXED NORMAL CJ CONFLICTS WITH THE EXISTING SKIN0 CATALOGUE");return
+                    }
+                    // All maps become visible together, after the final GPU/
+                    // source fence. `null` preserves the real PLAYER1 gait.
+                    self.pedModels["0"]="null";self.skeletalActors["null"]=ready.gpu.uploaded.actor
+                    self.ownRiderCapture=nil;self.ownRiderPrevious=nil;self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
+                    if self.pendingLegacySkin==0{_=self.setLegacySkin(0)}
+                    else if self.pendingLocalSkin==0{_=self.setLocalSkin(0)}
+                    if self.localSkin==0{self.footAnimationModel="";self.prepareFootAnimation()}
+                    self.onStatus?("FIXED NORMAL CJ READY — VEST / DENIM PROFILE")
+                }
+                owner.onUnavailable={[weak self]error in self?.onStatus?("FIXED NORMAL CJ PROFILE UNAVAILABLE: \(error)")}
+                fixedCJ=owner
+            }catch{onStatus?("FIXED NORMAL CJ PROFILE UNAVAILABLE: \(error)");return}
+        }
+        _=fixedCJ?.ensure()
+    }
 
     func loadModelIndex() {
         loadFlightAssets();loadParticleEffects()
@@ -2838,6 +2910,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             DispatchQueue.main.async {
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
+                if self.fixedCJ?.isReady==true,self.pedModels["0"]==nil{self.pedModels["0"]="null"}
                 for key in self.legacyModelDefinitions.keys where (20001...30000).contains(key){self.pedModels[String(key)]="samp-dl-\(key)"}
                 self.weaponModels = index["weapons"] ?? [:]
                 if let pending = self.pendingLegacySkin { _ = self.setLegacySkin(pending) }
@@ -2924,6 +2997,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func loadActor(_ name: String) {
+        if name == "null" {
+            if let ready=fixedCJ?.ready{skeletalActors[name]=ready.gpu.uploaded.actor}else{ensureFixedCJ()}
+            return
+        }
         if let custom=legacyPedModels[name]{skeletalActors[name]=custom.actor;return}
         let isPed=pedModels.values.contains(name),isVehicle=vehicleModels.values.contains(name)
         let complete=actorMeshes[name] != nil && (!isPed || skeletalActors[name] != nil) &&
@@ -4294,7 +4371,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let queued=actorOverrides[token].flatMap { $0.indices.contains(offset) ? $0[offset]:nil }
             if queued != nil {actorOverrideOffsets[token]=offset+1}
             let mesh = (vehicleContext != nil ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
-            let customPed=legacyPedModels[name]
+            let fixedPlayer=name=="null" ? fixedCJ?.ready:nil
+            let customPed=fixedPlayer?.gpu.uploaded ?? legacyPedModels[name]
             guard mesh != nil || customPed != nil else { loadActor(name); continue }
             let originalFoot = queued?.original ?? false
             // Archived pedestrian DFFs face local -Y after the RenderWare axis
@@ -4328,7 +4406,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             } }
             let pose = queued?.pose ?? sampledPose
             if let customPed {
-                guard let pose,let pipelines=legacyPedPipelines else{continue}
+                guard let pose,let pipelines=fixedPlayer?.gpu.pipelines ?? legacyPedPipelines else{continue}
                 var overrides=NativeRenderWareModel.DrawOverrides();overrides.tint.w=opacity
                 do {for index in customPed.plan.model.draws.indices {
                     try customPed.encode(drawIndex:index,pose:pose,encoder:encoder,pipelines:pipelines,viewProjection:matrix,worldTransform:transform,overrides:overrides)
@@ -4444,7 +4522,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if actorMeshes.count > 32 {
             actorMeshes = actorMeshes.filter { visible.contains($0.key) }
             actorAnimations = actorAnimations.filter { visible.contains($0.key) }
-            skeletalActors = skeletalActors.filter { visible.contains($0.key) || legacyPedModels[$0.key] != nil }
+            skeletalActors = skeletalActors.filter { visible.contains($0.key) || legacyPedModels[$0.key] != nil || ($0.key=="null" && fixedCJ?.ready != nil) }
             actorAttachments = actorAttachments.filter { visible.contains($0.key) }
             actorParts = actorParts.filter { visible.contains($0.key) }
             vehicleRigs=vehicleRigs.filter{visible.contains($0.key)}

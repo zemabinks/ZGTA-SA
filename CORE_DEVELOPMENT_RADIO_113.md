@@ -1,0 +1,13 @@
+# Development radio configuration
+
+Core113 repairs the independent host's original-radio development path. It does not include game recordings or change the native installed-resource policy.
+
+Registration now defaults to a regular private `local-only/native-radio-owner.json`, and generated PCM defaults to `local-only/native-radio-cache`. This supports read-only game-source directories. Legacy site registrations remain readable when no preferred registration exists. An invalid explicit/preferred source fails instead of borrowing a different source. Registration validates discovery before writing, refuses existing output and linked ancestors, and copies no recordings.
+
+`serve_local.js` forwards the explicit `ZGTA_RADIO_CONFIGURATION`, `ZGTA_RADIO_CACHE` and `ZGTA_RADIO_DECODER` settings. The host-only `native-audio/tools/radio_wav.c` exports a bounded bank record through the existing native-audio C ABI. `build_radio_development_decoder.py` links that small exporter against an already built, source-verified host library. This avoids requiring the optional Python audio dependency for that path. The existing Python fallback remains available. Decoder identity participates in generated-cache keys.
+
+The optional `serve_development_radio.js` helper serves only its declared read-only radio endpoints and requires private configuration. It does not provide gameplay, account, save, import or site-hydration endpoints. Use [owner radio setup](RADIO_OWNER_IMPORT.md) for the registration and launch commands; `python3 build_radio_development_decoder.py --help` describes the exporter build options. Keep registrations, tokens, caches and original recordings outside public source.
+
+Development mode may stream from the explicitly configured host. Installed mode still requires the app's own verified raw-resource import for original stations. A prepared visual-resource package alone does not supply that audio, and missing installed resources do not silently fall back to the network.
+
+Validation includes44 authored registration/index/router checks and59 exporter/helper checks. The cases cover explicit/legacy source selection, read-only sources, malformed inputs, overwrite/link refusal, endpoint boundaries, bounded export, WAV structure and independent mathematical audio fixtures. Source and access checks pass. Separate private device testing supports sampled playback and vehicle entry/exit behavior; it does not establish all-station coverage, original programme timing, loudspeaker quality or1:1 parity. Detailed owner captures, operational configuration and analysis stay local.

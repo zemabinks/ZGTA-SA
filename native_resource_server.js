@@ -14,7 +14,10 @@ function create({localOnly}) {
   const approved=roots.flatMap(p=>{try{const real=fs.realpathSync(p);return fs.statSync(real).isDirectory()?[real+path.sep]:[];}catch{return [];}});
   const digest=/^[a-f0-9]{64}$/;
   let cached=null,signature=null;
-  const matches=p=>p==='/game/native/resource-manifest.json'||p.startsWith('/game/native/resource-blobs/');
+  const cjPrefix='/game/native/cj-normal-vest-denim-v1/';
+  const cjFiles=new Set(['profile.json','player.dff','vest.dff','head.dff','hands.dff','jeans.dff','sneaker.dff',
+    'player_torso.txd','vest.txd','player_face.txd','jeansdenim.txd','sneakerbincblk.txd','clothes.dat']);
+  const matches=p=>p==='/game/native/resource-manifest.json'||p.startsWith('/game/native/resource-blobs/')||p.startsWith(cjPrefix);
   function handle(req,res,pathname){
     if(!['GET','HEAD'].includes(req.method)){res.writeHead(405,{Allow:'GET, HEAD'});res.end();return;}
     let data;
@@ -25,12 +28,19 @@ function create({localOnly}) {
       if(data.manifest?.schema!==1||data.manifest?.profile!=='zgta-prepared-v1'||!digest.test(data.manifest.contentID)||!data.files)throw Error('Invalid resource catalogue');
       cached=data;signature=revision;
     }catch{
-      res.writeHead(503,{'Content-Type':'text/plain; charset=utf-8'});res.end('Prepare the Mac resource index with prepare_native_resource_package.py');return;
+      res.writeHead(pathname.startsWith(cjPrefix)?404:503,{'Content-Type':'text/plain; charset=utf-8'});res.end('Prepare the Mac resource index with prepare_native_resource_package.py');return;
     }
     if(pathname==='/game/native/resource-manifest.json'){
       const bytes=Buffer.from(JSON.stringify(data.manifest));res.writeHead(200,{'Content-Type':'application/json','Content-Length':bytes.length,'Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:bytes);return;
     }
-    const key=pathname.slice('/game/native/resource-blobs/'.length),item=digest.test(key)&&data.files[key];
+    let key;
+    if(pathname.startsWith(cjPrefix)){
+      if(!cjFiles.has(pathname.slice(cjPrefix.length))){res.writeHead(404);res.end();return;}
+      const records=Array.isArray(data.manifest.resources)?data.manifest.resources.filter(item=>item&&item.path===pathname.slice(1)):null;
+      if(!Array.isArray(records)||records.length!==1){res.writeHead(404);res.end();return;}
+      key=records[0].sha256;
+    }else{key=pathname.slice('/game/native/resource-blobs/'.length);}
+    const item=digest.test(key)&&data.files[key];
     if(!item||typeof item.path!=='string'||!Number.isSafeInteger(item.bytes)||item.bytes<=0||item.bytes>2147483648){res.writeHead(404);res.end();return;}
     const file=path.resolve(item.path);
     let real;try{real=fs.realpathSync(file);}catch{res.writeHead(404);res.end();return;}

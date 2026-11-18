@@ -3,12 +3,38 @@
 const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
 const {spawn} = require('node:child_process');
 const {catalog, read, PACKS} = require('./radio_streams');
-const ROOT = path.join(__dirname, 'local-only/site/game/radio');
-const CONFIG = path.join(ROOT, 'owner.json');
-const CACHE = path.join(ROOT, 'native-cache');
+const LOCAL_ONLY = path.join(__dirname, 'local-only');
+
+// Keep registration and generated audio outside the archived asset tree. A
+// development site can be a read-only alias shared by several source checkouts.
+function locations(localOnly = LOCAL_ONLY) {
+  return {configuration: path.join(localOnly, 'native-radio-owner.json'),
+    legacyConfiguration: path.join(localOnly, 'site/game/radio/owner.json'),
+    cache: path.join(localOnly, 'native-radio-cache'),
+    custom: path.join(localOnly, 'site/game/radio/custom')};
+}
+
+function register(directory, options = {}) {
+  const source = catalog(directory);
+  const configuration = path.resolve(options.configuration || locations(options.localOnly).configuration);
+  // Refuse existing files and linked ancestors before creating anything. In
+  // particular, never write through a QA site's alias into an older checkout.
+  let ancestor = path.parse(configuration).root;
+  for (const component of configuration.slice(ancestor.length).split(path.sep)) {
+    ancestor = path.join(ancestor, component);
+    try { if (fs.lstatSync(ancestor).isSymbolicLink()) throw Error('Radio registration cannot use a linked path'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  fs.mkdirSync(path.dirname(configuration), {recursive: true});
+  fs.writeFileSync(configuration, JSON.stringify({directory: source.directory}) + '\n', {mode: 0o600, flag: 'wx'});
+  return {configuration, stations: source.stations.filter(value => value.length).length,
+    tracks: source.stations.flat().length, adverts: source.adverts.length, audioCopied: false};
+}
 
 function create(options = {}) {
-  const configuration = options.configuration || CONFIG, cache = options.cache || CACHE;
+  const local = locations(options.localOnly);
+  const cache = options.cache || local.cache;
+  const decoder = options.decoder || process.env.ZGTA_RADIO_DECODER;
   let current = null, stamp = null;
   const pending = new Map();
   let active = 0;
@@ -30,8 +56,14 @@ function create(options = {}) {
     }
   }
   function load() {
+    // An explicit registration is authoritative. Only the default lookup keeps
+    // compatibility with older installations; an invalid new file never falls
+    // back to another owner's source.
+    const configuration = options.configuration || (fs.existsSync(local.configuration) ? local.configuration : local.legacyConfiguration);
     if (!fs.existsSync(configuration)) return null;
-    const stat = fs.statSync(configuration), signature = `${stat.mtimeMs}:${stat.size}`;
+    const stat = fs.statSync(configuration);
+    if (!stat.isFile() || stat.size > 16384) throw Error('Invalid owner radio registration');
+    const signature = `${configuration}:${stat.ino}:${stat.ctimeMs}:${stat.mtimeMs}:${stat.size}`;
     if (stamp === signature) return current;
     const config = JSON.parse(fs.readFileSync(configuration, 'utf8'));
     if (typeof config.directory !== 'string' || !path.isAbsolute(config.directory)) throw Error('Invalid owner radio directory');
@@ -53,9 +85,9 @@ function create(options = {}) {
       const revision = crypto.createHash('sha256').update(`${versions.get(track.file)}:${track.offset}:${track.size}`).digest('hex').slice(0, 24);
       return {id: track.id, url: `/game/radio/native/track/${track.id}.wav?v=${revision}`};
     };
-    const customPath = path.join(ROOT, 'custom');
+    const customPath = options.customDirectory || local.custom;
     const overrides = new Set([...PACKS, 'USER']);
-    const songs = fs.existsSync(customPath) ? fs.readdirSync(customPath).filter(name =>
+    const songs = options.includeCustom !== false && fs.existsSync(customPath) ? fs.readdirSync(customPath).filter(name =>
       /\.(mp3|m4a|aac|wav)$/i.test(name) && !name.startsWith('.') && !overrides.has(name.replace(/\.[^.]+$/, '').toUpperCase()))
       .sort().slice(0, 2000).map(name => ({name: name.replace(/\.[^.]+$/, ''),
         url: '/game/radio/custom/' + encodeURIComponent(name)})) : [];
@@ -64,8 +96,11 @@ function create(options = {}) {
   }
   async function converted(track) {
     const stat = fs.statSync(track.file);
+    const tool = decoder ? fs.statSync(decoder) : null;
+    if (tool && !tool.isFile()) throw Error('Invalid native radio decoder');
     const key = crypto.createHash('sha256').update(JSON.stringify([
-      track.file, stat.size, stat.mtimeMs, track.offset, track.size, 'float-wav-1'])).digest('hex');
+      track.file, stat.size, stat.mtimeMs, track.offset, track.size,
+      decoder ? ['native-float-wav-1', decoder, tool.size, tool.mtimeMs] : 'float-wav-1'])).digest('hex');
     const output = path.join(cache, key + '.wav');
     if (fs.existsSync(output)) { const now = new Date(); fs.utimesSync(output,now,now); return output; }
     if (pending.has(key)) return pending.get(key);
@@ -76,16 +111,21 @@ function create(options = {}) {
         fs.mkdirSync(cache, {recursive: true});
         const currentStat = fs.statSync(track.file);
         if (currentStat.size !== stat.size || currentStat.mtimeMs !== stat.mtimeMs) throw Error('Owner radio file changed before decoding');
-        const descriptor = fs.openSync(input, 'w', 0o600);
-        try {
-          for (let start = 0; start < track.size - 8068; start += 1024 * 1024) {
-            const bytes = read(track, start, Math.min(track.size - 8068, start + 1024 * 1024));
-            let written = 0;
-            while (written < bytes.length) written += fs.writeSync(descriptor, bytes, written, bytes.length-written);
-          }
-        } finally { fs.closeSync(descriptor); }
+        if (!decoder) {
+          const descriptor = fs.openSync(input, 'w', 0o600);
+          try {
+            for (let start = 0; start < track.size - 8068; start += 1024 * 1024) {
+              const bytes = read(track, start, Math.min(track.size - 8068, start + 1024 * 1024));
+              let written = 0;
+              while (written < bytes.length) written += fs.writeSync(descriptor, bytes, written, bytes.length-written);
+            }
+          } finally { fs.closeSync(descriptor); }
+        }
         await new Promise((resolve, reject) => {
-          const child = spawn(options.python || process.env.ZGTA_PYTHON || process.env.PYTHON || 'python3', [path.join(__dirname, 'prepare_native_radio_audio.py'), input, partial],
+          const command = decoder || options.python || process.env.ZGTA_PYTHON || process.env.PYTHON || 'python3';
+          const args = decoder ? [track.file, String(track.offset), String(track.size), partial] :
+            [path.join(__dirname, 'prepare_native_radio_audio.py'), input, partial];
+          const child = spawn(command, args,
             {stdio: ['ignore', 'pipe', 'pipe']});
           let errors = '', metadata = '';
           child.stdout.on('data', data => { metadata = (metadata + data).slice(-8192); });
@@ -143,12 +183,9 @@ function create(options = {}) {
   return {handle, index, converted, tracks};
 }
 if (require.main === module) {
-  const directory = process.argv[2];
-  if (!directory) throw Error('Usage: node native_radio_server.js /absolute/owner/game/directory');
-  const source = catalog(directory);
-  fs.mkdirSync(ROOT, {recursive: true});
-  fs.writeFileSync(CONFIG, JSON.stringify({directory: source.directory}), {mode: 0o600});
-  console.log(JSON.stringify({stations: source.stations.filter(value => value.length).length,
-    tracks: source.stations.flat().length, adverts: source.adverts.length, audioCopied: false}));
+  const [directory, flag, configuration, ...extra] = process.argv.slice(2);
+  if (!directory || extra.length || (flag && (flag !== '--configuration' || !configuration)))
+    throw Error('Usage: node native_radio_server.js /absolute/owner/game/directory [--configuration /absolute/private/owner.json]');
+  console.log(JSON.stringify(register(directory, {configuration})));
 }
-module.exports = {create};
+module.exports = {create, register, locations};

@@ -34,6 +34,7 @@
 		22BBDCBC3FB1FC0CF6650218 /* NativeSwimController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8366153EB29F47D815A85CC4 /* NativeSwimController.swift */; };
 		22E6F6B98017F773FDBCE2B9 /* NativeMenuProfileClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E1DB8E527A12C33170D18F /* NativeMenuProfileClient.swift */; };
 		24D7F42F5A14B834A88C3E9F /* NativeVehicleAudioDynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8162236584EA8A1768F6CBC2 /* NativeVehicleAudioDynamics.swift */; };
+		2529CC621442608637C1292E /* NativeCJAssembly.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105373A7389E3A82B038BA4 /* NativeCJAssembly.swift */; };
 		2672E944F636AD4DD8DD1A60 /* NativeVehicleHornController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 502EC37E454A0689DA6E4869 /* NativeVehicleHornController.swift */; };
 		2A0560FF603D44C586112796 /* NativeGameFilesCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3FE03E3278B8C039E3496E0 /* NativeGameFilesCoordinator.swift */; };
 		2BB2F63B412B8719C022525E /* NativeFootAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AACBF4A071F3ED8D1A11AB58 /* NativeFootAnimation.swift */; };
@@ -64,6 +65,7 @@
 		45D5E817F7127A7B5D5D2634 /* NativeSAMPAddress.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6D4E8BB95AA2A97A77FA207 /* NativeSAMPAddress.swift */; };
 		466FF56BA6F588F0BDC63575 /* NativeLocalHitReaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38CD9A85767EC0BEF5EB4DEA /* NativeLocalHitReaction.swift */; };
 		46B82F1DD3D287077B361F89 /* NativeVehicleTread.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0889A4901123B34A2DD8C7E8 /* NativeVehicleTread.swift */; };
+		47732151C4DCF7A8FAC3B52D /* NativeCJResources.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40C83975C1901364F937BE8B /* NativeCJResources.swift */; };
 		47782FF1CF1F14B987B8A048 /* NativeRadioPCMWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5347A14899CF3113EB7FDF50 /* NativeRadioPCMWindow.swift */; };
 		4A9F4549E076D75780C75E9F /* NativeGameplayClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 770FA821A40A2262BBDB5DB2 /* NativeGameplayClient.swift */; };
 		4B2DEF02F3D9975E279595DF /* NativePassiveCameraTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = A924CBE17F4A64A056522984 /* NativePassiveCameraTrace.swift */; };
@@ -101,6 +103,7 @@
 		74FCFBC020B300AA1747DC83 /* NativeResourceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A05FA1019043981A2F1EF439 /* NativeResourceStore.swift */; };
 		75FC3E0DF53C7D9BFE2494DC /* NativeConnectionRecovery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A94B01CC17E576695BB0572 /* NativeConnectionRecovery.swift */; };
 		77724F3CE72B99E350D699DF /* NativeRawResourceLease.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D608CD40152E09CA615B2CD /* NativeRawResourceLease.swift */; };
+		781F99E9F27D8EF6386B49D9 /* NativeCJTextures.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE93343E4DB4691046694B3C /* NativeCJTextures.swift */; };
 		7957D46C996635F0D97FC5DB /* NativeVirtualStick.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52623E232AD9E36EADF98FC7 /* NativeVirtualStick.swift */; };
 		7DE136DB20B6F955FDFAAE71 /* NativePreparedRuntimeVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAD27E3A04D7D3DC915B9A00 /* NativePreparedRuntimeVerifier.swift */; };
 		7FE7E40CF8F3015242BA23AF /* NativeOriginalWorldEffects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F1B798F67AC9008D7286397 /* NativeOriginalWorldEffects.swift */; };
@@ -116,6 +119,7 @@
 		8BC98A505650FCB60D07A22F /* NativeRenderWareModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E13717B416A4B700A2B9519 /* NativeRenderWareModel.swift */; };
 		8C8615685FAF65731955D142 /* NativeSAMPObjectMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14857CAB9E6B2314EC6557E1 /* NativeSAMPObjectMaterials.swift */; };
 		8E2971A26FB902E66D2C20A5 /* NativeGameManagementController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D964C2804332F19C2A462E4 /* NativeGameManagementController.swift */; };
+		912A9A45E731D3D3248A0148 /* NativeCJPedModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B506B699DA67F074C2954D4E /* NativeCJPedModel.swift */; };
 		92803A5DEB94DABEFBD1E9C5 /* NativeWeaponShopPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B37788405BCD500BC0C4BC01 /* NativeWeaponShopPanel.swift */; };
 		92C967A587C1151AD04EA490 /* NativeOptionsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBEEA20F7CADAA527F2CCCDC /* NativeOptionsViewController.swift */; };
 		92CD1E508E2E26AB2E49FB64 /* NativeRateAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3E50DA4B9256B0F78126AF8 /* NativeRateAudio.swift */; };
@@ -148,11 +152,13 @@
 		C75061CF1AEB1AA4CA8C5AF2 /* NativeWorldWater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DC65E3B8177B0DE0D37CDAB /* NativeWorldWater.swift */; };
 		C823EE3D654F8DB60E898A71 /* WorldCollision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 101F6D0A7F914965384FFFDD /* WorldCollision.swift */; };
 		CA6541387B45810884FD1032 /* NativeVehicleLoopAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BE36043CD948CA423D13B3 /* NativeVehicleLoopAudio.swift */; };
+		CA7A276A59148388B7BC348C /* NativeCJProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ADB641D825DAE984689FFF0 /* NativeCJProfile.swift */; };
 		CA84DF1FA860D2EFBD115FBA /* NativeShotTargeting.swift in Sources */ = {isa = PBXBuildFile; fileRef = D785C9B1748A08EC230BA3B0 /* NativeShotTargeting.swift */; };
 		CB19D103A1B63A1DC55CA7DE /* NativeShotOcclusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718A2BEE6959502177046670 /* NativeShotOcclusion.swift */; };
 		D039497D742CA7F0D2F08DE6 /* NativeRemoteMeleeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF84EEC926D9870EC20D6FB /* NativeRemoteMeleeContext.swift */; };
 		D745C8603A349B1A1BF11798 /* NativeRenderWareCollisionWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50732CAC0459F1094ED1A0F /* NativeRenderWareCollisionWorld.swift */; };
 		D77994ED43402194D25FD11B /* NativeMenuAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BFEE8A2E28D3FE221B7470 /* NativeMenuAudio.swift */; };
+		D8D46E4F0DCFD9526AF5C080 /* NativeCJRuntimeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377027377634687E2F67D980 /* NativeCJRuntimeLoader.swift */; };
 		DAE0DC68E39100FD741A5805 /* SkeletalShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E7FB92323B6A05CD62B028B /* SkeletalShaders.metal */; };
 		DDC99373C20A989E4DBE0133 /* NativeFallDamage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A079C289993B9B3644543FB /* NativeFallDamage.swift */; };
 		DDE4042E5252FB0C0B8E440C /* NativeSAMPStockCollisionCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E91597E6874AECCA343C50A /* NativeSAMPStockCollisionCatalog.swift */; };
@@ -175,6 +181,7 @@
 		EE609E92C2D112EE11CB59E4 /* HomeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 087E7CB2B5881BBC13A9B417 /* HomeViewController.swift */; };
 		EFCBE2299E7FC12EF32BB994 /* NativeSAMPObjects.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B1112A6AE905818CEBA6ECA /* NativeSAMPObjects.swift */; };
 		F05CB721E90D6F0B069D1602 /* NativeGroundVehicle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59E67662C9B99A8DFB528F6E /* NativeGroundVehicle.swift */; };
+		F0873EA598B6079E3B596010 /* NativeCJClothesRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 099F23893C07CF66927040D5 /* NativeCJClothesRules.swift */; };
 		F0C130DB14D1D5E142B7ABF5 /* NativeWorldEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281AE20918C13B030D8575DE /* NativeWorldEnvironment.swift */; };
 		F12594C4F7F238E5B6BA0DE3 /* NativeOriginalWorldVitals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92280E0F025083340BB4B84E /* NativeOriginalWorldVitals.swift */; };
 		F1E0B55ECEEE324FD5A8A347 /* NativeBikeDynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8136F130C3B48FD59058909 /* NativeBikeDynamics.swift */; };
@@ -186,9 +193,11 @@
 		FDA81762D6B5FBEB0767BC61 /* NativeSAMPWorldConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21808037D5A8C1EAC34B5D6C /* NativeSAMPWorldConnection.swift */; };
 		FE3490CBED7FE80B8B3F7F80 /* NativeRawResourceSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DC6B5F5F8B025EE59B06E7 /* NativeRawResourceSelection.swift */; };
 		FEEE0106520E8068D6D1E2B2 /* WorldShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 1AF69E8CCF1AC866E1B91582 /* WorldShaders.metal */; };
+		FF07CD1478228E170C6657A2 /* NativeCJRuntimeModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CB1F3D44BDA55B4DF8395AD /* NativeCJRuntimeModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0105373A7389E3A82B038BA4 /* NativeCJAssembly.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJAssembly.swift; sourceTree = "<group>"; };
 		0260B8C458933E996D829557 /* NativeGameHUD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameHUD.swift; sourceTree = "<group>"; };
 		034F11B14B95BCCC8C11123C /* NativeCharacterController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCharacterController.swift; sourceTree = "<group>"; };
 		04113E8019D1F087F2DF3075 /* NativeResourceSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeResourceSession.swift; sourceTree = "<group>"; };
@@ -200,6 +209,7 @@
 		08EEB36A34394868F8298F8A /* NativeGameplayIdleTimer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameplayIdleTimer.swift; sourceTree = "<group>"; };
 		09716AFE34EB334F442D99A3 /* NativeVehicleAudioSpatial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleAudioSpatial.swift; sourceTree = "<group>"; };
 		099D18E9BA9F51B3794D4E0B /* NativeStreamShotClaims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStreamShotClaims.swift; sourceTree = "<group>"; };
+		099F23893C07CF66927040D5 /* NativeCJClothesRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJClothesRules.swift; sourceTree = "<group>"; };
 		0B1112A6AE905818CEBA6ECA /* NativeSAMPObjects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPObjects.swift; sourceTree = "<group>"; };
 		0D964C2804332F19C2A462E4 /* NativeGameManagementController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameManagementController.swift; sourceTree = "<group>"; };
 		0DC65E3B8177B0DE0D37CDAB /* NativeWorldWater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldWater.swift; sourceTree = "<group>"; };
@@ -211,6 +221,7 @@
 		1501B6967053EEBDD01D0558 /* NativeSAMPVehicleCoordinates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPVehicleCoordinates.swift; sourceTree = "<group>"; };
 		159E9344F4D4521EAFD4937D /* NativeHeadingContinuity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeHeadingContinuity.swift; sourceTree = "<group>"; };
 		1A079C289993B9B3644543FB /* NativeFallDamage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFallDamage.swift; sourceTree = "<group>"; };
+		1ADB641D825DAE984689FFF0 /* NativeCJProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJProfile.swift; sourceTree = "<group>"; };
 		1AF69E8CCF1AC866E1B91582 /* WorldShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = WorldShaders.metal; sourceTree = "<group>"; };
 		1BF84EEC926D9870EC20D6FB /* NativeRemoteMeleeContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRemoteMeleeContext.swift; sourceTree = "<group>"; };
 		1DD051557FBDF8C9F92AC65F /* NativeCombatEligibility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCombatEligibility.swift; sourceTree = "<group>"; };
@@ -232,11 +243,13 @@
 		347138D73FE552378B05699E /* NativeMultiplayerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMultiplayerClient.swift; sourceTree = "<group>"; };
 		34F03E26066C9A4AB35F0487 /* NativeGameCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameCamera.swift; sourceTree = "<group>"; };
 		3691761B787AB51C3173B5D4 /* NativeRenderWareSkeleton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderWareSkeleton.swift; sourceTree = "<group>"; };
+		377027377634687E2F67D980 /* NativeCJRuntimeLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJRuntimeLoader.swift; sourceTree = "<group>"; };
 		38CD9A85767EC0BEF5EB4DEA /* NativeLocalHitReaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLocalHitReaction.swift; sourceTree = "<group>"; };
 		3C625F976BE62852F37692C1 /* NativeVehicleSupportScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleSupportScene.swift; sourceTree = "<group>"; };
 		3C997172E8F7041ABEB93A87 /* NativeWorldRay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldRay.swift; sourceTree = "<group>"; };
 		3E6C536AED882DF9A6555DD1 /* NativeVehicleRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleRadio.swift; sourceTree = "<group>"; };
 		3E91597E6874AECCA343C50A /* NativeSAMPStockCollisionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPStockCollisionCatalog.swift; sourceTree = "<group>"; };
+		40C83975C1901364F937BE8B /* NativeCJResources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJResources.swift; sourceTree = "<group>"; };
 		40DC6B5F5F8B025EE59B06E7 /* NativeRawResourceSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRawResourceSelection.swift; sourceTree = "<group>"; };
 		41173437D14963BD67924798 /* NativeSAMPGameplayCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPGameplayCommands.swift; sourceTree = "<group>"; };
 		422617B4FD560E3E71002C59 /* NativeAtmosphere.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAtmosphere.swift; sourceTree = "<group>"; };
@@ -303,6 +316,7 @@
 		969E34393B1C41FCC8822BC5 /* NativeAudioEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeAudioEnvelope.swift; sourceTree = "<group>"; };
 		976F21502D066100E945BDF7 /* NativeVehicleRig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleRig.swift; sourceTree = "<group>"; };
 		97CC48C3BC667BDFE0165969 /* NativeVehiclePaint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehiclePaint.swift; sourceTree = "<group>"; };
+		9CB1F3D44BDA55B4DF8395AD /* NativeCJRuntimeModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJRuntimeModel.swift; sourceTree = "<group>"; };
 		9F39E2255D193D8F79D4883F /* NativeSAMPServerUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPServerUI.swift; sourceTree = "<group>"; };
 		9F7C0A4A39CA9C7B5F46EC4C /* NativeRiderPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRiderPlayback.swift; sourceTree = "<group>"; };
 		9FEE22F99D13E30CC86C3F85 /* NativeGameBindings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGameBindings.swift; sourceTree = "<group>"; };
@@ -322,6 +336,7 @@
 		B2680FC89ECCCE70E9157C5F /* NativeMovingSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMovingSupport.swift; sourceTree = "<group>"; };
 		B37788405BCD500BC0C4BC01 /* NativeWeaponShopPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWeaponShopPanel.swift; sourceTree = "<group>"; };
 		B3E50DA4B9256B0F78126AF8 /* NativeRateAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRateAudio.swift; sourceTree = "<group>"; };
+		B506B699DA67F074C2954D4E /* NativeCJPedModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJPedModel.swift; sourceTree = "<group>"; };
 		B9388F60B4020A35441B2389 /* NativeISOExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeISOExtraction.swift; sourceTree = "<group>"; };
 		BBC82BCB75D5520EBAFB5BAE /* NativeStockAssetAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStockAssetAccess.swift; sourceTree = "<group>"; };
 		BBEEA20F7CADAA527F2CCCDC /* NativeOptionsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOptionsViewController.swift; sourceTree = "<group>"; };
@@ -359,6 +374,7 @@
 		E72FB264A5C31078E3A37BBA /* NativeRenderWarePedModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderWarePedModel.swift; sourceTree = "<group>"; };
 		E7C1456168675138F8BEADDF /* NativeSwimAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSwimAnimation.swift; sourceTree = "<group>"; };
 		EC15EF8624A53D88078459DB /* NativeRadioSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRadioSelection.swift; sourceTree = "<group>"; };
+		EE93343E4DB4691046694B3C /* NativeCJTextures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJTextures.swift; sourceTree = "<group>"; };
 		EF7D3FE7CEE40987836E6DE3 /* NativeParticleRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeParticleRenderer.swift; sourceTree = "<group>"; };
 		EFCAF572FDF0029F73D544CC /* NativeParticleEffects.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeParticleEffects.swift; sourceTree = "<group>"; };
 		F12F2589A8640BAA466C6D26 /* NativeRadioPlayback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRadioPlayback.swift; sourceTree = "<group>"; };
@@ -415,6 +431,14 @@
 				5D3DF9DB4B50E82163A58A83 /* NativeCharacterMotor.swift */,
 				D317C08D8555DB9A863B986F /* NativeChatPanel.swift */,
 				4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */,
+				0105373A7389E3A82B038BA4 /* NativeCJAssembly.swift */,
+				099F23893C07CF66927040D5 /* NativeCJClothesRules.swift */,
+				B506B699DA67F074C2954D4E /* NativeCJPedModel.swift */,
+				1ADB641D825DAE984689FFF0 /* NativeCJProfile.swift */,
+				40C83975C1901364F937BE8B /* NativeCJResources.swift */,
+				377027377634687E2F67D980 /* NativeCJRuntimeLoader.swift */,
+				9CB1F3D44BDA55B4DF8395AD /* NativeCJRuntimeModel.swift */,
+				EE93343E4DB4691046694B3C /* NativeCJTextures.swift */,
 				65793AA68B36AEC43B0BF0CD /* NativeClimbController.swift */,
 				1DD051557FBDF8C9F92AC65F /* NativeCombatEligibility.swift */,
 				6A94B01CC17E576695BB0572 /* NativeConnectionRecovery.swift */,
@@ -688,6 +712,14 @@
 				212739909D41C73DABA80E72 /* NativeAudioEnvelope.swift in Sources */,
 				F1E0B55ECEEE324FD5A8A347 /* NativeBikeDynamics.swift in Sources */,
 				31DBECB1FCB3E6ECF70C4875 /* NativeBoardingAnimation.swift in Sources */,
+				2529CC621442608637C1292E /* NativeCJAssembly.swift in Sources */,
+				F0873EA598B6079E3B596010 /* NativeCJClothesRules.swift in Sources */,
+				912A9A45E731D3D3248A0148 /* NativeCJPedModel.swift in Sources */,
+				CA7A276A59148388B7BC348C /* NativeCJProfile.swift in Sources */,
+				47732151C4DCF7A8FAC3B52D /* NativeCJResources.swift in Sources */,
+				D8D46E4F0DCFD9526AF5C080 /* NativeCJRuntimeLoader.swift in Sources */,
+				FF07CD1478228E170C6657A2 /* NativeCJRuntimeModel.swift in Sources */,
+				781F99E9F27D8EF6386B49D9 /* NativeCJTextures.swift in Sources */,
 				8B6D3FF8836239DF899B5089 /* NativeCameraVisibility.swift in Sources */,
 				E5C2DD8581401A258681107F /* NativeCharacterController.swift in Sources */,
 				083F44148770CAA887D5280B /* NativeCharacterMotor.swift in Sources */,

@@ -32,3 +32,5 @@ jobs:
       - run: node smoke_native_working_assets.js
       - run: node smoke_vehicle_coupling_server.js
       - run: node smoke_radio_import_bounds.js
+      - run: node smoke_radio_development.js
+      - run: node smoke_selfhost_tp_units.js

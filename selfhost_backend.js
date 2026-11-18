@@ -276,6 +276,9 @@ function safeName(value) {
 }
 
 function finite(value, fallback = 0) { return Number.isFinite(value) ? value : fallback; }
+// The tp wire heading is degrees. Vehicle/runway headings are radians;
+// imported home exterior/interior headings are already degrees.
+function tpHeadingFromRadians(value) { return value * 180 / Math.PI; }
 function limited(value, limit, fallback = 0) {
   return Number.isFinite(value) ? Math.max(-limit, Math.min(limit, value)) : fallback;
 }
@@ -1462,7 +1465,7 @@ class LocalGame {
       peer.send({t:'enter',v:claim.vehicle.id,seat:claim.seat,ok:false});
       if(peer.player.health>0 && !peer.player.insideHome && claim.active) {
         const row=claim.vehicle.row;
-        peer.send({t:'tp',x:row[3],y:row[4],z:row[5],h:finite(row[6])*180/Math.PI,g:1});
+        peer.send({t:'tp',x:row[3],y:row[4],z:row[5],h:tpHeadingFromRadians(finite(row[6])),g:1});
       }
     }
     if(publish)this.publishPlayerRows();
@@ -1514,7 +1517,7 @@ class LocalGame {
         const at=peer.state;
         // The archive has no passenger reservation RPC. Its normal tp handler
         // cancels ub and restores foot ownership after a rejected implicit seat.
-        if(this.validVehiclePose(at))peer.send({t:'tp',x:at.x,y:at.y,z:at.z,h:finite(at.heading)*180/Math.PI,g:1});
+        if(this.validVehiclePose(at))peer.send({t:'tp',x:at.x,y:at.y,z:at.z,h:tpHeadingFromRadians(finite(at.heading)),g:1});
       }
       return null;
     }
@@ -2336,7 +2339,7 @@ class LocalGame {
         this.addMissionVehicle(player);
         pos.peer.send({t: 'tp', x: rounded(from.runway[0] - Math.sin(from.runway[3]) * 7),
           y: rounded(from.runway[1] - Math.cos(from.runway[3]) * 7),
-          z: from.runway[2] + 1, h: from.runway[3], g: 1});
+          z: from.runway[2] + 1, h: tpHeadingFromRadians(from.runway[3]), g: 1});
         message = `Pilot flight started on the ${from.name} runway. Board the marked ${aircraft.name}, climb 35 m, then land at ${to.name} within ten minutes.`;
       } else if (job.id === 'fire') {
         const home = nearestHome(pos, 180);
@@ -2869,7 +2872,7 @@ class LocalGame {
       const entry = clientCatalog.interior_spawns?.[home.kind];
       if (!Array.isArray(entry) || entry.length !== 4) throw new Error('This interior is unavailable.');
       player.insideHome = home.id;
-      pos.peer.send({t: 'tp', x: entry[0], y: entry[1], z: entry[2], h: entry[3] * Math.PI / 180, g: 1});
+      pos.peer.send({t: 'tp', x: entry[0], y: entry[1], z: entry[2], h: entry[3], g: 1});
       message = `Entered ${home.name}. Use Exit Home to return outside.`;
     } else if (action === 'home.exit') {
       const home = homeAt(player.insideHome);
@@ -2878,7 +2881,7 @@ class LocalGame {
       if (!entry || Math.hypot(pos.x-entry[0], pos.y-entry[1], pos.z-entry[2]) > 80)
         throw new Error('Return to your home interior before leaving.');
       player.insideHome = null;
-      pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2], h: home.out[3] * Math.PI / 180, g: 1});
+      pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2], h: home.out[3], g: 1});
       message = `Left ${home.name}.`;
     } else if (action === 'home.visit') {
       const home = HOME_CATALOG.find(item => item.id === input.home);
@@ -2887,7 +2890,7 @@ class LocalGame {
       if (!pos) throw new Error('Enter the game before visiting your home.');
       player.insideHome = null;
       pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2],
-        h: home.out[3]*Math.PI/180, g: 1});
+        h: home.out[3], g: 1});
       message = `Travelling to ${home.name}.`;
     } else throw new Error('Unknown action.');
     this.note(player, message);

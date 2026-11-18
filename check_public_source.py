@@ -45,6 +45,7 @@ NATIVE_AUDIO_SOURCE = {
     'patches/vorbis-sharedbook-unsigned.json',
     'src/codec_alloc.h',
     'src/zgtasa_native_audio.c',
+    'tools/radio_wav.c',
     'tests/api.c',
     'tests/archive.swift',
     'tests/fixtures.py',

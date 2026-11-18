@@ -108,6 +108,7 @@ def main():
         'smoke_native_ammo_reconciliation.py', 'smoke_native_inventory_wire.py',
         'smoke_native_camera_visibility.py',
         'smoke_native_controls.py', 'smoke_native_action_gate.py', 'smoke_native_horn.py', 'smoke_native_wire.py',
+        'smoke_native_cj_assembly.py', 'smoke_native_cj_profile.py',
         'smoke_native_foot_locomotion.py', 'smoke_native_foot_animation.py',
         'smoke_native_gun_animation.py', 'smoke_native_swim_animation.py',
         'smoke_native_swim_sprint.py', 'smoke_native_world_water.py', 'smoke_native_personal_flight.py',
@@ -151,6 +152,7 @@ def main():
         'smoke_browser_armour_sync.js', 'smoke_weapon_inventory.js', 'smoke_weapon_cadence.js', 'smoke_weapon_streams.js', 'smoke_weapon_transport.js', 'smoke_native_server.js', 'smoke_inventory_ack.js', 'smoke_jetpack_drop.js', 'smoke_vehicle_departure.js', 'smoke_health_ack.js',
         'smoke_native_melee_server.js', 'smoke_native_melee_assets.js', 'smoke_native_parry.js',
         'smoke_vehicle_coupling_server.js', 'smoke_native_terminal_vehicle.js', 'smoke_native_skin_network_child.js', 'smoke_native_working_stage.js', 'smoke_native_working_assets.js',
+        'smoke_radio_development.js', 'smoke_selfhost_tp_units.js',
     ]]
     cases.append(('samp_ped_coordinate_calibration',['python3','smoke_samp_coordinates.py',str(ROOT/'local-only/research/samp-ped-height/mesh-observations.json')]))
     cases.append(('core_physics_transitions', ['zsh', 'smoke_core_physics_transitions.sh']))

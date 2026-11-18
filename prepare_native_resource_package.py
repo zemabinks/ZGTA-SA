@@ -223,6 +223,12 @@ def candidates(local):
     for name, source in overrides.items():
         if source.is_file():
             result['game/native/' + name] = source
+    # Optional explicitly declared player assembly. Only its thirteen bounded
+    # files are indexed; no IMG/CAB is copied or converted by this producer.
+    optional_player = local / 'resources-v1/generated/cj-normal-vest-denim-v1'
+    if optional_player.exists() or optional_player.is_symlink():
+        from prepare_native_cj_profile import candidates as cj_candidates
+        result.update(cj_candidates(local))
     # The native renderer uses one shared CLP1 library with SKN1 skeletons.
     # Old per-character baked vertex clips are browser/legacy alternatives,
     # not an additional native dependency. Keep them for legacy-only families.

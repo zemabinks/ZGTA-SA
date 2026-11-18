@@ -252,6 +252,25 @@ enum NativePreparedRuntimeVerifier {
             guard let library = NativeSkeletalAnimationLibrary(data: try bytes("game/native/models/animations.clips.bin")) else {
                 throw Failure.invalid("animations.clips.bin", "invalid native animation library")
             }
+            // Old packages remain valid without this optional fixed body. Once
+            // declared, all twelve exact sources and the actual actor upload
+            // must pass; a bare descriptor cannot advertise a playable CJ.
+            if resources[NativeCJProfile.descriptorPath] != nil {
+                let profile=try NativeCJProfile.decode(bytes(NativeCJProfile.descriptorPath,limit:65_536))
+                var body=[String:Data]()
+                for item in profile.files {
+                    let resource=try require(item.path)
+                    guard resource.bytes==Int64(item.bytes),resource.sha256==item.sha256 else{
+                        throw Failure.invalid(item.path,"fixed player descriptor disagrees with the prepared manifest")
+                    }
+                    body[item.role]=try bytes(item.path,limit:Int64(item.bytes))
+                }
+                let candidate=try profile.prepare(body),plan=try NativeRenderWarePedModel.prepareCJ(candidate)
+                let uploaded=try NativeRenderWarePedModel.Uploaded(plan:plan,device:device)
+                guard uploaded.actor.pose(clip:"ped/idle_stance",elapsed:0,library:library) != nil else{
+                    throw Failure.invalid(NativeCJProfile.descriptorPath,"fixed player cannot sample the installed animation library")
+                }
+            }
             for clip in ["ped/idle_stance", "ped/walk_player", "ped/run_player", "ped/car_sit", "ped/car_sitp", "ped/car_getin_lhs", "ped/car_getout_lhs"] {
                 guard library.contains(clip), library.duration(of: clip) != nil else { throw Failure.invalid("animations.clips.bin", "missing core clip \(clip)") }
             }

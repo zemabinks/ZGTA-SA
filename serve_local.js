@@ -22,6 +22,8 @@ if (SELFHOST && HOST !== '127.0.0.1' && HOST !== '::1' &&
   throw new Error('Network hosting requires a join code and ZGTA_ALLOWED_HOSTS.');
 const localGame = SELFHOST ? require('./selfhost_backend') : null;
 const nativeRadio = SELFHOST ? require('./native_radio_server').create({
+  configuration: process.env.ZGTA_RADIO_CONFIGURATION,
+  decoder: process.env.ZGTA_RADIO_DECODER,
   python: process.env.ZGTA_PYTHON || 'python3',
   cache: process.env.ZGTA_RADIO_CACHE || path.join(LOCAL_ONLY, 'native-radio-cache')
 }) : null;

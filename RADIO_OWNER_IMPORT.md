@@ -27,31 +27,48 @@ Serve the chosen file at `/game/native/radio.program.json`. The full-recording h
 
 ## Registration and isolated QA
 
-For the normal local site, this existing command writes its ignored owner registration:
+For the normal development host, register the owned game directory:
 
 ```sh
 node native_radio_server.js /absolute/path/to/owned/game
 ```
 
-It records the owner directory and copies no music. The server lazily converts requested tracks to 32 kHz float WAV using `prepare_native_radio_audio.py` and the project-local `local-only/toolchains/python-audio` dependency. `ZGTA_PYTHON=/usr/bin/python3` selects that interpreter explicitly on the tested Mac.
+This writes `local-only/native-radio-owner.json` and copies no music. Registration and the default `local-only/native-radio-cache` are outside the archived site, which can therefore remain a read-only alias. The command refuses existing registrations and linked output ancestors; to change an owner source, explicitly remove the old registration or choose a new private configuration filename. The helper still reads the older `local-only/site/game/radio/owner.json` when no new registration exists. An explicit or present new registration is authoritative: an invalid one does not borrow another source.
 
-For a disposable QA site, put the selected programme at that site's `game/native/radio.program.json`. Give its `game/radio/owner.json` this structure:
+The host can lazily export requested tracks through the same bounded compressed-bank decoder used by native iOS, without installing Python audio packages. Link the small exporter against an already built, verified host library:
 
-```json
-{"directory":"/absolute/path/to/owned/game"}
+```sh
+python3 build_radio_development_decoder.py \
+  --library-root local-only/native-audio/targets \
+  --output local-only/native-radio-tools
 ```
 
-The QA host must instantiate the radio helper with the QA paths:
+Set `ZGTA_RADIO_DECODER` to the absolute path of `local-only/native-radio-tools/radio-wav` when starting the development host, or pass the helper's `decoder` option. The link helper verifies the current source stamp and library hash and requires a new output directory. If no host library has been built yet, first run `python3 native-audio/build.py --platform host --output local-only/native-audio/targets`. The generated tool, libraries and PCM remain local. Export validates each complete bounded Ogg record before decoding, writes float WAV in small windows, refuses existing outputs and removes incomplete files on errors.
+
+Without `ZGTA_RADIO_DECODER`/`decoder`, the older `prepare_native_radio_audio.py` path remains available. That path needs the project-local `local-only/toolchains/python-audio` dependency or an interpreter with SoundFile installed; a copied source checkout does not acquire those dependencies automatically. `ZGTA_PYTHON=/usr/bin/python3` selects its interpreter explicitly.
+
+For a disposable QA host, keep its registration and cache in regular private directories. Its read-only site may continue to provide the existing `game/native/radio.program.json`. Register an explicit output:
+
+```sh
+node native_radio_server.js /absolute/path/to/owned/game \
+  --configuration /absolute/path/to/qa-private/radio-owner.json
+```
+
+`serve_local.js` accepts `ZGTA_RADIO_CONFIGURATION=/absolute/path/to/qa-private/radio-owner.json`, `ZGTA_RADIO_CACHE=/absolute/path/to/qa-private/native-radio-cache` and `ZGTA_RADIO_DECODER=/absolute/path/to/qa-private/radio-wav`. A separate QA host can instantiate the helper with the same paths:
 
 ```js
 const radio = require('./native_radio_server').create({
-  configuration: '/absolute/path/to/qa-site/game/radio/owner.json',
-  cache: '/absolute/path/to/qa-site/game/radio/native-cache',
-  python: '/usr/bin/python3'
+  configuration: '/absolute/path/to/qa-private/radio-owner.json',
+  cache: '/absolute/path/to/qa-private/native-radio-cache',
+  decoder: '/absolute/path/to/qa-private/radio-wav'
 });
 ```
 
-The default helper paths refer to the server source root's local site. Use the explicit paths above when running from the normal source root, or use a separate copied server source root whose `local-only/site` points to the QA overlay. Existing access checks still precede `radio.handle(req, res, pathname)`.
+The default helper paths refer to the server source root's `local-only` directory. Custom user songs still come from its `site/game/radio/custom`, or an explicit `customDirectory` helper option. Existing access checks still precede `radio.handle(req, res, pathname)`; registration does not publish local filenames or recordings to GitHub.
+
+This is a development streaming path. Native playback first checks the app's verified raw-resource receipt and reads compressed owner banks locally when present. A prepared visual-resource package alone does not import those raw radio banks. Installed-resource mode remains fail-closed for missing `/game/` files, so it will not silently request development radio from the Mac. Use the existing raw original-resource import for on-device original radio, or deliberately choose the app's development resource mode while using the configured development host. Invalid local banks continue to report a verification error instead of silently changing sources.
+
+An isolated radio-only process is available with `node serve_development_radio.js --port <unused-port>`. It requires all four absolute private paths in `ZGTA_RADIO_CONFIGURATION`, `ZGTA_RADIO_CACHE`, `ZGTA_RADIO_DECODER` and `ZGTA_RADIO_TOKEN_FILE`. The token file must have owner-only permissions and contain a random 64-character hexadecimal token. This process binds only to 127.0.0.1 and accepts GET/HEAD for `/game/radio/native/index` and `/game/radio/native/track/<numeric-id>.wav`, including their normal revision query. Requests need `X-ZGTA-Radio-Token` and a loopback Host matching its port. It does not serve the site, custom songs, gameplay state, saves or resource installation. A LAN host must perform its existing authentication before forwarding these radio requests and add the helper token itself; keep that token out of client code and responses. Running this process does not change the app's installed-resource policy.
 
 Conversion uses at most two concurrent decoder jobs. The Mac cache retains 2 GiB of recent generated audio, and the native device cache retains 256 MiB; a single larger current file can remain. Complete predecoding is unnecessary. The tested owner radio sources total about977MB compressed; all decoded float PCM would occupy about15GB.
 
@@ -59,6 +76,8 @@ Conversion uses at most two concurrent decoder jobs. The Mac cache retains 2 GiB
 
 `node smoke_radio_import_bounds.js` is self-contained and passes under Node22 without an archive. It checks both size conventions, unaligned XOR ranges, exact EOF, metadata, preserved compatibility input and overlapping-range rejection using synthetic format pages. It does not claim those pages are listening-test audio. Existing synthetic Vorbis, conversion/cache/HTTP range and archived scheduler regressions also pass.
 
-The local original-file gate inspected all 1731 tracks across 13 owner packs, finding stereo 32 kHz streams and 613 affected sizes. It decoded 15 actual recordings, compared 13 legacy shortened frame counts, checked 45 native PCM windows and 752000 exact channel samples, and rendered a real transition through AVAudioEngine's offline mode. Full-recording programme generation covered all 12 internal station programmes. These checks used no microphone or speaker output.
+`node smoke_radio_development.js` uses authored opaque pack bytes and no network listener. It checks private registration, read-only site aliases, explicit QA sources, legacy compatibility, source precedence, linked-path and overwrite refusal, CLI registration and sanitized index responses. These index tests do not decode audio or prove audible playback. The independent Core113 implementation and validation limits are summarized in `CORE_DEVELOPMENT_RADIO_113.md`.
 
-The optimized79 Simulator subsequently entered a car, selected Bounce FM, switched to SF-UR and exited on the isolated loopback world. Three requested PCM files appeared in both its Mac and native app caches. This verifies the live UI/download flow alongside the separate offline sample proof; physical-device listening and interruptions remain unverified. This evidence does not certify1:1 retail radio scheduling.
+`python3 test_radio_development_decoder.py --decoder /absolute/private/radio-wav --output local-only/new-decoder-test` exercises the actual exporter and development helper with independently authored mathematical Vorbis fixtures. It checks reference samples, WAV metadata, private exclusive outputs, malformed streams, linked outputs, native conversion without Python audio dependencies, deduplication and byte ranges. It needs the verified exporter above and opens no listener or audio device.
+
+Original recordings and detailed owner-file/device evidence remain local. Development streaming does not establish installed offline audio, all-station playback, interruption handling or1:1 retail programme scheduling.

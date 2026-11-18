@@ -27,4 +27,12 @@ struct NativeSAMPSkinCatalog {
     }
     func nativeSkin(forLegacy id:Int)->Int?{mappings[id]?.nativeID}
     func model(forLegacy id:Int)->String?{mappings[id]?.model}
+    /// Protocol identity is separate from render readiness. Canonical zero is
+    /// the composite player; the renderer must admit its declared profile.
+    /// Other retail IDs still require the exact imported ordinary-ped join.
+    static func canonicalSkin(legacyID:Int,customID:Int?,catalog:Self?)->Int? {
+        if let customID,(20001...30000).contains(customID){return customID}
+        if legacyID==0{return 0}
+        return catalog?.nativeSkin(forLegacy:legacyID)
+    }
 }

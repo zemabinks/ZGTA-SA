@@ -136,7 +136,10 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
             guard let self else{return}
             self.lastPlayers=values
             let rows=values.filter{$0.id != self.client.localID}.compactMap {p->RemotePlayer? in
-                guard let skin=p.customSkin.flatMap({(20001...30000).contains($0) ? $0:nil}) ?? self.skinCatalog?.nativeSkin(forLegacy:p.skin)else{
+                // Zero has an unambiguous canonical player identity. The
+                // renderer admits its explicit composite profile separately;
+                // retaining this row never substitutes an ordinary pedestrian.
+                guard let skin=NativeSAMPSkinCatalog.canonicalSkin(legacyID:p.skin,customID:p.customSkin,catalog:self.skinCatalog)else{
                     if self.skinCatalog != nil,self.unsupportedSkins.insert(p.skin).inserted{self.onStatus?("SKIN \(p.skin) NEEDS ITS ORIGINAL MODEL ASSETS")};return nil
                 }
                 let vehicle=p.vehicle.flatMap{self.client.vehicles[$0]}

@@ -4,7 +4,7 @@ import Foundation
 /// Explicit snapshot of this app's own first-party LAN join cookie. Callers
 /// must obtain sessionCookies from their configured app session, never browser,
 /// WKWebsiteDataStore, original-game login or Discord cookie sources.
-/// This value cannot authorize a different origin or a non-stock request.
+/// This value cannot authorize a different origin or an unrelated resource.
 struct NativeStockAssetAccess {
     private static let preparedLock=NSLock()
     private static var preparedReader:((URL,Int)throws->Data?)?
@@ -85,6 +85,11 @@ struct NativeStockAssetAccess {
         return "zgta_access="+value
     }
     private static func stockPath(_ value:String)->Bool {
+        let cjPrefix="/game/native/cj-normal-vest-denim-v1/"
+        if value.hasPrefix(cjPrefix) {
+            return ["profile.json","player.dff","vest.dff","head.dff","hands.dff","jeans.dff","sneaker.dff",
+                "player_torso.txd","vest.txd","player_face.txd","jeansdenim.txd","sneakerbincblk.txd","clothes.dat"].contains(String(value.dropFirst(cjPrefix.count)))
+        }
         if ["/game/native/stock-models.json","/game/native/stock-collision/catalog.json","/game/native/stock-collision/index.json"].contains(value) {return true}
         let prefix:String,suffix:String
         if value.hasPrefix("/game/native/stock-img/") {

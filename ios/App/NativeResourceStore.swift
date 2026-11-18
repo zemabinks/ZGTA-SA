@@ -17,6 +17,15 @@ final class NativeResourceStore {
         let developmentOrigin: String?
         let issues: [String]
     }
+    /// A read-only fence for asynchronous optional resource consumers. A repair
+    /// or same-content replacement still changes the admission generation.
+    struct RuntimeBinding: Equatable {
+        let generation: UUID
+        let mode: Mode
+        let contentID: String?
+        let developmentOrigin: String?
+        let playable: Bool
+    }
     struct Progress {
         let phase: String
         let completedFiles: Int
@@ -144,6 +153,11 @@ final class NativeResourceStore {
         } catch { issues = [String(describing: error)] }
     }
     var snapshot: Snapshot { lock.lock(); defer { lock.unlock() }; return state() }
+    var runtimeBinding: RuntimeBinding {
+        lock.lock(); defer { lock.unlock() }
+        return .init(generation:admissionGeneration,mode:settings.mode,contentID:catalogue?.contentID,
+            developmentOrigin:settings.developmentOrigin,playable:usable)
+    }
     private static func validValidationIdentity(_ value:String?)->Bool {
         guard let value else{return false}
         return !value.isEmpty && value.utf8.count<=128
