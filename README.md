@@ -55,6 +55,10 @@ over advanced roleplay. See the [core parity checklist](CORE_GAMEPLAY_PARITY.md)
 and [audit journal](CORE_GAMEPLAY_JOURNAL.md) for tested fixes and remaining work.
 The [original-game reference ledger](CORE_RETAIL_REFERENCE.md) records direct
 data comparisons and unresolved engine differences.
+The [rider clock](CORE_RIDER_RENDER_CLOCK_116.md),
+[legacy spawn ownership](CORE_LEGACY_SPAWN_INFO_116.md), and
+[browser recovery](CORE_BROWSER_RECOVERY_116.md) notes describe the current
+transition fixes and their verification boundaries.
 The [owner radio import guide](RADIO_OWNER_IMPORT.md) covers complete local
 recordings and the separate compatibility/full-recording programme choices.
 
@@ -77,6 +81,12 @@ python3 smoke_host.py
 python3 smoke_public_source.py
 python3 check_public_source.py
 ```
+
+On macOS with Xcode, `python3 smoke_core_116.py` runs the portable native source
+regressions without game assets. Full SDK builds and actual gameplay tests are
+separate checks.
+After building the host transport, add `--with-transport` to include the full
+client/adapter lifecycle gate.
 
 The GitHub workflow runs source/history checks and synthetic hosting tests on
 Linux. Full gameplay and native fixtures additionally require your local archive;

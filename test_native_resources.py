@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/resources-107'
 SWIFT=['ServerAddress.swift','NativeStockAssetAccess.swift','NativeResourceManifest.swift','NativeResourceStore.swift','NativeResourceSession.swift']
 ANIMATION_SWIFT=['NativeSkeletalActor.swift','NativeActorAnimation.swift','NativeFootAnimation.swift','NativeGunAnimation.swift','NativeSwimAnimation.swift','NativeFlightAnimation.swift','NativeRiderAnimation.swift']
-SERVER=['serve_local.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','native_radio_server.js','radio_streams.js','prepare_native_radio_audio.py','selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
+SERVER=['serve_local.js','browser_recovery_hook.js','browser_recovery.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','native_radio_server.js','radio_streams.js','prepare_native_radio_audio.py','selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
 REQUIRED=['game/world/index.json','game/native/models/index.json','game/native/vehicles.physics.json','game/native/foot-animation.json','game/native/models/animations.clips.bin','game/native/weapons.json','game/native/seating.json','game/native/riders.json']
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()

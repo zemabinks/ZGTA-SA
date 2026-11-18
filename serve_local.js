@@ -6,6 +6,7 @@ const https = require('https');
 const path = require('path');
 const crypto = require('crypto');
 const {pipeline} = require('stream/promises');
+const browserRecoveryHook = require('./browser_recovery_hook');
 
 const ROOT = path.join(__dirname, 'local-only', 'site');
 const LOCAL_ONLY = path.join(__dirname, 'local-only');
@@ -336,6 +337,12 @@ function serve(req, res) {
       (pathname === '/' || pathname === '/index.html' ||
         req.headers['sec-fetch-dest'] === 'document'))
     localGame.ensurePlayer(req, res);
+  if (SELFHOST && pathname === '/local-browser-recovery.js' && ['GET','HEAD'].includes(req.method)) {
+    const content=fs.readFileSync(path.join(__dirname,'browser_recovery.js'));
+    res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8',
+      'Content-Length':content.length,'Cache-Control':'no-store'});
+    return res.end(req.method==='HEAD'?undefined:content);
+  }
   if (SELFHOST && pathname === '/local-gameplay.js' && req.method === 'GET') {
     const content = fs.readFileSync(path.join(__dirname, 'local_gameplay.js'));
     res.writeHead(200, {'Content-Type': 'text/javascript; charset=utf-8',
@@ -385,12 +392,21 @@ function serve(req, res) {
       const html = fs.readFileSync(filename, 'utf8');
       const gamePage = ['/', '/ru', '/es', '/pt', '/tr'].includes(decoded);
       const content = Buffer.from(gamePage ? html
-        .replace('<head>', '<head>' + SELFHOST_TIPS_SCRIPT)
+        .replace('<head>', '<head>' + (SELFHOST?'<script src="/local-browser-recovery.js"></script>':'') + SELFHOST_TIPS_SCRIPT)
         .replace('</body>', COMMUNITY_SCRIPT + GAMEPLAY_SCRIPT + '</body>') : html);
       res.setHeader('Content-Type', type);
       res.setHeader('Content-Length', content.length);
       res.setHeader('Accept-Ranges', 'none');
       return res.end(req.method === 'HEAD' ? undefined : content);
+    }
+    if(SELFHOST&&/^9737\.[a-f0-9]+\.js$/.test(path.basename(filename))){
+      try{
+        if(stat.size>32*1024*1024)throw Error('Browser recovery: local client is too large.');
+        const content=Buffer.from(browserRecoveryHook.instrument(fs.readFileSync(filename,'utf8')));
+        res.writeHead(200,{'Content-Type':type,'Content-Length':content.length,'Cache-Control':'no-store'});
+        return res.end(req.method==='HEAD'?undefined:content);
+      }catch(error){res.writeHead(503,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'});
+        return res.end('Local browser recovery adapter unavailable. '+error.message);}
     }
     let start = 0, end = stat.size - 1;
     const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');

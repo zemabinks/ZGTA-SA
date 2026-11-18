@@ -86,6 +86,11 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
         client.onStatus = { [weak self]in self?.onStatus?($0) }
         func effectiveSkin(_ info:NativeSAMPProtocol.Spawn)->Int{info.customSkin.map(Int.init).flatMap{(20001...30000).contains($0) ? $0:nil} ?? Int(info.skin)}
         client.onClass = { [weak self] info in self?.onEvent?(["t":"class","skin":effectiveSkin(info),"point":NativeSAMPPedCoordinates.feet(info.position),"heading":info.heading]) }
+        client.onSpawnInfo = { [weak self] info in
+            guard let self else{return}
+            self.onEvent?(["t":"spawnInfo","skin":effectiveSkin(info),
+                "selection":self.client.state == .selecting || self.client.state == .spawning])
+        }
         client.onSpawn = { [weak self] info in
             guard let self else{return};self.point=NativeSAMPPedCoordinates.feet(info.position);self.lastDeath=false
             let generation=self.client.gameplayGeneration

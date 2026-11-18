@@ -341,6 +341,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var carriageSpeed:Float {if case .carriage(let value)=source{return value};return 0}
     }
     private var lastRiderDraw: Double = 0
+    private var riderPoseClock=NativeRiderPoseClock()
+    private var riderMonotonicNow:()->Double={ProcessInfo.processInfo.systemUptime}
     struct FlightAudioVoice {var id:String;var sound:String;var position:SIMD3<Float>;var thrust:Float}
     private(set) var flightAudioVoices:[FlightAudioVoice]=[]
     private var flightCanopyMesh:Mesh?
@@ -1205,7 +1207,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if acceptedStreamRay?.weapon != equippedWeapon || !weaponTriggerHeld || !weaponReady || weaponReloading ||
             health<=0 || driving || swimming || climb != nil {acceptedStreamRay=nil}
     }
-    func resetDisplayClock() {renderClock.reset()}
+    func resetDisplayClock() {renderClock.reset();riderPoseClock.reset(at:riderMonotonicNow())}
     var hasNativeFootWeaponTiming:Bool {
         guard footAnimator != nil,let definition=footWeaponDefinitions[equippedWeapon],
               ["gun","stream","launch","throw"].contains(definition.use ?? ""),climb==nil,!driving,!swimming,!personalFlight.chuting else{return false}
@@ -2423,11 +2425,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// exits may still call exitVehicle directly (death/teleport/disconnect).
     @discardableResult func beginVehicleExit(onReady:@escaping()->Void)->Bool {
         guard driving,pendingVehicleExit==nil,pendingExitPlacement==nil,let playback=ownRiderPlayback,playback.inside else{return pendingVehicleExit != nil || pendingExitPlacement != nil}
-        pendingVehicleExit=onReady;ownRiderFeet=nil
+        let serial=vehicleExitSerial
+        pendingVehicleExit = { [weak self,weak playback] in
+            guard let self,let playback,self.vehicleExitSerial==serial,self.driving,self.ownRiderPlayback === playback else{return}
+            onReady()
+        }
+        ownRiderFeet=nil
         let seats=riderDefinitions?.models[activeVehicleModel]?.seats
         let part=seats.flatMap{$0.indices.contains(passengerSeat ?? 0) ? $0[passengerSeat ?? 0].door:nil}
         let leaveOpen=isPassenger ? Self.sharedDoorOpen(part,damage:passengerFrame?.vehicle.damage ?? "") : part.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
-        playback.leave(side:ownRiderSide,leaveOpen:leaveOpen)
+        playback.leave(at:riderMonotonicNow(),side:ownRiderSide,leaveOpen:leaveOpen)
         return true
     }
 
@@ -2622,7 +2629,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         remoteFootAnimations.removeAll();remoteBikeAnimations.removeAll()
         remoteBikeSamples.removeAll();remoteBikeFrames.removeAll()
         flightCanopyPoses.removeAll();flightCanopyLanded.removeAll();flightAudioVoices.removeAll()
-        lastRiderDraw=0;remoteServerTimeOffsetMilliseconds=nil
+        lastRiderDraw=0;riderPoseClock.reset();remoteServerTimeOffsetMilliseconds=nil
         weaponEffects.clear();particleEffects?.clear();blasts.removeAll();gameCamera.cancelShake()
     }
 
@@ -4123,9 +4130,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
         remoteSuspensionRayBudget = 64
-        let riderTime = ProcessInfo.processInfo.systemUptime
+        let riderTime = riderMonotonicNow()
         let riderDelta = lastRiderDraw > 0 ? min(0.1,max(0,riderTime-lastRiderDraw)) : 0
         lastRiderDraw = riderTime
+        let riderPoseInterval=riderPoseClock.interval(at:riderTime,
+            active:UIApplication.shared.applicationState == .active && view.window != nil)
         let riderIDs = Set(remotePlayers.filter { Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) || $0.ridingVehicleID != nil }.map(\.id))
         remoteRiderAnimations = remoteRiderAnimations.filter { riderIDs.contains($0.key) }
         remoteRiderPlayback=remoteRiderPlayback.filter{riderIDs.contains($0.key)}
@@ -4162,9 +4171,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 let sourceSeat=definition.seats[seat]
                 if ownRiderPlayback==nil,let playback=NativeRiderPlayback(definition:definition,seat:seat,library:library) {
                     ownRiderSide=sourceSeat.side==0 ? 1:sourceSeat.side
-                    playback.enter(side:ownRiderSide,doorOpen:Self.sharedDoorOpen(sourceSeat.door,damage:frame.vehicle.damage) ? 1:0);ownRiderPlayback=playback
+                    playback.enter(at:riderTime,side:ownRiderSide,doorOpen:Self.sharedDoorOpen(sourceSeat.door,damage:frame.vehicle.damage) ? 1:0);ownRiderPlayback=playback
                 }
-                if let sample=ownRiderPlayback?.update(delta:riderDelta,input:.init(dead:health<=0)) {
+                if let sample=ownRiderPlayback?.update(interval:riderPoseInterval,input:.init(dead:health<=0)) {
                     if let capture=sample.capture {
                         switch capture {
                         case .current:ownRiderCapture=ownRiderPrevious
@@ -4220,10 +4229,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         if ownRiderPlayback==nil,let playback=NativeRiderPlayback(definition:definition,library:library) {
                             let near=car.inverse*SIMD4(entryOrigin,1);ownRiderSide=near.x<0 ? -1:1
                             let door=sourceSeat.door.map{groundVehicle?.damageController?.state.isOpen($0) ?? false} ?? false
-                            if time>3{playback.sit()}else{playback.enter(side:ownRiderSide,doorOpen:door ? 1:0)}
+                            if time>3{playback.sit(at:riderTime)}else{playback.enter(at:riderTime,side:ownRiderSide,doorOpen:door ? 1:0)}
                             ownRiderPlayback=playback
                         }
-                        if let frame=ownRiderPlayback?.update(delta:riderDelta,input:input) {
+                        if let frame=ownRiderPlayback?.update(interval:riderPoseInterval,input:input) {
                             if let capture=frame.capture {
                                 switch capture {
                                 case .current:ownRiderCapture=ownRiderPrevious
@@ -4296,12 +4305,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     if remoteRiderActions[player.id] != action {
                         remoteRiderActions[player.id]=action
                         switch action {
-                        case 1,3:playback.enter(side:action==1 ? -1:1)
-                        case 2,4:playback.leave(side:action==2 ? -1:1,leaveOpen:sourceSeat.door.map{NativeVehicleDamage.decode(shared.vehicle.damage)?.open[$0] ?? false} ?? false)
-                        default:if playback.state != .entering{playback.sit()}
+                        case 1,3:playback.enter(at:riderTime,side:action==1 ? -1:1)
+                        case 2,4:playback.leave(at:riderTime,side:action==2 ? -1:1,leaveOpen:sourceSeat.door.map{NativeVehicleDamage.decode(shared.vehicle.damage)?.open[$0] ?? false} ?? false)
+                        default:if playback.state != .entering{playback.sit(at:riderTime)}
                         }
                     }
-                    if let frame=playback.update(delta:riderDelta,input:input) {
+                    if let frame=playback.update(interval:riderPoseInterval,input:input) {
                         if let capture=frame.capture {
                             switch capture {
                             case .current:remoteRiderCapture[player.id]=remoteRiderPrevious[player.id]
@@ -4383,12 +4392,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 if remoteRiderActions[player.id] != action {
                     remoteRiderActions[player.id]=action
                     switch action {
-                    case 1,3,5,6:playback.enter(side:action==1 || action==5 ? -1:1,jack:action==5 || action==6)
-                    case 2,4:playback.leave(side:action==2 ? -1:1,leaveOpen:sourceSeat.door.map{NativeVehicleDamage.decode(player.vehicleDamage)?.open[$0] ?? false} ?? false)
-                    default:if playback.state != .entering{playback.sit()}
+                    case 1,3,5,6:playback.enter(at:riderTime,side:action==1 || action==5 ? -1:1,jack:action==5 || action==6)
+                    case 2,4:playback.leave(at:riderTime,side:action==2 ? -1:1,leaveOpen:sourceSeat.door.map{NativeVehicleDamage.decode(player.vehicleDamage)?.open[$0] ?? false} ?? false)
+                    default:if playback.state != .entering{playback.sit(at:riderTime)}
                     }
                 }
-                if let frame=playback.update(delta:riderDelta,input:input) {
+                if let frame=playback.update(interval:riderPoseInterval,input:input) {
                     if let capture=frame.capture {
                         switch capture {
                         case .current:remoteRiderCapture[player.id]=remoteRiderPrevious[player.id]

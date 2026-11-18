@@ -716,35 +716,43 @@
   }
   async function refresh() {
     if (busy) return;
+    const recovery=globalThis.ZGTABrowserRecovery,grant=recovery?.captureActionGrant();
+    if(grant===null)return;
     try {
       const response = await fetch('/api/local/state', {credentials: 'same-origin'});
       if (!response.ok) throw new Error(`Could not load local state (${response.status}).`);
       const next = await response.json();
+      if(recovery&&!recovery.isActionGrantCurrent(grant))return;
       if (JSON.stringify(next) !== JSON.stringify(state)) {
         state = next;
         render();
         renderObjective();
       }
       maybeAutoCheckpoint();
-    } catch (failure) { result = failure.message; error = true; render(); }
+    } catch (failure) { if(!recovery||recovery.isActionGrantCurrent(grant)){result = failure.message; error = true; render();} }
   }
   async function perform(action, payload) {
     if (busy) return;
+    const recovery=globalThis.ZGTABrowserRecovery,grant=recovery?.captureActionGrant();
+    const owns=()=>!recovery||recovery.isActionGrantCurrent(grant);
     busy = true;
     try {
+      if(grant===null)throw Error('Wait for the server placement before using local actions.');
       const response = await fetch('/api/local/action', {method: 'POST', credentials: 'same-origin',
-        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({action, ...payload})});
+        headers: {'Content-Type': 'application/json',...(grant&&!grant.legacy?{
+          'X-ZGTA-Browser-Connection':grant.connection,'X-ZGTA-Browser-Revision':String(grant.revision)}:{})},
+        body: JSON.stringify({action, ...payload})});
       const body = await response.json();
+      if(!owns())return;
       if (!response.ok) throw new Error(body.error || `Action failed (${response.status}).`);
       state = body.state;
       result = body.message;
       error = false;
       if (action === 'party.chat') partyDraft = '';
-    } catch (failure) { result = failure.message; error = true; }
-    busy = false;
-    render();
-    renderObjective();
+    } catch (failure) { if(owns()||grant===null){result = failure.message; error = true;} }
+    finally {busy = false;render();renderObjective();}
   }
+
   function toggle(next) {
     visible = next;
     shade.dataset.open = String(next);

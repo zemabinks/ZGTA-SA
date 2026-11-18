@@ -482,6 +482,11 @@ class LocalGame {
       validFoot:(player,value)=>this.validPlacementFoot(player,value),
       validTarget:(player,value)=>this.validPlacementTarget(player,value),
     });
+    this.browserPlacement=PlayerPlacement.createBrowser({
+      isCurrent:peer=>this.peers.has(peer)&&peer.ready&&!peer.closed,
+      select:player=>this.placement.select(player),
+      validFoot:(player,value)=>this.validPlacementFoot(player,value),
+    });
     this.coupling=VehicleCoupling?.create(couplingCatalog) || null;
     this.nextVehicle = 1;
     this.race = null;
@@ -705,8 +710,9 @@ class LocalGame {
   }
 
   sendTeleport(peer,packet,options) {
-    if(!peer.positionAckEnabled){peer.send(packet);return;}
-    const wire=this.placement.issue(peer,packet,options);
+    if(!peer.positionAckEnabled&&!peer.browserRecoveryEnabled){peer.send(packet);return;}
+    const wire=peer.positionAckEnabled?this.placement.issue(peer,packet,options):
+      this.browserPlacement.issue(peer,packet,options);
     this.terminalVehicleReports.delete(peer);
     for(const claim of this.vehicleClaims.values())if(claim.peer===peer)
       this.releaseVehicleClaim(claim,{removeActor:claim.driving});
@@ -1135,6 +1141,23 @@ class LocalGame {
     }
     if (changed) this.save();
     reply();
+  }
+
+  requestBrowserActionPeer(req,player) {
+    const connection=req.headers['x-zgta-browser-connection'],revision=req.headers['x-zgta-browser-revision'];
+    const peers=[...this.peers].filter(peer=>peer.player===player&&peer.ready&&!peer.closed&&peer.browserRecoveryEnabled);
+    if(connection===undefined&&revision===undefined){
+      if(peers.length)throw Error('Wait for the current browser placement before using local actions.');
+      return null; // Genuine unnegotiated legacy behavior is unchanged.
+    }
+    if(req.headers['x-zgta-inventory-connection']!==undefined||typeof connection!=='string'||
+      typeof revision!=='string'||!/^(0|[1-9][0-9]{0,15})$/.test(revision))
+      throw Error('Invalid browser action placement.');
+    const envelope={connection,revision:Number(revision)};
+    const peer=peers.find(value=>this.browserPlacement.matches(value,envelope));
+    if(!peer||!this.browserPlacement.state(peer)?.applied||peer.player.health<=0)
+      throw Error('Browser action belongs to an unavailable or replaced placement.');
+    return peer;
   }
 
   gameplayState(player,inventoryPeer=null) {
@@ -3075,14 +3098,16 @@ class LocalGame {
       catch (error) {return json(res,409,{error:error.message});}
     }
     if (url.pathname === '/api/local/action' && req.method === 'POST') {
-      try {this.requestInventoryPeer(req,player);}
+      let browserPeer;
+      try {this.requestInventoryPeer(req,player);browserPeer=this.requestBrowserActionPeer(req,player);}
       catch (error) {return json(res,409,{error:error.message});}
       try {
         const body = await readBody(req, 2048);
         // The peer can disconnect while the HTTP body is being received.
         // Validate again before mutating an account or inventory.
         let peer;
-        try {peer=this.requestInventoryPeer(req,player);}
+        try {peer=this.requestInventoryPeer(req,player);
+          if(this.requestBrowserActionPeer(req,player)!==browserPeer)throw Error('Browser connection changed during this action.');}
         catch (error) {return json(res,409,{error:error.message});}
         const result=this.action(player,body.action,body);
         result.state.weaponInventory=this.inventoryState(player,peer);
@@ -3161,6 +3186,24 @@ class LocalGame {
     if (!message || typeof message !== 'object') return;
     if(!this.peers.has(peer) || peer.closed)return;
     if(message.t==='me'&&peer.positionAckEnabled&&!this.placement.matches(peer,message.placement))return;
+    if(peer.browserRecoveryEnabled&&message.t!=='hi'&&message.t!=='ping'){
+      if(message.t==='browserPlacementRequest'){
+        if(this.browserPlacement.matches(peer,message.browserPlacement)){
+          const packet=this.browserPlacement.packet(peer);if(packet)peer.send(packet);
+        }return;
+      }
+      const session=this.browserPlacement.state(peer);
+      if(!session)return;
+      if(!session.applied){
+        if(message.t!=='me')return;
+        if(!this.browserPlacement.canAdmit(peer,message)){
+          if(this.browserPlacement.matches(peer,message.browserPlacement)&&message.walking===true&&
+            message.driving!==true&&message.air!==true)peer.send({t:'browserPlacement',accepted:false,
+              browserPlacement:this.browserPlacement.view(peer)});
+          return;
+        }
+      }else if(message.t==='me'&&!this.browserPlacement.matches(peer,message.browserPlacement))return;
+    }
     this.pruneVehicleClaims();
     const terminalCompleted=message.t==='me' && this.completeTerminalVehicleReport(peer,message)===true;
     if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
@@ -3182,7 +3225,12 @@ class LocalGame {
     }
     if (message.t === 'hi') {
       const wasReady=peer.ready;
-      if(!peer.positionAckEnabled)peer.player.insideHome = null;
+      if(peer.browserRecoveryEnabled&&(message.nativeInventory===true||message.inventoryAck===1||
+        message.healthAck===1||message.positionAck===1)){peer.close();return;}
+      if(!wasReady&&message.browserRecovery===1&&message.nativeInventory!==true&&
+        message.inventoryAck!==1&&message.healthAck!==1&&message.positionAck!==1)
+        peer.browserRecoveryEnabled=true;
+      if(!peer.positionAckEnabled&&!peer.browserRecoveryEnabled)peer.player.insideHome = null;
       peer.inventoryEnabled = peer.inventoryEnabled || message.nativeInventory === true;
       if (peer.inventoryEnabled && message.inventoryAck===1) {
         peer.inventoryAckEnabled=true;
@@ -3199,15 +3247,23 @@ class LocalGame {
         peer.positionAckEnabled=true;
       peer.ready = true;
       const placement=peer.positionAckEnabled?this.placement.begin(peer):null;
+      const browserPlacement=peer.browserRecoveryEnabled?this.browserPlacement.begin(peer):null;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
-        spot: placement?.spot || [1480, -1738, 13, 0],
+        spot: placement?.spot || (browserPlacement?this.browserPlacement.state(peer).target.spot:[1480, -1738, 13, 0]),
         life: [peer.player.health, peer.player.armour],...this.healthState(peer), out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0,
         ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {}),
         ...(placement?{positionAck:1,placement:placement.placement}:{}),
+        ...(browserPlacement?{browserRecovery:1,browserPlacement}:{}),
         ...(peer.couplingAckEnabled?{couplingAck:1}:{})});
       if(peer.couplingAckEnabled)peer.send({t:'couplings',state:this.coupling.snapshot()});
+      // The normal teleport must release the old registered controller before
+      // the baseline reconciles parked vehicles. Otherwise the archive demotes
+      // that still-active body to local freeplay, which ordinary rows retain.
+      // Client admission still waits for a valid baseline and a genuine report.
+      if(browserPlacement&&!wasReady){const packet=this.browserPlacement.packet(peer);if(packet)peer.send(packet);
+        else peer.send({t:'note',text:'Reconnect placement refused: the server character is dead.'});}
       peer.send(this.fullState(peer));
       peer.send({t:'flightgear',...(peer.player.flightGear || {})});
       if (peer.player.flightGear?.parachute || peer.player.flightGear?.jetpack)
@@ -3379,6 +3435,15 @@ class LocalGame {
       }
       this.finishVehicleReport(peer,message,vehicleChange);
       if(peer.positionAckEnabled&&this.placement.observe(peer,message))this.save();
+      if(peer.browserRecoveryEnabled){
+        const pending=!this.browserPlacement.state(peer)?.applied;
+        if(this.browserPlacement.observe(peer,message)){
+          if(this.browserPlacement.state(peer).changed)this.save();
+          if(pending)peer.send({t:'browserPlacement',accepted:true,
+            browserPlacement:this.browserPlacement.view(peer)});
+        }else if(pending)peer.send({t:'browserPlacement',accepted:false,
+          browserPlacement:this.browserPlacement.view(peer)});
+      }
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
     }

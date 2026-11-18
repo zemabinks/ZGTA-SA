@@ -97,4 +97,64 @@ function create({isCurrent,validFoot,validTarget,now=()=>Date.now()}={}){
   }
   return{begin,hello,envelope,matches,issue,canIssue,observe,select,snapshot:saved};
 }
-module.exports={DEFAULT_SPOT,normalize,create};
+// Browser recovery is a distinct, explicitly negotiated admission policy.
+const browserSources=new Set(['spawn','respawn','home.enter','home.exit','home.visit','pilot','passenger']);
+const browserEnvelope=v=>v&&typeof v==='object'&&!Array.isArray(v)&&typeof v.connection==='string'&&
+  /^[A-Za-z0-9_-]{24}$/.test(v.connection)&&Number.isSafeInteger(v.revision)&&v.revision>=0;
+function createBrowser({isCurrent,select,validFoot,now=()=>Date.now(),nonce=()=>require('node:crypto').randomBytes(18).toString('base64url')}={}){
+  const current=peer=>!!(peer?.browserRecoveryEnabled&&isCurrent(peer)&&peer.browserPlacement);
+  const state=peer=>current(peer)?peer.browserPlacement:null;
+  function view(peer){const s=state(peer);return s?{connection:s.connection,revision:s.revision}:null;}
+  function begin(peer){
+    if(peer.browserPlacement)return view(peer);
+    const target=select(peer.player),connection=nonce();
+    if(!browserEnvelope({connection,revision:0}))throw Error('Invalid browser placement namespace.');
+    peer.browserPlacement={connection,revision:0,target,applied:false};
+    peer.player.insideHome=target.home;return view(peer);
+  }
+  function matches(peer,value){const expected=view(peer);return !!expected&&browserEnvelope(value)&&
+    value.connection===expected.connection&&value.revision===expected.revision;}
+  function packet(peer){const s=state(peer);if(!s||peer.player.health<=0)return null;
+    return{t:'tp',x:s.target.spot[0],y:s.target.spot[1],z:s.target.spot[2],
+      h:s.target.spot[3]*180/Math.PI,g:1,browserPlacement:view(peer)};}
+  function issue(peer,wire,{source,home=null,context=null}={}){
+    const s=state(peer);
+    if(!s||s.revision===Number.MAX_SAFE_INTEGER||!browserSources.has(source)||
+      ![wire.x,wire.y,wire.z,wire.h].every(Number.isFinite))throw Error('Invalid browser placement.');
+    const intent={spot:[wire.x,wire.y,wire.z,wire.h*Math.PI/180],home,context,source,updatedAt:now()};
+    const saved=normalize({version:1,intent});
+    if(!saved.intent)throw Error('Invalid browser placement target.');
+    peer.player.reconnectPlacement=normalize(peer.player.reconnectPlacement);
+    peer.player.reconnectPlacement.intent=saved.intent;
+    s.target=saved.intent;s.revision++;s.applied=false;
+    return{...wire,browserPlacement:view(peer)};
+  }
+  function foot(peer,report){
+    if(!matches(peer,report?.browserPlacement)||peer.player.health<=0||report.walking!==true||
+      report.driving===true||report.passenger===true||report.riding||report.on||report.vehicle||
+      !Number.isFinite(report.health)||report.health<=0||report.air===true||
+      ![report.x,report.y,report.z,report.heading].every(Number.isFinite))return null;
+    const target={spot:[report.x,report.y,report.z,report.heading],home:peer.player.insideHome||null,
+      context:null,source:'foot',updatedAt:now()};
+    try{return validFoot(peer.player,target)?target:null;}catch{return null;}
+  }
+  function canAdmit(peer,report){const s=state(peer),target=foot(peer,report);if(!s||!target)return false;
+    // Independent bounded arrival policy, not an original-game movement constant.
+    return Math.hypot(target.spot[0]-s.target.spot[0],target.spot[1]-s.target.spot[1])<=2&&
+      Math.abs(target.spot[2]-s.target.spot[2])<=3;
+  }
+  function observe(peer,report){
+    const s=state(peer),target=foot(peer,report);if(!s||!target||(!s.applied&&!canAdmit(peer,report)))return false;
+    const saved=normalize(peer.player.reconnectPlacement);s.changed=false;
+    // Same restrictions as the existing idle-foot checkpoint policy.
+    if(report.crouch!==true&&(report.act??0)===0){
+      s.changed=!!saved.intent||!saved.foot||saved.foot.home!==target.home||
+        saved.foot.spot.some((n,i)=>!Object.is(n,target.spot[i]));
+      if(s.changed){saved.foot=target;saved.intent=null;peer.player.reconnectPlacement=saved;}
+    }
+    s.applied=true;return true;
+  }
+  return{begin,view,matches,packet,issue,canAdmit,observe,state};
+}
+
+module.exports={DEFAULT_SPOT,normalize,create,createBrowser};

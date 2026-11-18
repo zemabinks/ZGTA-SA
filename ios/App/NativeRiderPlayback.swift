@@ -1,6 +1,38 @@
 import Foundation
 import simd
 
+/// Successful pose draws own these intervals; this is not the gameplay clock.
+/// Rejection remains distinct from valid zero (which may consume empty phases).
+struct NativeRiderPoseClock {
+    enum Admission {case elapsed(Double),rejected(Double)}
+    struct Interval {
+        let start:Double,end:Double,rejection:Double?
+        var canPrime:Bool{rejection == nil && start.isFinite && end.isFinite && end>=start && end-start<=0.5}
+        func admission(commandAt:Double)->Admission {
+            if let rejection{return .rejected(rejection)}
+            guard canPrime,commandAt.isFinite else{return .rejected(.nan)}
+            let delta=end-max(start,commandAt)
+            guard delta>=0,delta<=0.5 else{return .rejected(delta)}
+            return .elapsed(delta)
+        }
+    }
+    private var previous:Double?
+    private var wasActive=false
+    mutating func reset(at time:Double?=nil){
+        if let time,time.isFinite{previous=time;wasActive=true}
+        else{previous=nil;wasActive=false}
+    }
+    mutating func interval(at time:Double,active:Bool)->Interval {
+        guard time.isFinite else{reset();return .init(start:0,end:0,rejection:.nan)}
+        let before=previous;previous=time
+        guard active else{wasActive=false;return .init(start:time,end:time,rejection:.nan)}
+        let start=wasActive ? before ?? time:time;wasActive=true
+        guard time>=start else{return .init(start:start,end:time,rejection:time-start)}
+        guard time-start<=0.5 else{return .init(start:start,end:time,rejection:time-start)}
+        return .init(start:start,end:time,rejection:nil)
+    }
+}
+
 /// Public bA phase plans and 0.25 s pose transitions. Ordinary elapsed time
 /// carries across phase boundaries instead of rounding every phase to a frame.
 /// A capture names the exact raw phase-end pose, not the preceding display.
@@ -32,6 +64,7 @@ final class NativeRiderPlayback {
     private var part:Int?,opening:Double=0
     private var capture:Capture?
     private var serial=0
+    private var timedCommandAt:Double?
     private(set) var state:State = .out
     init?(definition:NativeRiderDefinitions.Definition,seat:Int=0,library:NativeSkeletalAnimationLibrary){
         guard let configuration=Self.configuration(definition,seat:seat) else{return nil}
@@ -45,8 +78,9 @@ final class NativeRiderPlayback {
         let point=model*SIMD4(SIMD3<Float>(at),1)
         return SIMD3(point.x,point.y,point.z)
     }
-    func sit(){queue=[];phase=nil;state = .inside;capture=nil;transition=1;turn=definition.seats[configuration.seat].turn ?? 0}
+    func sit(){timedCommandAt=nil;queue=[];phase=nil;state = .inside;capture=nil;transition=1;turn=definition.seats[configuration.seat].turn ?? 0}
     func enter(side:Int = -1,jack:Bool=false,doorOpen:Double=0){
+        timedCommandAt=nil
         let plan=planner.enter(configuration,side:side,jack:jack,doorOpen:doorOpen)
         anchor=plan.anchor;queue=plan.phases;phase=queue.isEmpty ? nil:queue.removeFirst();elapsed=0
         state=phase==nil ? .inside:.entering;transition=0;serial+=1
@@ -54,9 +88,42 @@ final class NativeRiderPlayback {
         seated=NativeRiderAnimation(duration:duration)
     }
     func leave(side:Int = -1,leaveOpen:Bool=false){
+        timedCommandAt=nil
         let plan=planner.leave(configuration,side:side,leaveOpen:leaveOpen)
         anchor=plan.anchor;queue=plan.phases;phase=queue.isEmpty ? nil:queue.removeFirst();elapsed=0
         state=phase==nil ? .stood:.leaving;transition=0;serial+=1;capture = .current
+    }
+    /// Callers inject one monotonic domain. Commands observed inside a pose
+    /// draw use its timestamp; an input command between draws uses its own time.
+    func sit(at time:Double){sit();timedCommandAt=time}
+    func enter(at time:Double,side:Int = -1,jack:Bool=false,doorOpen:Double=0){
+        enter(side:side,jack:jack,doorOpen:doorOpen);timedCommandAt=time
+    }
+    func leave(at time:Double,side:Int = -1,leaveOpen:Bool=false){
+        leave(side:side,leaveOpen:leaveOpen);timedCommandAt=time
+    }
+    func update(interval:NativeRiderPoseClock.Interval,input:NativeRiderAnimation.Input)->Frame? {
+        // An untimed caller switching to this adapter starts here, never at an
+        // old global draw. The direct delta API below retains its own contract.
+        if timedCommandAt == nil,interval.canPrime{timedCommandAt=interval.end}
+        switch interval.admission(commandAt:timedCommandAt ?? .nan) {
+        case .rejected:return update(delta:.nan,input:input)
+        case .elapsed(let delta):
+            if delta<=0.1{return update(delta:delta,input:input)}
+            let count=min(5,max(1,Int(ceil(delta/0.1))))
+            var final:Frame?,lastCapture:Capture?,released:(Int,Double)?
+            for index in 0..<count {
+                let step=min(0.1,max(0,delta-Double(index)*0.1))
+                if step==0{continue}
+                guard let frame=update(delta:step,input:input) else{continue}
+                final=frame
+                if let capture=frame.capture{lastCapture=capture}
+                if let release=frame.releasedDoor{released=release}
+            }
+            guard var frame=final else{return nil}
+            frame.capture=lastCapture;frame.releasedDoor=released
+            return frame
+        }
     }
     func update(delta dt:Double,input:NativeRiderAnimation.Input)->Frame? {
         guard state != .out else{return nil}

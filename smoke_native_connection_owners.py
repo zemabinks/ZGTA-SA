@@ -45,6 +45,8 @@ final class DamageOwner {var resets=0;func reset(){resets+=1}}
 final class Renderer {
  var displayResets=0
  func resetDisplayClock(){displayResets+=1}
+ var actorSelectionCancels=0
+ func cancelActorSelection(){actorSelectionCancels+=1}
  var legacyWorldClears=0
  func clearLegacyWorld(){legacyWorldClears+=1;ownerCalls.append("legacy-world-clear")}
  var networkInterior:Int?=3,actorEffectResets=0
@@ -73,6 +75,7 @@ final class Renderer {
  var remoteFootAnimations=["old":1],remoteBikeAnimations=["old":1],remoteBikeSamples=["old":1],remoteBikeFrames=["old":1]
  var flightCanopyPoses=["own":1],flightCanopyLanded=["own":1],flightAudioVoices=[1]
  var lastRiderDraw:Double=123,remoteServerTimeOffsetMilliseconds:Double?=456
+ var riderPoseClock=Clock()
  func synchronizeProjectiles(_ rows:[Int]){projectileRows=rows}
  func cancelReloadAnimation(){reloadCancelled=true}
  func teleport(x:Float,y:Float,z:Float,direction:Float?=nil){camera=SIMD3(x,y,z);if let direction {self.heading=direction};resets+=1}
@@ -104,6 +107,8 @@ enum NativeMultiplayerClient {typealias ConnectionState=NativeConnectionRecovery
 final class Game:Parent {
  let idleOwner=UUID();var gameStopped=false
  var applicationActive=true,pauseEscapeHandoff:Handoff?=Handoff()
+ var legacyClassSkin:Int?
+ func updateLegacyClassAdmission(){}
  let originalEffects=NativeOriginalWorldEffects();var originalExitToken:UInt64?=17
  var legacyDialog:LegacyDialog?=LegacyDialog(),legacyOverlay:LegacyOverlay?=LegacyOverlay(),legacySelection=true
  var legacyArtwork:Artwork?=Artwork()
@@ -149,6 +154,7 @@ check(world.passengerSeat==nil && world.passengerFrame==nil && world.passengerAc
 check(world.remoteFootAnimations.isEmpty && world.remoteBikeAnimations.isEmpty && world.remoteBikeSamples.isEmpty && world.remoteBikeFrames.isEmpty,"same-id remote ped reused old animation samples")
 check(world.flightCanopyPoses.isEmpty && world.flightCanopyLanded.isEmpty && world.flightAudioVoices.isEmpty,"own landed canopy or old flight audio survives new world")
 check(world.lastRiderDraw==0 && world.remoteServerTimeOffsetMilliseconds==nil,"old animation/server clock survives")
+check(world.riderPoseClock.resets>0,"old rider pose interval survives session reset")
 check(world.weaponEffects.clears==1 && world.particleEffects!.clears==1 && world.blasts.isEmpty,"old fires, particles, stream or blasts survive new world")
 check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")

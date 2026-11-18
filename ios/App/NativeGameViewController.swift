@@ -48,6 +48,7 @@ final class NativeGameViewController: UIViewController {
     private var legacyCrouchUntil:Double=0
     private var legacyArtwork:NativeSAMPArtworkSession?
     private var legacyClassSkin:Int?
+    private var legacyClassPresentation:UUID?
     private let originalEffects=NativeOriginalWorldEffects()
     private var originalExitToken:UInt64?
 
@@ -1286,6 +1287,8 @@ final class NativeGameViewController: UIViewController {
         case "class":
             if let skin=event["skin"]as?Int{renderer?.setLegacySkin(skin)}
             showLegacyClass(skin:event["skin"]as?Int ?? 7)
+        case "spawnInfo":
+            if let skin=event["skin"]as?Int{refreshLegacySpawnInfo(skin:skin,selection:event["selection"]as?Bool==true)}
         case "sampGameplay":
             guard let command=event["event"]as?NativeSAMPGameplayCommands.Event else{return}
             renderer?.receiveLegacyGameplay(command)
@@ -1353,14 +1356,18 @@ final class NativeGameViewController: UIViewController {
     }
     private func showLegacyClass(skin:Int){
         legacyClassSkin=skin
+        let presentation=UUID();legacyClassPresentation=presentation
         guard view.window != nil else{return};resetControls()
         let show={ [weak self] in
             guard let self,self.presentedViewController==nil else{return}
-            guard self.legacyClassSkin==skin else{return}
-            let panel=UIAlertController(title:"SELECT CHARACTER",message:self.legacyClassMessage(skin:skin),preferredStyle:.actionSheet)
+            guard self.legacyClassPresentation==presentation,let currentSkin=self.legacyClassSkin else{return}
+            let panel=UIAlertController(title:"SELECT CHARACTER",message:self.legacyClassMessage(skin:currentSkin),preferredStyle:.actionSheet)
             panel.addAction(UIAlertAction(title:"Previous",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"classStep","delta":-1])})
-            let spawn=UIAlertAction(title:"SPAWN",style:.default){[weak self]_ in self?.requestLegacyClassSpawn(skin:skin)}
-            spawn.isEnabled=self.legacyClassCanSpawn(skin:skin)
+            let spawn=UIAlertAction(title:"SPAWN",style:.default){[weak self]_ in
+                guard let self,let current=self.legacyClassSkin else{return}
+                self.requestLegacyClassSpawn(skin:current)
+            }
+            spawn.isEnabled=self.legacyClassCanSpawn(skin:currentSkin)
             panel.addAction(spawn)
             panel.addAction(UIAlertAction(title:"Next",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"classStep","delta":1])})
             panel.addAction(UIAlertAction(title:"Back to servers",style:.cancel){[weak self]_ in self?.dismiss(animated:true)})
@@ -1372,6 +1379,13 @@ final class NativeGameViewController: UIViewController {
     private var legacyClassArtworkReady:Bool {
         guard let phase=legacyArtwork?.status.phase else{return true}
         return phase == .idle || phase == .ready
+    }
+    private func refreshLegacySpawnInfo(skin:Int,selection:Bool){
+        // Only refresh an already owned class choice. Live spawn-data updates
+        // neither replace its actor nor open/dismiss menus or reset controls.
+        guard selection,legacyClassSkin != nil else{return}
+        legacyClassSkin=skin;renderer?.setLegacySkin(skin)
+        updateLegacyClassAdmission()
     }
     private func legacyClassCanSpawn(skin:Int)->Bool {
         legacyClassSkin==skin && renderer?.actorSelectionState?.allowsLegacySpawn(skin:skin,artworkReady:legacyClassArtworkReady)==true

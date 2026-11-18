@@ -102,8 +102,8 @@ for version in [NativeSAMPProtocol.Version.v037,.dl]{
             if version == .dl{w.integer(UInt32(custom),size:4)}
             w.integer(0,size:1);w.vector(SIMD3(1,2,3));w.float(0)}
         let expected=version == .dl && custom>0 ? custom:287
-        check(events.last?["t"]as?String=="class" && events.last?["skin"]as?Int==expected,"Class menu effective custom skin lost")
-        check(events.last?["point"]as?SIMD3<Float>==SIMD3(1,2,2),"Class root not converted to feet")
+        check(events.last?["t"]as?String=="spawnInfo" && events.last?["skin"]as?Int==expected,"Next-spawn effective custom skin lost")
+        check(events.last?["selection"]as?Bool==true && events.last?["point"]==nil,"Spawn metadata became an actor placement")
         client.onSpawn?(.init(team:0,skin:287,customSkin:version == .dl ? Int32(custom):nil,position:SIMD3(1,2,3),heading:0))
         check(events.contains{$0["t"]as?String=="spawn" && $0["skin"]as?Int==expected},"Spawn callback effective custom skin lost")
         check(teleports.last==SIMD3(1,2,2),"Spawn root conversion was lost or doubled")

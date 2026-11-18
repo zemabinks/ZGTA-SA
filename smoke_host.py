@@ -46,7 +46,7 @@ def main():
     assert module.authority('play.example.com') == 'play.example.com'
     with tempfile.TemporaryDirectory(prefix='zgta-host-') as temporary:
         root = Path(temporary)
-        for name in ('host.py', 'serve_local.js', 'native_resource_server.js', 'selfhost_backend.js',
+        for name in ('host.py', 'serve_local.js','browser_recovery_hook.js','browser_recovery.js', 'native_resource_server.js', 'selfhost_backend.js',
                      'optional_discord.js', 'weapon_inventory.js', 'world_collision.js',
                      'local_projectiles.js', 'player_placement.js', 'local_gameplay.js', 'native_radio_server.js',
                      'radio_streams.js', 'prepare_native_radio_audio.py',

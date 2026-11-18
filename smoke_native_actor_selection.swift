@@ -53,6 +53,7 @@ final class ClassPanelOwner {
     let view = View(), status = Label(), network = Network()
     var renderer: AdmissionRenderer? = AdmissionRenderer()
     var legacyArtwork: Artwork?, legacyClassSkin: Int?
+    var legacyClassPresentation: UUID?
     var presentedViewController: Controller?
     var resets = 0
     func resetControls() { resets += 1 }

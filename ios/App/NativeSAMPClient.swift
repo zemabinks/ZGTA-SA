@@ -35,6 +35,9 @@ final class NativeSAMPClient {
     private(set) var controllable=true,spectating=false
     var onStatus:((String)->Void)?
     var onClass:((NativeSAMPProtocol.Spawn)->Void)?
+    /// RPC68 changes the next spawn data; it does not authorize selection or
+    /// respawn a live actor. Keep this separate from accepted RPC128 classes.
+    var onSpawnInfo:((NativeSAMPProtocol.Spawn)->Void)?
     var onSpawn:((NativeSAMPProtocol.Spawn)->Void)?
     var onPosition:((SIMD3<Float>,Float?)->Void)?
     var onHeading:((Float)->Void)?
@@ -208,7 +211,7 @@ final class NativeSAMPClient {
         case 128:
             guard try r.integer(1) != 0 else{onStatus?("CLASS UNAVAILABLE");if let info=spawnInfo{onClass?(info)};return}
             let info=try NativeSAMPProtocol.spawn(&r,version:version);spawnInfo=info;spawnRequested=false;setState(.selecting);onClass?(info)
-        case 68:let info=try NativeSAMPProtocol.spawn(&r,version:version);spawnInfo=info;onClass?(info)
+        case 68:let info=try NativeSAMPProtocol.spawn(&r,version:version);spawnInfo=info;onSpawnInfo?(info)
         case 129:
             let result=try r.integer(1)
             if result==0{spawnRequested=false;setState(.selecting);onStatus?("SPAWN DECLINED");return}

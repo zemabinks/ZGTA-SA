@@ -8,7 +8,7 @@ async function main() {
   const probe=net.createServer();probe.listen(0,'127.0.0.1');await once(probe,'listening');
   const port=probe.address().port;await new Promise(resolve=>probe.close(resolve));
   const local=path.join(temporary,'local-only');fs.mkdirSync(path.join(local,'selfhost'),{recursive:true});
-  for(const file of ['serve_local.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js',
+  for(const file of ['serve_local.js','browser_recovery_hook.js','browser_recovery.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js',
     'local_projectiles.js','native_radio_server.js','radio_streams.js'])fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
   for(const [name,value] of [['client-catalog.json',{vehicles:[],homes:[]}],['weapon-catalog.json',{items:[],shops:[]}]])
     fs.writeFileSync(path.join(local,'selfhost',name),JSON.stringify(value));
