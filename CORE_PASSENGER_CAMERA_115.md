@@ -20,6 +20,12 @@ The retained run passed 65,030 assertions over 24 configurations and 21,600 actu
 
 Offline execution of the retained browser passenger component and camera independently confirmed the input contract. Invented examples produced an 0.8 m eye error from using the driver seat, a 0.2607 m error from omitted roll, and a 0.9318 m eye error from omitted sideslip/spin. Those are source-level numerical counterexamples, not observed retail-game or device measurements.
 
+## Integrated checks
+
+The same App sources passed full iPhone Release and universal Simulator Debug SDK builds. An ordinary-UI Simulator test joined the independent server alongside a real browser driver, approached its occupied Taxi, boarded seat1, verified passenger controls and selected the eye camera through the menu. Direct review of saved rendered images confirms the in-cabin view. Ordinary browser acceleration/steering/braking produced observed body motion while the native peer retained the same seat and vehicle. Normal passenger exit restored foot controls and health100; the browser retained driving authority. A first UI-selector failure before boarding is retained separately and is not counted as acceptance.
+
+Those are bounded Simulator/independent-server observations. They do not establish physical-iPhone passenger-camera behavior, large-roll/spin behavior on hardware, or retail camera parity. The independent numerical camera gate remains separate from live rendering evidence.
+
 ## Limits
 
-The focused gate does not prove rendered pixels, collision queries, live multiplayer timing, retail feel, or cross-schedule camera trajectory equality. Full App SDK compilation and device/Simulator observation remain separate acceptance steps. Remote wheel contact counts are unavailable; the passenger adapter preserves the browser's four-wheel metadata convention. Non-passenger fallback behavior and existing smoothing curves remain unchanged. This correction does not establish 1:1 San Andreas parity.
+The focused gate does not prove rendered pixels, collision queries, live multiplayer timing, retail feel, or cross-schedule camera trajectory equality. The completed SDK/Simulator checks above are separate from the numerical gate; physical-device passenger-camera acceptance remains open. Remote wheel contact counts are unavailable; the passenger adapter preserves the browser's four-wheel metadata convention. Non-passenger fallback behavior and existing smoothing curves remain unchanged. This correction does not establish 1:1 San Andreas parity.
