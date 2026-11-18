@@ -55,8 +55,13 @@ python3 smoke_native_camera_motion.py
 
 The new asset-free gate extracts the production task-entry blocks, climb
 admission, GVC callback/toggle/setter/poll/movement loop, shared predicates and
-camera call. It runs the actual pure swim/flight/climb controllers and camera
-with independently authored metadata. UI, unavailable geometry and unused clip
+camera call. It runs the actual swim/flight controllers and camera, plus the
+literal climb data declarations and initializer used by admission. This aim
+harness does not call climb stepping or probe methods; the separate real
+climb/movement gates retain that coverage. The unused stepping expression
+exhausted an ARM CI compiler constraint budget even with a larger expression
+timeout, so it is excluded from this focused carrier instead of replacing it.
+It uses independently authored metadata. UI, unavailable geometry and unused clip
 durations are explicit test boundaries. It covers 15/30/60/120Hz, scope and
 shoulder aim, shore return, genuine rearming, rejected transitions, eligible
 jetpack, direct render protection and accepted entry/exit inside one outer move.
