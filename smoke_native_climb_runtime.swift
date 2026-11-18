@@ -44,6 +44,7 @@ final class ClimbRuntimeHarness {
     var stamina=NativeStamina(),pendingSprintTap=false
     var verticalSpeed:Float=0
     var onFootWeaponShot:((Int,Bool)->Bool)?
+    var onReloadTaskCancelled:(()->Void)?
     var acceptedStreamShot=false,pendingNativeJump=0.0,pendingSwimJump=false,pendingDive=false
     var acceptedStreamRay:(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>)?
     var pendingParachuteOpen=false,sprintWasHeld=false,personalFlightDown=false,personalFlightBrake=false
@@ -95,6 +96,7 @@ final class ClimbRuntimeHarness {
     }
 
     func emitFootWeaponEventsForTest(_ frame:NativeFootAnimation.Frame,feet:SIMD3<Float>) {emitFootWeaponEvents(frame,feet:feet)}
+    func attemptClimbForTest()->Bool {beginClimb(state:character!.state,extended:true)}
     // ACTUAL_RENDERER_METHODS
 
     @discardableResult func frame(_ delta:Double,forward:Float=0,sideways:Float=0)->NativeCharacterController.Output {
@@ -275,7 +277,8 @@ final class ClimbRuntimeHarness {
             reports.append(["kind":"vehicle-stand","bodyKind":kind.rawValue,"height":top,"hz":hz,"steps":carrier.fixedSteps,"parts":carrier.seen.sorted()])
         }}
     }
-    let report:[String:Any]=["authority":"Actual current Renderer methods + real local animation/native character/core; actual archived entry predicate; not retail GTA replay","checks":checks,"displayFrames":frames,"physicsTicks":physicsTicks,"cases":reports,"additionalScenarios":["cancel-pending-input","air-grab-every-second-tick","slow-vehicle-admission","strict-half-unit-speed-boundary","nonfixed-vault-rejection","entry-mode-guards","vehicle-climb-completion"],"limitations":["No UIKit, camera or Metal pose verification","Metadata load is precompleted","Physics scenes are controlled fixtures","Vehicle climb captures the admission ledge in world space like the archived controller; no entity-relative moving handhold or retail executable coverage"]]
+    // ACTUAL_RELOAD_AUDIO_TESTS
+    let report:[String:Any]=["authority":"Actual current Renderer methods + real local animation/native character/core; actual archived entry predicate; not retail GTA replay","checks":checks,"displayFrames":frames,"physicsTicks":physicsTicks,"cases":reports,"additionalScenarios":["cancel-pending-input","air-grab-every-second-tick","slow-vehicle-admission","strict-half-unit-speed-boundary","nonfixed-vault-rejection","entry-mode-guards","vehicle-climb-completion","accepted-climb-reload-audio-owner"],"limitations":["No UIKit, camera or Metal pose verification","Metadata load is precompleted","Physics scenes are controlled fixtures","Vehicle climb captures the admission ledge in world space like the archived controller; no entity-relative moving handhold or retail executable coverage","Actual audio/GVC cancellation methods run with inert one-shot/sample/scheduler adapters, no speaker or retail sound timing"]]
     try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:root.appendingPathComponent("local-only/research/climbing/runtime-report.json"))
     print("PASS current Renderer climb runtime:",checks,"checks,",frames,"display frames,",physicsTicks,"native physics ticks; real local clips",neutral.skeletalLibrary!.clipCount)
  }

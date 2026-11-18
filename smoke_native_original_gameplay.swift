@@ -51,8 +51,10 @@ enum StateCarrier{case normal}
 final class ButtonCarrier {func setTitle(_ value:String,for state:StateCarrier){}}
 final class StatusCarrier {var text=""}
 final class RadioCarrier {var stops=0;func stop(){stops+=1}}
+final class ReloadAudioCarrier {var cancels=0;func cancelReload(){cancels+=1}}
 final class Game {
  let network=NetworkCarrier(),weapons=ArsenalCarrier(),gameHUD=HUDCarrier(),vehicleButton=ButtonCarrier(),status=StatusCarrier(),radio=RadioCarrier()
+ let audio=ReloadAudioCarrier()
  var renderer:RendererCarrier?=RendererCarrier(),currentVehicle:VehicleCarrier?,originalExitToken:UInt64?
  let originalEffects=NativeOriginalWorldEffects()
  var resets=0,exitCalls=0,exitReady=false,drivingControls=false
@@ -106,6 +108,7 @@ do{
  check(game.network.clears==1,"staff clear uses chat owner")
  game.currentVehicle=VehicleCarrier(id:"owned");game.command(["t":"tp","x":1,"y":2,"z":3,"h":90])
  check(game.currentVehicle==nil && game.renderer!.point==SIMD3(1,2,3) && close(Double(game.renderer!.facing!),-.pi/2),"original tp degrees are converted once and vehicle ownership is discarded")
+ check(game.audio.cancels==1,"Original TP retained queued reload audio")
  game.command(["t":"tp","x":4,"y":5,"z":6]);check(game.renderer!.facing==game.renderer!.cameraDirection,"missing tp.h adopts current native camera yaw")
  game.command(["t":"fix"]);game.command(["t":"flip"]);game.command(["t":"slap","h":102]);check(game.renderer!.repairs==1&&game.renderer!.flips==1&&game.renderer!.lifted==100,"vehicle commands route to real owner APIs")
  game.command(["t":"dose","heal":0.25]);check(close(game.network.originalHealth,42.5),"on-foot dose heals exact fraction")

@@ -76,7 +76,9 @@ final class NativeWeaponEffects {
     /// triangle raycast preserves bounce normals and rocket impact locations.
     var trace: ((SIMD3<Float>, SIMD3<Float>, Float) -> Contact?)?
     /// Missing streamed geometry is not a clear path. Prediction waits for
-    /// collision data; authoritative snapshots/blasts still reconcile it.
+    /// collision data, but lifetime still advances. Expiry without coverage
+    /// removes the prediction without inventing an impact/blast position;
+    /// authoritative snapshots/blasts still reconcile it.
     var geometryAvailable: ((SIMD3<Float>, SIMD3<Float>, Float) -> Bool)?
     /// Used to place the six seeded molotov fires, matching the 4 m down ray.
     var groundHeight: ((Float, Float, Float) -> Float?)?
@@ -253,6 +255,7 @@ final class NativeWeaponEffects {
         for fire in fires {for flame in fire.flames where flame.strength>0{onFlames?(flame.position,delta*min(1,fire.remaining))}}
         var retained: [Projectile] = []
         for var projectile in projectiles {
+            projectile.age += delta
             var proposed=projectile
             if !projectile.stuck && !projectile.lying {
                 if proposed.rocket {
@@ -260,10 +263,10 @@ final class NativeWeaponEffects {
                 } else {proposed.velocity.z -= Self.gravity*delta;proposed.rotation += proposed.spin*delta}
                 let speed=simd_length(proposed.velocity)
                 if speed>0.0001,geometryAvailable?(projectile.position,proposed.velocity/speed,speed*delta+0.05)==false {
-                    retained.append(projectile);continue
+                    if projectile.age < projectile.lifetime { retained.append(projectile) }
+                    continue
                 }
             }
-            projectile.age += delta
             if projectile.age >= projectile.lifetime {
                 if projectile.weapon != 17 && projectile.weapon != 39 { detonate(projectile) }
                 continue

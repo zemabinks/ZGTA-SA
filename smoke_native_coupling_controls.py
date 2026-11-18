@@ -33,7 +33,7 @@ def main():
  source=source.replace('// ACTUAL_SPECTATOR_SIGNATURE',spectator)
  with tempfile.TemporaryDirectory(prefix='run-',dir=OUT) as temp:
   p=Path(temp);(p/'main.swift').write_text(source);exe=p/'verify'
-  compiled=subprocess.run(['xcrun','swiftc','-module-cache-path',str(OUT/'modules'),str(p/'main.swift'),'-o',str(exe)],capture_output=True,text=True)
+  compiled=subprocess.run(['xcrun','swiftc','-whole-module-optimization','-Onone','-num-threads','1','-module-cache-path',str(OUT/'modules'),str(p/'main.swift'),'-o',str(exe)],capture_output=True,text=True,timeout=900)
   (OUT/'compile.log').write_text(compiled.stdout+compiled.stderr)
   if compiled.returncode:print(compiled.stdout+compiled.stderr);compiled.check_returncode()
   result=subprocess.run([str(exe)],capture_output=True,text=True)

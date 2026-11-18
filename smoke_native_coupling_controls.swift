@@ -4,6 +4,7 @@ final class Button {var isHidden=false,title="",accessibilityLabel="",background
 final class Status {var text=""}
 final class HUD {func updateVehicle(name:String?,speed:Float){}}
 final class Radio {var stops=0;func stop(){stops+=1}}
+final class ReloadAudio {var cancels=0;func cancelReload(){cancels+=1}}
 final class Gameplay {var inventoryConnection:String?}
 final class Network {
  var legacySpectating=false
@@ -71,6 +72,7 @@ final class Game {
  var legacyAxes=SIMD2<Int16>(-128,127),legacySpecialKeys:UInt8=3
  var legacyCrouchUntil:TimeInterval=0
  let network=Network(),gameplay=Gameplay(),weaponCycle=NativeWeaponCycleQueue(),radio=Radio(),gameHUD=HUD(),status=Status()
+ let audio=ReloadAudio()
  let vehicleButton=Button(),radioButton=Button(),runButton=Button(),jumpButton=Button(),gasButton=Button(),brakeButton=Button(),handbrakeButton=Button()
  let weaponButton=Button(),reloadButton=Button(),aimButton=Button(),crouchButton=Button(),attackButton=Button()
  let weapons=NativeWeaponState(catalog:[
@@ -184,6 +186,7 @@ let armedCrouch=footCrouch.legacyCrouchUntil;footCrouch.network.health=0;footCro
 check(footCrouch.renderer!.crouches==1 && footCrouch.legacyCrouchUntil==armedCrouch,"Dead foot input rearmed crouch or reached Renderer")
 let callback=Game();callback.install();callback.network.onInventoryConnection?("one")
 check(callback.renderer!.connections.count==1 && callback.gameplay.inventoryConnection=="one","Namespace callback did not reset coupling owner")
+check(callback.audio.cancels==1,"Namespace callback retained queued reload audio")
 callback.network.onCouplings?([],4,"stale");check(callback.renderer!.applied.isEmpty,"Stale topology callback reached renderer")
 callback.network.onCouplings?([],4,"one");check(callback.renderer!.applied==[4] && callback.resets==0,"Topology UI update reset game controls")
 

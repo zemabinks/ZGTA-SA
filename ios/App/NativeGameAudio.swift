@@ -88,6 +88,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var notifications: [NSObjectProtocol] = []
     private var pendingManifest: NativeResourceTask?
     private var suspended = false
+    private var reloadSerial: UInt64 = 0
     private var distanceSinceStep: Float = 0
     private var vehicleModel: Int?
     private(set) var loadedSampleCount = 0
@@ -206,6 +207,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     }
 
     func suspend() {
+        cancelReload()
         suspended = true
         weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
         remoteEngines.removeAll()
@@ -224,6 +226,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     }
 
     func stop() {
+        cancelReload()
         suspended = true
         weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
         remoteEngines.removeAll()
@@ -259,11 +262,13 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     }
 
     private func once(_ name: String, rate: Float = 1, gain: Float = 1, pan: Float = 0,
-                      start: Double = 0, fade: Fade? = nil,rise: Double = 0) {
-        guard !suspended, gain > 0, volume > 0 else { return }
+                      start: Double = 0, fade: Fade? = nil,rise: Double = 0, reloadOwner: UInt64? = nil) {
+        guard !suspended, gain > 0, volume > 0,
+              reloadOwner == nil || reloadOwner == reloadSerial else { return }
         let requested = Date()
         fetch(name) { [weak self] bytes in
             guard let self, !self.suspended, requested.timeIntervalSinceNow > -0.5,
+                  reloadOwner == nil || reloadOwner == self.reloadSerial,
                   let bytes else { return }
             if rate < 0.5 || rate > 2 {
                 if self.rateAudio.play(bytes,name:name,rate:rate,gain:gain*self.volume,pan:pan,rise:rise) { self.lastEvent = name }
@@ -455,11 +460,18 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    /// Invalidate queued reload phases and pending sample loads. A voice that
+    /// already started remains a committed one-shot; shot/blast audio is separate.
+    func cancelReload() { reloadSerial &+= 1 }
+
     func reload(weapon id: Int) {
-        guard let row = reloads[String(id)], row.count >= 2 else { return }
-        once("143_\(row[0].intValue)", gain: 0.5)
+        cancelReload()
+        guard !suspended, let row = reloads[String(id)], row.count >= 2 else { return }
+        let owner=reloadSerial
+        once("143_\(row[0].intValue)", gain: 0.5, reloadOwner: owner)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.42) { [weak self] in
-            self?.once("143_\(row[1].intValue)", gain: 0.5)
+            guard let self,self.reloadSerial==owner else{return}
+            self.once("143_\(row[1].intValue)", gain: 0.5, reloadOwner: owner)
         }
     }
 

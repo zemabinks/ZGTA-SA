@@ -82,9 +82,11 @@ final class Renderer {
     func exitVehicle(){exits+=1}
     func teleport(x:Float,y:Float,z:Float,direction:Float?=nil){feet=SIMD3(x,y,z);teleports.append(feet)}
 }
+final class ReloadAudio {var cancels=0;func cancelReload(){cancels+=1}}
 final class Game {
     var acceptsHeldInput=true,currentVehicle:Int?=42,renderer:Renderer?=Renderer(),weaponCycle=WeaponCycle()
     let originalEffects=NativeOriginalWorldEffects()
+    let audio=ReloadAudio()
     var originalExitToken:UInt64?
     let network:Network,weapons=NativeWeaponState(allowLegacySnapshots:true)
     let status=Label(),vitals=Label(),vehicleButton=Button(),attackButton=Button(),radio=Radio(),gameHUD=HUD()
@@ -110,12 +112,15 @@ final class Game {
         check(accepted.network.health==0 && accepted.currentVehicle==42 && accepted.renderer!.feet==initial && accepted.renderer!.exits==0 && accepted.resets==0 && accepted.heldFire,"Respawn request teleported/reset before acceptance")
         check(accepted.status.text=="RESPAWN REQUESTED","Request feedback lost")
         accepted.attack();check(accepted.network.requests.count==1 && accepted.renderer!.teleports.isEmpty,"Held/repeated request duplicated pending respawn")
+        let beforeReloadCancels=accepted.audio.cancels
         check(accepted.network.receive(100,processed:1,revision:1,respawned:1),"Accepted acknowledgement was rejected")
+        check(accepted.audio.cancels==beforeReloadCancels+1,"Accepted respawn retained queued reload audio")
         check(accepted.network.health==100 && accepted.currentVehicle==nil && accepted.renderer!.exits==1 && accepted.radio.stops==1 && accepted.drivingChanges==[false],"Accepted respawn did not transfer vehicle/control ownership")
         check(accepted.resets==1 && !accepted.heldFire && accepted.renderer!.teleports==[SIMD3(1480,-1738,13)],"Accepted respawn must reset/teleport exactly once")
         check(accepted.status.text=="RESPAWNED AT THE CITY CENTRE" && accepted.vehicleButton.title=="ENTER CAR","Accepted callback presentation missing")
         _=accepted.network.receive(100,processed:1,revision:1,respawned:1)
         check(accepted.resets==1 && accepted.renderer!.teleports.count==1 && accepted.renderer!.exits==1,"Duplicate acknowledgement displaced player again")
+        check(accepted.audio.cancels==beforeReloadCancels+1,"Duplicate live acknowledgement canceled a fresh reload owner")
 
         let rejected=Game();rejected.network.begin();rejected.attack()
         check(rejected.network.receive(0,processed:1,revision:1),"Rejected request was not acknowledged")
@@ -204,7 +209,7 @@ def main():
             p=folder/(name+'.swift');p.write_bytes(inputs[f'ios/App/{name}.swift']);sources.append(str(p))
         main=SWIFT.replace('HEALTH_PREDICTION',prediction).replace('NETWORK_METHODS',network_methods).replace('CALLBACKS',callback).replace('GAME_METHODS',game_methods)+'\n'+animation
         p=folder/'main.swift';p.write_text(main);sources.append(str(p));exe=folder/'verify'
-        compile=subprocess.run(['xcrun','swiftc','-parse-as-library','-module-cache-path',str(OUT/'module-cache'),*sources,'-o',str(exe)],capture_output=True,text=True)
+        compile=subprocess.run(['xcrun','swiftc','-whole-module-optimization','-Onone','-num-threads','1','-parse-as-library','-module-cache-path',str(OUT/'module-cache'),*sources,'-o',str(exe)],capture_output=True,text=True,timeout=900)
         (OUT/'compile.log').write_text(compile.stdout+compile.stderr)
         if compile.returncode:print(compile.stdout+compile.stderr);compile.check_returncode()
         result=subprocess.run([str(exe)],capture_output=True,text=True)

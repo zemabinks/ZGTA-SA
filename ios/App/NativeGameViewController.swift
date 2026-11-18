@@ -57,6 +57,8 @@ final class NativeGameViewController: UIViewController {
     private var displayLink: CADisplayLink?
     private var frameClock = NativeGameFrameClock()
     private var controllerGate = NativeControllerInputGate()
+    private weak var menuControllerPad:GCExtendedGamepad?
+    private var controllerMenuEdge=NativeReleaseEdge(pressed:true)
     private var previousPad = NativeGameBindings.Pad()
     private let weaponCycle = NativeWeaponCycleQueue()
     private var applicationActive = true
@@ -145,7 +147,7 @@ final class NativeGameViewController: UIViewController {
     private func resetControls() {
         legacyKeys=0;legacyAxes = .zero;legacySpecialKeys=0;legacyCrouchUntil=0
         heldKeys.removeAll(); stick.reset(); lookStick.reset(); controllerGate.reset()
-        previousPad = .init(); weaponCycle.cancel()
+        previousPad = .init(); resetControllerMenuInput(); weaponCycle.cancel()
         touchMeleeGuard=false
         renderer?.meleeGuardHeld=false;renderer?.meleeBlockHeld=false
         run = false; gasPressed = false; brakePressed = false; handbrakePressed = false
@@ -339,7 +341,7 @@ final class NativeGameViewController: UIViewController {
         network.onFlightGear = { [weak self] parachute,jetpack in self?.renderer?.setFlightGear(parachute:parachute,jetpack:jetpack) }
         weapons.onChange = { [weak self] in
             guard let self else { return }
-            if self.guardWeapon != self.weapons.selected {self.guardWeapon=self.weapons.selected;self.touchMeleeGuard=false}
+            if self.guardWeapon != self.weapons.selected {self.audio.cancelReload();self.guardWeapon=self.weapons.selected;self.touchMeleeGuard=false}
             self.renderer?.equippedWeapon = self.weapons.selected
             if self.network.usesClientOwnedWeapons,let renderer=self.renderer {
                 renderer.setFlightGear(parachute:self.weapons.weapons.contains{$0.id==46},jetpack:renderer.wearingJetpack)
@@ -354,7 +356,7 @@ final class NativeGameViewController: UIViewController {
             self.weaponCycle.disconnected()
             self.gameplay.inventoryConnection=nonce
             self.weapons.setConnection(nonce)
-            self.renderer?.cancelWeaponInput();self.renderer?.cancelReloadAnimation()
+            self.renderer?.cancelWeaponInput();self.renderer?.cancelReloadAnimation();self.audio.cancelReload()
         }
         network.onCouplings = { [weak self] links,revision,connection in
             guard let self,self.network.inventoryConnection==connection else{return}
@@ -397,6 +399,7 @@ final class NativeGameViewController: UIViewController {
         renderer?.onFootWeaponShot = { [weak self] weapon, left in
             self?.consumeFootWeaponShot(weapon: weapon, left: left) ?? false
         }
+        renderer?.onReloadTaskCancelled = { [weak self] in self?.audio.cancelReload() }
         renderer?.onVehicleLostInWater = { [weak self] in self?.completeVehicleExit(water:true) }
         renderer?.onVehicleWrecked = { [weak self] in self?.completeVehicleExit(wrecked:true) }
         renderer?.onBikeEjection = { [weak self] event in self?.completeVehicleExit(ejection:event) }
@@ -432,6 +435,7 @@ final class NativeGameViewController: UIViewController {
                 return
             }
             self.currentVehicle = vehicle
+            self.audio.cancelReload()
             let kind = self.vehicleModelType(vehicle)
             self.renderer?.enter(vehicle, kind: kind)
             self.vehicleButton.setTitle("EXIT CAR", for: .normal)
@@ -457,6 +461,7 @@ final class NativeGameViewController: UIViewController {
                 self.network.sendPassengerExit(renderer.position,heading:renderer.direction);self.status.text="PASSENGER RESOURCES ARE NOT READY";return
             }
             self.currentVehicle=vehicle;self.vehicleButton.setTitle("EXIT CAR",for:.normal)
+            self.audio.cancelReload()
             self.status.text="PASSENGER · \(self.vehicleModelName(vehicle).uppercased())"
             self.gameHUD.updateVehicle(name:self.vehicleModelName(vehicle),speed:0);self.setDrivingControls(true)
             self.radio.enter(model:Int(vehicle.code.split(separator:".").first ?? "") ?? 0)
@@ -478,6 +483,7 @@ final class NativeGameViewController: UIViewController {
                 self.vehicleButton.setTitle("ENTER CAR",for:.normal);self.gameHUD.updateVehicle(name:nil,speed:0);self.radio.stop()
             }
             self.resetControls()
+            self.audio.cancelReload()
             self.renderer?.teleport(x: point.x, y: point.y, z: point.z, direction: heading)
         }
         network.onEnvironment = { [weak self] weather, shift, hold in
@@ -488,7 +494,7 @@ final class NativeGameViewController: UIViewController {
             self.renderer?.dayHold = hold
         }
         network.onVitals = { [weak self] health, armour in
-            if health <= 0 { self?.resetControls() }
+            if health <= 0 { self?.resetControls();self?.audio.cancelReload() }
             self?.renderer?.health = health
             self?.vitals.text = "HEALTH \(health)  ·  ARMOUR \(armour)"
             self?.gameHUD.updateVitals(health: health, armour: armour)
@@ -572,6 +578,7 @@ final class NativeGameViewController: UIViewController {
             return
         }
         gameplay.setConnectionReady(false)
+        audio.cancelReload()
         legacyClassSkin=nil;renderer?.cancelActorSelection()
         updateLegacyClassAdmission()
         originalEffects.reset();originalExitToken=nil;renderer?.setOriginalActorEffects(burning:false,coughing:false)
@@ -960,6 +967,25 @@ final class NativeGameViewController: UIViewController {
         map.modalPresentationStyle = .overFullScreen
         present(map, animated: true)
     }
+    /// Navigation observes its own release edge even when gameplay is blocked.
+    /// Sample the real current state at an owner boundary, so an already-held
+    /// Menu is consumed while the next genuinely new press remains available.
+    private func resetControllerMenuInput() {
+        let pad=GCController.controllers().compactMap(\.extendedGamepad).first
+        menuControllerPad=pad
+        controllerMenuEdge=NativeReleaseEdge(pressed:pad?.buttonMenu.isPressed ?? true)
+    }
+    private func pollControllerMenu(_ pad:GCExtendedGamepad?) {
+        guard let pad else {
+            menuControllerPad=nil;controllerMenuEdge=NativeReleaseEdge(pressed:true);return
+        }
+        guard menuControllerPad === pad else {
+            menuControllerPad=pad
+            controllerMenuEdge=NativeReleaseEdge(pressed:pad.buttonMenu.isPressed);return
+        }
+        let fresh=controllerMenuEdge.update(pressed:pad.buttonMenu.isPressed)
+        if fresh,canNavigateMenus {performBinding(.pause)}
+    }
     @objc private func controllerChanged() { resetControls(); status.text = GCController.controllers().isEmpty ? "TOUCH CONTROLS ACTIVE" : "CONTROLLER CONNECTED" }
     @objc private func toggleRun() {
         guard acceptsHeldInput else { return }
@@ -1233,6 +1259,7 @@ final class NativeGameViewController: UIViewController {
         resetControls();processOriginalFatal()
     }
     private func leaveForOriginalTeleport(){
+        audio.cancelReload()
         network.cancelOriginalFatal();originalExitToken=nil
         renderer?.leaveVehicleForOriginalTeleport();currentVehicle=nil
         vehicleButton.setTitle("ENTER CAR",for:.normal);gameHUD.updateVehicle(name:nil,speed:0)
@@ -1528,6 +1555,7 @@ final class NativeGameViewController: UIViewController {
             if result == false {
                 if !dispatchReturned {synchronouslyRejected=true}
                 self.renderer?.cancelReloadAnimation()
+                self.audio.cancelReload()
             }
         }
         dispatchReturned=true
@@ -1595,6 +1623,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     private func finishRespawn() {
+        audio.cancelReload()
         resetControls()
         if network.usesOriginalWorldProtocol{
             leaveForOriginalTeleport()
@@ -1917,6 +1946,8 @@ final class NativeGameViewController: UIViewController {
             if let rows=weapons.outgoingOriginalGuns(),network.sendOriginalGuns(rows){weapons.originalGunsSent(rows)}
             gameHUD.updateCash(network.cash)
         }
+        let controller = GCController.controllers().compactMap(\.extendedGamepad).first
+        pollControllerMenu(controller)
         var acceptsInput = active && presentedViewController == nil && network.isReady && !legacySelection && !network.originalInputBlocked
         if !acceptsInput && inputWasAvailable { resetControls() }
         inputWasAvailable = acceptsInput
@@ -1952,7 +1983,6 @@ final class NativeGameViewController: UIViewController {
         var gamepadHop=false
         var gamepadJumping = false
         var gamepadAttacking = keyboard.attack
-        let controller = GCController.controllers().compactMap(\.extendedGamepad).first
         var controllerAllowed = false
         if let pad = controller {
             let pressed = [pad.buttonA,pad.buttonB,pad.buttonX,pad.buttonY,pad.leftShoulder,pad.rightShoulder,
@@ -1968,7 +1998,7 @@ final class NativeGameViewController: UIViewController {
         if controllerAllowed, let pad = controller {
             let buttons=NativeGameBindings.Pad(a:pad.buttonA.isPressed,b:pad.buttonB.isPressed,x:pad.buttonX.isPressed,y:pad.buttonY.isPressed,
                 lb:pad.leftShoulder.isPressed,rb:pad.rightShoulder.isPressed,leftClick:pad.leftThumbstickButton?.isPressed == true,
-                rightClick:pad.rightThumbstickButton?.isPressed == true,menu:pad.buttonMenu.isPressed,options:pad.buttonOptions?.isPressed == true,
+                rightClick:pad.rightThumbstickButton?.isPressed == true,menu:false,options:pad.buttonOptions?.isPressed == true,
                 up:pad.dpad.up.isPressed,down:pad.dpad.down.isPressed,left:pad.dpad.left.isPressed,right:pad.dpad.right.isPressed)
             var padContext=context
             padContext.guarding=context.melee && (touchMeleeGuard || keyboard.aim || pad.leftTrigger.isPressed)

@@ -13,6 +13,7 @@ import math
 import struct
 import os
 import shutil
+import stat as stat_module
 import tempfile
 
 ROOT = Path(__file__).resolve().parent
@@ -285,33 +286,63 @@ def prepare(local, export=None, verify=False):
     atomic_json(cache_path, new_cache)
     atomic_json(output / 'catalog.json', {'manifest': manifest, 'files': blobs})
     if export:
-        export.mkdir(parents=True, exist_ok=True)
-        target = export / 'blobs'
-        target.mkdir(exist_ok=True)
-        for digest, item in blobs.items():
-            destination = target / digest
-            if destination.exists():
-                existing = hashlib.sha256()
-                with destination.open('rb') as stream:
-                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                        existing.update(chunk)
-                if existing.hexdigest() != digest:
-                    raise ValueError('Existing export blob is corrupt: ' + digest)
-                continue
-            partial = target / (digest + '.partial')
-            shutil.copyfile(item['path'], partial)
+        export_catalog(manifest, blobs, export)
+    return {'contentID': manifest['contentID'], 'resources': len(resources), 'uniqueBlobs': len(blobs),
+            'logicalBytes': sum(x['bytes'] for x in resources), 'physicalBlobBytes': sum(x['bytes'] for x in blobs.values()),
+            'hashedFiles': hashed, 'reusedHashReceipts': reused, 'exported': bool(export)}
+
+
+def export_catalog(manifest, blobs, export):
+    """Portable output uses verified content, and commits its manifest last."""
+    manifest_path=export/'zgta-resources.json'
+    if export.is_symlink() or (export/'blobs').is_symlink() or ((manifest_path.exists()or manifest_path.is_symlink())and not stat_module.S_ISREG(manifest_path.lstat().st_mode)):
+        raise ValueError('Portable output must not write through a symlink')
+    export.mkdir(parents=True, exist_ok=True)
+    target = export / 'blobs'
+    target.mkdir(exist_ok=True)
+    for digest, item in blobs.items():
+        destination = target / digest
+        if destination.exists()or destination.is_symlink():
+            if not stat_module.S_ISREG(destination.lstat().st_mode):raise ValueError('Portable blob destination is not a regular file')
+        if destination.exists():
+            before=destination.lstat()
+            if before.st_size!=item['bytes']:raise ValueError('Existing export blob has the wrong size: '+digest)
+            existing = hashlib.sha256()
+            descriptor=os.open(destination,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0))
+            with os.fdopen(descriptor,'rb') as stream:
+                opened=os.fstat(stream.fileno())
+                stamp=lambda value:(value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+                if not stat_module.S_ISREG(opened.st_mode)or stamp(before)!=stamp(opened):raise ValueError('Existing portable blob changed before open')
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    existing.update(chunk)
+                if stamp(opened)!=stamp(os.fstat(stream.fileno()))or stamp(opened)!=stamp(destination.lstat()):raise ValueError('Existing portable blob changed during verification')
+            if existing.hexdigest() != digest or destination.stat().st_size != item['bytes']:
+                raise ValueError('Existing export blob is corrupt: ' + digest)
+            continue
+        descriptor,name=tempfile.mkstemp(prefix='.'+digest+'-',suffix='.partial',dir=target)
+        os.close(descriptor)
+        partial=Path(name)
+        try:
+            source=Path(item['path']).resolve(strict=True);before=source.lstat()
+            if not stat_module.S_ISREG(before.st_mode)or before.st_size!=item['bytes']:raise ValueError('Portable source is not the expected regular file')
+            flags=os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0)|getattr(os,'O_CLOEXEC',0)
+            descriptor=os.open(source,flags)
+            with os.fdopen(descriptor,'rb')as incoming,partial.open('wb')as outgoing:
+                opened=os.fstat(incoming.fileno())
+                stamp=lambda value:(value.st_dev,value.st_ino,value.st_size,value.st_mtime_ns,value.st_ctime_ns)
+                if not stat_module.S_ISREG(opened.st_mode)or stamp(opened)!=stamp(before):raise ValueError('Portable source changed before open')
+                for chunk in iter(lambda:incoming.read(1024*1024),b''):outgoing.write(chunk)
+                if stamp(opened)!=stamp(os.fstat(incoming.fileno()))or stamp(opened)!=stamp(source.lstat()):raise ValueError('Portable source changed during export')
             sha = hashlib.sha256()
             with partial.open('rb') as stream:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                     sha.update(chunk)
-            if sha.hexdigest() != digest:
+            if sha.hexdigest() != digest or partial.stat().st_size != item['bytes']:
                 raise ValueError('Source changed while exporting: ' + digest)
             os.replace(partial, destination)
-        # The portable catalogue is activated only after all blobs are verified.
-        atomic_json(export / 'zgta-resources.json', manifest)
-    return {'contentID': manifest['contentID'], 'resources': len(resources), 'uniqueBlobs': len(blobs),
-            'logicalBytes': sum(x['bytes'] for x in resources), 'physicalBlobBytes': sum(x['bytes'] for x in blobs.values()),
-            'hashedFiles': hashed, 'reusedHashReceipts': reused, 'exported': bool(export)}
+        finally:
+            if partial.exists():partial.unlink()
+    atomic_json(export / 'zgta-resources.json', manifest)
 
 
 def main():
@@ -320,6 +351,12 @@ def main():
     parser.add_argument('--export', type=Path, help='Optional private portable package destination; no export is needed for normal Mac-hosted development.')
     parser.add_argument('--verify', action='store_true', help='Rehash unchanged source files instead of using stat-bound hash receipts.')
     parser.add_argument('--allow-source-root',type=Path,action='append',help='Explicitly authorize an existing archive directory used by development symlinks. Saved privately; never accepted from a downloaded resource catalogue.')
+    parser.add_argument('--base-catalog',type=Path,help='Explicit trusted private prepared catalog for an opt-in stock extension; existing blobs are reused, not rediscovered.')
+    parser.add_argument('--stock-config',type=Path,help='Explicit private stock IMG/COL source configuration; never packaged.')
+    parser.add_argument('--include-stock-model',type=int,action='append',default=[],help='Include an exact stock object/weapon dependency set; repeat for additional IDs.')
+    parser.add_argument('--all-supported',action='store_true',help='Opt in to all available object/weapon metadata candidates, within explicit stock limits; runtime import remains separately verified.')
+    parser.add_argument('--stock-max-models',type=int,default=64)
+    parser.add_argument('--stock-max-bytes',type=int,default=128*1024*1024)
     args = parser.parse_args()
     try:
         if args.allow_source_root:
@@ -330,7 +367,15 @@ def main():
                     raise ValueError('Choose a specific existing game-resource directory')
                 approved.append(str(entry))
             atomic_json(args.local_only/'resource-source-roots.json',sorted(set(approved)))
-        print(json.dumps(prepare(args.local_only.absolute(), args.export, args.verify), indent=2))
+        if args.include_stock_model or args.all_supported or args.base_catalog or args.stock_config:
+            if not args.base_catalog or not args.stock_config or not (args.include_stock_model or args.all_supported):
+                raise ValueError('Stock extension requires --base-catalog, --stock-config and explicit model selection')
+            from prepare_native_stock_package import extend
+            result=extend(args.base_catalog,args.local_only.absolute(),args.stock_config,args.include_stock_model,
+                          all_supported=args.all_supported,maximum_models=args.stock_max_models,
+                          maximum_bytes=args.stock_max_bytes,export=args.export)
+        else:result=prepare(args.local_only.absolute(), args.export, args.verify)
+        print(json.dumps(result, indent=2))
     except (OSError, ValueError, KeyError) as error:
         raise SystemExit(str(error))
 

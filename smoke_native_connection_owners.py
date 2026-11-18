@@ -89,7 +89,7 @@ final class Radar {var target:SIMD2<Float>?=SIMD2(1,2)}
 final class HUD {let radar=Radar();var vehicle:String?="OLD";func updateVehicle(name:String?,speed:Float){vehicle=name}}
 final class Gameplay {var ready=false,refreshes=0;func setConnectionReady(_ value:Bool){ready=value};func refresh(){precondition(ready);refreshes+=1}}
 final class Network {var positionAcknowledgements=false;var onTeleport:((SIMD3<Float>,Float?)->Void)?;var passengerExitWrites=0;func sendPassengerExit(_ point:SIMD3<Float>,heading:Float){passengerExitWrites+=1};var legacy:AnyObject?;var stops=0,activities=[Bool]();func setApplicationActive(_ value:Bool){activities.append(value)};func disconnect(){stops+=1;ownerCalls.append("network-disconnect")}}
-final class Audio {var stops=0;func stop(){stops+=1}}
+final class Audio {var stops=0,reloadCancels=0;func stop(){stops+=1};func cancelReload(){reloadCancels+=1}}
 final class Display {var invalidated=false;func invalidate(){invalidated=true;ownerCalls.append("display-invalidate")}}
 struct Clock {var resets=0;mutating func reset(){resets+=1}}
 final class Presenter {var isBeingDismissed=false}
@@ -160,12 +160,15 @@ check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")
 check(game.gameHUD.vehicle==nil && game.gameHUD.radar.target==nil && game.renderer!.objective==nil,"old HUD/objective survives")
 check(game.previousAudioPosition==nil && game.lastAutomaticCheckpoint.isEmpty && game.radio.stops==1,"loss retains stale timing/effects")
+check(game.audio.reloadCancels==1,"session replacement retained queued reload audio")
 check(NativeMenuKeyLatch.isHeld(26),"held gameplay key replays after loss")
 NativeMenuKeyLatch.release(26)
 check(!NativeMenuKeyLatch.isHeld(26),"fresh release cannot rearm")
 game.renderer!.teleport(x:1480,y:-1738,z:13)
 let resets=game.renderer!.resets
+let reloadCancels=game.audio.reloadCancels
 game.connectionChanged(.ready)
+check(game.audio.reloadCancels==reloadCancels,"ready/input refresh canceled a legitimate reload owner")
 check(game.gameplay.ready && game.gameplay.refreshes==1 && game.lastNetwork==0 && game.lastGameplay==0,"ready does not refresh/rebase clocks")
 check(game.renderer!.resets==resets && game.renderer!.camera==SIMD3(1480,-1738,13) && game.currentVehicle==nil,"ready resurrects old driver or moves fresh spawn")
 game.viewWillDisappear(true)
@@ -239,6 +242,7 @@ for role in ["driver","passenger","foot"] {
  check(world.groundVehicle!.otherIDs==otherIDs && world.remoteVehicles.count==2,"Strict TP cleared unrelated parked/remote world")
  check(placing.network.passengerExitWrites==0 && placing.network.stops==0 && placing.radio.stops==1,"Strict TP manufactured a passenger exit or disconnected the server")
  check(placing.previousAudioPosition==nil && placing.controlResets==1,"Strict TP retained old motion/input history")
+ check(placing.audio.reloadCancels==1,"Strict TP retained queued reload audio")
 }
 let legacyPlacement=Game();legacyPlacement.installPlacementCallback();legacyPlacement.network.onTeleport?(SIMD3(4,5,6),nil)
 check(legacyPlacement.network.passengerExitWrites==1 && legacyPlacement.renderer!.camera==SIMD3(4,5,6),"Unnegotiated passenger correction policy changed")
@@ -247,6 +251,6 @@ print("PASS connection owners: \(checks) actual extracted controller/renderer li
 with tempfile.TemporaryDirectory(prefix='zgta-connection-owners-') as directory:
  root=Path(directory);source=root/'main.swift';binary=root/'verify'
  source.write_text(inputs[paths[2]]+'\n'+inputs[paths[3]]+'\n'+inputs[paths[4]]+'\n'+inputs[paths[5]]+'\n'+code)
- subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'modules'),str(source),'-o',str(binary)],check=True)
+ subprocess.run(['xcrun','swiftc','-whole-module-optimization','-Onone','-num-threads','1','-module-cache-path',str(OUT/'modules'),str(source),'-o',str(binary)],check=True,timeout=900)
  result=subprocess.run([str(binary)],check=True,capture_output=True,text=True);print(result.stdout,end='')
  (OUT/'report.json').write_text(json.dumps({'pass':True,'output':result.stdout,'scope':__doc__,'sources':{p:hashlib.sha256(value.encode()).hexdigest() for p,value in inputs.items()}},indent=2)+'\n')

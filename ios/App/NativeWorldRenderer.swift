@@ -815,6 +815,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// Fixed-step animation events own firing time; the inventory/network
     /// consumer can synchronously update weaponReady before the next substep.
     var onFootWeaponShot: ((Int,Bool) -> Bool)?
+    /// A successfully admitted task replaced an active reload animation.
+    var onReloadTaskCancelled: (() -> Void)?
     private var acceptedStreamShot=false
     private var acceptedStreamRay:(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>)?
     var aiming = false
@@ -2043,7 +2045,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if !extended {ledge.high=ledge.hold.y-feet.y-1>=1.1}
         climb=NativeClimbController(ledge:ledge,feet:feet,durations:.init(jump:jump,pull:pull,stand:stand,vault:vault))
         climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        let cancelledReload=animator.reloading
         cancelWeaponInput();crouching=false;manualAnimation=false;animator.resetMovementTask()
+        if cancelledReload {onReloadTaskCancelled?()}
         footAirTime=0;footAirFall=0;footAirFell=false;footJumped=false;footLaunchRemaining=nil;footAirVelocity = .zero
         return true
     }

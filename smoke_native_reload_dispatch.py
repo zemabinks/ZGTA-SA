@@ -31,7 +31,7 @@ final class Renderer {
     func cancelReloadAnimation(){cancels+=1}
     func cancelWeaponInput(){}
 }
-final class Audio {var reloads=0;func reload(weapon:Int){reloads+=1}}
+final class Audio {var reloads=0,cancels=0;func reload(weapon:Int){reloads+=1};func cancelReload(){cancels+=1}}
 final class DispatchGameplay {
     let actualOffline=NativeGameplayClient(server:ServerAddress("http://127.0.0.1:1")!)
     var rejectInline=false,calls=0,pending:[(Bool?)->Void]=[]
@@ -77,9 +77,11 @@ final class Harness {
         check(deferred.weapons.reloading && !deferred.weapons.canFire,"Pending reload did not block further rounds")
         deferred.gameplay.complete(false)
         check(!deferred.weapons.reloading && deferred.weapons.canFire && deferred.renderer!.cancels==1,"Delayed definitive rejection did not roll back reload")
+        check(deferred.audio.cancels==1,"Definitive rejection retained queued reload audio")
         deferred.reload();check(deferred.gameplay.calls==2 && deferred.renderer!.starts==2,"Fresh reload after rejection was suppressed")
         deferred.baseline(revision:1,reload:true);deferred.gameplay.complete(true)
         check(deferred.weapons.reloading && !deferred.weapons.canFire && deferred.renderer!.cancels==1,"Accepted authoritative reload canceled prematurely")
+        check(deferred.audio.cancels==1,"Accepted authoritative reload canceled its audio owner")
 
         let unknown=Harness();unknown.baseline();var resyncs=0;unknown.weapons.onNeedsResync={resyncs+=1}
         unknown.reload();unknown.gameplay.complete(nil)
@@ -88,6 +90,7 @@ final class Harness {
         let stale=Harness();stale.baseline();stale.reload();stale.baseline(nonce:"peer-two");stale.reload()
         stale.gameplay.complete(false)
         check(stale.weapons.reloading && stale.renderer!.cancels==0,"Old-peer rejection canceled a replacement reload")
+        check(stale.audio.cancels==0,"Old-peer rejection canceled replacement reload audio")
         stale.gameplay.complete(false)
         check(!stale.weapons.reloading && stale.renderer!.cancels==1,"Current-peer rejection was discarded")
 
@@ -111,7 +114,7 @@ def main():
             p=folder/(name+'.swift');p.write_bytes(inputs[f'ios/App/{name}.swift']);sources.append(str(p))
         p=folder/'main.swift';p.write_text(SWIFT.replace('PRODUCTION_RELOAD',reload_method)+'\n'+animation);sources.append(str(p))
         exe=folder/'verify'
-        compile=subprocess.run(['xcrun','swiftc','-parse-as-library','-module-cache-path',str(OUT/'module-cache'),*sources,'-o',str(exe)],capture_output=True,text=True)
+        compile=subprocess.run(['xcrun','swiftc','-whole-module-optimization','-Onone','-num-threads','1','-parse-as-library','-module-cache-path',str(OUT/'module-cache'),*sources,'-o',str(exe)],capture_output=True,text=True,timeout=900)
         (OUT/'compile.log').write_text(compile.stdout+compile.stderr)
         if compile.returncode:print(compile.stdout+compile.stderr);compile.check_returncode()
         result=subprocess.run([str(exe)],capture_output=True,text=True)

@@ -36,9 +36,12 @@ final class NativeVehicleRadio {
     private var wantsPlayback = false, interrupted = false
     private var loadedIndex: Int?
     private var dial: DispatchWorkItem?
+    private var dialOwner: UUID?
     private var vehicleModel: Int?, specialStation: Int?
     private var vehicleType = 0
     private var following = false
+    private var followedStation: Int?
+    private var vehicleStation: Int?
     private var remembered: (station: Int, at: Double)?
     private var timeAnchor: (milliseconds: Double, uptime: Double)?
     private(set) var index = -1
@@ -96,17 +99,23 @@ final class NativeVehicleRadio {
         guard let selected = NativeRadioSelection.cycle(stationID, choices: choices, direction: direction) else { return }
         specialStation = nil
         index = selected == 13 ? -1 : selected - 1
+        if vehicleModel != nil { vehicleStation = selected }
         UserDefaults.standard.set(index, forKey: preferenceKey)
         wantsPlayback = index >= 0
-        dial?.cancel(); releasePlayback()
+        cancelDial(); releasePlayback()
         onStatus?(index < 0 ? "RADIO OFF" : "TUNING \(stationName)")
-        let work = DispatchWorkItem { [weak self] in self?.tune() }
+        let owner = UUID(); dialOwner = owner
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.dialOwner == owner else { return }
+            self.dialOwner = nil; self.dial = nil; self.tune()
+        }
         dial = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: work)
     }
     func stop() {
         if vehicleType == 0 || vehicleType == 2 { remembered = (stationID, ProcessInfo.processInfo.systemUptime) }
-        vehicleModel = nil; following = false; dial?.cancel(); dial = nil; wantsPlayback = false
+        vehicleModel = nil; following = false; followedStation = nil; vehicleStation = nil
+        cancelDial(); wantsPlayback = false
         releasePlayback()
     }
     func resume() {
@@ -116,22 +125,40 @@ final class NativeVehicleRadio {
     /// The original model classification includes ordinary, off-only and
     /// emergency vehicles. Known models should use this instead of resume().
     func enter(model: Int, followedStation: Int? = nil) {
+        cancelDial()
         vehicleModel = model
         following = followedStation != nil
-        guard let program else { resume(); return }
+        self.followedStation = followedStation
+        vehicleStation = nil
+        configureVehicleStation(model: model)
+    }
+    /// Metadata belongs to the asset source, not to a new vehicle entry or
+    /// station-selection intent. Resolve it against the current owner.
+    private func refreshMetadata() {
+        if let model = vehicleModel { configureVehicleStation(model: model, play: dialOwner == nil) }
+        else if wantsPlayback, dialOwner == nil { tune() }
+    }
+    private func configureVehicleStation(model: Int, play: Bool = true) {
+        guard let program else {
+            vehicleType = 0; wantsPlayback = index >= 0
+            if play, wantsPlayback { tune() }; return
+        }
         let defaults = program.defaultStation(model: model)
         vehicleType = defaults.type
         var selected = defaults.station
         if vehicleType == 3 { selected = 0 }
         else if vehicleType != 0 && vehicleType != 2 { selected = 13 }
+        else if let vehicleStation, (1...12).contains(vehicleStation) || vehicleStation == 13 { selected = vehicleStation }
         else if let followedStation, (1...11).contains(followedStation) || followedStation == 13 { selected = followedStation }
         else if vehicleType == 0, let remembered, ProcessInfo.processInfo.systemUptime - remembered.at < 60,
                 remembered.station != defaults.station { selected = remembered.station }
         specialStation = selected == 0 ? 0 : nil
         index = (1...12).contains(selected) ? selected - 1 : -1
+        vehicleStation = selected
         wantsPlayback = selected != 13
-        tune()
+        if play { tune() }
     }
+    private func cancelDial() { dialOwner = nil; dial?.cancel(); dial = nil }
     func synchronize(milliseconds: Double) {
         guard milliseconds.isFinite, milliseconds >= 0 else { return }
         timeAnchor = (milliseconds, ProcessInfo.processInfo.systemUptime)
@@ -155,8 +182,7 @@ final class NativeVehicleRadio {
                   let value = try? NativeRadioProgram(data: data) else { return }
             DispatchQueue.main.async {
                 guard let self else { return }; self.program = value
-                if let model = self.vehicleModel { self.enter(model: model) }
-                else if self.wantsPlayback { self.tune() }
+                self.refreshMetadata()
             }
         }
         indexRequest = NativeResourceTransport.dataTask(with: server.path("game/radio/native/index")) { [weak self] data, response, _ in
@@ -169,8 +195,7 @@ final class NativeVehicleRadio {
                 }
                 self.songs = value.songs.filter { self.audioURL($0.url) != nil }
                 self.songOrder = Array(self.songs.indices).shuffled()
-                if let model = self.vehicleModel { self.enter(model: model) }
-                else if self.wantsPlayback { self.tune() }
+                self.refreshMetadata()
             }
         }
         programRequest?.resume(); indexRequest?.resume()
@@ -182,6 +207,7 @@ final class NativeVehicleRadio {
         return url
     }
     private func tune() {
+        cancelDial()
         releasePlayback()
         guard stationID != 13 else { onStatus?("RADIO OFF"); return }
         guard !interrupted, wantsPlayback else { return }

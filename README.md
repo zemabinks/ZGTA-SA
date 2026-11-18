@@ -59,6 +59,16 @@ The [rider clock](CORE_RIDER_RENDER_CLOCK_116.md),
 [legacy spawn ownership](CORE_LEGACY_SPAWN_INFO_116.md), and
 [browser recovery](CORE_BROWSER_RECOVERY_116.md) notes describe the current
 transition fixes and their verification boundaries.
+The [controller navigation](CORE_CONTROLLER_NAVIGATION_117.md),
+[reload audio](CORE_RELOAD_AUDIO_117.md), [radio metadata](CORE_RADIO_METADATA_117.md),
+[projectile clock](CORE_PROJECTILE_CLOCK_117.md) and
+[optional stock-package](CORE_STOCK_PACKAGE_117.md) notes describe the current
+core control, task and resource corrections without claiming retail parity.
+The combined Core117 source passes full iPhone Release and universal Simulator
+Debug builds. Its normal installed-resource multiplayer join, CJ Spawn,
+Pause/Resume and touch-camera checks pass in the Simulator. Physical controller,
+audible playback, exhaustive stock-model rendering and matched original-game
+timing remain separate acceptance requirements.
 The [owner radio import guide](RADIO_OWNER_IMPORT.md) covers complete local
 recordings and the separate compatibility/full-recording programme choices.
 
@@ -82,7 +92,7 @@ python3 smoke_public_source.py
 python3 check_public_source.py
 ```
 
-On macOS with Xcode, `python3 smoke_core_116.py` runs the portable native source
+On macOS with Xcode, `python3 smoke_core_117.py` runs the portable native source
 regressions without game assets. Full SDK builds and actual gameplay tests are
 separate checks.
 After building the host transport, add `--with-transport` to include the full

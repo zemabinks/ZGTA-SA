@@ -188,6 +188,8 @@ private final class RoutingCarrier {
     var started:[Int]=[],fallbacks=0,status:[String]=[]
     var onStatus:((String)->Void)?
     init(_ program:NativeRadioProgram){self.program=program;onStatus={[weak self]in self?.status.append($0)}}
+    var dial:DispatchWorkItem?,dialOwner:UUID?
+    // ACTUAL_ROUTING_CANCEL_DIAL
     func releasePlayback(){generation+=1;local.cancel()}
     func startPCM(program:NativeRadioProgram,local:NativeRadioWindowSource?){started.append(stationID)}
     func tuneFallback(token:Int){if token==generation{fallbacks+=1}}
@@ -218,7 +220,8 @@ private final class SelectionCarrier {
     private struct Station {let name:String,file:String}
     private let stations=(0..<12).map{Station(name:"AUTHORED",file:"TEST\($0)")}
     let program:NativeRadioProgram?
-    var vehicleModel:Int?,following=false,vehicleType=0,specialStation:Int?,index=0,wantsPlayback=true,interrupted=false
+    var vehicleModel:Int?,following=false,followedStation:Int?,vehicleStation:Int?,vehicleType=0,specialStation:Int?,index=0,wantsPlayback=true,interrupted=false
+    var dial:DispatchWorkItem?,dialOwner:UUID?
     var remembered:(station:Int,at:Double)?
     var generation=1,tracks:[Int:URL]=[:],songs=["authored custom"],started:[Int]=[],userStarts=0,customStarts=0
     var stationID:Int{specialStation ?? (index<0 ? 13:index+1)}

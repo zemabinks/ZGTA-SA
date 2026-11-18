@@ -16,7 +16,7 @@ def main():
   for name in names:
    path=work/(name+'.swift');path.write_bytes(before[f'ios/App/{name}.swift']);sources.append(str(path))
   (work/'main.swift').write_text(source);sources.append(str(work/'main.swift'))
-  result=subprocess.run(['xcrun','swiftc','-Onone','-module-cache-path',str(out/'modules'),*sources,'-o',str(work/'verify')],capture_output=True,text=True)
+  result=subprocess.run(['xcrun','swiftc','-whole-module-optimization','-Onone','-num-threads','1','-module-cache-path',str(out/'modules'),*sources,'-o',str(work/'verify')],capture_output=True,text=True,timeout=900)
   (out/'compile.log').write_text(result.stdout+result.stderr)
   if result.returncode:print(result.stdout+result.stderr);result.check_returncode()
   result=subprocess.run([str(work/'verify')],capture_output=True,text=True);same=all((ROOT/name).read_bytes()==data for name,data in before.items())

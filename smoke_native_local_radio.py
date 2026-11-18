@@ -87,7 +87,9 @@ def main():
     source=source.replace('// ACTUAL_ADVANCE',function(playback,'    private func advance('))
     source=source.replace('// ACTUAL_FINISH',function(playback,'    private func finish('))
     source=source.replace('// ACTUAL_TUNE',function(vehicle,'    private func tune('))
-    source=source.replace('// ACTUAL_ENTER',function(vehicle,'    func enter('))
+    source=source.replace('// ACTUAL_ROUTING_CANCEL_DIAL',function(vehicle,'    private func cancelDial('))
+    source=source.replace('// ACTUAL_ENTER','\n'.join(function(vehicle,marker) for marker in
+        ['    func enter(','    private func configureVehicleStation(','    private func cancelDial(']))
     source=source.replace('// ACTUAL_FALLBACK',function(vehicle,'    private func tuneFallback('))
     provider=before['ios/App/NativeLocalRadioProvider.swift'].decode()
     source=source.replace('// ACTUAL_RESERVE',function(provider,'    private func reserveRequest('))

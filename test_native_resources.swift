@@ -61,6 +61,24 @@ enum NativePreparedRuntimeVerifier {
             if let delay=cancelAfter{let handle=ResourceCancelHandle(op);DispatchQueue.global().asyncAfter(deadline:.now()+delay){handle.operation.cancel()}}
         }
     }
+    /// Cancel only after the real fixture observes the intended inflight blob.
+    /// A fixed wall delay can fire while Store is still checking cached files.
+    static func operation(cancelWhen observed:@escaping()async throws->Bool,
+                          _ begin:(@escaping(Result<NativeResourceStore.Snapshot,Error>)->Void)->NativeResourceStore.Operation)async->Result<NativeResourceStore.Snapshot,Error>{
+        await withCheckedContinuation{continuation in
+            let handle=ResourceCancelHandle(begin{continuation.resume(returning:$0)})
+            Task {
+                let deadline=ProcessInfo.processInfo.systemUptime+5
+                do {
+                    while ProcessInfo.processInfo.systemUptime<deadline {
+                        if try await observed(){handle.operation.cancel();return}
+                        try await Task.sleep(nanoseconds:25_000_000)
+                    }
+                }catch{}
+                handle.operation.cancel() // bounded failure path, never a pass.
+            }
+        }
+    }
     static func response(_ session:NativeResourceSession,_ url:URL,_ method:String="GET")async->ResourceTestResponse {
         await withCheckedContinuation{continuation in
             var request=URLRequest(url:url);request.httpMethod=method
@@ -185,7 +203,11 @@ enum NativePreparedRuntimeVerifier {
                 checks.check(try Data(contentsOf:cacheRoot.appendingPathComponent("active.json"))==receipt,"failure preserves active receipt bytes")
                 checks.check(cache.snapshot.installedContentID==mB.contentID,"failure preserves active content identity")
                 _=try await control(b,["action":"phase","phase":"delayC"]);start=try await control(b,["action":"stats"])
-                let cancelled=await operation(cancelAfter:0.2){cache.cacheDevelopment(origin:a,progress:{_ in},completion:$0)}
+                let beforeCancellationBlobs=blobs(start,"a")
+                let cancelled=await operation(cancelWhen:{
+                    let observed=try await control(b,["action":"stats"])
+                    return blobs(observed,"a")==beforeCancellationBlobs+1
+                }){cache.cacheDevelopment(origin:a,progress:{_ in},completion:$0)}
                 if case .failure=cancelled{checks.check(true,"inflight cancellation completes as failure")}else{checks.check(false,"inflight cancellation completes as failure")}
                 end=try await control(b,["action":"stats"]);checks.check(blobs(end,"a")-blobs(start,"a")==1,"cancellation exercised actual delayed blob request")
                 checks.check(try Data(contentsOf:cacheRoot.appendingPathComponent("active.json"))==receipt,"cancellation preserves active receipt bytes")
