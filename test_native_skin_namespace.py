@@ -46,17 +46,100 @@ def balanced(source, marker):
     raise ValueError('Unbalanced reference function')
 
 
+def native_gate(output_index, output_skins, out):
+    OUT = out
+    renderer_path = ROOT / 'ios/App/NativeWorldRenderer.swift'
+    client_path = ROOT / 'ios/App/NativeMultiplayerClient.swift'
+    renderer = renderer_path.read_text()
+    client = client_path.read_text()
+    swift = '''import Foundation
+final class VisibilitySpy{var resets=0;func reset(){resets+=1}}
+final class UnavailableCJ{var isReady=false}
+final class Renderer{
+ var pedModels:[String:String]=[:],vehicleModels:[String:String]=[:],legacyPedModels:[String:Int]=[:]
+ var localSkin=7,localLegacySkin:Int?,onStatus:((String)->Void)?
+ var fixedCJ:UnavailableCJ?=UnavailableCJ()
+ func fixedCJSourceIdentity()->String{"authored-namespace-source"}
+ func ensureFixedCJ(force:Bool=false){}
+ var ownRiderCapture:Int?,ownRiderPrevious:Int?,ownRiderFeet:Int?
+ let ownCameraVisibility=VisibilitySpy();var loaded:[String]=[]
+ func loadActor(_ name:String){loaded.append(name)}
+ func prepareFootAnimation(){}
+ func resolve(_ code:String)->String?{actorName(code:code)}
+'''
+    selection = renderer[renderer.index('    private let actorSelection = NativeActorSelection()'):
+                         renderer.index('    private var weaponModels:')]
+    swift += selection.replace('private ', '')
+    swift += function(renderer, '    private func actorName(')
+    swift += '}\nfinal class Client{var localSkin=7;'
+    swift += function(client, '    func setLocalSkin(') + '}\n'
+    swift += '''let index=try JSONDecoder().decode([String:[String:String]].self,from:Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1])))
+let renderer=Renderer(),client=Client();renderer.pedModels=index["peds"]!
+let catalog=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[2]))
+precondition(renderer.loadLegacySkinCatalog(catalog));var checks=0
+for(key,name)in index["peds"]!{let id=Int(key)!
+ precondition(renderer.setLocalSkin(id)&&renderer.localSkin==id&&renderer.loaded.last==name);checks+=1
+ precondition(renderer.resolve("s"+key)==name);checks+=1
+ client.setLocalSkin(id);precondition(client.localSkin==id);checks+=1
+ if let mapping=renderer.sampSkinCatalog?.mappings[id],let native=mapping.nativeID {
+  precondition(renderer.setLegacySkin(id)&&renderer.localSkin==native&&renderer.localLegacySkin==id&&renderer.loaded.last==mapping.model)
+ }else{let before=renderer.localSkin;precondition(!renderer.setLegacySkin(id)&&renderer.localSkin==before)};checks+=1
+}
+let previous=renderer.localSkin
+    if index["peds"]!["2"] == nil {
+     precondition(!renderer.setLocalSkin(2)&&renderer.localSkin==previous&&renderer.resolve("s2")==nil)
+    }else{precondition(renderer.setLocalSkin(2)&&renderer.resolve("s2")=="maccer")};checks+=1
+let beforeCJ=renderer.localSkin
+precondition(!renderer.setLegacySkin(0)&&renderer.localSkin==beforeCJ);checks+=1
+renderer.pedModels["20001"]="samp-dl-20001";renderer.legacyPedModels["samp-dl-20001"]=1
+precondition(renderer.setLegacySkin(20001)&&renderer.loaded.last=="samp-dl-20001");checks+=1
+print("PASS actual skin lookup/setters: \\(checks) checks; actor loading and animation owners are explicit spies")
+'''
+    with tempfile.TemporaryDirectory(prefix='swift-', dir=OUT) as temp:
+        work = Path(temp)
+        (work / 'main.swift').write_text(swift)
+        command = ['xcrun', 'swiftc', '-Onone', '-module-cache-path', str(OUT / 'modules'),
+                   str(ROOT / 'ios/App/NativeActorSelection.swift'),
+                   str(ROOT / 'ios/App/NativeSAMPSkinCatalog.swift'), str(work / 'main.swift'), '-o', str(work / 'verify')]
+        compiled = subprocess.run(command, capture_output=True, text=True)
+        (OUT / 'compile.log').write_text(compiled.stdout + compiled.stderr)
+        compiled.check_returncode()
+        run = subprocess.run([str(work / 'verify'), str(output_index), str(output_skins)], capture_output=True, text=True)
+        (OUT / 'swift-run.log').write_text(run.stdout + run.stderr)
+        run.check_returncode()
+
+    return run
+
+
 def main():
     global OUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--index', type=Path, default=ROOT / 'local-only/site/game/native/models/index.json')
     parser.add_argument('--model-overrides', type=Path)
+    parser.add_argument('--native-only', action='store_true', help='Read existing verified catalogues; do not prepare overlays or inspect original assets')
+    parser.add_argument('--skin-catalog', type=Path)
     parser.add_argument('--out', type=Path, default=OUT)
     args = parser.parse_args()
     OUT = args.out.resolve()
     if (ROOT / 'local-only').resolve() not in OUT.parents:
         raise ValueError('Namespace evidence must stay owner-local')
     OUT.mkdir(parents=True, exist_ok=True)
+    if args.native_only:
+        if args.skin_catalog is None:
+            parser.error('--native-only requires an existing --skin-catalog')
+        paths = [ROOT / 'ios/App/NativeWorldRenderer.swift', ROOT / 'ios/App/NativeMultiplayerClient.swift',
+                 ROOT / 'ios/App/NativeActorSelection.swift', ROOT / 'ios/App/NativeSAMPSkinCatalog.swift',
+                 Path(__file__).resolve(), args.index.resolve(), args.skin_catalog.resolve()]
+        before = {path: path.read_bytes() for path in paths}
+        run = native_gate(args.index.resolve(), args.skin_catalog.resolve(), OUT)
+        assert all(path.read_bytes() == data for path, data in before.items()), 'Read-only native fixture inputs changed'
+        report = {'status': 'PASS', 'scope': 'native-only/existing-catalogues', 'output': run.stdout,
+                  'sourceUnchanged': True, 'sourceHashes': {str(path): hashlib.sha256(data).hexdigest() for path, data in before.items()},
+                  'limits': ['Actual extracted native lookup/setters with retained verified catalogues',
+                             'Explicit unavailable-CJ boundary; no asset loading, conversion, network, UIKit or GPU action']}
+        (OUT / 'native-only-report.json').write_text(json.dumps(report, indent=2) + '\n')
+        print(run.stdout, end='')
+        return
     checks = 0
 
     def check(value, message):
@@ -249,58 +332,7 @@ def main():
 
     renderer_path = ROOT / 'ios/App/NativeWorldRenderer.swift'
     client_path = ROOT / 'ios/App/NativeMultiplayerClient.swift'
-    renderer = renderer_path.read_text()
-    client = client_path.read_text()
-    swift = '''import Foundation
-final class VisibilitySpy{var resets=0;func reset(){resets+=1}}
-final class Renderer{
- var pedModels:[String:String]=[:],vehicleModels:[String:String]=[:],legacyPedModels:[String:Int]=[:]
- var localSkin=7,pendingLocalSkin:Int?,localLegacySkin:Int?,pendingLegacySkin:Int?
- var sampSkinCatalog:NativeSAMPSkinCatalog?,onStatus:((String)->Void)?
- var ownRiderCapture:Int?,ownRiderPrevious:Int?,ownRiderFeet:Int?
- let ownCameraVisibility=VisibilitySpy();var loaded:[String]=[]
- func loadActor(_ name:String){loaded.append(name)}
- func prepareFootAnimation(){}
- func resolve(_ code:String)->String?{actorName(code:code)}
-'''
-    swift += '\n'.join(function(renderer, marker) for marker in [
-        '    @discardableResult func setLocalSkin(', '    @discardableResult func setLegacySkin(',
-        '    @discardableResult func loadLegacySkinCatalog(', '    private func actorName('])
-    swift += '}\nfinal class Client{var localSkin=7;'
-    swift += function(client, '    func setLocalSkin(') + '}\n'
-    swift += '''let index=try JSONDecoder().decode([String:[String:String]].self,from:Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1])))
-let renderer=Renderer(),client=Client();renderer.pedModels=index["peds"]!
-let catalog=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[2]))
-precondition(renderer.loadLegacySkinCatalog(catalog));var checks=0
-for(key,name)in index["peds"]!{let id=Int(key)!
- precondition(renderer.setLocalSkin(id)&&renderer.localSkin==id&&renderer.loaded.last==name);checks+=1
- precondition(renderer.resolve("s"+key)==name);checks+=1
- client.setLocalSkin(id);precondition(client.localSkin==id);checks+=1
- if let mapping=renderer.sampSkinCatalog?.mappings[id],let native=mapping.nativeID {
-  precondition(renderer.setLegacySkin(id)&&renderer.localSkin==native&&renderer.localLegacySkin==id&&renderer.loaded.last==mapping.model)
- }else{let before=renderer.localSkin;precondition(!renderer.setLegacySkin(id)&&renderer.localSkin==before)};checks+=1
-}
-let previous=renderer.localSkin
-    if index["peds"]!["2"] == nil {
-     precondition(!renderer.setLocalSkin(2)&&renderer.localSkin==previous&&renderer.resolve("s2")==nil)
-    }else{precondition(renderer.setLocalSkin(2)&&renderer.resolve("s2")=="maccer")};checks+=1
-let beforeCJ=renderer.localSkin
-precondition(!renderer.setLegacySkin(0)&&renderer.localSkin==beforeCJ);checks+=1
-renderer.pedModels["20001"]="samp-dl-20001";renderer.legacyPedModels["samp-dl-20001"]=1
-precondition(renderer.setLegacySkin(20001)&&renderer.loaded.last=="samp-dl-20001");checks+=1
-print("PASS actual skin lookup/setters: \\(checks) checks; actor loading and animation owners are explicit spies")
-'''
-    with tempfile.TemporaryDirectory(prefix='swift-', dir=OUT) as temp:
-        work = Path(temp)
-        (work / 'main.swift').write_text(swift)
-        command = ['xcrun', 'swiftc', '-Onone', '-module-cache-path', str(OUT / 'modules'),
-                   str(ROOT / 'ios/App/NativeSAMPSkinCatalog.swift'), str(work / 'main.swift'), '-o', str(work / 'verify')]
-        compiled = subprocess.run(command, capture_output=True, text=True)
-        (OUT / 'compile.log').write_text(compiled.stdout + compiled.stderr)
-        compiled.check_returncode()
-        run = subprocess.run([str(work / 'verify'), str(output_index), str(output_skins)], capture_output=True, text=True)
-        (OUT / 'swift-run.log').write_text(run.stdout + run.stderr)
-        run.check_returncode()
+    run = native_gate(output_index, output_skins, OUT)
 
     check(index_path.read_bytes() == original_index_data, 'Shared original index changed')
     check(all(hashlib.sha256(path.read_bytes()).hexdigest() == digest for path, digest in before.items()),
@@ -319,7 +351,8 @@ print("PASS actual skin lookup/setters: \\(checks) checks; actor loading and ani
               'correctedIndexSHA256': hashlib.sha256(output_index.read_bytes()).hexdigest(),
               'correctedSkinMapSHA256': hashlib.sha256(output_skins.read_bytes()).hexdigest(),
               'sourceHashes': {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-                               for path in [renderer_path, client_path, server_path, ROOT / 'ios/App/NativeSAMPSkinCatalog.swift']},
+                               for path in [renderer_path, client_path, server_path, ROOT / 'ios/App/NativeSAMPSkinCatalog.swift',
+                                            ROOT / 'ios/App/NativeActorSelection.swift']},
               'perModelBytesUnchanged': True, 'modelFiles': [{'path': str(path), 'sha256': digest, 'bytes': path.stat().st_size}
                                                            for path, digest in before.items()],
               'mapping': mapping,

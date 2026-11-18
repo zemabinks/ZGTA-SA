@@ -6,7 +6,7 @@ from smoke_native_climb_runtime import function
 ROOT=Path(__file__).resolve().parent
 def main():
     out=ROOT/'local-only/native-physics/tests/original-renderer';out.mkdir(parents=True,exist_ok=True)
-    names=['SwiftRapierWorld','NativeWorldRay','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeVehiclePaint','NativeVehicleRig','NativeFootLocomotion','NativeHeadingContinuity','NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativeSwimController','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPSkinCatalog','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPGameCamera']
+    names=['SwiftRapierWorld','NativeWorldRay','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle','NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces','NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeVehiclePaint','NativeVehicleRig','NativeFootLocomotion','NativeHeadingContinuity','NativeCombatEligibility','NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','NativeFootAnimation','NativeSwimController','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeActorSelection','NativeSAMPSkinCatalog','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPGameCamera']
     paths=[f'ios/App/{name}.swift'for name in names]+['ios/App/NativeSkeletalActor.swift','ios/App/NativeWorldRenderer.swift','smoke_native_original_renderer.py','smoke_native_original_renderer.swift']
     before={name:(ROOT/name).read_bytes()for name in paths};skeletal=before['ios/App/NativeSkeletalActor.swift'].decode();renderer=before['ios/App/NativeWorldRenderer.swift'].decode()
     source=skeletal[:skeletal.index('struct NativeSkinVertex')].replace('import Metal','')+'\nfinal class NativeSkeletalActor {\n'+skeletal[skeletal.index('    struct OriginalAim {'):skeletal.index('    struct Pose {')]+'}\n'
@@ -16,12 +16,18 @@ struct WorldCollision {let label:String}
 struct CharacterQuerySpy {let walker:UInt64,probe:UInt64}
 struct CharacterSpy {let queries:CharacterQuerySpy?}
 final class CameraSpy {var begins=0;func beginVehicle(){begins+=1}}
+// Fixed CJ GPU availability is deliberately absent in this renderer/physics
+// carrier; the separate CJ runtime gate owns actual assembly/upload admission.
+final class UnavailableCJ {var isReady=false}
 final class OriginalRenderer {
  let groundVehicle:NativeGroundVehicle?
  var pedModels:[String:String]=[:],vehicleModels:[String:String]=[:],vehicleRigs:[String:NativeVehicleRig]=[:]
  var legacyPedModels:[String:Int]=[:],legacyPedStyles:[String:String]=[:]
- var localSkin=7,pendingLocalSkin:Int?,localLegacySkin:Int?,pendingLegacySkin:Int?
- var sampSkinCatalog:NativeSAMPSkinCatalog?
+ var localSkin=7,localLegacySkin:Int?
+ var fixedCJ:UnavailableCJ?=UnavailableCJ()
+ func fixedCJSourceIdentity()->String{"authored-renderer-source"}
+ func ensureFixedCJ(force:Bool=false){}
+ // ACTUAL_SELECTION
  var skeletalLibrary:NativeSkeletalAnimationLibrary?,footDefinitions:NativeFootAnimationDefinitions?
  var footAnimator:NativeFootAnimation?,footAnimationModel=""
  var ownRiderCapture:Int?,ownRiderPrevious:Int?,ownRiderFeet:Int?
@@ -61,8 +67,10 @@ final class OriginalRenderer {
         prefix=renderer[start:body]
         tail=function(renderer[body:],'{')
         return prefix+tail
+    selection=renderer[renderer.index('    private let actorSelection = NativeActorSelection()'):renderer.index('    private var weaponModels:')]
+    source=source.replace('// ACTUAL_SELECTION',selection.replace('private ',''))
     source=source.replace('// ACTUAL_METHODS','\n'.join(actual(marker)for marker in[
-        '    @discardableResult func setLocalSkin(', '    @discardableResult func setLegacySkin(', '    @discardableResult func loadLegacySkinCatalog(', '    private func prepareFootAnimation(',
+        '    private func prepareFootAnimation(',
         '    var legacyVehicleQuaternion:', '    @discardableResult func receiveOriginalVehicleHit(',
         '    private func burstOriginalVehicleWheel(',
         '    func canParryOriginalHit(', '    @discardableResult func repairOriginalVehicle(',

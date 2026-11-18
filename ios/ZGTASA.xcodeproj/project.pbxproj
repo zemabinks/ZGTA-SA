@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		018CA1BD5D90D205DDD49374 /* NativeRapierClimbQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3A994D21120E957D693396A /* NativeRapierClimbQueries.swift */; };
+		027501B58BD8D97968C415B6 /* NativeActorSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D458C1609000A0D15E78B34 /* NativeActorSelection.swift */; };
 		0291932B96429254ECB345D3 /* NativeOriginalWorldSignInController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E6D78EF9CF66E8399E753F0 /* NativeOriginalWorldSignInController.swift */; };
 		02B73785605A04DF63D210FA /* NativeRenderWareModel.metal in Sources */ = {isa = PBXBuildFile; fileRef = 643B048C459C890972AB8F98 /* NativeRenderWareModel.metal */; };
 		04B40C99D7BE0124F276906E /* NativePedestrianReaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57FD67E1D1161EFB1AEF6C8A /* NativePedestrianReaction.swift */; };
@@ -247,6 +248,7 @@
 		38CD9A85767EC0BEF5EB4DEA /* NativeLocalHitReaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLocalHitReaction.swift; sourceTree = "<group>"; };
 		3C625F976BE62852F37692C1 /* NativeVehicleSupportScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleSupportScene.swift; sourceTree = "<group>"; };
 		3C997172E8F7041ABEB93A87 /* NativeWorldRay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldRay.swift; sourceTree = "<group>"; };
+		3D458C1609000A0D15E78B34 /* NativeActorSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeActorSelection.swift; sourceTree = "<group>"; };
 		3E6C536AED882DF9A6555DD1 /* NativeVehicleRadio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleRadio.swift; sourceTree = "<group>"; };
 		3E91597E6874AECCA343C50A /* NativeSAMPStockCollisionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPStockCollisionCatalog.swift; sourceTree = "<group>"; };
 		40C83975C1901364F937BE8B /* NativeCJResources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJResources.swift; sourceTree = "<group>"; };
@@ -419,6 +421,7 @@
 				8B6E1BEA395F88AFB175F6CE /* Info.plist */,
 				DAF3FFE41D4B8C5B0F20E99A /* MainMenuViewController.swift */,
 				8A2987F67DA4F5463FEFF776 /* NativeActorAnimation.swift */,
+				3D458C1609000A0D15E78B34 /* NativeActorSelection.swift */,
 				A80829C7A98ABE5DC1C42D9D /* NativeAnimationPanel.swift */,
 				CD3B254232A2948E5E9B7B1C /* NativeAppSettings.swift */,
 				422617B4FD560E3E71002C59 /* NativeAtmosphere.swift */,
@@ -705,6 +708,7 @@
 				EE609E92C2D112EE11CB59E4 /* HomeViewController.swift in Sources */,
 				A04EB9A2AA84E43AE0417110 /* MainMenuViewController.swift in Sources */,
 				54DDE12A75BD4B81259536BD /* NativeActorAnimation.swift in Sources */,
+				027501B58BD8D97968C415B6 /* NativeActorSelection.swift in Sources */,
 				83D5043A797662B20D20121A /* NativeAnimationPanel.swift in Sources */,
 				E7B4C938790CB389CEE732CA /* NativeAppSettings.swift in Sources */,
 				5CF0D2D3CDD5A2CDF89B58B3 /* NativeAtmosphere.swift in Sources */,

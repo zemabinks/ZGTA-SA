@@ -36,3 +36,11 @@ jobs:
       - run: node smoke_selfhost_tp_units.js
       - run: node smoke_selfhost_position_resume.js
       - run: node smoke_selfhost_mission_persistence.js
+  native-foundation:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python3 smoke_core_115.py

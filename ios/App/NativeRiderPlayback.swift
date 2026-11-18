@@ -1,8 +1,9 @@
 import Foundation
 import simd
 
-/// Public bA boarding queue and 0.25 s pose transitions. A capture event names
-/// the exact raw phase-end pose, rather than the preceding displayed frame.
+/// Public bA phase plans and 0.25 s pose transitions. Ordinary elapsed time
+/// carries across phase boundaries instead of rounding every phase to a frame.
+/// A capture names the exact raw phase-end pose, not the preceding display.
 final class NativeRiderPlayback {
     enum State:String {case out,entering,inside="in",leaving,stood}
     struct Sample {var pose:NativeRiderAnimation.Frame;var anchor:SIMD3<Double>}
@@ -59,37 +60,61 @@ final class NativeRiderPlayback {
     }
     func update(delta dt:Double,input:NativeRiderAnimation.Input)->Frame? {
         guard state != .out else{return nil}
+        // Suspension/invalid samples hold the clock; they do not become old
+        // boarding input on a later frame. Ordinary low-FPS time is retained.
+        let advances=dt.isFinite && dt>=0 && dt<=0.5
+        let delta=advances ? dt:0
         var sample:Sample?
         var released:(Int,Double)?
-        if let phase {
-            elapsed+=dt;let length=duration(phase.clip) ?? 0
+        var transitionDelta=delta
+        let hadPhase=phase != nil
+        func length(_ phase:NativeBoardingAnimation.Phase)->Double {
+            guard let value=duration(phase.clip),value.isFinite,value>=0 else{return 0}
+            return value
+        }
+        func sampled(_ phase:NativeBoardingAnimation.Phase,at time:Double)->Sample {
+            let clipLength=length(phase),time=min(clipLength,max(0,time))
             var place=phase.anchor
-            if let lower=phase.lower {place.z=lower.x+(lower.y-lower.x)*smooth(elapsed,lower.z,lower.w)}
-            sample=Sample(pose:.init(base:phase.clip,time:min(elapsed,length)),anchor:place)
+            if let lower=phase.lower {place.z=lower.x+(lower.y-lower.x)*smooth(time,lower.z,lower.w)}
             if let door=phase.door {
                 part=phase.part ?? configuration.seats[configuration.seat].door
-                opening=elapsed>=length ? door.y:door.x+(door.y-door.x)*(door.w>door.z ? min(1,max(0,(elapsed-door.z)/(door.w-door.z))):1)
+                opening=time>=clipLength ? door.y:door.x+(door.y-door.x)*(door.w>door.z ? min(1,max(0,(time-door.z)/(door.w-door.z))):1)
             }
-            if elapsed>=length {
-                serial+=1;capture = .sample(sample!);transition=0;elapsed=0
-                self.phase=queue.isEmpty ? nil:queue.removeFirst()
-                if self.phase==nil {
-                    state=state == .entering ? .inside:.stood
-                    if let part{released=(part,opening)}
-                    part=nil
+            return Sample(pose:.init(base:phase.clip,time:time),anchor:place)
+        }
+        if phase != nil {
+            if advances {
+                elapsed+=delta
+                // Every iteration consumes one finite queued phase, including
+                // absent/zero-length clips; it cannot spin on a zero duration.
+                var remainingPhases=queue.count+1
+                while let current=phase,remainingPhases>0 {
+                    let duration=length(current)
+                    guard elapsed>=duration else{break}
+                    let overflow=max(0,elapsed-duration)
+                    serial+=1;capture = .sample(sampled(current,at:duration));transition=0
+                    elapsed=overflow;transitionDelta=overflow;remainingPhases-=1
+                    self.phase=queue.isEmpty ? nil:queue.removeFirst()
+                    if self.phase==nil {
+                        state=state == .entering ? .inside:.stood
+                        if let part{released=(part,opening)}
+                        part=nil;elapsed=0
+                    }
                 }
             }
+            if let phase {sample=sampled(phase,at:elapsed)}
         }
         if phase==nil {
             if state == .inside {
                 let seat=definition.seats[configuration.seat],at=seat.position.map(SIMD3<Double>.init) ?? configuration.seats[configuration.seat].at
-                sample=Sample(pose:seated.update(delta:dt,configuration:definition.configuration(seat:configuration.seat),input:input),anchor:at)
+                sample=Sample(pose:seated.update(delta:hadPhase ? transitionDelta:delta,configuration:definition.configuration(seat:configuration.seat),input:input),anchor:at)
             } else {sample=Sample(pose:.init(base:"ped/idle_stance"),anchor:anchor)}
         }
         let transitioning=transition<1
-        transition=min(1,transition+dt/0.25)
+        transition=min(1,transition+transitionDelta/0.25)
         let target=phase==nil && state == .inside ? definition.seats[configuration.seat].turn ?? 0:0
-        turn+=(target-turn)*min(1,dt/0.25*2)
+        let turnDelta=hadPhase && phase==nil && state == .inside ? transitionDelta:delta
+        turn+=(target-turn)*min(1,turnDelta/0.25*2)
         // Original bA's door getter hides its cached part after a forced sit.
         // Remote action cancellation must release the renderer's door override.
         let holdingDoor=state == .entering || state == .leaving

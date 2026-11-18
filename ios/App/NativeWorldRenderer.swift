@@ -475,67 +475,97 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var vehicleModels: [String: String] = [:]
     private var pedModels: [String: String] = [:]
     private(set) var localSkin = 7
-    private var pendingLocalSkin: Int?
     private(set) var localLegacySkin: Int?
-    private var pendingLegacySkin: Int?
+    private let actorSelection = NativeActorSelection()
+    var actorSelectionState: NativeActorSelection.State? {
+        guard let state=actorSelection.state,state.request.sourceIdentity==fixedCJSourceIdentity() else{return nil}
+        return state
+    }
+    var onActorSelectionChanged: ((NativeActorSelection.State)->Void)? {
+        didSet { actorSelection.onChange = onActorSelectionChanged }
+    }
+    private var pendingActorSelection: NativeActorSelection.Request? {
+        guard let state = actorSelection.state, state.phase == .pending else { return nil }
+        return state.request
+    }
+    private var pendingLocalSkin: Int? {
+        guard let request = pendingActorSelection, request.domain == .native else { return nil }
+        return request.skin
+    }
+    private var pendingLegacySkin: Int? {
+        guard let request = pendingActorSelection, request.domain == .legacy else { return nil }
+        return request.skin
+    }
+    func cancelActorSelection() { actorSelection.cancel() }
     private var sampSkinCatalog: NativeSAMPSkinCatalog?
     @discardableResult func loadLegacySkinCatalog(_ data: Data) -> Bool {
         guard let catalog = try? NativeSAMPSkinCatalog(data: data) else { return false }
         sampSkinCatalog = catalog
-        if let pending = pendingLegacySkin { _ = setLegacySkin(pending) }
+        resumeActorSelection()
         return true
     }
     /// SA-MP IDs refer to retail peds.ide, not the browser's compact array.
     @discardableResult func setLegacySkin(_ skin: Int) -> Bool {
-        if skin == 0 {
-            guard fixedCJ?.isReady == true,pedModels["0"] == "null" else {
-                pendingLegacySkin=0;pendingLocalSkin=nil;ensureFixedCJ();return false
-            }
-            guard setLocalSkin(0) else{pendingLegacySkin=0;return false}
-            localLegacySkin=0;pendingLegacySkin=nil;return true
-        }
-        if (20001...30000).contains(skin) {
-            guard legacyPedModels["samp-dl-\(skin)"] != nil else{pendingLegacySkin=skin;return false}
-            guard setLocalSkin(skin)else{pendingLegacySkin=skin;return false}
-            localLegacySkin=skin;pendingLegacySkin=nil;return true
-        }
-        guard (0...311).contains(skin) else { return false }
-        guard let catalog = sampSkinCatalog, !pedModels.isEmpty else { pendingLegacySkin = skin; return false }
-        guard let native = catalog.nativeSkin(forLegacy: skin),
-              pedModels[String(native)] == catalog.model(forLegacy: skin) else {
-            pendingLegacySkin = nil
-            onStatus?("NO CONVERTED NATIVE MODEL FOR SA-MP SKIN \(skin)")
-            return false
-        }
-        guard setLocalSkin(native) else { pendingLegacySkin = skin; return false }
-        localLegacySkin = skin; pendingLegacySkin = nil
-        return true
+        let request=actorSelection.begin(domain: .legacy, skin: skin, sourceIdentity: fixedCJSourceIdentity())
+        return resolveActorSelection(request,forceCJ:skin==0)
     }
     /// Requests received before the model catalogue are applied once it arrives.
     /// Unsupported/custom IDs remain explicit gaps rather than another skin
     /// being advertised as the requested model.
     @discardableResult func setLocalSkin(_ skin: Int) -> Bool {
-        guard (0...65535).contains(skin) else { return false }
-        pendingLegacySkin = nil; localLegacySkin = nil
-        if skin == 0,(fixedCJ?.isReady != true || pedModels["0"] != "null") {
-            pendingLocalSkin=0;ensureFixedCJ();return false
-        }
-        guard !pedModels.isEmpty else { pendingLocalSkin = skin; return false }
-        guard let model = pedModels[String(skin)] else {
-            pendingLocalSkin = nil
-            onStatus?("NO CONVERTED NATIVE MODEL FOR SKIN \(skin)")
+        let request=actorSelection.begin(domain: .native, skin: skin, sourceIdentity: fixedCJSourceIdentity())
+        return resolveActorSelection(request,forceCJ:skin==0)
+    }
+    /// Async resource arrivals resume one current intent, never a new request.
+    /// Resource admission does not change the server's canonical wire identity.
+    private func resumeActorSelection() {
+        guard let request = pendingActorSelection else { return }
+        _ = resolveActorSelection(request)
+    }
+    @discardableResult private func resolveActorSelection(_ request: NativeActorSelection.Request,forceCJ:Bool=false) -> Bool {
+        let source = fixedCJSourceIdentity()
+        _ = actorSelection.invalidateSource(source)
+        guard actorSelection.owns(request, sourceIdentity: source) else { return false }
+        func unavailable(_ message: String) -> Bool {
+            if actorSelection.unavailable(request, sourceIdentity: fixedCJSourceIdentity(), message: message) { onStatus?(message) }
             return false
         }
-        pendingLocalSkin = nil
-        guard skin != localSkin else { loadActor(model); return true }
-        localSkin = skin
+        let skin: Int
+        if request.skin == 0 {
+            if let existing=pedModels["0"],existing != "null" {
+                return unavailable("FIXED NORMAL CJ CONFLICTS WITH THE EXISTING SKIN0 CATALOGUE")
+            }
+            // Only a new explicit selection bypasses the failed-owner retry
+            // delay. Resource arrivals and remote demand retain normal backoff.
+            guard fixedCJ?.isReady == true, pedModels["0"] == "null" else { ensureFixedCJ(force:forceCJ); return false }
+            skin = 0
+        } else if request.domain == .legacy {
+            if (20001...30000).contains(request.skin) {
+                guard legacyPedModels["samp-dl-\(request.skin)"] != nil else { return false }
+                skin = request.skin
+            } else {
+                guard let catalog = sampSkinCatalog, !pedModels.isEmpty else { return false }
+                guard let native = catalog.nativeSkin(forLegacy: request.skin),
+                      pedModels[String(native)] == catalog.model(forLegacy: request.skin) else {
+                    return unavailable("NO CONVERTED NATIVE MODEL FOR SA-MP SKIN \(request.skin)")
+                }
+                skin = native
+            }
+        } else { skin = request.skin }
+        guard !pedModels.isEmpty else { return false }
+        guard let model = pedModels[String(skin)] else { return unavailable("NO CONVERTED NATIVE MODEL FOR SKIN \(skin)") }
+        // A ready-resource callback may have been superseded or invalidated.
+        guard actorSelection.owns(request, sourceIdentity: fixedCJSourceIdentity()) else { return false }
+        let changed = skin != localSkin
+        localSkin = skin; localLegacySkin = request.domain == .legacy ? request.skin : nil
         loadActor(model)
-        prepareFootAnimation()
-        // Capture matrices belong to the previous skeleton. Keep the entry/
-        // exit task and body pose, but never blend a new mesh from old bones.
-        ownRiderCapture = nil; ownRiderPrevious = nil; ownRiderFeet = nil
-        ownCameraVisibility.reset()
-        return true
+        if changed {
+            prepareFootAnimation()
+            // Pose captures belong to the previous skeleton.
+            ownRiderCapture = nil; ownRiderPrevious = nil; ownRiderFeet = nil
+            ownCameraVisibility.reset()
+        }
+        return actorSelection.applied(request, nativeSkin: skin, sourceIdentity: fixedCJSourceIdentity())
     }
     private var weaponModels: [String: String] = [:]
     private var weaponMuzzleCatalog:NativeWeaponMuzzle.Catalog?
@@ -886,6 +916,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         super.init()
         fixedCJObserver=NativeResourceStore.shared.observe {[weak self] _ in
             guard let self else{return}
+            _ = self.actorSelection.invalidateSource(self.fixedCJSourceIdentity())
             if self.fixedCJ?.invalidateIfSourceChanged()==true,self.needsFixedCJ{self.ensureFixedCJ()}
         }
         configureMovingSupport()
@@ -2760,7 +2791,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var server: ServerAddress? {didSet{
-        if oldValue != server {fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+        if oldValue != server {actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
     deinit {if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
@@ -2772,7 +2803,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return [server?.display ?? "",binding.generation.uuidString,binding.mode.rawValue,
             binding.contentID ?? "",binding.developmentOrigin ?? "",binding.playable ? "ready":"unverified"].joined(separator:"|")
     }
-    private func ensureFixedCJ() {
+    private func ensureFixedCJ(force:Bool=false) {
         guard let server else{return}
         if fixedCJ==nil {
             do {
@@ -2788,7 +2819,6 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     guard let self else{return}
                     if self.pedModels["0"]=="null"{self.pedModels.removeValue(forKey:"0")}
                     self.skeletalActors.removeValue(forKey:"null")
-                    if self.localSkin==0,self.pendingLegacySkin != 0{self.pendingLocalSkin=0}
                     self.ownRiderCapture=nil;self.ownRiderPrevious=nil
                     self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
                 }
@@ -2796,27 +2826,43 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     guard let self,let owner,self.fixedCJ === owner,owner.isReady,
                           ready.sourceIdentity==self.fixedCJSourceIdentity() else{return}
                     guard self.pedModels["0"]==nil || self.pedModels["0"]=="null" else {
+                        if let request=self.pendingActorSelection,request.skin==0 {
+                            _=self.actorSelection.unavailable(request,sourceIdentity:self.fixedCJSourceIdentity(),message:"FIXED NORMAL CJ CONFLICTS WITH THE EXISTING SKIN0 CATALOGUE")
+                        }
                         self.onStatus?("FIXED NORMAL CJ CONFLICTS WITH THE EXISTING SKIN0 CATALOGUE");return
                     }
                     // All maps become visible together, after the final GPU/
                     // source fence. `null` preserves the real PLAYER1 gait.
                     self.pedModels["0"]="null";self.skeletalActors["null"]=ready.gpu.uploaded.actor
                     self.ownRiderCapture=nil;self.ownRiderPrevious=nil;self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
-                    if self.pendingLegacySkin==0{_=self.setLegacySkin(0)}
-                    else if self.pendingLocalSkin==0{_=self.setLocalSkin(0)}
+                    self.resumeActorSelection()
                     if self.localSkin==0{self.footAnimationModel="";self.prepareFootAnimation()}
                     self.onStatus?("FIXED NORMAL CJ READY — VEST / DENIM PROFILE")
                 }
-                owner.onUnavailable={[weak self]error in self?.onStatus?("FIXED NORMAL CJ PROFILE UNAVAILABLE: \(error)")}
+                owner.onUnavailable={[weak self]error in
+                    guard let self else{return}
+                    let message="FIXED NORMAL CJ PROFILE UNAVAILABLE: \(error)"
+                    if let request=self.pendingActorSelection,request.skin==0 {
+                        _=self.actorSelection.unavailable(request,sourceIdentity:self.fixedCJSourceIdentity(),message:message)
+                    }
+                    self.onStatus?(message)
+                }
                 fixedCJ=owner
-            }catch{onStatus?("FIXED NORMAL CJ PROFILE UNAVAILABLE: \(error)");return}
+            }catch{
+                let message="FIXED NORMAL CJ PROFILE UNAVAILABLE: \(error)"
+                if let request=pendingActorSelection,request.skin==0 {
+                    _=actorSelection.unavailable(request,sourceIdentity:fixedCJSourceIdentity(),message:message)
+                }
+                onStatus?(message);return
+            }
         }
-        _=fixedCJ?.ensure()
+        _=fixedCJ?.ensure(force:force)
     }
 
     func loadModelIndex() {
         loadFlightAssets();loadParticleEffects()
         guard let server else { return }
+        let modelSource=fixedCJSourceIdentity()
         loadLegacyStockCatalogs()
         NativeResourceTransport.dataTask(with:server.path("game/native/weapons.json")) { [weak self] data,response,_ in
             guard (response as? HTTPURLResponse)?.statusCode==200,let data,
@@ -2912,20 +2958,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let self, let data,
                   let index = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
             DispatchQueue.main.async {
+                guard self.fixedCJSourceIdentity()==modelSource else{return}
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
                 if self.fixedCJ?.isReady==true,self.pedModels["0"]==nil{self.pedModels["0"]="null"}
                 for key in self.legacyModelDefinitions.keys where (20001...30000).contains(key){self.pedModels[String(key)]="samp-dl-\(key)"}
                 self.weaponModels = index["weapons"] ?? [:]
-                if let pending = self.pendingLegacySkin { _ = self.setLegacySkin(pending) }
-                else if let pending = self.pendingLocalSkin { _ = self.setLocalSkin(pending) }
+                self.resumeActorSelection()
                 self.loadActor(self.pedModels[String(self.localSkin)] ?? "bmori")
                 self.loadActor("colt45")
             }
         }.resume()
         NativeResourceTransport.dataTask(with: server.path("game/native/samp-skins.json")) { [weak self] data, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200, let data else { return }
-            DispatchQueue.main.async { _ = self?.loadLegacySkinCatalog(data) }
+            DispatchQueue.main.async {
+                guard let self,self.fixedCJSourceIdentity()==modelSource else{return}
+                _=self.loadLegacySkinCatalog(data)
+            }
         }.resume()
         NativeResourceTransport.dataTask(with: server.path("game/native/handling.json")) { [weak self] data, _, _ in
             guard let self, let data,
@@ -3493,11 +3542,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         legacyStockCollisionKinds.removeAll()
         for name in legacyPedModels.keys{skeletalActors.removeValue(forKey:name)}
         for key in legacyModelDefinitions.keys where (20001...30000).contains(key){pedModels.removeValue(forKey:String(key))}
-        if let current=localLegacySkin,(20001...30000).contains(current){pendingLegacySkin=current}
+        let refreshSkin: Int? = {
+            guard let current=localLegacySkin,(20001...30000).contains(current),
+                  let selection=actorSelection.state,selection.phase == .applied,
+                  selection.request.domain == .legacy,selection.request.skin == current else{return nil}
+            return current
+        }()
         legacyModels.removeAll();legacyPedModels.removeAll();legacyPedStyles.removeAll();legacyModelDefinitions.removeAll();legacyModelCosts.removeAll()
         legacyMaterialOwner?.reset();legacyExactTextures.removeAll();legacyTextureSources.removeAll();legacyTextureConflicts.removeAll();legacyTextureLoads.removeAll();legacyTextureRetries.removeAll();legacyMaterialErrors.removeAll();legacyExternalTextureBytes.removeAll();legacyTextureUse.removeAll()
         legacyModelBytes=0;legacyMissingObjects.removeAll()
         legacyCollisionWorld?.removeAll();legacyCollisionHandles.removeAll();legacyCollisionKinds.removeAll();legacyCollisionModels.removeAll()
+        if let refreshSkin{_=setLegacySkin(refreshSkin)}
     }
     func clearLegacyWorld() {
         clearLegacyModels();legacyObjects.reset();legacyVirtualWorld=0;legacyLocalPlayerID=nil
@@ -3546,7 +3601,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         self.legacyPedModels[name]=uploaded;self.pedModels[String(model.customID)]=name;self.skeletalActors[name]=uploaded.actor
                         if let style=self.sampSkinCatalog?.model(forLegacy:Int(model.baseID)){self.legacyPedStyles[name]=style}
                         self.ownRiderCapture=nil;self.ownRiderPrevious=nil;self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
-                        if self.pendingLegacySkin==Int(model.customID){_=self.setLegacySkin(Int(model.customID))}
+                        if self.pendingLegacySkin==Int(model.customID){self.resumeActorSelection()}
                     }
                     self.legacyModelDefinitions[model.customID]=model;self.legacyModelCosts[model.customID]=bytes
                     self.legacyCollisionModels[model.customID]=prepared.collision
@@ -4063,20 +4118,19 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let flightIDs=Set(remotePlayers.map(\.id)).union(["own"])
         flightCanopyPoses=flightCanopyPoses.filter{flightIDs.contains($0.key)}
         flightCanopyLanded=flightCanopyLanded.filter{flightIDs.contains($0.key)}
-        var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int, VehicleDrawContext?)] = []
+        var modelInstances: [(String, SIMD3<Float>, Float, Float, String, Double, Int, VehicleDrawContext?, Int?)] = []
         var transparentVehicleDraws:[TransparentVehicleDraw]=[]
         // Vehicle source, appearance and physical transform stay with each
         // occurrence; coordinates are never used as an ownership key.
         var driverPose: NativeSkeletalActor.Pose?
-        // An ordered queue preserves independent instances even when two players
-        // have the same skin and exact position (including passengers).
-        var actorOverrides: [String:[ActorPoseOverride]] = [:]
-        var actorOverrideOffsets: [String:Int] = [:]
-        func key(_ name: String,_ position: SIMD3<Float>) -> String { "\(name):\(position)" }
+        // Each occurrence refers to its own draw-local override, including
+        // co-located players with the same skin. No position key is needed.
+        var actorOverrides: [ActorPoseOverride] = []
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
                        pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false) {
-            actorOverrides[key(name,at),default:[]].append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot))
-            modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil))
+            let occurrence = actorOverrides.count
+            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot))
+            modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil,occurrence))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
            let ped=pedModels[String(localSkin)] {
@@ -4105,7 +4159,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let code = ownVehicleAppearanceCode
             if let name = actorName(code: code) {
                 let context=ownVehicleDrawContext(name:name,code:code)
-                modelInstances.append((name,camera,heading,vehiclePitch,"",0,0,context))
+                modelInstances.append((name,camera,heading,vehiclePitch,"",0,0,context,nil))
                 if let seat = riderDefinitions?.models[activeVehicleModel]?.seats.first?.position ?? vehicleSeats[name], let ped = pedModels[String(localSkin)] {
                     // A pose cannot be the prerequisite for loading its actor:
                     // eviction or fast boarding would otherwise hide it forever.
@@ -4279,7 +4333,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 continue
             }
             let context=remoteVehicleDrawContext(name:name,player:player)
-            modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0,context))
+            modelInstances.append((name,player.position,player.heading,player.pitch,"",0,0,context,nil))
             guard let ped=pedModels[String(player.skin)] else {continue}
             guard let actor=skeletalActors[ped],let library=skeletalLibrary else {loadActor(ped);continue}
             let model=String(player.code.split(separator:".").first ?? "")
@@ -4332,14 +4386,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for projectile in weaponEffects.projectiles {
             let direction = atan2(projectile.velocity.x,projectile.velocity.y)
             let pitch = atan2(projectile.velocity.z,hypot(projectile.velocity.x,projectile.velocity.y))
-            modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0,nil))
+            modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0,nil,nil))
         }
         var parkedTrainCandidates:[RemoteVehicle] = []
         for source in remoteVehicles where (isPassenger || source.id != currentVehicleID) && !drivenVehicleIDs.contains(source.id) {
             let vehicle=predictedVehicle(source)
             guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
             let context=parkedVehicleDrawContext(name:name,vehicle:vehicle)
-            modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0,context))
+            modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0,context,nil))
             parkedTrainCandidates.append(vehicle)
         }
         var trainLayoutIDs:Set<String> = []
@@ -4347,7 +4401,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             for (index,carriage) in carriages.enumerated() {
                 guard let name=actorName(code:carriage.model) else{continue}
                 let context=carriageVehicleDrawContext(name:name,model:carriage.model,transform:carriage.transform,identity:identity,own:own,index:index)
-                modelInstances.append((name,carriage.position,0,0,"",0,0,context))
+                modelInstances.append((name,carriage.position,0,0,"",0,0,context,nil))
             }
         }
         if driving,let carriages=groundVehicle?.carriages {
@@ -4370,10 +4424,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             appendCarriages(carriages,identity:id)
         }
         groundVehicle?.retainTrainCarriageLayouts(trainLayoutIDs)
-        for (name, position, angle, pitch, clip, elapsed, weapon, vehicleContext) in modelInstances {
-            let token=key(name,position),offset=actorOverrideOffsets[key(name,position),default:0]
-            let queued=actorOverrides[token].flatMap { $0.indices.contains(offset) ? $0[offset]:nil }
-            if queued != nil {actorOverrideOffsets[token]=offset+1}
+        for (name, position, angle, pitch, clip, elapsed, weapon, vehicleContext, occurrence) in modelInstances {
+            let queued = occurrence.map { actorOverrides[$0] }
             let mesh = (vehicleContext != nil ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
             let fixedPlayer=name=="null" ? fixedCJ?.ready:nil
             let customPed=fixedPlayer?.gpu.uploaded ?? legacyPedModels[name]

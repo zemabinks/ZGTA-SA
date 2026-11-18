@@ -47,6 +47,7 @@ final class NativeGameViewController: UIViewController {
     private var legacySpecialKeys:UInt8=0
     private var legacyCrouchUntil:Double=0
     private var legacyArtwork:NativeSAMPArtworkSession?
+    private var legacyClassSkin:Int?
     private let originalEffects=NativeOriginalWorldEffects()
     private var originalExitToken:UInt64?
 
@@ -300,6 +301,7 @@ final class NativeGameViewController: UIViewController {
                 renderer.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
             ])
             renderer.onStatus = { [weak self] text in self?.status.text = text }
+            renderer.onActorSelectionChanged = { [weak self] state in self?.actorSelectionChanged(state) }
             renderer.loadNearby()
             renderer.loadModelIndex()
         } else {
@@ -569,6 +571,8 @@ final class NativeGameViewController: UIViewController {
             return
         }
         gameplay.setConnectionReady(false)
+        legacyClassSkin=nil;renderer?.cancelActorSelection()
+        updateLegacyClassAdmission()
         originalEffects.reset();originalExitToken=nil;renderer?.setOriginalActorEffects(burning:false,coughing:false)
         renderer?.networkInterior=network.legacy != nil ? 0:nil
         legacyDialog?.invalidate();legacyDialog=nil;legacyOverlay?.clear();legacySelection=false
@@ -594,6 +598,7 @@ final class NativeGameViewController: UIViewController {
 
     private func stopGame() {
         gameStopped=true;NativeGameplayIdleTimer.shared.release(idleOwner)
+        legacyClassSkin=nil;renderer?.cancelActorSelection()
         legacyArtwork?.cancel();legacyArtwork=nil;renderer?.clearLegacyWorld()
         gameplay.setConnectionReady(false)
         resetControls(); frameClock.reset()
@@ -1286,6 +1291,7 @@ final class NativeGameViewController: UIViewController {
             renderer?.receiveLegacyGameplay(command)
             if network.serverInputBlocked{resetControls()}
         case "spawn":
+            legacyClassSkin=nil;renderer?.cancelActorSelection();updateLegacyClassAdmission()
             renderer?.legacySpawned(generation:network.sampGameplayGeneration)
             weapons.resetClientWeapons();weapons.setClientWeaponReady(true)
             if let skin=event["skin"]as?Int{renderer?.setLegacySkin(skin)}
@@ -1303,6 +1309,7 @@ final class NativeGameViewController: UIViewController {
         case "rpc":
             guard let id=event["id"]as?Int,let byte=UInt8(exactly:id),let data=event["data"]as?Data,let bits=event["bits"]as?Int else{return}
             if byte==139 {
+                legacyClassSkin=nil;renderer?.cancelActorSelection();updateLegacyClassAdmission()
                 renderer?.clearLegacyWorld();renderer?.legacyLocalPlayerID=(network.legacy as?NativeSAMPWorldConnection)?.client.localID
                 _=legacyArtwork?.reset()
             }
@@ -1337,9 +1344,7 @@ final class NativeGameViewController: UIViewController {
             session.onStatus = {[weak self] state in
                 guard let self else{return}
                 let ready=state.phase == .idle || state.phase == .ready
-                if let panel=self.presentedViewController as?UIAlertController,panel.title=="SELECT CHARACTER" {
-                    panel.actions.first(where:{$0.title=="SPAWN"})?.isEnabled=ready
-                }
+                self.updateLegacyClassAdmission()
                 if let error=state.failure{self.status.text="SERVER MODEL DOWNLOAD FAILED: \(error)"}
                 else if !ready{self.status.text="SERVER MODELS: \(state.importedModels) / \(state.requiredModels)"}
             }
@@ -1347,13 +1352,15 @@ final class NativeGameViewController: UIViewController {
         }catch{status.text="CANNOT PREPARE SERVER MODEL CACHE: \(error)"}
     }
     private func showLegacyClass(skin:Int){
+        legacyClassSkin=skin
         guard view.window != nil else{return};resetControls()
         let show={ [weak self] in
             guard let self,self.presentedViewController==nil else{return}
-            let panel=UIAlertController(title:"SELECT CHARACTER",message:"Skin \(skin)",preferredStyle:.actionSheet)
+            guard self.legacyClassSkin==skin else{return}
+            let panel=UIAlertController(title:"SELECT CHARACTER",message:self.legacyClassMessage(skin:skin),preferredStyle:.actionSheet)
             panel.addAction(UIAlertAction(title:"Previous",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"classStep","delta":-1])})
-            let spawn=UIAlertAction(title:"SPAWN",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"spawn"])}
-            if let phase=self.legacyArtwork?.status.phase{spawn.isEnabled=phase == .idle || phase == .ready}
+            let spawn=UIAlertAction(title:"SPAWN",style:.default){[weak self]_ in self?.requestLegacyClassSpawn(skin:skin)}
+            spawn.isEnabled=self.legacyClassCanSpawn(skin:skin)
             panel.addAction(spawn)
             panel.addAction(UIAlertAction(title:"Next",style:.default){[weak self]_ in _=self?.network.legacy?.send(["t":"classStep","delta":1])})
             panel.addAction(UIAlertAction(title:"Back to servers",style:.cancel){[weak self]_ in self?.dismiss(animated:true)})
@@ -1361,6 +1368,45 @@ final class NativeGameViewController: UIViewController {
             self.present(panel,animated:false)
         }
         if let current=presentedViewController{current.dismiss(animated:false,completion:show)}else{show()}
+    }
+    private var legacyClassArtworkReady:Bool {
+        guard let phase=legacyArtwork?.status.phase else{return true}
+        return phase == .idle || phase == .ready
+    }
+    private func legacyClassCanSpawn(skin:Int)->Bool {
+        legacyClassSkin==skin && renderer?.actorSelectionState?.allowsLegacySpawn(skin:skin,artworkReady:legacyClassArtworkReady)==true
+    }
+    private func legacyClassMessage(skin:Int)->String {
+        let model=renderer?.actorSelectionState?.legacyClassMessage(skin:skin) ?? "Skin \(skin)\nWAITING FOR CHARACTER MODEL"
+        return legacyClassArtworkReady ? model:model+"\nWAITING FOR SERVER MODEL DOWNLOADS"
+    }
+    private func updateLegacyClassAdmission(){
+        guard let panel=presentedViewController as?UIAlertController,
+              panel.title=="SELECT CHARACTER" else{return}
+        guard let skin=legacyClassSkin else{
+            panel.message="CHARACTER SELECTION DISCONNECTED"
+            panel.actions.first(where:{$0.title=="SPAWN"})?.isEnabled=false
+            return
+        }
+        panel.message=legacyClassMessage(skin:skin)
+        panel.actions.first(where:{$0.title=="SPAWN"})?.isEnabled=legacyClassCanSpawn(skin:skin)
+    }
+    private func actorSelectionChanged(_ state:NativeActorSelection.State){
+        updateLegacyClassAdmission()
+        if state.phase == .unavailable,let message=state.message{status.text=message}
+    }
+    private func requestLegacyClassSpawn(skin:Int){
+        // Recheck at activation: resource/source ownership may change after the
+        // action was enabled. Canonical server skin identity remains untouched.
+        guard legacyClassCanSpawn(skin:skin) else{
+            status.text=legacyClassMessage(skin:skin)
+            if legacyClassSkin==skin{DispatchQueue.main.async{[weak self]in
+                guard let self,self.legacyClassSkin==skin else{return}
+                self.showLegacyClass(skin:skin)
+            }}
+            return
+        }
+        if network.legacy?.send(["t":"spawn"]) != true{status.text="SPAWN REQUEST COULD NOT BE SENT"}
     }
     private func applyLegacyUI(_ event:NativeSAMPServerUI.Event){
         if case .dialog(let model)=event {
