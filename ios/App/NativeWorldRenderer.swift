@@ -817,6 +817,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var onFootWeaponShot: ((Int,Bool) -> Bool)?
     /// A successfully admitted task replaced an active reload animation.
     var onReloadTaskCancelled: (() -> Void)?
+    /// A movement task took ownership of an active aim latch. The input/HUD
+    /// owner must retire it before another internal fixed step can return foot.
+    var onFootAimCancelled: (() -> Void)?
     private var acceptedStreamShot=false
     private var acceptedStreamRay:(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>)?
     var aiming = false
@@ -1229,6 +1232,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     var canRequestFootWeaponFire:Bool {combatEligibility().canRequestFire}
     var supportsFootWeaponAim:Bool {footWeaponDefinitions[equippedWeapon]?.aims == true}
+    var canMaintainFootAim:Bool {
+        health>0 && supportsFootWeaponAim && !driving && !swimming && climb==nil && !personalFlight.chuting &&
+            (!personalFlight.flying || footWeaponDefinitions[equippedWeapon]?.arm == true)
+    }
+    private func cancelFootAimForTask() {
+        let wasAiming=aiming
+        aiming=false
+        if wasAiming {onFootAimCancelled?()}
+    }
     var canUseFootUtility:Bool {
         // The detonator's source action is an eligibility/stun check, not an
         // ammunition event. Inventory synchronization belongs to the caller.
@@ -1752,6 +1764,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if personalFlight.chuting && personalFlight.state>=5 {hasParachute=false;onParachuteUsed?()}
             personalFlight.stop()
             swimController.enter(velocity:velocity,rising:rising,depth:depth!)
+            cancelFootAimForTask()
             crouching = false;clearAction()
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footLaunchRemaining = nil
         }
@@ -1787,7 +1800,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // The outgoing swim task advances animation only when it owns this
         // tick. A nil result hands the same tick to foot/flight animation.
         if let animator = footAnimator {
+            let cancelledReload=animator.reloading
             animator.arm(nil)
+            if cancelledReload && !animator.reloading {onReloadTaskCancelled?()}
             if health <= 0 && !animator.dead { animator.die(footDeathKind ?? "drown") }
             else if health > 0 && animator.dead { animator.revive() }
             var animation = NativeFootAnimation.Input()
@@ -1812,9 +1827,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pendingParachuteOpen=false
         if !personalFlight.on,hasParachute,!state.grounded,personalFlight.dives(rising:state.rising,height:height) {
             personalFlight.dive(velocity:lastFootVelocity,rising:state.rising,heading:-Double(actorHeading))
+            cancelFootAimForTask()
             crouching=false;clearAction();footLaunchRemaining=nil
         }
         if personalFlight.lifts,footAnimator?.busy != true {personalFlight.takeOff(heading:-Double(actorHeading));crouching=false}
+        if personalFlight.flying && footWeaponDefinitions[equippedWeapon]?.arm != true {
+            cancelFootAimForTask()
+        }
         guard personalFlight.on || personalFlight.state==10 else{return nil}
         let ownedFacing=personalFlight.on
         if ownedFacing {headingContinuity.external(personalFlight.chuting ? .parachute:.jetpack)}
@@ -1837,7 +1856,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             animation.position=SIMD3<Double>(state.feet);animation.heading=Double(actorHeading)
             let definition=footWeaponDefinitions[equippedWeapon]
             let canAim=personalFlight.flying && definition?.arm == true && definition?.use == "gun"
+            let cancelledReload=personalFlight.flying && animator.reloading
             animator.arm(canAim ? definition:nil)
+            if cancelledReload && !animator.reloading {onReloadTaskCancelled?()}
             if canAim {
                 let context=combatEligibility(grounded:state.grounded)
                 animation.gun = .init(pitch:Double(cameraPitch),yaw:min(1.4,max(-1.4,NativeHeadingContinuity.difference(Double(actorHeading),from:Double(heading)))))
@@ -2044,6 +2065,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard var ledge=queries.find(feet:feet,heading:-Double(actorHeading),extended:extended) else{return false}
         if !extended {ledge.high=ledge.hold.y-feet.y-1>=1.1}
         climb=NativeClimbController(ledge:ledge,feet:feet,durations:.init(jump:jump,pull:pull,stand:stand,vault:vault))
+        cancelFootAimForTask()
         climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         let cancelledReload=animator.reloading
         cancelWeaponInput();crouching=false;manualAnimation=false;animator.resetMovementTask()
@@ -3772,9 +3794,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 gameCameraFrame = gameCamera.followVehicle(input,delta:Float(step),look:cameraLookDirection,nowMilliseconds:now*1000)
             } else if !driving {
                 gameCamera.setDirection(heading:heading,pitch:cameraPitch)
+                let cameraAiming=aiming && canMaintainFootAim
                 gameCameraFrame=gameCamera.followFoot(.init(position:camera,actorHeading:actorHeading,weapon:equippedWeapon,
-                    aiming:aiming,crouching:crouching,holdingLedge:climb != nil || swimController.hauled != nil,parachuting:personalFlight.chuting,
-                    sight:aiming ? gameCamera.sightForWeapon(equippedWeapon):nil,
+                    aiming:cameraAiming,crouching:crouching,holdingLedge:climb != nil || swimController.hauled != nil,parachuting:personalFlight.chuting,
+                    sight:cameraAiming ? gameCamera.sightForWeapon(equippedWeapon):nil,
                     planarSpeed:Float(hypot(currentFootVelocity.x,currentFootVelocity.z))),delta:Float(step),look:cameraLookDirection)
             } else {gameCameraFrame=nil}
         }

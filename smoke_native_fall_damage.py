@@ -45,7 +45,7 @@ def main():
     methods=['private func combatEligibility(','var canEmitFootWeaponShot:','var canEmitFootCombatMarker:','var hasNativeFootWeaponTiming:','private func footMotion(','private func beginClimb(','private func climbingMotion(',
              'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(',
              'private var activeMeleeDefinition:','var hasNativeFootMeleeTiming:','var canNativeFootMeleeGuard:',
-             'private func meleeControls(','private func advanceMelee(']
+             'private func meleeControls(','private func advanceMelee(','private func cancelFootAimForTask(']
     extracted='\n\n'.join(function(renderer,marker) for marker in methods)
     shot=renderer.index('    private var weaponEventFeet:')
     extracted=renderer[shot:renderer.index('    func weaponMuzzle(',shot)]+'\n'+extracted

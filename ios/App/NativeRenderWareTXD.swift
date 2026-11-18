@@ -210,7 +210,10 @@ enum NativeRenderWareTXD {
                 guard size <= info.body.upperBound - offset else { throw DecodeError.malformed("mip payload exceeds native struct") }
                 let w = max(1, width >> level), h = max(1, height >> level)
                 if size == 0 {
-                    guard level > 0, format.blockBytes != nil, w < 4, h < 4 else { throw DecodeError.malformed("empty base or non-tail mip") }
+                    // Original PC dictionaries can omit a rectangular BC tail
+                    // once either axis is smaller than one 4x4 block (e.g. 8x2).
+                    // Keep it absent; never invent pixels or accept an empty base.
+                    guard level > 0, format.blockBytes != nil, (w < 4 || h < 4) else { throw DecodeError.malformed("empty base or non-tail mip") }
                     missingTail = true
                     mipLevels.append(MipLevel(width: w, height: h, encodedByteCount: 0, rgba8: nil, containsTransparentPixels: false))
                     continue

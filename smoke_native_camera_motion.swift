@@ -3,13 +3,18 @@ import simd
 
 // Only rendering dependencies unrelated to this actual camera call are spies.
 final class CameraMotionHarness {
-    final class Flight {var chuting=false}
+    final class Flight {var chuting=false,flying=false}
     final class Swim {var hauled:Int?}
     let gameCamera:NativeGameCamera
     let personalFlight=Flight(),swimController=Swim()
     var gameCameraFrame:NativeGameCamera.Frame?
     var camera=SIMD3<Float>.zero,actorHeading:Float=0
     var equippedWeapon=0,aiming=false,crouching=true,climb:Int?
+    struct WeaponDefinition { var aims:Bool;var arm=false }
+    var footWeaponDefinitions:[Int:WeaponDefinition]=[:]
+    var health=100,driving=false
+    var swimming:Bool {false}
+    // ACTUAL_RENDERER_AIM_PREDICATES
     var cameraLookDirection:String?
     var lastFootVelocity=SIMD3<Double>.zero
     var character:NativeCharacterController?

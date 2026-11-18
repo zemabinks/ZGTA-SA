@@ -18,7 +18,7 @@ def main():
     boundary = renderer[renderer.index("\n", start):renderer.index("                    if let held=climbingMotion", start)]
     methods = "\n".join(function(renderer, marker) for marker in
                         ["private func combatEligibility(", "private func swimmingMotion(", "private func personalFlightMotion(",
-                         "private var personalFlightAnimationInput:", "func cancelGameplayInput("])
+                         "private var personalFlightAnimationInput:", "func cancelGameplayInput(", "private func cancelFootAimForTask("])
     skeletal = (ROOT / "ios/App/NativeSkeletalActor.swift").read_text()
     source = skeletal[:skeletal.index("struct NativeSkinVertex")].replace("import Metal", "")
     source += "\nfinal class NativeSkeletalActor {\n" + skeletal[skeletal.index("    struct OriginalAim {"):skeletal.index("    struct Pose {")] + "}\n"
@@ -38,12 +38,12 @@ def main():
         sources = [ROOT / "ios/App" / (name + ".swift") for name in
                    ["SwiftRapierWorld", "NativeCharacterMotor", "NativeRapierCharacterQueries",
                     "NativeCharacterController", "NativeGameInput"]]
-        subprocess.run(["swiftc", "-parse-as-library", "-whole-module-optimization", "-Onone", "-module-cache-path",
+        subprocess.run(["swiftc", "-parse-as-library", "-whole-module-optimization", "-Onone", "-num-threads", "1", "-module-cache-path",
                         "/private/tmp/zgtasa-core-swift-modules", "-I", str(ROOT / "native-physics/include"),
                         *map(str, sources), str(work / "main.swift"), "-L",
                         str(ROOT / f"local-only/native-physics/macos-{platform.machine()}"),
                         "-lzgtasa_native_physics", "-framework", "Security", "-framework", "CoreFoundation",
-                        "-o", str(work / "verify")], check=True)
+                        "-o", str(work / "verify")], check=True, timeout=900)
         subprocess.run([str(work / "verify"), str(ROOT)], check=True)
 
 

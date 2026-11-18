@@ -16,9 +16,9 @@ NAMES=['NativeGunAnimation','NativeSwimAnimation','NativeFlightAnimation','Nativ
 FOOT=['private func footMotion(','private func beginClimb(','private func climbingMotion(',
       'private func emitFootWeaponEvents(','func cancelWeaponInput(','func cancelGameplayInput(','func letGoOfLedge(',
       'private var activeMeleeDefinition:','var hasNativeFootMeleeTiming:','var canNativeFootMeleeGuard:',
-      'private func meleeControls(','private func advanceMelee(']
+      'private func meleeControls(','private func advanceMelee(','private func cancelFootAimForTask(']
 WATER=['private func swimmingMotion(','private func personalFlightMotion(',
-       'private var personalFlightAnimationInput:','func cancelGameplayInput(','var swimmingBreath:']
+       'private var personalFlightAnimationInput:','func cancelGameplayInput(','var swimmingBreath:','private func cancelFootAimForTask(']
 JS=r'''
 const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');
 const root=process.argv[2],output=process.argv[3],baseline=process.argv[4]==='baseline';

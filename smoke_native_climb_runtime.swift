@@ -45,6 +45,7 @@ final class ClimbRuntimeHarness {
     var verticalSpeed:Float=0
     var onFootWeaponShot:((Int,Bool)->Bool)?
     var onReloadTaskCancelled:(()->Void)?
+    var onFootAimCancelled:(()->Void)?
     var acceptedStreamShot=false,pendingNativeJump=0.0,pendingSwimJump=false,pendingDive=false
     var acceptedStreamRay:(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>)?
     var pendingParachuteOpen=false,sprintWasHeld=false,personalFlightDown=false,personalFlightBrake=false

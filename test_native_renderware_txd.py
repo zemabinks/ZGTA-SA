@@ -131,6 +131,35 @@ def expected(data):
     return {'version': root[3], 'deviceID': device, 'decodedBytes': decoded, 'textures': result}
 
 
+def rectangular_tail_cases(add):
+    # Authored BC block arithmetic. Rectangular stored mips still occupy whole
+    # blocks; an omitted trailing record keeps no RGBA bytes at all. The real
+    # header evidence includes 4x2, 4x1 and 8x2; long strips test the explicit
+    # one-small-axis policy without claiming those shapes occurred in that set.
+    for fmt, block_bytes in ((DXT1, 8), (DXT3, 16), (DXT5, 16)):
+        for width, height, first_missing in ((8,4,1),(4,8,1),(16,4,1),(4,16,1),
+                                             (16,2,1),(2,16,1),(32,2,1),(2,32,1),
+                                             (128,64,5),(64,128,5)):
+            levels=max(width,height).bit_length()
+            payloads=[bytes(((max(1,width>>level)+3)//4)*((max(1,height>>level)+3)//4)*block_bytes)
+                      if level<first_missing else b'' for level in range(levels)]
+            body=txd([native('rectangle',fmt,width,height,payloads)])
+            golden=expected(body);mips=golden['textures'][0]['mips']
+            assert all(m['sha256']is not None for m in mips[:first_missing])
+            assert all(m['sha256']is None and m['encodedByteCount']==0 for m in mips[first_missing:])
+            assert golden['decodedBytes']==sum(max(1,width>>level)*max(1,height>>level)*4 for level in range(first_missing))
+            add(f'omitted-rectangle-{fmt:x}-{width}x{height}',body)
+        add(f'empty-bc-base-rectangle-{fmt:x}',txd([native('bad',fmt,2,8,[b''])]),'malformed')
+        add(f'empty-bc-nontail-square-{fmt:x}',txd([native('bad',fmt,8,8,[bytes(4*block_bytes),b''])]),'malformed')
+        add(f'empty-bc-nontail-rectangle-{fmt:x}',txd([native('bad',fmt,16,8,[bytes(8*block_bytes),b''])]),'malformed')
+        add(f'empty-bc-resumed-rectangle-{fmt:x}',txd([native('bad',fmt,8,4,[bytes(2*block_bytes),b'',bytes(block_bytes)])]),'malformed')
+        add(f'empty-bc-resumed-long-{fmt:x}',txd([native('bad',fmt,16,4,[bytes(4*block_bytes),b'',bytes(block_bytes)])]),'malformed')
+    for fmt in (21,22):
+        add(f'empty-raw-rectangle-tail-{fmt}',txd([native('bad',fmt,8,4,[bytes(8*4*4),b''])]),'malformed')
+        add(f'empty-raw-rectangle-base-{fmt}',txd([native('bad',fmt,2,8,[b''])]),'malformed')
+
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-corpus', action='store_true', help='test only generated data')
@@ -198,6 +227,8 @@ def main():
     add('unknown-chunks-skipped', txd([native('full_32_byte_name_abcdefghijklmno', DXT1, 4, 4, [bytes(8)], extension=chunk(3, b'opaque extension'))], extras=chunk(0xDEAD, b'unknown chunk')))
     add('mip-chain', txd([native('mips', DXT1, 8, 4, [bytes(16), bytes(8), bytes(8), bytes(8)])]))
     add('omitted-tiny-tail', txd([native('mips', DXT1, 8, 8, [bytes(32), bytes(8), b'', b''])]))
+
+    rectangular_tail_cases(add)
 
     good_native = native('valid', DXT1, 4, 4, [bytes(8)])
     good = txd([good_native])

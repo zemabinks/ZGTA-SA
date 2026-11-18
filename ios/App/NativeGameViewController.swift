@@ -400,6 +400,7 @@ final class NativeGameViewController: UIViewController {
             self?.consumeFootWeaponShot(weapon: weapon, left: left) ?? false
         }
         renderer?.onReloadTaskCancelled = { [weak self] in self?.audio.cancelReload() }
+        renderer?.onFootAimCancelled = { [weak self] in self?.setAiming(false) }
         renderer?.onVehicleLostInWater = { [weak self] in self?.completeVehicleExit(water:true) }
         renderer?.onVehicleWrecked = { [weak self] in self?.completeVehicleExit(wrecked:true) }
         renderer?.onBikeEjection = { [weak self] event in self?.completeVehicleExit(ejection:event) }
@@ -1521,10 +1522,13 @@ final class NativeGameViewController: UIViewController {
         crouchButton.backgroundColor = UIColor.black.withAlphaComponent(renderer.crouching ? 0.7 : 0.3)
     }
     private func setAiming(_ value: Bool) {
-        aiming = value && usingPistol && !usingMelee && renderer?.supportsFootWeaponAim == true && currentVehicle == nil && renderer?.isClimbing != true && renderer?.swimming != true && renderer?.isChuting != true
+        aiming = value && usingPistol && !usingMelee && currentVehicle == nil && renderer?.canMaintainFootAim == true
         renderer?.aiming = aiming
         gameHUD.setAiming(aiming, scoped: weapons.selected == 34)
         aimButton.backgroundColor = UIColor.black.withAlphaComponent(aiming ? 0.7 : 0.3)
+    }
+    private func reconcileAimOwnership() {
+        if aiming && renderer?.canMaintainFootAim != true {setAiming(false)}
     }
     @objc private func pressFire() {
         guard acceptsHeldInput else { return }
@@ -2042,6 +2046,7 @@ final class NativeGameViewController: UIViewController {
             }
         }
         acceptsInput = acceptsInput && presentedViewController == nil
+        reconcileAimOwnership()
         let heldAim=acceptsInput && (keyboard.aim || (controllerAllowed && controller?.leftTrigger.isPressed == true))
         let guardHeld=acceptsInput && context.melee && (touchMeleeGuard || heldAim)
         renderer?.meleeGuardHeld=guardHeld
@@ -2094,7 +2099,6 @@ final class NativeGameViewController: UIViewController {
         renderer?.jumpHeld=acceptsInput && renderer?.originalCoughing != true && (handbrakePressed || gamepadJumping || keyboard.jump)
         renderer?.personalFlightBrake=acceptsInput && (flightBrakePressed || keyboard.flightBrake)
         vehicleTuck=acceptsInput ? Double(lookVertical):0
-        if renderer?.isClimbing == true && aiming {setAiming(false)}
         let canFight = acceptsInput && !weaponCycle.busy && currentVehicle == nil && renderer?.isClimbing != true && renderer?.originalCoughing != true && network.health > 0 && !network.passive &&
             renderer?.swimming != true && renderer?.isChuting != true &&
             (renderer?.wearingJetpack != true || renderer?.hasNativeFootWeaponTiming == true || renderer?.hasNativeFootMeleeTiming == true)
@@ -2122,6 +2126,7 @@ final class NativeGameViewController: UIViewController {
             renderer?.move(forward: forward, sideways: sideways,
                            turn: steering, delta: Float(step), running: running,
                            lookVertical: lookVertical, lift: lift)
+            reconcileAimOwnership()
         }
         let triggerHeld=firePressed || gamepadAttacking
         if !triggerHeld || magazine>0 || autoReloadWeapon != weapons.selected {autoReloadWeapon=nil}

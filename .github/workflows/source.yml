@@ -47,4 +47,4 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python3 smoke_core_117.py
+      - run: python3 smoke_core_118.py

@@ -64,9 +64,15 @@ The [controller navigation](CORE_CONTROLLER_NAVIGATION_117.md),
 [projectile clock](CORE_PROJECTILE_CLOCK_117.md) and
 [optional stock-package](CORE_STOCK_PACKAGE_117.md) notes describe the current
 core control, task and resource corrections without claiming retail parity.
-The combined Core117 source passes full iPhone Release and universal Simulator
+The [movement-task aim](CORE_AIM_OWNERSHIP_118.md),
+[reload handoff](CORE_RELOAD_TASK_HANDOFFS_118.md) and
+[rectangular texture-tail](CORE_TXD_RECTANGULAR_TAIL_118.md) notes cover the current
+native corrections and their separate source, CPU and gameplay evidence.
+The combined Core118 source passes full iPhone Release and universal Simulator
 Debug builds. Its normal installed-resource multiplayer join, CJ Spawn,
-Pause/Resume and touch-camera checks pass in the Simulator. Physical controller,
+Pause/Resume and touch-camera checks pass in the Simulator. A selected stock
+object with the corrected texture also renders in the normally joined scene.
+Physical controller,
 audible playback, exhaustive stock-model rendering and matched original-game
 timing remain separate acceptance requirements.
 The [owner radio import guide](RADIO_OWNER_IMPORT.md) covers complete local
@@ -92,11 +98,15 @@ python3 smoke_public_source.py
 python3 check_public_source.py
 ```
 
-On macOS with Xcode, `python3 smoke_core_117.py` runs the portable native source
+On macOS with Xcode, `python3 smoke_core_118.py` runs the portable native source
 regressions without game assets. Full SDK builds and actual gameplay tests are
 separate checks.
 After building the host transport, add `--with-transport` to include the full
 client/adapter lifecycle gate.
+The optional `--with-owner-assets` adds the real movement/audio and camera
+checks using an existing local animation archive and physics library.
+`--with-txd` adds generated CPU texture tests and requires an already installed
+Pillow; neither option claims rendered or retail gameplay parity.
 
 The GitHub workflow runs source/history checks and synthetic hosting tests on
 Linux. Full gameplay and native fixtures additionally require your local archive;

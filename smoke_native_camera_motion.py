@@ -23,10 +23,26 @@ def main():
         depth += (renderer[end] == '(') - (renderer[end] == ')')
         end += 1
     call = renderer[start:end]
+    line_start = renderer.rfind('\n', 0, start) + 1
+    prefix = renderer[renderer.rfind('\n', 0, line_start - 1) + 1:line_start]
+    if 'let cameraAiming=' in prefix:
+        call = prefix + call
+    def property_(marker):
+        first = renderer.index(marker)
+        opening = renderer.index('{', first)
+        depth = 1
+        last = opening + 1
+        while depth:
+            depth += (renderer[last] == '{') - (renderer[last] == '}')
+            last += 1
+        return renderer[first:last].replace('private ', '')
+    aim = '\n'.join(property_(marker) for marker in
+                    ['var supportsFootWeaponAim:', 'var canMaintainFootAim:'])
     marker = '    private var currentFootVelocity:'
     velocity = renderer[renderer.index(marker):renderer.index('\n', renderer.index(marker))].replace('private ', '')
     source = (ROOT / 'smoke_native_camera_motion.swift').read_text().replace('// ACTUAL_RENDERER_CAMERA_CALL', call)
     source = source.replace('// ACTUAL_RENDERER_CURRENT_VELOCITY', velocity)
+    source = source.replace('// ACTUAL_RENDERER_AIM_PREDICATES', aim)
     out = ROOT / 'local-only/research/camera-motion'
     out.mkdir(parents=True, exist_ok=True)
     (out / 'renderer-call.sha256').write_text(hashlib.sha256(call.encode()).hexdigest() + '\n')
@@ -36,7 +52,8 @@ def main():
         swift.write_text(source)
         names = ['ServerAddress', 'NativeGameInput', 'NativeGameCamera', 'SwiftRapierWorld',
                  'NativeCharacterMotor', 'NativeRapierCharacterQueries', 'NativeCharacterController']
-        subprocess.run(['xcrun', 'swiftc', '-O', '-module-cache-path', str(out / 'modules'),
+        subprocess.run(['nice', '-n', '15', 'xcrun', 'swiftc', '-O', '-whole-module-optimization',
+                        '-num-threads', '1', '-module-cache-path', str(out / 'modules'),
                         '-I', str(ROOT / 'native-physics/include'),
                         *[str(ROOT / 'ios/App' / (name + '.swift')) for name in names], str(swift),
                         '-L', str(ROOT / f'local-only/native-physics/macos-{platform.machine()}'),

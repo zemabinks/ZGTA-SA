@@ -15,6 +15,7 @@ final class FixedVelocityHarness {
     var originalCoughing=false
     var onLocalDamage:((Double,Int)->Void)?
     var weaponReloading=false,climb:Int?
+    var onReloadTaskCancelled:(()->Void)?,onFootAimCancelled:(()->Void)?
     var verticalSpeed:Float=0
     var swimming:Bool {swimController.on}
     var equippedWeapon=0,personalFlightDown=false,personalFlightBrake=false,pendingParachuteOpen=false
