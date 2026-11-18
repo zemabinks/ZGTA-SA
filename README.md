@@ -1,113 +1,60 @@
 # ZGTA:SA
 
-Community multiplayer hosting source and a native Swift/Metal iOS client for
-San Andreas. Players can join as guests; Discord account linking is optional.
-Each host runs its own world, accounts, economy and saved progress.
+**An experimental GTA: San Andreas free-roam and multiplayer project for iPhone and iPad, built with Swift and Apple's Metal graphics API.**
 
-**Start here: [Hosting guide](HOSTING.md)** · [Native iOS builds](NATIVE_BUILD.md) ·
-[Native menu](NATIVE_DE_MENU.md) · [Feature coverage](FEATURE_MATRIX.md) · [AGPL license](LICENSE)
+ZGTA:SA is a work-in-progress, independently developed native iOS client, with an optional self-hosted browser world and experimental connections to other multiplayer services. The goal is a faithful San Andreas sandbox where players can see the same characters, vehicles, customizations and interactions, whichever supported client they use.
 
-## Run a server
+> **Development project — not a finished game download.** There is currently **no packaged public iOS release** in this repository. The original GTA: San Andreas game files are **not included**. An ISO can be inspected and its raw resources extracted, but selecting the ISO does **not yet** create a fully playable native installation.
 
-Install Node.js 22 or later and Python 3.9 or later on macOS or Linux:
+**[Start here](docs/START-HERE.md)** · **[Game files & ISO](docs/GAME-FILES.md)** · **[Play with friends](docs/MULTIPLAYER.md)** · **[Build for iPhone](docs/development/BUILD-IOS.md)** · **[Get help](docs/TROUBLESHOOTING.md)**
+
+## What is ZGTA:SA?
+
+- **Native iOS game client:** Swift, UIKit, Metal, and native physics, animation, vehicle, combat and world systems. This is a reconstruction, not the original Windows executable running on iPhone.
+- **Your own multiplayer world:** a local server and browser client that can share a session with the native iOS client. Gameplay synchronization is still being improved.
+- **Other server options:** development-stage SA-MP/open.mp and original-browser-world adapters, each with different limitations.
+- **Original game resources:** tools for preparing owned San Andreas assets, verified local iOS resources and Mac-assisted development.
+
+**Focus:** free-roam gameplay, pedestrians, traffic, vehicles, interactions and faithful shared multiplayer. **Recreating the original story campaign is not the goal.**
+
+## What can I use today?
+
+| Option | Current availability |
+| --- | --- |
+| **Mac/browser: self-hosted development world** | Source setup is available. Requires Python, Node.js, a compatible browser and the prepared game archive. |
+| **iPhone/iPad: native Metal client** | Build from source with Xcode. Target is **iOS/iPadOS 16+**; functionality varies by device and build. |
+| **Original GTA SA 1.0 US ISO import** | Raw-file extraction and verification exist. **Automatic ISO → playable native game conversion is unfinished.** |
+| **Verified prepared game files on iOS** | Development caching and an installed-resource mode exist; see the actual requirements and restrictions in the [game files guide](docs/GAME-FILES.md). |
+| **SA-MP/open.mp and original browser service** | Partial, experimental compatibility. **Not guaranteed on arbitrary servers.** |
+
+See the [dated project status](docs/PROJECT-STATUS.md) for what has actually been tested and what is still missing.
+
+## Quick start: try the Mac/browser development world
+
+First install **Python 3.9+** and **Node.js 22+**. On your Mac, open Terminal and enter:
 
 ```sh
 git clone https://github.com/zemabinks/ZGTA-SA.git
 cd ZGTA-SA
 python3 host.py setup --download
+python3 host.py doctor
 python3 host.py serve
 ```
 
-Open `http://127.0.0.1:8766/`. Setup downloads discoverable public content into
-ignored `local-only/`; it can resume existing downloads. To import an existing
-site archive or prepare native iOS data, follow [HOSTING.md](HOSTING.md).
+Keep Terminal open and open **http://127.0.0.1:8766/** in a compatible browser. The initial archive/setup needs the relevant source files to be accessible; this is not a substitute for owning the original PC game. For first-time users, the [step-by-step guide](docs/START-HERE.md) explains what each command does.
 
-For LAN play, replace the example address with your host's LAN IP:
+**Want the iPhone app instead?** There is no public IPA to download yet. Follow the [native build guide](docs/development/BUILD-IOS.md) and [game-file instructions](docs/GAME-FILES.md). Downloading this repository as a ZIP does **not** install an iPhone app.
 
-```sh
-python3 host.py serve --bind 0.0.0.0 --host 192.168.1.20:8766
-```
+## Playing together
 
-The launcher creates a private join code under `local-only/selfhost/`. The
-hosting guide also covers public HTTPS access through a WebSocket-capable
-reverse proxy, backups, guest identities and optional Discord linking.
+ZGTA:SA's own server, external SA-MP/open.mp servers, and the original **play.samp.directory** service are **different multiplayer worlds**. They do not automatically share players. The aim is accurate cross-platform representation **when players are actually connected to the same supported server**.
 
-## What is included
+Read [Host or join multiplayer](docs/MULTIPLAYER.md) before trying mixed browser/iOS or external-server sessions. Vehicle seats, custom content and complete visual parity are still active development targets.
 
-- Independent Node multiplayer server, saved guest accounts, chat, garage and
-  property ownership, jobs, races and other local gameplay systems.
-- Browser hosting and asset archive/import tools.
-- Native Swift, UIKit, Metal and GameController source with touch controls.
-- Separate SA-MP/open.mp UDP and original-browser-world adapters; see the
-  [tested compatibility boundaries](SERVER_COMPATIBILITY.md).
-- Local asset converters, pinned Rust physics bridge and source comparison tests.
+## Source, safety and credits
 
-Game assets, the original website bundles, extracted game catalogs, converted
-meshes/textures, music, player saves, credentials and compiled builds are
-excluded from GitHub. A source checkout needs a local content archive before
-it can render the game. Download tools depend on the public source remaining
-available; they do not obtain the publisher's private backend.
+This repository contains **project source code and tools**, not Rockstar's game files, copyrighted archives, private website bundles, account data or compiled releases. Users must supply game content they are entitled to use. Do not upload original game files or credentials in issues.
 
-## Development status
+Source is **AGPL-3.0-only**; third-party components have their own notices. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). This is an independent fan development effort, **not affiliated with or endorsed by Rockstar Games**.
 
-Core movement, animation, camera, physics, vehicles and combat now take priority
-over advanced roleplay. See the [core parity checklist](CORE_GAMEPLAY_PARITY.md)
-and [audit journal](CORE_GAMEPLAY_JOURNAL.md) for tested fixes and remaining work.
-The [original-game reference ledger](CORE_RETAIL_REFERENCE.md) records direct
-data comparisons and unresolved engine differences.
-The [rider clock](CORE_RIDER_RENDER_CLOCK_116.md),
-[legacy spawn ownership](CORE_LEGACY_SPAWN_INFO_116.md), and
-[browser recovery](CORE_BROWSER_RECOVERY_116.md) notes describe the current
-transition fixes and their verification boundaries.
-The [controller navigation](CORE_CONTROLLER_NAVIGATION_117.md),
-[reload audio](CORE_RELOAD_AUDIO_117.md), [radio metadata](CORE_RADIO_METADATA_117.md),
-[projectile clock](CORE_PROJECTILE_CLOCK_117.md) and
-[optional stock-package](CORE_STOCK_PACKAGE_117.md) notes describe the current
-core control, task and resource corrections without claiming retail parity.
-The [movement-task aim](CORE_AIM_OWNERSHIP_118.md),
-[reload handoff](CORE_RELOAD_TASK_HANDOFFS_118.md) and
-[rectangular texture-tail](CORE_TXD_RECTANGULAR_TAIL_118.md) notes cover the current
-native corrections and their separate source, CPU and gameplay evidence.
-The combined Core118 source passes full iPhone Release and universal Simulator
-Debug builds. Its normal installed-resource multiplayer join, CJ Spawn,
-Pause/Resume and touch-camera checks pass in the Simulator. A selected stock
-object with the corrected texture also renders in the normally joined scene.
-Physical controller,
-audible playback, exhaustive stock-model rendering and matched original-game
-timing remain separate acceptance requirements.
-The [owner radio import guide](RADIO_OWNER_IMPORT.md) covers complete local
-recordings and the separate compatibility/full-recording programme choices.
-
-This is an in-progress reconstruction. The independent server uses its own
-mission/economy policies, and the native client still has gaps compared with
-the browser game. It is not yet a full 1:1 port. [FEATURE_MATRIX.md](FEATURE_MATRIX.md)
-tracks verification and outstanding work. [Development notes](DEVELOPMENT_NOTES.md)
-retain earlier behavior, commands, optional Discord configuration and validation
-records. Simulator/generic-device builds do not certify physical iPhone performance.
-
-## Source and license
-
-Project contributions use **AGPL-3.0-only**. See [LICENSE](LICENSE) and
-[NOTICE.md](NOTICE.md); separate game content and dependencies retain their own
-terms. Hosted modified versions must offer their corresponding source. Set
-`ZGTA_SOURCE_URL` to your fork/source archive; the browser game panel exposes it.
-
-```sh
-python3 smoke_host.py
-python3 smoke_public_source.py
-python3 check_public_source.py
-```
-
-On macOS with Xcode, `python3 smoke_core_118.py` runs the portable native source
-regressions without game assets. Full SDK builds and actual gameplay tests are
-separate checks.
-After building the host transport, add `--with-transport` to include the full
-client/adapter lifecycle gate.
-The optional `--with-owner-assets` adds the real movement/audio and camera
-checks using an existing local animation archive and physics library.
-`--with-txd` adds generated CPU texture tests and requires an already installed
-Pillow; neither option claims rendered or retail gameplay parity.
-
-The GitHub workflow runs source/history checks and synthetic hosting tests on
-Linux. Full gameplay and native fixtures additionally require your local archive;
-the hosting and native build guides list the relevant checks.
+**For developers:** [Project map](docs/development/PROJECT-MAP.md) · [Technical documentation](docs/DEVELOPMENT.md) · [Detailed feature matrix](FEATURE_MATRIX.md) · [Proposed safe repository cleanup](docs/development/REPOSITORY-CLEANUP.md).
