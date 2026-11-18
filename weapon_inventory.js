@@ -33,10 +33,12 @@ function create(catalog = {}, options = {}) {
     if (!loops.length) continue;
     const stream=row.use==='stream'||row.continuous===true;
     const intervalMs=stream&&row.continuous===true ? 20:Math.max(20,Math.min(...loops)*1000/(row.twin===true?2:1));
-    // A continuous native step emits at most four events. One extra 20ms
-    // stream token absorbs bounded receive jitter between grouped frames.
-    // This is transport credit, not a faster animation or sustained fire rate.
-    timings.set(row.id,{intervalMs,capacity:stream?5:2,use:row.use,twin:row.twin===true,source:'animation'});
+    // Display catch-up groups fixed-tick events even for a fast ordinary gun.
+    // Admit one 15Hz batch plus a phase/jitter token, bounded to five credits.
+    // Streams retain their existing five-credit policy. Refill remains the
+    // canonical interval; no client timestamp or claimed elapsed time is used.
+    const frameCredit=Math.max(2,Math.min(5,Math.ceil((1000/15)/intervalMs)+1));
+    timings.set(row.id,{intervalMs,capacity:stream?5:frameCredit,use:row.use,twin:row.twin===true,source:'animation'});
   }
   const rates = new WeakMap();
   const sequences = new WeakMap();

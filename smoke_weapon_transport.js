@@ -66,9 +66,10 @@ for(const id of ids){
 // capacity in our own module. The identical traffic must expose the defect.
 const filename=path.join(__dirname,'weapon_inventory.js'),source=fs.readFileSync(filename,'utf8');
 const seed='Math.max(0,now-inventory.lastShotAt)/interval):timing.capacity};';
-check(source.includes(seed)&&source.includes('capacity:stream?5:2'),'Historical control markers changed; review this probe');
+const capacityMarker='capacity:stream?5:frameCredit';
+check(source.includes(seed)&&source.includes(capacityMarker),'Historical control markers changed; review this probe');
 const old=new Module(filename,module);old.filename=filename;old.paths=module.paths;
-old._compile(source.replace(seed,'Math.max(0,now-inventory.lastShotAt)/interval):1};').replace('capacity:stream?5:2','capacity:stream?4:2'),filename);
+old._compile(source.replace(seed,'Math.max(0,now-inventory.lastShotAt)/interval):1};').replace(capacityMarker,'capacity:stream?4:2'),filename);
 const before=grouped(old.exports.create);
 check(before.rejections>0,'Historical receive-time failure was not reproduced');
-console.log(`PASS: ${checks} transport checks; ${traffic.cases} grouped-frame/jitter cases and ${traffic.emissions} synthetic emissions without rejection; historical control rejected${before.rejections}. Bounded2/5 bursts, sustained rate, replay, switch, reconnect, restart and backward clock.`);
+console.log(`PASS: ${checks} transport checks; ${traffic.cases} grouped-frame/jitter cases and ${traffic.emissions} synthetic emissions without rejection; historical control rejected${before.rejections}. Bounded2-to-5 bursts, sustained rate, replay, switch, reconnect, restart and backward clock.`);

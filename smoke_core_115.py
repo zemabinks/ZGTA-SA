@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: AGPL-3.0-only
-"""Run the asset-free actor selection, draw occurrence and boarding-clock gates."""
+"""Run asset-free actor, draw, passenger-camera and boarding-clock gates."""
 from pathlib import Path
 import json
 import shutil
@@ -17,6 +17,7 @@ out = Path(tempfile.mkdtemp(prefix='core115-', dir=base))
 commands = [
     ['python3', 'smoke_native_actor_selection.py', '--out', str(out / 'selection')],
     ['python3', 'smoke_native_draw_occurrences.py', '--output', str(out / 'occurrences')],
+    ['python3', 'smoke_native_passenger_camera.py', '--out', str(out / 'passenger-camera')],
     ['python3', 'smoke_native_rider_clock.py', '--out', str(out / 'boarding')],
 ]
 results = []

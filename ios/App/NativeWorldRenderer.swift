@@ -720,7 +720,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var vehicleWirePosition: SIMD3<Float> { isPassenger ? passengerFrame?.vehicle.position ?? camera:groundVehicle?.active == true ? groundVehicle!.bodyPosition : camera }
     private(set) var passengerSeat:Int?
     var isPassenger:Bool{passengerSeat != nil}
-    private struct SharedVehicleFrame {let vehicle:RemoteVehicle;let transform:simd_float4x4;let speed:Float;let velocity:SIMD3<Float>}
+    private struct SharedVehicleFrame {let vehicle:RemoteVehicle;let transform:simd_float4x4;let speed:Float;let velocity:SIMD3<Float>;var angularVelocity=SIMD3<Float>.zero}
     private var passengerFrame:SharedVehicleFrame?
     private var passengerAccumulator=0.0
     var passengerWirePosition:SIMD3<Float>{
@@ -2315,17 +2315,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if driving,!isPassenger,currentVehicleID==id,let vehicle=remoteVehicles.first(where:{$0.id==id}) {
             var value=vehicle;value.position=vehicleWirePosition;value.heading=heading;value.pitch=vehiclePitch;value.roll=vehicleRoll
             let matrix=nativeVehicleTransform ?? (Self.translation(camera)*Self.rotationZ(-heading)*Self.rotationX(vehiclePitch)*Self.rotationY(vehicleRoll))
-            return .init(vehicle:value,transform:matrix,speed:drivingSpeed,velocity:currentWireVelocity)
+            return .init(vehicle:value,transform:matrix,speed:drivingSpeed,velocity:currentWireVelocity,angularVelocity:currentWireAngularVelocity)
         }
         if let driver=remotePlayers.first(where:{$0.vehicleID==id}),
            let vehicle=RemoteVehicle(row:[id,driver.name,driver.code,driver.position.x,driver.position.y,driver.position.z,-driver.heading,driver.pitch,-driver.roll,driver.vehicleHealth,driver.vehicleDamage]) {
             let matrix=Self.translation(driver.position)*Self.rotationZ(-driver.heading)*Self.rotationX(driver.pitch)*Self.rotationY(driver.roll)*Self.translation(SIMD3(0,0,vehicleModelOrigin(driver.code)))
-            return .init(vehicle:vehicle,transform:matrix,speed:driver.speed,velocity:driver.velocity)
+            return .init(vehicle:vehicle,transform:matrix,speed:driver.speed,velocity:driver.velocity,angularVelocity:driver.angularVelocity)
         }
         guard let source=remoteVehicles.first(where:{$0.id==id})else{return nil}
         let vehicle=predictedVehicle(source),matrix=groundVehicle?.otherVehicle(id)?.transform ??
             (Self.translation(vehicle.position)*Self.rotationZ(-vehicle.heading)*Self.rotationX(vehicle.pitch)*Self.rotationY(vehicle.roll)*Self.translation(SIMD3(0,0,vehicleModelOrigin(vehicle.code))))
-        return .init(vehicle:vehicle,transform:matrix,speed:0,velocity:.zero)
+        var velocity=SIMD3<Float>.zero,spin=SIMD3<Float>.zero
+        if let ground=groundVehicle,let collider=ground.otherVehicleColliders(id:id).sorted().first,
+           let body=ground.world.colliderInfo(collider)?.body,let state=ground.world.bodyState(body) {
+            velocity=SwiftRapierWorld.rapierToGTA(state.linearVelocity)
+            spin=SwiftRapierWorld.rapierToGTA(state.angularVelocity)
+        }
+        let forward=SIMD3(matrix.columns.1.x,matrix.columns.1.y,matrix.columns.1.z)
+        return .init(vehicle:vehicle,transform:matrix,speed:simd_dot(velocity,forward),velocity:velocity,angularVelocity:spin)
     }
     func availablePassengerSeat(vehicle:RemoteVehicle)->Int? {
         let model=String(vehicle.code.split(separator:".").first ?? "")
@@ -3194,6 +3201,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func nativeCameraVehicle() -> NativeGameCamera.Vehicle? {
+        if isPassenger {
+            guard let id=currentVehicleID,let frame=passengerFrame,frame.vehicle.id==id,
+                  let definition=cameraVehicleDefinitions[activeVehicleModel] else{return nil}
+            // Shared transform is already the GTA model-root frame. Its
+            // translation includes the rotated origin exactly once.
+            let matrix=frame.transform
+            func column(_ index:Int)->SIMD3<Float>{let c=matrix[index];return SIMD3(c.x,c.y,c.z)}
+            func vector(_ row:[Float]?)->SIMD3<Float>?{guard let row,row.count==3 else{return nil};return SIMD3(row[0],row[1],row[2])}
+            let seats=riderDefinitions?.models[activeVehicleModel]?.seats
+            let eye=passengerSeat.flatMap{index in seats.flatMap{$0.indices.contains(index) ? $0[index].position:nil}}
+            let bounds=definition.bounds
+            return .init(kind:definition.kind,position:column(3),forward:column(1),right:column(0),up:column(2),
+                moveSpeed:frame.velocity/50,turnSpeed:frame.angularVelocity/50,wheels:4,
+                bounds:.init(maxX:bounds.maxX,minY:bounds.minY,maxZ:bounds.maxZ,min:vector(bounds.box?.min),max:vector(bounds.box?.max)),
+                heightAboveRoad:definition.origin,eye:eye)
+        }
         if let value = groundVehicle?.cameraFrame {
             return NativeGameCamera.Vehicle(kind: vehicleKind == "helicopter" ? "heli" : vehicleKind == "bicycle" ? "bike" : vehicleKind,
                 position: value.position,forward: value.forward,right: value.right,up: value.up,
