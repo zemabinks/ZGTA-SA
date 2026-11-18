@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: AGPL-3.0-only
+"""Actual offscreen Metal atlas sampling with independently authored PNGs."""
+import argparse, hashlib, json, os, subprocess, time
+from pathlib import Path
+from smoke_native_ped_atlas_support import family, png, digest, canonical
+from smoke_native_vehicle_transparency import block
+
+ROOT = Path(__file__).resolve().parent
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--metal', type=Path)
+    parser.add_argument('--compile-only', action='store_true')
+    args = parser.parse_args()
+    out = ROOT / 'local-only/research/ped-atlas-119/gpu' / str(time.time_ns())
+    stage = out / 'source'; stage.mkdir(parents=True)
+    fixtures = out / 'fixtures'; fixtures.mkdir()
+    cases = [family('legacy', body=(128,128)), family('portrait', body=(128,256)),
+             family('mixed', mixed=True), family('white', txd=False)]
+    for alpha in [20,26,64,128]:
+        value=family('alpha'+str(alpha), body=(8,16))
+        pixels=bytearray(value['pixels'])
+        for offset in range(3,len(pixels),4): pixels[offset]=alpha
+        value['pixels']=bytes(pixels)
+        value['files']['atlas']=png(*value['size'],bytes(pixels))
+        value['layout']['atlasSHA256']=digest(value['files']['atlas'])
+        cases.append(value)
+    descriptions=[]
+    for value in cases:
+        target=fixtures/value['model']; target.mkdir()
+        for role in ['mesh','atlas']: (target/(role+'.data')).write_bytes(value['files'][role])
+        (target/'layout.json').write_bytes(canonical(value['layout']))
+        (target/'pixels.rgba').write_bytes(value['pixels'])
+        descriptions.append(value['model'])
+    (fixtures/'cases.json').write_text(json.dumps(descriptions))
+    names=['NativeWorldRenderer.swift','WorldBinary.swift','NativePedAtlasLayout.swift','WorldShaders.metal','SkeletalShaders.metal']
+    tests=['smoke_native_ped_atlas_gpu.py','smoke_native_ped_atlas_gpu.swift','smoke_native_ped_atlas_support.py','smoke_native_vehicle_transparency.py']
+    inputs=[ROOT/'ios/App'/n for n in names]+[ROOT/n for n in tests]
+    before={str(p.relative_to(ROOT)):digest(p.read_bytes()) for p in inputs}
+    renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
+    pipeline=renderer[renderer.index('        let descriptor = MTLRenderPipelineDescriptor()'):renderer.index('        descriptor.colorAttachments[0].writeMask = []')]
+    source=(ROOT/'smoke_native_ped_atlas_gpu.swift').read_text().replace('// ACTUAL_UNIFORMS',block(renderer,'    private struct Uniforms {')).replace('// ACTUAL_PIPELINE',pipeline)
+    (stage/'main.swift').write_text(source)
+    for name in names[1:]: (stage/name).write_bytes((ROOT/'ios/App'/name).read_bytes())
+    compiler=args.metal
+    if compiler is None:
+        configured=os.environ.get('ZGTA_METAL_COMPILER')
+        mounts=Path.home()/'Library/Developer/DVTDownloads/MetalToolchain/mounts'
+        choices=sorted(mounts.glob('*/Metal.xctoolchain/usr/bin/metal')) if mounts.is_dir() else []
+        compiler=Path(configured) if configured else choices[-1] if choices else Path(subprocess.check_output(['xcrun','--find','metal'],text=True).strip())
+    commands=[]
+    def run(command,label,timeout=240):
+        command=['nice','-n','15',*map(str,command)]; commands.append(command)
+        with (out/(label+'.log')).open('w') as log:
+            result=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=timeout,env={k:v for k,v in os.environ.items() if k!='SDKROOT'})
+        if result.returncode: print((out/(label+'.log')).read_text()[-5000:]); result.check_returncode()
+    sdk=subprocess.check_output(['xcrun','--sdk','macosx','--show-sdk-path'],text=True).strip()
+    airs=[]
+    for name in ['WorldShaders','SkeletalShaders']:
+        air=stage/(name+'.air'); airs.append(air)
+        run([compiler,'-target','air64-apple-macos13.0','-isysroot',sdk,'-fmodules-cache-path='+str(out/'metal-modules'),'-c',stage/(name+'.metal'),'-o',air],'metal-'+name)
+    run([compiler.with_name('metallib'),*airs,'-o',out/'production.metallib'],'link-metal')
+    run(['xcrun','swiftc','-whole-module-optimization','-num-threads','1','-Onone','-swift-version','5','-module-cache-path',out/'modules',stage/'WorldBinary.swift',stage/'NativePedAtlasLayout.swift',stage/'main.swift','-o',out/'verify'],'swift')
+    if args.compile_only:
+        print(json.dumps({'status':'COMPILED_ONLY','work':str(out)})); return
+    run([out/'verify',out],'runtime')
+    report=json.loads((out/'gpu-report.json').read_text())
+    assert all(digest((ROOT/path).read_bytes())==sha for path,sha in before.items())
+    report.update(sourceHashes=before,sourceUnchanged=True,commands=commands,originalDataUsed=False,
+                  metallibSHA256=digest((out/'production.metallib').read_bytes()))
+    (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
+    (out.parent/'latest.json').write_text(json.dumps(dict(report,work=str(out)),indent=2)+'\n')
+    print(json.dumps({'status':report['status'],'checks':report['checks'],'renders':report['renders'],'device':report['device'],'work':str(out)}))
+
+if __name__=='__main__': main()

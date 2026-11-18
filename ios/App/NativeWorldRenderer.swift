@@ -130,6 +130,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let vehicleMaskPipeline:MTLRenderPipelineState?
     private let animatedPipeline: MTLRenderPipelineState
     private let skeletalPipeline: MTLRenderPipelineState?
+    // Same ordinary vertex/appearance states; only the explicit atlas layout differs.
+    private let pedAtlasPipeline:MTLRenderPipelineState?
+    private let pedAtlasAnimatedPipeline:MTLRenderPipelineState?
+    private let pedAtlasSkeletalPipeline:MTLRenderPipelineState?
+    private struct PedAtlasGPU {
+        let family:String,source:String,layout:MTLBuffer,textureBytes:Int
+    }
+    private var pedAtlasFamilies:[String:String]=[:]
+    private var pedAtlasGPU:[String:PedAtlasGPU]=[:]
+    private struct PedAtlasLoad {let token:UUID;var request:NativePedAtlasLoader.Request?}
+    private var pedAtlasLoads:[String:PedAtlasLoad]=[:]
+    private var pedAtlasAdmission:[String:UUID]=[:]
+    private var pedAtlasDemand=Set<String>(),pedAtlasErrors=Set<String>()
+    private let pedAtlasLoader=NativePedAtlasLoader()
+    private var pedAtlasSource:String?
+
     private let skyPipeline: MTLRenderPipelineState?
     private let atmospherePipelines: [String: MTLRenderPipelineState]
     private let waterPipeline: MTLRenderPipelineState?
@@ -872,6 +888,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard let animatedPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
         descriptor.vertexFunction = library.makeFunction(name: "skeletalActorVertex")
         let skeletalPipeline = descriptor.vertexFunction.flatMap { _ in try? device.makeRenderPipelineState(descriptor: descriptor) }
+        descriptor.fragmentFunction=library.makeFunction(name:"ordinaryPedAtlasFragment")
+        descriptor.vertexFunction=vertex
+        let pedAtlasPipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        descriptor.vertexFunction=animatedVertex
+        let pedAtlasAnimatedPipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        descriptor.vertexFunction=library.makeFunction(name:"skeletalActorVertex")
+        let pedAtlasSkeletalPipeline=descriptor.vertexFunction.flatMap{_ in
+            descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        }
+
         descriptor.vertexFunction = library.makeFunction(name: "nativeDomeVertex")
         descriptor.fragmentFunction = library.makeFunction(name: "nativeDomeFragment")
         let skyPipeline = descriptor.vertexFunction.flatMap { _ in try? device.makeRenderPipelineState(descriptor: descriptor) }
@@ -913,6 +939,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.vehicleMaskPipeline = vehicleMaskPipeline
         self.animatedPipeline = animatedPipeline
         self.skeletalPipeline = skeletalPipeline
+        self.pedAtlasPipeline=pedAtlasPipeline;self.pedAtlasAnimatedPipeline=pedAtlasAnimatedPipeline;self.pedAtlasSkeletalPipeline=pedAtlasSkeletalPipeline
         self.skyPipeline = skyPipeline
         self.atmospherePipelines = atmospherePipelines
         self.waterPipeline = waterPipeline
@@ -923,6 +950,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         super.init()
         fixedCJObserver=NativeResourceStore.shared.observe {[weak self] _ in
             guard let self else{return}
+            self.invalidatePedAtlasSourceIfChanged()
             _ = self.actorSelection.invalidateSource(self.fixedCJSourceIdentity())
             if self.fixedCJ?.invalidateIfSourceChanged()==true,self.needsFixedCJ{self.ensureFixedCJ()}
         }
@@ -2831,10 +2859,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var server: ServerAddress? {didSet{
-        if oldValue != server {actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+        if oldValue != server {invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
-    deinit {if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    deinit {pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
     private var needsFixedCJ:Bool {
         localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
     }
@@ -3001,9 +3029,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 guard self.fixedCJSourceIdentity()==modelSource else{return}
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
+                self.weaponModels = index["weapons"] ?? [:]
+                self.bindPedAtlasFamilies(index["pedAtlasV1"] ?? [:],source:modelSource)
                 if self.fixedCJ?.isReady==true,self.pedModels["0"]==nil{self.pedModels["0"]="null"}
                 for key in self.legacyModelDefinitions.keys where (20001...30000).contains(key){self.pedModels[String(key)]="samp-dl-\(key)"}
-                self.weaponModels = index["weapons"] ?? [:]
                 self.resumeActorSelection()
                 self.loadActor(self.pedModels[String(self.localSkin)] ?? "bmori")
                 self.loadActor("colt45")
@@ -3090,18 +3119,21 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func loadActor(_ name: String) {
+        invalidatePedAtlasSourceIfChanged()
         if name == "null" {
             if let ready=fixedCJ?.ready{skeletalActors[name]=ready.gpu.uploaded.actor}else{ensureFixedCJ()}
             return
         }
         if let custom=legacyPedModels[name]{skeletalActors[name]=custom.actor;return}
         let isPed=pedModels.values.contains(name),isVehicle=vehicleModels.values.contains(name)
+        if isPed,let family=pedAtlasFamilies[name] {pedAtlasDemand.insert(name);loadPedAtlasActor(name,family:family);return}
         let complete=actorMeshes[name] != nil && (!isPed || skeletalActors[name] != nil) &&
             (!isVehicle || (vehicleRigs[name] != nil && vehicleRigMeshes[name] != nil))
         guard !name.isEmpty,!complete,!actorLoading.contains(name),
               Date()>=(actorRetryAfter[name] ?? .distantPast),
               let server else { return }
         actorLoading.insert(name)
+        let actorSource=fixedCJSourceIdentity()
         let group = DispatchGroup()
         let lock = NSLock()
         var binary: Data?
@@ -3175,6 +3207,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.actorLoading.remove(name)
+            // A newly advertised family may not be replaced by an older generic request.
+            guard self.fixedCJSourceIdentity()==actorSource,self.pedAtlasFamilies[name]==nil else{return}
             // A partial mesh must not permanently suppress skeleton/rig retry.
             // Publish the required family together only after all stages pass.
             self.actorRetryAfter[name]=Date().addingTimeInterval(2)
@@ -3231,6 +3265,94 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.actorAttachments[name] = hand
             }
         }
+    }
+
+    private func pedAtlasError(_ name:String,_ message:String) {
+        if pedAtlasErrors.insert(name).inserted{onStatus?(message)}
+    }
+    private func clearPedAtlas(_ name:String) {
+        pedAtlasLoads.removeValue(forKey:name)?.request?.cancel()
+        pedAtlasAdmission.removeValue(forKey:name)
+        actorMeshes.removeValue(forKey:name);skeletalActors.removeValue(forKey:name)
+        actorAnimations.removeValue(forKey:name);actorParts.removeValue(forKey:name);actorAttachments.removeValue(forKey:name)
+        pedAtlasGPU.removeValue(forKey:name);actorRetryAfter.removeValue(forKey:name);pedAtlasErrors.remove(name)
+    }
+    private func invalidatePedAtlasSourceIfChanged() {
+        guard let source=pedAtlasSource,source != fixedCJSourceIdentity() else{return}
+        for name in Set(pedAtlasGPU.keys).union(pedAtlasLoads.keys).union(pedAtlasAdmission.keys){clearPedAtlas(name)}
+        pedAtlasLoader.cancelAll()
+        // Keep the old advertised catalogue fenced. A source change cannot
+        // silently downgrade these names to legacy PNGs before a real rebind.
+    }
+    private func bindPedAtlasFamilies(_ families:[String:String],source:String) {
+        let allowed=Set(pedModels.values).subtracting(["null"]).subtracting(vehicleModels.values).subtracting(weaponModels.values)
+        let admitted=families.filter{allowed.contains($0.key) && !$0.key.hasPrefix("samp-dl-")}
+        let changed=Set(pedAtlasFamilies.keys).union(admitted.keys).filter{
+            pedAtlasSource != source || pedAtlasFamilies[$0] != admitted[$0]
+        }
+        for name in changed{clearPedAtlas(name)}
+        pedAtlasFamilies=admitted;pedAtlasSource=source
+        if admitted.count != families.count{onStatus?("PED ATLAS CATALOGUE HAS UNKNOWN MODEL ENTRIES")}
+    }
+    private func loadPedAtlasActor(_ name:String,family:String) {
+        let source=fixedCJSourceIdentity()
+        if let bound=pedAtlasGPU[name],bound.family==family,bound.source==source,
+           actorMeshes[name] != nil,skeletalActors[name] != nil{return}
+        guard pedAtlasSource==source,NativePedAtlasFamily.digest(in:family,model:name) != nil,
+              pedAtlasPipeline != nil,pedAtlasAnimatedPipeline != nil,pedAtlasSkeletalPipeline != nil,
+              let server else{
+            pedAtlasError(name,"PED ATLAS FAMILY/SHADER IS UNAVAILABLE: \(name)");return
+        }
+        guard pedAtlasLoads[name]==nil,Date()>=(actorRetryAfter[name] ?? .distantPast) else{return}
+        let token=UUID()
+        // Own the admission before calling the asynchronous factory.
+        pedAtlasAdmission[name]=token;pedAtlasLoads[name]=PedAtlasLoad(token:token,request:nil)
+        let request=pedAtlasLoader.load(model:name,path:family,source:source,server:server,
+            priority:name==pedModels[String(localSkin)] ? 1:0){[weak self] result in
+            guard let self,self.pedAtlasAdmission[name]==token,self.pedAtlasLoads[name]?.token==token else{
+                if case .success(let payload)=result{payload.close()};return
+            }
+            let owned=self.pedAtlasLoads.removeValue(forKey:name)?.request
+            guard self.fixedCJSourceIdentity()==source,self.pedAtlasSource==source,self.pedAtlasFamilies[name]==family,
+                  owned?.isCancelled != true else{if case .success(let payload)=result{payload.close()};return}
+            self.actorRetryAfter[name]=Date().addingTimeInterval(2)
+            switch result {
+            case .failure(let error):
+                if (error as? NativePedAtlasLoader.Failure) != .cancelled {
+                    self.pedAtlasError(name,"PED ATLAS LOAD FAILED: \(name): \(error.localizedDescription)")
+                }
+            case .success(let payload):
+                let installed=payload.consume{_,files -> Bool in
+                    let world=payload.world,validated=payload.layout
+                    guard let image=files["atlas"],let skin=files["skeleton"],
+                          let atlas=try? self.textureLoader.newTexture(data:image,options:[.SRGB:false,.generateMipmaps:false]),
+                          atlas.width==validated.width,atlas.height==validated.height,
+                          let vertices=self.device.makeBuffer(bytes:world.vertices,length:world.vertices.count*MemoryLayout<NativeVertex>.stride),
+                          let indices=self.device.makeBuffer(bytes:world.indices,length:world.indices.count*4),
+                          let rectangles=self.device.makeBuffer(bytes:validated.vectors,length:validated.vectors.count*MemoryLayout<SIMD4<Float>>.stride),
+                          let actor=NativeSkeletalActor(data:skin,vertexCount:world.vertices.count,device:self.device) else{return false}
+                    let hand=files["hand"].flatMap(NativeActorAttachment.init(data:))
+                    let parts=files["parts"].flatMap{try? JSONDecoder().decode(ActorParts.self,from:$0)}
+                    guard files["hand"]==nil || hand != nil,files["parts"]==nil || parts != nil,
+                          owned?.isCancelled != true,self.fixedCJSourceIdentity()==source,
+                          self.pedAtlasSource==source,self.pedAtlasFamilies[name]==family,self.pedAtlasAdmission[name]==token else{return false}
+                    self.actorMeshes[name]=Mesh(vertices:vertices,indices:indices,indexCount:world.indices.count,atlas:atlas)
+                    self.skeletalActors[name]=actor
+                    self.pedAtlasGPU[name]=PedAtlasGPU(family:family,source:source,layout:rectangles,textureBytes:validated.textureBytes)
+                    self.actorAnimations.removeValue(forKey:name)
+                    if let hand{self.actorAttachments[name]=hand}else{self.actorAttachments.removeValue(forKey:name)}
+                    if let parts {
+                        self.actorParts[name]=parts.parts.filter{$0.start>=0 && $0.count>0 && $0.count<=world.indices.count && $0.start<=world.indices.count-$0.count && $0.pivot.count==3}
+                    }else{self.actorParts.removeValue(forKey:name)}
+                    self.actorRetryAfter.removeValue(forKey:name);self.pedAtlasErrors.remove(name)
+                    return true
+                } ?? false
+                if !installed,self.pedAtlasAdmission[name]==token {
+                    self.pedAtlasError(name,"PED ATLAS GPU ADMISSION FAILED: \(name)")
+                }
+            }
+        }
+        if pedAtlasLoads[name]?.token==token{pedAtlasLoads[name]?.request=request}else{request.cancel()}
     }
 
     private func nativeCameraVehicle() -> NativeGameCamera.Vehicle? {
@@ -4156,6 +4278,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(depth)
     }
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
+        pedAtlasDemand.removeAll(keepingCapacity:true)
         remoteSuspensionRayBudget = 64
         let riderTime = riderMonotonicNow()
         let riderDelta = lastRiderDraw > 0 ? min(0.1,max(0,riderTime-lastRiderDraw)) : 0
@@ -4483,12 +4606,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             appendCarriages(carriages,identity:id)
         }
         groundVehicle?.retainTrainCarriageLayouts(trainLayoutIDs)
+        let pedAtlasDrawSource=pedAtlasFamilies.isEmpty ? nil:fixedCJSourceIdentity()
         for (name, position, angle, pitch, clip, elapsed, weapon, vehicleContext, occurrence) in modelInstances {
             let queued = occurrence.map { actorOverrides[$0] }
             let mesh = (vehicleContext != nil ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
             let fixedPlayer=name=="null" ? fixedCJ?.ready:nil
             let customPed=fixedPlayer?.gpu.uploaded ?? legacyPedModels[name]
             guard mesh != nil || customPed != nil else { loadActor(name); continue }
+            if pedAtlasFamilies[name] != nil {
+                guard let bound=pedAtlasGPU[name],bound.source==pedAtlasDrawSource,bound.family==pedAtlasFamilies[name] else{loadActor(name);continue}
+            }
             let originalFoot = queued?.original ?? false
             // Archived pedestrian DFFs face local -Y after the RenderWare axis
             // conversion, while the world protocol defines heading zero as +Y.
@@ -4528,17 +4655,21 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }}catch{onStatus?("CUSTOM CHARACTER DRAW FAILED: \(error)");continue}
             } else if let mesh {
             if let pose, let actor = skeletalActors[name], let skeletalPipeline {
-                encoder.setRenderPipelineState(skeletalPipeline)
+                if pedAtlasGPU[name] != nil {guard let pedAtlasSkeletalPipeline else{continue};encoder.setRenderPipelineState(pedAtlasSkeletalPipeline)}
+                else{encoder.setRenderPipelineState(skeletalPipeline)}
                 actor.bind(pose: pose, encoder: encoder)
             } else if let frames = actorAnimations[name]?.sample(clip: clip, elapsed: elapsed) {
-                encoder.setRenderPipelineState(animatedPipeline)
+                if pedAtlasGPU[name] != nil {guard let pedAtlasAnimatedPipeline else{continue};encoder.setRenderPipelineState(pedAtlasAnimatedPipeline)}
+                else{encoder.setRenderPipelineState(animatedPipeline)}
                 encoder.setVertexBuffer(frames.0, offset: 0, index: 2)
                 encoder.setVertexBuffer(frames.1, offset: 0, index: 3)
                 var blend = frames.2
                 encoder.setVertexBytes(&blend, length: MemoryLayout<Float>.stride, index: 4)
             } else {
-                encoder.setRenderPipelineState(pipeline)
+                if pedAtlasGPU[name] != nil {guard let pedAtlasPipeline else{continue};encoder.setRenderPipelineState(pedAtlasPipeline)}
+                else{encoder.setRenderPipelineState(pipeline)}
             }
+            if let layout=pedAtlasGPU[name] {encoder.setFragmentBuffer(layout.layout,offset:0,index:2)}
             encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
@@ -4634,12 +4765,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         encodeTransparentVehicles(transparentVehicleDraws,encoder:encoder)
         let visible = Set(modelInstances.map { $0.0 } + modelInstances.compactMap { weaponModels[String($0.6)] })
+        for name in Array(pedAtlasLoads.keys) where !visible.contains(name) && !pedAtlasDemand.contains(name) {
+            pedAtlasLoads.removeValue(forKey:name)?.request?.cancel();pedAtlasAdmission.removeValue(forKey:name)
+        }
         if actorMeshes.count > 32 {
             actorMeshes = actorMeshes.filter { visible.contains($0.key) }
             actorAnimations = actorAnimations.filter { visible.contains($0.key) }
             skeletalActors = skeletalActors.filter { visible.contains($0.key) || legacyPedModels[$0.key] != nil || ($0.key=="null" && fixedCJ?.ready != nil) }
             actorAttachments = actorAttachments.filter { visible.contains($0.key) }
             actorParts = actorParts.filter { visible.contains($0.key) }
+            pedAtlasGPU=pedAtlasGPU.filter{visible.contains($0.key)}
             vehicleRigs=vehicleRigs.filter{visible.contains($0.key)}
             vehicleRigMeshes=vehicleRigMeshes.filter{visible.contains($0.key)}
             vehicleWaterMasks=vehicleWaterMasks.filter{visible.contains($0.key)}

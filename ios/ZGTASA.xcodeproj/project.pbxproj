@@ -134,6 +134,7 @@
 		9E7CF5B1DA6910A81DFB7A8F /* NativeFlightAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13D9044A38C55A08C41FD1EB /* NativeFlightAnimation.swift */; };
 		A04EB9A2AA84E43AE0417110 /* MainMenuViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAF3FFE41D4B8C5B0F20E99A /* MainMenuViewController.swift */; };
 		A15513AF40B8FAFEB4BB7E16 /* NativeWeatherParticles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24B8E5444BF25DE89BEFB795 /* NativeWeatherParticles.swift */; };
+		A5443E6FDF8A8B2748F2FE18 /* NativePedAtlasLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DFC1747FD063F85D265C317 /* NativePedAtlasLoader.swift */; };
 		A5CBCAE13D8CB314DFD26FEE /* NativeMovingSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2680FC89ECCCE70E9157C5F /* NativeMovingSupport.swift */; };
 		A735637C1C630175F04ADC07 /* NativeResourceManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12F1BA289D7C0E61816D3501 /* NativeResourceManifest.swift */; };
 		ACD126EF6D1B8AB684EC440E /* NativeGameViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2326D5F1610E7F3B8859A41D /* NativeGameViewController.swift */; };
@@ -160,6 +161,7 @@
 		D745C8603A349B1A1BF11798 /* NativeRenderWareCollisionWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50732CAC0459F1094ED1A0F /* NativeRenderWareCollisionWorld.swift */; };
 		D77994ED43402194D25FD11B /* NativeMenuAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BFEE8A2E28D3FE221B7470 /* NativeMenuAudio.swift */; };
 		D8D46E4F0DCFD9526AF5C080 /* NativeCJRuntimeLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 377027377634687E2F67D980 /* NativeCJRuntimeLoader.swift */; };
+		D9AF4A11F9FD110119FE312D /* NativePedAtlasLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A3F68897CC41114E79F10D9 /* NativePedAtlasLayout.swift */; };
 		DAE0DC68E39100FD741A5805 /* SkeletalShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 4E7FB92323B6A05CD62B028B /* SkeletalShaders.metal */; };
 		DDC99373C20A989E4DBE0133 /* NativeFallDamage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A079C289993B9B3644543FB /* NativeFallDamage.swift */; };
 		DDE4042E5252FB0C0B8E440C /* NativeSAMPStockCollisionCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E91597E6874AECCA343C50A /* NativeSAMPStockCollisionCatalog.swift */; };
@@ -264,6 +266,7 @@
 		49E1DB8E527A12C33170D18F /* NativeMenuProfileClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMenuProfileClient.swift; sourceTree = "<group>"; };
 		4C869C965C2E923B5C8B3588 /* NativeVehicleSeating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleSeating.swift; sourceTree = "<group>"; };
 		4DEED582EAC6344E9961902B /* NativeWeatherAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWeatherAudio.swift; sourceTree = "<group>"; };
+		4DFC1747FD063F85D265C317 /* NativePedAtlasLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePedAtlasLoader.swift; sourceTree = "<group>"; };
 		4E7FB92323B6A05CD62B028B /* SkeletalShaders.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = SkeletalShaders.metal; sourceTree = "<group>"; };
 		4E8E5285E9049F47EE74BFB9 /* NativeCityMapViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCityMapViewController.swift; sourceTree = "<group>"; };
 		502EC37E454A0689DA6E4869 /* NativeVehicleHornController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleHornController.swift; sourceTree = "<group>"; };
@@ -286,6 +289,7 @@
 		68ECF76A29B2B319314833C7 /* NativeRapierCharacterQueries.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRapierCharacterQueries.swift; sourceTree = "<group>"; };
 		6945A20DE471AFFD0CC49AB3 /* NativePausePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePausePanel.swift; sourceTree = "<group>"; };
 		6A10C388E455DD11D44E0A27 /* NativeSprintController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSprintController.swift; sourceTree = "<group>"; };
+		6A3F68897CC41114E79F10D9 /* NativePedAtlasLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePedAtlasLayout.swift; sourceTree = "<group>"; };
 		6A5F440C2D502D65DBB92549 /* SwiftRapierWorld.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwiftRapierWorld.swift; sourceTree = "<group>"; };
 		6A94B01CC17E576695BB0572 /* NativeConnectionRecovery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeConnectionRecovery.swift; sourceTree = "<group>"; };
 		6B0299955CDF0C5E3943E14D /* NativeVehicleDamage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleDamage.swift; sourceTree = "<group>"; };
@@ -495,6 +499,8 @@
 				06A86C8384D82A769D39DD92 /* NativeParticleShaders.metal */,
 				A924CBE17F4A64A056522984 /* NativePassiveCameraTrace.swift */,
 				6945A20DE471AFFD0CC49AB3 /* NativePausePanel.swift */,
+				6A3F68897CC41114E79F10D9 /* NativePedAtlasLayout.swift */,
+				4DFC1747FD063F85D265C317 /* NativePedAtlasLoader.swift */,
 				57FD67E1D1161EFB1AEF6C8A /* NativePedestrianReaction.swift */,
 				53186CE890365391FC7540E7 /* NativePersonalFlightController.swift */,
 				AAD27E3A04D7D3DC915B9A00 /* NativePreparedRuntimeVerifier.swift */,
@@ -783,6 +789,8 @@
 				1A0F166303AE38FDE592B6F9 /* NativeParticleShaders.metal in Sources */,
 				4B2DEF02F3D9975E279595DF /* NativePassiveCameraTrace.swift in Sources */,
 				31D8D111A774EA69DE95E520 /* NativePausePanel.swift in Sources */,
+				D9AF4A11F9FD110119FE312D /* NativePedAtlasLayout.swift in Sources */,
+				A5443E6FDF8A8B2748F2FE18 /* NativePedAtlasLoader.swift in Sources */,
 				04B40C99D7BE0124F276906E /* NativePedestrianReaction.swift in Sources */,
 				3DF56650D1DDEC0560887D66 /* NativePersonalFlightController.swift in Sources */,
 				7DE136DB20B6F955FDFAAE71 /* NativePreparedRuntimeVerifier.swift in Sources */,
