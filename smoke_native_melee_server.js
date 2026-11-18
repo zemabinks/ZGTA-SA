@@ -9,7 +9,7 @@ try {
   Date.now=()=>now;
   const local=path.join(temporary,'local-only'),worldPath=path.join(local,'site/game/world');
   fs.mkdirSync(path.join(local,'selfhost'),{recursive:true});fs.mkdirSync(worldPath,{recursive:true});
-  for(const file of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])
+  for(const file of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
   fs.writeFileSync(path.join(local,'selfhost/client-catalog.json'),JSON.stringify({vehicles:[],homes:[]}));
   fs.mkdirSync(path.join(local,'native'),{recursive:true});

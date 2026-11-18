@@ -1066,6 +1066,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }else{teleport(x:camera.x,y:camera.y,z:camera.z+Float(min(100,amount)),direction:actorHeading)}
     }
     func leaveVehicleForOriginalTeleport(){if driving{discardOwnedVehicle()}}
+    /// Authoritative placement revokes ownership without a parked exit or offset.
+    func revokeVehicleForServerPlacement(){discardOwnedVehicle()}
     private var groundAudioContact:(material:Int,surface:Int)? {
         if let hit=groundVehicle?.world.raycast(origin:SwiftRapierWorld.gtaToRapier(camera+SIMD3(0,0,0.5)),direction:SIMD3(0,-1,0),distance:1.5,
             excludingColliders:driving ? groundVehicle?.chassisColliders ?? []:[],groups:0xffff0081) {
@@ -2557,6 +2559,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         activeVehicleModel="";activeHandling=nil;vehicleKind="car"
         pendingVehicleExit=nil;pendingExitPlacement=nil;vehicleExitSerial &+= 1
         ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
+        ownRiderAnimation=nil;vehicleHorn=false;vehicleSiren=false;steeringInput=0
+        vehicleWorkingControl=0;vehicleHop=false
         riderDoorHolds.removeAll()
     }
 

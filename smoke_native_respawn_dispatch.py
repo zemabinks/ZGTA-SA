@@ -31,6 +31,7 @@ final class DisabledLegacy {func send(_ packet:[String:Any])->Bool{preconditionF
 final class Network {
     var healthPrediction=NativeHealthPrediction(),health=0,armour=25
     var passive=false,isReady=true,usesClientOwnedWeapons=false,transportGeneration:UInt64=1,deliveredRespawnSequence=0
+    var positionAcknowledgements=false
     let originalVitals=NativeOriginalWorldVitals()
     var originalRespawnWasDead=false
     var originalRespawnRequested:Double?
@@ -181,6 +182,16 @@ final class Game {
             _=h.network.receive(100,processed:1,revision:1,respawned:1)
             check(h.renderer!.teleports.isEmpty && h.currentVehicle==42,"Accepted old ACK crossed a reentrant \(boundary) boundary")
         }
+        // A sequenced respawn ACK can arrive after a newer authoritative
+        // placement. Its presentation callback must not move/revoke that world.
+        let strict=Game();strict.network.positionAcknowledgements=true;strict.network.begin();strict.attack()
+        let newerPlacement=SIMD3<Float>(700,800,60);strict.renderer!.feet=newerPlacement
+        check(strict.network.receive(100,processed:1,revision:1,respawned:1),"Strict accepted respawn ACK rejected")
+        check(strict.renderer!.feet==newerPlacement && strict.renderer!.teleports.isEmpty,"Late strict respawn ACK overwrote a newer server placement")
+        check(strict.currentVehicle==42 && strict.renderer!.exits==0 && strict.radio.stops==0 && strict.drivingChanges.isEmpty,"Late strict respawn ACK revoked a newer role")
+        check(strict.resets==1 && !strict.heldFire && strict.status.text=="RESPAWNED","Strict accepted respawn presentation did not complete once")
+        _=strict.network.receive(100,processed:1,revision:1,respawned:1)
+        check(strict.resets==1 && strict.renderer!.teleports.isEmpty && strict.currentVehicle==42,"Duplicate strict respawn ACK repeated presentation or placement")
         print("PASS actual respawn dispatch: \(checks) checks; dead request, accepted once, rejected, heal, reconnect, legacy, callback ownership")
     }
 }

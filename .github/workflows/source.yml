@@ -34,3 +34,5 @@ jobs:
       - run: node smoke_radio_import_bounds.js
       - run: node smoke_radio_development.js
       - run: node smoke_selfhost_tp_units.js
+      - run: node smoke_selfhost_position_resume.js
+      - run: node smoke_selfhost_mission_persistence.js

@@ -59,6 +59,10 @@ final class Renderer {
  var pendingVehicleBodyPose:Int?=1,activeVehicleModel="410",activeHandling:Int?=1,vehicleKind="car"
  var pendingExitPlacement:(()->Void)?={},vehicleExitSerial:UInt64=0
  var pendingVehicleExit:(()->Void)?={},ownRiderPlayback:Int?=1,ownRiderPrevious:Int?=1,ownRiderCapture:Int?=1,ownRiderFeet:Int?=1
+ var ownRiderAnimation:Int?=1,vehicleHorn=true,vehicleSiren=true,vehicleHop=true
+ var steeringInput:Float=0.8,vehicleWorkingControl:Float=1
+ var isPassenger:Bool{passengerSeat != nil};var passengerWirePosition:SIMD3<Float>{camera}
+ var direction:Float{driving ? heading:actorHeading}
  var riderDoorHolds=["old-car":1],remotePlayers=[1],remoteVehicles=[Vehicle(id:"old-car"),Vehicle(id:"parked")],hasParachute=true
  var camera=SIMD3<Float>(12,34,56),objective:SIMD2<Float>?=SIMD2(1,2)
  let gameCamera=Camera();var gameCameraFrame:Int?=1,heading:Float=1.2,actorHeading:Float=0.3,cameraPitch:Float=0.2,cameraWasDriving=true
@@ -72,7 +76,7 @@ final class Renderer {
  func synchronizeProjectiles(_ rows:[Int]){projectileRows=rows}
  func cancelReloadAnimation(){reloadCancelled=true}
  func teleport(x:Float,y:Float,z:Float,direction:Float?=nil){camera=SIMD3(x,y,z);if let direction {self.heading=direction};resets+=1}
-'''+method(renderer,'    func setVehicleCouplingConnection(')+method(renderer,'    private func discardOwnedVehicle()')+method(renderer,'    func deferVehicleExit(')+method(renderer,'    @discardableResult func removeVehicle(')+method(renderer,'    private func clearMultiplayerPresentation()')+method(renderer,'    func resetMultiplayerSession()')+r'''
+'''+method(renderer,'    func setVehicleCouplingConnection(')+method(renderer,'    private func discardOwnedVehicle()')+method(renderer,'    func revokeVehicleForServerPlacement()')+method(renderer,'    func revokePassenger(')+method(renderer,'    func deferVehicleExit(')+method(renderer,'    @discardableResult func removeVehicle(')+method(renderer,'    private func clearMultiplayerPresentation()')+method(renderer,'    func resetMultiplayerSession()')+r'''
 }
 struct RawKey:Hashable {let rawValue:Int}
 final class Text {var text=""}
@@ -81,7 +85,7 @@ enum ButtonState {case normal}
 final class Radar {var target:SIMD2<Float>?=SIMD2(1,2)}
 final class HUD {let radar=Radar();var vehicle:String?="OLD";func updateVehicle(name:String?,speed:Float){vehicle=name}}
 final class Gameplay {var ready=false,refreshes=0;func setConnectionReady(_ value:Bool){ready=value};func refresh(){precondition(ready);refreshes+=1}}
-final class Network {var legacy:AnyObject?;var stops=0,activities=[Bool]();func setApplicationActive(_ value:Bool){activities.append(value)};func disconnect(){stops+=1;ownerCalls.append("network-disconnect")}}
+final class Network {var positionAcknowledgements=false;var onTeleport:((SIMD3<Float>,Float?)->Void)?;var passengerExitWrites=0;func sendPassengerExit(_ point:SIMD3<Float>,heading:Float){passengerExitWrites+=1};var legacy:AnyObject?;var stops=0,activities=[Bool]();func setApplicationActive(_ value:Bool){activities.append(value)};func disconnect(){stops+=1;ownerCalls.append("network-disconnect")}}
 final class Audio {var stops=0;func stop(){stops+=1}}
 final class Display {var invalidated=false;func invalidate(){invalidated=true;ownerCalls.append("display-invalidate")}}
 struct Clock {var resets=0;mutating func reset(){resets+=1}}
@@ -111,7 +115,7 @@ final class Game:Parent {
  var isBeingDismissed=false,isMovingFromParent=false,presentingViewController:Presenter?=Presenter()
  func resetControls(){heldKeys=[];controlResets+=1}
  func setDrivingControls(_ value:Bool){drivingControls=value}
-'''+method(vc,'    private func connectionChanged(')+method(vc,'    private func vehicleRemoved(')+method(vc,'    private func stopGame()')+method(vc,'    override func viewWillDisappear(')+method(vc,'    @objc private func applicationResigned()')+method(vc,'    @objc private func applicationReturned()')+r'''
+'''+ '\n func installPlacementCallback(){\n'+method(vc,'        network.onTeleport =')+'\n}\n'+method(vc,'    private func connectionChanged(')+method(vc,'    private func vehicleRemoved(')+method(vc,'    private func stopGame()')+method(vc,'    override func viewWillDisappear(')+method(vc,'    @objc private func applicationResigned()')+method(vc,'    @objc private func applicationReturned()')+r'''
 }
 var checks=0
 func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}
@@ -216,6 +220,22 @@ let finalOwner=Game();NativeGameplayIdleTimer.shared.claim(finalOwner.idleOwner,
 lifecycle.applicationResigned()
 check(systemIdleDisabled,"old controller's actual resign hook cleared the current game's display ownership")
 finalOwner.stopGame();check(!systemIdleDisabled,"final actual shutdown did not restore the original display policy")
+for role in ["driver","passenger","foot"] {
+ let placing=Game();placing.network.positionAcknowledgements=true;placing.installPlacementCallback()
+ let world=placing.renderer!,otherIDs=placing.renderer!.groundVehicle!.otherIDs
+ world.passengerSeat=role=="passenger" ? 1:nil;world.driving=role != "foot";world.groundVehicle!.active=role != "foot"
+ let target=SIMD3<Float>(700,-800,30);placing.network.onTeleport?(target,Float(-1.25))
+ check(placing.currentVehicle==nil && !placing.drivingControls && placing.gameHUD.vehicle==nil,"Strict TP retained \(role) HUD/control owner")
+ check(!world.driving && world.currentVehicleID==nil && world.passengerSeat==nil && !world.groundVehicle!.active,"Strict TP retained \(role) physical owner")
+ check(world.camera==target && world.heading == -1.25 && world.resets==1,"Strict TP applied an exit offset or repeated teleport")
+ check(world.pendingVehicleExit==nil && world.pendingExitPlacement==nil && world.ownRiderAnimation==nil,"Strict TP retained pending rider placement")
+ check(!world.vehicleHorn && !world.vehicleSiren && !world.vehicleHop && world.steeringInput==0 && world.vehicleWorkingControl==0,"Strict TP retained vehicle control effects")
+ check(world.groundVehicle!.otherIDs==otherIDs && world.remoteVehicles.count==2,"Strict TP cleared unrelated parked/remote world")
+ check(placing.network.passengerExitWrites==0 && placing.network.stops==0 && placing.radio.stops==1,"Strict TP manufactured a passenger exit or disconnected the server")
+ check(placing.previousAudioPosition==nil && placing.controlResets==1,"Strict TP retained old motion/input history")
+}
+let legacyPlacement=Game();legacyPlacement.installPlacementCallback();legacyPlacement.network.onTeleport?(SIMD3(4,5,6),nil)
+check(legacyPlacement.network.passengerExitWrites==1 && legacyPlacement.renderer!.camera==SIMD3(4,5,6),"Unnegotiated passenger correction policy changed")
 print("PASS connection owners: \(checks) actual extracted controller/renderer lifecycle checks (non-UI spies)")
 '''
 with tempfile.TemporaryDirectory(prefix='zgta-connection-owners-') as directory:

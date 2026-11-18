@@ -8,7 +8,7 @@ const check=(value,label)=>{checks++;assert(value,label);};
 try {
  Date.now=()=>now;
  const local=path.join(temporary,'local-only/selfhost');fs.mkdirSync(local,{recursive:true});
- for(const file of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
+ for(const file of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
  fs.writeFileSync(path.join(local,'client-catalog.json'),JSON.stringify({vehicles:[],homes:[]}));
  fs.writeFileSync(path.join(local,'weapon-catalog.json'),JSON.stringify({items:[],shops:[]}));
  game=require(path.join(temporary,'selfhost_backend.js'));

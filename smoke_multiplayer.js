@@ -57,7 +57,7 @@ async function main() {
   fs.symlinkSync(path.join(__dirname, 'local-only', 'site'), path.join(local, 'site'));
   fs.mkdirSync(path.join(local,'selfhost'));
   fs.copyFileSync(path.join(__dirname,'local-only/selfhost/client-catalog.json'),path.join(local,'selfhost/client-catalog.json'));
-  for (const file of ['serve_local.js', 'native_resource_server.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
+  for (const file of ['serve_local.js', 'native_resource_server.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js','player_placement.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   const child = spawn(process.execPath, ['serve_local.js'], {

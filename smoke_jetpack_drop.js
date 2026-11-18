@@ -7,7 +7,7 @@ const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'zgta-jetpack-drop-'));
 let game,restored;
 try {
  fs.mkdirSync(path.join(temporary,'local-only/selfhost'),{recursive:true});
- for(const name of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
+ for(const name of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
  game=require(path.join(temporary,'selfhost_backend.js'));
  function peer(owner=game,id=null){
   const account=owner.ensurePlayer({headers:{cookie:id?'zgta_local='+id:''}},{setHeader(){}}),packets=[];

@@ -1,6 +1,14 @@
 let address=ServerAddress(CommandLine.arguments[1])!
 let session=URLSession(configuration:.ephemeral)
 let client=NativeMultiplayerClient(server:address,session:session)
+
+// Headless protocol owner records the actual authoritative placement. This
+// fixture exercises transport/state, not a rendered world or physical egress.
+var observedPlacement:SIMD3<Float>?
+client.onTeleport={point,heading in
+ precondition([point.x,point.y,point.z].allSatisfy(\.isFinite) && heading?.isFinite != false)
+ observedPlacement=point
+}
 var checks=0,readyCount=0,phase=0,finished=false,guestEstablished=false,uncertainCallbacks=0
 var root:RemoteVehicle!,firstNonce:String?,callbacks:[Bool]=[],baselineNonces:[String]=[]
 func check(_ value:Bool,_ message:String){checks+=1;precondition(value,message)}

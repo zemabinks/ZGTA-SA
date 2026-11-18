@@ -10,6 +10,8 @@ struct ExitVehicle {var id:String;var code:String;var work=0}
 final class BikeExitRenderer {
  let groundVehicle:NativeGroundVehicle?,character:NativeCharacterController?
  let ownCameraVisibility=ExitOwner(),vehicleCoupling:ExitOwner?=ExitOwner(),gameCamera=ExitCamera(),pedestrian=ExitPedestrian()
+ var ownRiderAnimation:Int?=1,vehicleHorn=true,vehicleSiren=true,vehicleHop=true
+ var steeringInput:Float=0.8,vehicleWorkingControl:Float=1
  var ownRiderPlayback:ExitPlayback?=ExitPlayback(),ownRiderFeet:ExitFeet?
  var ownRiderSide = -1
  var passengerSeat:Int?,passengerFrame:Int?,passengerAccumulator=0.0

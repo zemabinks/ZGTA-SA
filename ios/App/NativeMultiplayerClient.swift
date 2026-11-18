@@ -68,7 +68,10 @@ struct NativeVehicleSeatSession {
     mutating func cancel()->Entry?{let old=pending;pending=nil;return old}
     mutating func leavePassenger()->Seat?{let old=passenger;passenger=nil;return old}
     mutating func remove(vehicle:String){if pending?.seat.vehicle==vehicle{pending=nil};if passenger?.vehicle==vehicle{passenger=nil}}
-    mutating func reset(){pending=nil;passenger=nil;issued=0}
+    // A TP changes placement on the SAME peer. Keep its request namespace so
+    // a delayed entry ACK cannot alias a new request after occupancy cleanup.
+    mutating func clearOccupancy(){pending=nil;passenger=nil}
+    mutating func reset(){clearOccupancy();issued=0}
 }
 
 struct RemotePlayer {
@@ -268,6 +271,96 @@ protocol NativeLegacyWorldConnection:AnyObject {
     func tick(now:Double)
     @discardableResult func send(_ message:[String:Any])->Bool
 }
+/// Connection-scoped server placements are committed only after the owner has
+/// synchronously applied their pose. A nonce/revision correlates position; it
+/// neither grants a vehicle role nor substitutes for the health/ammo owners.
+struct NativePlacementSession {
+    struct Envelope:Equatable {
+        let connection:String,revision:Int
+        var wire:[String:Any]{["connection":connection,"revision":revision]}
+    }
+    struct Transaction:Equatable {
+        let token:UUID,envelope:Envelope,position:SIMD3<Float>,heading:Float
+    }
+    enum Hello {case legacy,duplicate,place(Transaction),invalid}
+    private(set) var negotiated=false
+    private(set) var applied:Envelope?
+    private var pending:Transaction?
+    var isPlacing:Bool{pending != nil}
+    var permitsPosition:Bool{!isPlacing && (!negotiated || applied != nil)}
+    mutating func reset(){self=NativePlacementSession()}
+
+    static func integer(_ value:Any?)->Int? {
+        guard let n=value as? NSNumber,CFGetTypeID(n) != CFBooleanGetTypeID(),
+              n.doubleValue.isFinite,n.doubleValue>=0,n.doubleValue<=9_007_199_254_740_991,
+              let result=Int(exactly:n.doubleValue)else{return nil}
+        return result
+    }
+    private static func number(_ value:Any?)->Double? {
+        guard let n=value as? NSNumber,CFGetTypeID(n) != CFBooleanGetTypeID(),n.doubleValue.isFinite else{return nil}
+        return n.doubleValue
+    }
+    private static func validNonce(_ value:String)->Bool {
+        (16...80).contains(value.utf8.count) && value.utf8.allSatisfy{
+            (48...57).contains($0)||(65...90).contains($0)||(97...122).contains($0)||$0==45||$0==95
+        }
+    }
+    private static func envelope(_ value:Any?,connection:String)->Envelope? {
+        guard validNonce(connection),let object=value as? [String:Any],
+              object["connection"] as? String==connection,let revision=integer(object["revision"])else{return nil}
+        return Envelope(connection:connection,revision:revision)
+    }
+    private static func pose(_ values:[Any],degrees:Bool)->(SIMD3<Float>,Float)? {
+        guard values.count==4 else{return nil}
+        let numbers=values.compactMap{number($0)}
+        guard numbers.count==4,numbers.prefix(3).allSatisfy({abs($0)<=1_000_000})else{return nil}
+        let radians=degrees ? numbers[3] * .pi/180:numbers[3]
+        guard radians.isFinite,abs(radians)<=1_000_000 else{return nil}
+        let point=SIMD3<Float>(Float(numbers[0]),Float(numbers[1]),Float(numbers[2])),heading = -Float(radians)
+        guard point.x.isFinite,point.y.isFinite,point.z.isFinite,heading.isFinite else{return nil}
+        return(point,heading)
+    }
+    mutating func hello(_ message:[String:Any],connection:String,fresh:Bool)->Hello {
+        // The server repeats its INITIAL hello on this socket. A later TP may
+        // already have advanced the applied revision; duplicate hello cannot
+        // downgrade the negotiated mode or rewind its original spot/revision.
+        guard fresh else{return .duplicate}
+        guard message["positionAck"] != nil else{reset();return .legacy}
+        guard Self.integer(message["positionAck"])==1,
+              let envelope=Self.envelope(message["placement"],connection:connection),envelope.revision==0,
+              let values=message["spot"]as?[Any],let pose=Self.pose(values,degrees:false),
+              let health=message["healthAck"]as?[String:Any],health["connection"]as?String==connection,
+              Self.integer(health["processed"]) != nil,Self.integer(health["revision"]) != nil,
+              Self.integer(health["respawned"]) != nil,
+              let life=message["life"]as?[Any],life.count==2,
+              let hp=Self.integer(life[0]),hp<=100,let armour=Self.integer(life[1]),armour<=100 else{return .invalid}
+        let transaction=Transaction(token:UUID(),envelope:envelope,position:pose.0,heading:pose.1)
+        negotiated=true;applied=nil;pending=transaction
+        return .place(transaction)
+    }
+    mutating func teleport(_ message:[String:Any],connection:String)->Transaction? {
+        guard negotiated,let current=applied ?? pending?.envelope,current.connection==connection,
+              let envelope=Self.envelope(message["placement"],connection:connection),
+              envelope.revision>max(current.revision,pending?.envelope.revision ?? current.revision),
+              let x=message["x"],let y=message["y"],let z=message["z"],let h=message["h"],
+              let pose=Self.pose([x,y,z,h],degrees:true)else{return nil}
+        let transaction=Transaction(token:UUID(),envelope:envelope,position:pose.0,heading:pose.1)
+        pending=transaction;return transaction
+    }
+    func owns(_ transaction:Transaction)->Bool{pending==transaction}
+    @discardableResult mutating func commit(_ transaction:Transaction)->Bool {
+        guard owns(transaction),negotiated else{return false}
+        applied=transaction.envelope;pending=nil;return true
+    }
+    func stamping(_ object:[String:Any])->[String:Any]? {
+        guard object["t"]as?String=="me"else{return object}
+        guard permitsPosition else{return nil}
+        guard negotiated else{return object}
+        guard let applied else{return nil}
+        var result=object;result["placement"]=applied.wire;return result
+    }
+}
+
 final class NativeMultiplayerClient {
     enum Flavor {
         case selfHost
@@ -322,7 +415,7 @@ final class NativeMultiplayerClient {
     private var transportGeneration: UInt64 = 0
     private var lastPing: Double = -.infinity
     private(set) var state: ConnectionState = .stopped
-    var isReady: Bool { if let legacy{return legacy.state == .ready};return recovery.state == .ready && socket != nil }
+    var isReady: Bool { if let legacy{return legacy.state == .ready};return recovery.state == .ready && socket != nil && (usesOriginalWorldProtocol || placementSession.permitsPosition) }
     var onConnectionState: ((ConnectionState) -> Void)?
     private var socket: URLSessionWebSocketTask?
     private(set) var players: [String: RemotePlayer] = [:]
@@ -342,6 +435,11 @@ final class NativeMultiplayerClient {
     private var deliveredHitSequence:Int?
     private var resynchronizingInventory = false
     private var announcedInventoryConnection: String?
+    private var placementSession=NativePlacementSession()
+    var positionAcknowledgements:Bool{placementSession.negotiated}
+    var isPlacing:Bool{placementSession.isPlacing}
+    var appliedPlacementRevision:Int?{placementSession.applied?.revision}
+    var placementConnection:String?{placementSession.applied?.connection}
     var inventoryConnection: String? { shotSequence.connection }
     var onInventoryConnection: ((String?) -> Void)?
     private(set) var localName = "LOCAL PLAYER"
@@ -498,7 +596,7 @@ final class NativeMultiplayerClient {
             }
             parts.scheme=server.url.scheme=="https" ? "wss":"ws"
             guard let value=parts.url else { failTransport(generation:generation,reason:"INVALID MULTIPLAYER ADDRESS");return }
-            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1]
+            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1]
         case .originalWorld(let build,let deviceID):
             do {
                 let originalURL=try NativeOriginalWorldProtocol.liveURL(deviceID:deviceID)
@@ -524,6 +622,7 @@ final class NativeMultiplayerClient {
     private func closeSocket() {
         let old = socket; socket = nil
         old?.cancel(with: .normalClosure, reason: nil)
+        placementSession.reset()
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         originalStream.clear();originalHeard=nil;originalDeathSent=false;originalRespawnRequested=nil;originalLatestPosition=nil
         originalVitals.cancelPendingFatal();originalFrozen=false;originalRespawnWasDead=false
@@ -1233,7 +1332,17 @@ final class NativeMultiplayerClient {
     private func send(_ object: [String: Any], allowBeforeReady: Bool = false) {
         if let legacy{if isReady || allowBeforeReady{_=legacy.send(object)};return}
         guard isReady || allowBeforeReady else { return }
-        guard let task = socket, let data = try? JSONSerialization.data(withJSONObject: object),
+        // This is the sole self-host me serialization boundary, including
+        // normal foot/driver, passenger and explicit exit producers. Cleanup
+        // callbacks cannot send an old pose while a placement is in progress.
+        let packet:[String:Any]
+        if usesOriginalWorldProtocol {packet=object}
+        else {
+            guard object["t"]as?String != "me" || isReady,
+                  let stamped=placementSession.stamping(object)else{return}
+            packet=stamped
+        }
+        guard let task = socket, let data = try? JSONSerialization.data(withJSONObject: packet),
               let text = String(data: data, encoding: .utf8) else { return }
         task.send(.string(text)) { [weak self] error in
             guard let error else { return }
@@ -1270,6 +1379,7 @@ final class NativeMultiplayerClient {
     }
 
     private func handle(_ message: [String: Any], generation: UInt64) {
+        guard transportGeneration==generation,socket != nil else{return}
         if usesOriginalWorldProtocol,handleOriginal(message,generation:generation) {return}
         switch message["t"] as? String {
         case "pong":
@@ -1296,20 +1406,32 @@ final class NativeMultiplayerClient {
         case "couplings":
             receiveCouplings(message,generation:generation)
         case "hello":
-            guard message["inventoryAck"] as? Int == 1, let nonce = message["inventoryConnection"] as? String,
-                  shotSequence.negotiate(nonce) else {
-                onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING"); return
+            guard NativePlacementSession.integer(message["inventoryAck"])==1,
+                  let nonce=message["inventoryConnection"]as?String,let task=socket else{
+                onStatus?("THIS SERVER NEEDS NATIVE INVENTORY ACKNOWLEDGEMENTS TO ENABLE FIRING");return
+            }
+            if let announced=announcedInventoryConnection,announced != nonce {
+                failTransport(generation:generation,reason:"CONNECTION NAMESPACE CHANGED — RECONNECTING");return
+            }
+            guard shotSequence.negotiate(nonce)else{
+                failTransport(generation:generation,reason:"INVALID CONNECTION NAMESPACE — RECONNECTING");return
             }
             let freshHello=announcedInventoryConnection != nonce
+            let placement=placementSession.hello(message,connection:nonce,fresh:freshHello)
+            if case .invalid=placement {
+                failTransport(generation:generation,reason:"INVALID AUTHORITATIVE PLACEMENT — RECONNECTING");return
+            }
             if freshHello {
                 couplingAcknowledgements=NativeHealthPrediction.integer(message["couplingAck"])==1
-                announcedInventoryConnection = nonce; onInventoryConnection?(nonce)
+                announcedInventoryConnection=nonce;onInventoryConnection?(nonce)
             }
-            guard transportGeneration==generation,socket != nil else{return}
-            if let time=(message["time"] as? NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
-            if freshHello,let spot = message["spot"] as? [NSNumber], spot.count >= 3 {
+            guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
+            if let time=(message["time"]as?NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
+            if case .place(let transaction)=placement {
+                guard applyPlacement(transaction,generation:generation,task:task)else{return}
+            }else if freshHello,let spot=message["spot"]as?[NSNumber],spot.count>=3 {
                 onTeleport?(SIMD3(spot[0].floatValue,spot[1].floatValue,spot[2].floatValue),
-                            spot.count > 3 ? -spot[3].floatValue : nil)
+                            spot.count>3 ? -spot[3].floatValue:nil)
             }
             guard transportGeneration==generation,socket != nil else{return}
             let day = message["day"] as? [String: Any]
@@ -1435,13 +1557,33 @@ final class NativeMultiplayerClient {
         case "enter":
             receiveVehicleEntry(message)
         case "tp":
-            if let x = (message["x"] as? NSNumber)?.floatValue,
-               let y = (message["y"] as? NSNumber)?.floatValue,
-               let z = (message["z"] as? NSNumber)?.floatValue {
-                onTeleport?(SIMD3(x, y, z), (message["h"] as? NSNumber).map { -$0.floatValue * .pi/180 })
+            if positionAcknowledgements {
+                guard let connection=inventoryConnection,let task=socket,
+                      let transaction=placementSession.teleport(message,connection:connection)else{return}
+                _=applyPlacement(transaction,generation:generation,task:task)
+            }else if let x=(message["x"]as?NSNumber)?.floatValue,
+                     let y=(message["y"]as?NSNumber)?.floatValue,
+                     let z=(message["z"]as?NSNumber)?.floatValue {
+                onTeleport?(SIMD3(x,y,z),(message["h"]as?NSNumber).map{-$0.floatValue * .pi/180})
             }
         default: break
         }
+    }
+
+    private func applyPlacement(_ transaction:NativePlacementSession.Transaction,
+                                generation:UInt64,task:URLSessionWebSocketTask)->Bool {
+        guard socket === task,transportGeneration==generation,
+              inventoryConnection==transaction.envelope.connection,placementSession.owns(transaction)else{return false}
+        guard let apply=onTeleport else{
+            failTransport(generation:generation,reason:"NO AUTHORITATIVE PLACEMENT OWNER — RECONNECTING");return false
+        }
+        // The server revoked occupancy. Drop local seat/boarding correlation
+        // before the owner cleans up driver/passenger UI and physical state.
+        vehicleSeats.clearOccupancy()
+        apply(transaction.position,transaction.heading)
+        guard socket === task,transportGeneration==generation,
+              inventoryConnection==transaction.envelope.connection else{return false}
+        return placementSession.commit(transaction)
     }
 
     private func updateRows(_ value: Any?) {

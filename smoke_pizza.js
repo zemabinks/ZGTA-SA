@@ -9,7 +9,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zgta-pizza-'));
 try {
   const local = path.join(temporary, 'local-only', 'selfhost');
   fs.mkdirSync(local, {recursive: true});
-  for (const file of ['selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
+  for (const file of ['selfhost_backend.js','player_placement.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   fs.copyFileSync(path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json'),
     path.join(local, 'client-catalog.json'));

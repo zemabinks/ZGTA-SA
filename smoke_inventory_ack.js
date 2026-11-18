@@ -10,7 +10,7 @@ let game,now=1_700_000_000_000;
 async function main(){
  Date.now=()=>now;
  const local=path.join(temporary,'local-only');fs.mkdirSync(path.join(local,'selfhost'),{recursive:true});
- for(const file of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
+ for(const file of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
  fs.writeFileSync(path.join(local,'selfhost/client-catalog.json'),JSON.stringify({vehicles:[],homes:[]}));
  fs.writeFileSync(path.join(local,'selfhost/weapon-catalog.json'),JSON.stringify({items:[{
   id:22,name:'Synthetic ACK fixture',ammo:100,capacity:17,price:0,slot:2,

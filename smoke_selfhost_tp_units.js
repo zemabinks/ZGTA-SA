@@ -4,6 +4,7 @@
 // methods in a VM. No backend constructor, listener, save, timer or game data.
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const assert=require('node:assert/strict'),crypto=require('node:crypto');
+const PlayerPlacement=require('./player_placement');
 const args=process.argv.slice(2),historical=args.includes('--expect-historical-mismatch');
 const sourceAt=args.indexOf('--source');
 assert(args.every((a,i)=>a==='--expect-historical-mismatch'||a==='--source'||i===sourceAt+1),'Unknown argument');
@@ -21,7 +22,8 @@ check(begin>0&&end>begin,'Actual class extraction markers changed');
 // then evaluate authored angles; this is source conformance, not Swift runtime.
 const nativeTP=native.slice(native.indexOf('        case "tp":'),native.indexOf('        default: break',native.indexOf('        case "tp":')));
 check(/-\$0\.floatValue\s*\*\s*\.pi\s*\/\s*180/.test(nativeTP),'Native TP consumer no longer converts degrees; re-audit contract');
-equal((source.match(/\bt:\s*['"]tp['"]/g)||[]).length,6,'TP producer inventory changed: add actual-path coverage');
+const rawTPCount=(source.match(/\bt:\s*['"]tp['"]/g)||[]).length;
+equal(rawTPCount,historical?6:7,'TP producer inventory changed: add actual-path coverage');
 const helper=source.match(/function tpHeadingFromRadians\(value\)\s*\{[^}]+\}/)?.[0]||'';
 
 function fixture(degrees){
@@ -29,7 +31,7 @@ function fixture(degrees){
   const entry=[110,210,900,degrees],radians=degrees*Math.PI/180;
   const airports=[{id:'a',name:'Authored airport A',stand:[100,200,20],runway:[120,220,25,radians]},
     {id:'b',name:'Authored airport B',stand:[500,500,20],runway:[500,500,25,0]}];
-  const context={finite:(v,f=0)=>Number.isFinite(v)?v:f,
+  const context={PlayerPlacement,finite:(v,f=0)=>Number.isFinite(v)?v:f,
     rounded:(v,f=0)=>Math.round((Number.isFinite(v)?v:f)*1000)/1000,
     HOME_CATALOG:[home],homeAt:id=>id===home.id?home:null,
     clientCatalog:{interior_spawns:{'authored-room':entry}},
@@ -43,7 +45,8 @@ function fixture(degrees){
   const peer={player,ready:true,closed:false,lastSeen:Date.now(),
     state:{walking:true,skin:7,x:100,y:200,z:20,heading:radians,pitch:0,roll:0},
     send:m=>packets.push(structuredClone(m))};
-  Object.assign(game,{peers:new Set([peer]),passengerClaims:new Map(),vehicles:new Map(),race:null});
+  Object.assign(game,{peers:new Set([peer]),passengerClaims:new Map(),vehicles:new Map(),
+    vehicleClaims:new Map(),terminalVehicleReports:new Map(),race:null});
   game.expireRace=()=>{};game.note=()=>{};game.gameplayState=()=>({});game.save=()=>{};
   let created=0;game.addMissionVehicle=()=>created++;
   return{game,player,peer,packets,home,entry,airports,created:()=>created};
@@ -89,13 +92,41 @@ for(const degrees of angles)for(const producer of paths){
     check(near(-tp.h*Math.PI/180,-degrees*Math.PI/180),producer+' native-heading contract');}
   outcomes.push({producer,inputDegrees:degrees,wireHeading:tp.h,passed:near(tp.h,degrees)});
 }
+// Preserve the six legacy producers/84 cases above. The new seventh producer
+// has a fixed spawn heading, rather than the caller's selected home angle.
+let respawnCases=0;
+if(!historical){
+  const f=fixture(90),inventory=structuredClone(f.player.inventory);
+  f.peer.positionAckEnabled=true;f.peer.inventoryAckEnabled=true;f.peer.healthAckEnabled=true;
+  f.peer.inventoryConnection='authored-placement-000000';
+  f.game.placement=PlayerPlacement.create({
+    isCurrent:peer=>f.game.peers.has(peer)&&peer.ready&&!peer.closed,
+    validFoot:(player,value)=>f.game.validPlacementFoot(player,value),
+    validTarget:(player,value)=>f.game.validPlacementTarget(player,value)});
+  f.game.placement.begin(f.peer);
+  f.player.health=0;f.player.lastDeath=Date.now()-3000;
+  f.game.applySelfHealth(f.peer,{kind:'respawn',c:f.peer.inventoryConnection,s:1});
+  const teleports=f.packets.filter(m=>m.t==='tp');equal(teleports.length,1,'Negotiated respawn TP count');
+  const tp=teleports[0];equal([tp.x,tp.y,tp.z,tp.h,tp.g],[1480,-1738,13,0,1],'Respawn fixed spawn/degree contract changed');
+  equal(tp.placement,{connection:f.peer.inventoryConnection,revision:1},'Respawn did not fence placement');
+  equal(f.peer.state,null,'Respawn retained old actor baseline');
+  equal([f.player.health,f.player.armour],[100,0],'Accepted respawn vitals changed');
+  equal(f.player.inventory,inventory,'Respawn changed ammunition');
+  check(f.packets.findIndex(m=>m.t==='tp')<f.packets.findIndex(m=>m.t==='vitals'),'Respawn ACK preceded placement');
+  check(near(-tp.h*Math.PI/180,0),'Respawn native heading contract');
+  f.game.applySelfHealth(f.peer,{kind:'respawn',c:f.peer.inventoryConnection,s:1});
+  equal(f.packets.filter(m=>m.t==='tp').length,1,'Duplicate health ACK replayed respawn TP');
+  respawnCases=1;
+  outcomes.push({producer:'respawn',inputDegrees:null,wireHeading:tp.h,passed:true});
+}
 if(historical){
   equal([...new Set(mismatches.map(m=>m.producer))].sort(),['home.enter','home.exit','home.visit','pilot.start'],
     'Historical negative must isolate four broken producers, retaining correct passenger cases');
   equal(mismatches.length,(angles.length-1)*4,'Historical mismatch count changed');
 }else equal(mismatches,[],'Heading mismatch');
 const report={status:historical?'HISTORICAL_FOUR_PRODUCER_MISMATCH_REPRODUCED':'PASS',checks,
-  actualPathCases:outcomes.length,producerCount:paths.length,backendSHA256:sha(source),
+  actualPathCases:outcomes.length,legacyPathCases:angles.length*paths.length,respawnCases,
+  producerCount:paths.length+respawnCases,rawProducerCount:rawTPCount,backendSHA256:sha(source),
   nativeParserSHA256:sha(native),mismatches,outcomes,
   limits:['Actual LocalGame methods, authored catalogues/transports, no constructor/listener/timers/save.',
     'Native parser check is actual-source conformance plus authored arithmetic; no Swift or device execution.',
@@ -104,4 +135,4 @@ const report={status:historical?'HISTORICAL_FOUR_PRODUCER_MISMATCH_REPRODUCED':'
 const out=path.join(__dirname,'local-only/research/server-tp-units-113');fs.mkdirSync(out,{recursive:true});
 const name=historical?'historical-report.json':'report.json';
 fs.writeFileSync(path.join(out,name),JSON.stringify(report,null,2)+'\n');
-console.log(JSON.stringify({status:report.status,checks,cases:outcomes.length,producers:paths.length,mismatches:mismatches.length,backendSHA256:report.backendSHA256}));
+console.log(JSON.stringify({status:report.status,checks,cases:outcomes.length,legacyCases:angles.length*paths.length,producers:paths.length+respawnCases,mismatches:mismatches.length,backendSHA256:report.backendSHA256}));

@@ -65,7 +65,7 @@ async function main() {
     fs.mkdirSync(selfhost, {recursive: true});
     fs.writeFileSync(path.join(selfhost, 'client-catalog.json'), '{"vehicles":[],"homes":[]}');
     fs.writeFileSync(path.join(selfhost, 'discord-oauth.json'), JSON.stringify(config));
-    for (const file of ['selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
+    for (const file of ['selfhost_backend.js','player_placement.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
       fs.copyFileSync(path.join(__dirname, file), path.join(temp, file));
     const game = require(path.join(temp, 'selfhost_backend.js'));
     const first = 'a'.repeat(32), second = 'b'.repeat(32);

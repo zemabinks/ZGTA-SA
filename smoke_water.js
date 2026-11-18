@@ -7,7 +7,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zgta-water-'));
 try {
   fs.mkdirSync(path.join(temporary, 'local-only/site/game/world'), {recursive: true});
   fs.mkdirSync(path.join(temporary, 'local-only/selfhost'), {recursive: true});
-  for (const file of ['selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js']) fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
+  for (const file of ['selfhost_backend.js','player_placement.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js']) fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
   fs.copyFileSync(path.join(__dirname,'local-only/selfhost/client-catalog.json'),path.join(temporary,'local-only/selfhost/client-catalog.json'));
   fs.copyFileSync(path.join(__dirname,'local-only/site/game/world/index.json'),path.join(temporary,'local-only/site/game/world/index.json'));
   const game = require(path.join(temporary,'selfhost_backend.js'));

@@ -8,7 +8,7 @@ OUT=ROOT/'local-only/native-physics/tests/connection-runtime'
 OUT.mkdir(parents=True,exist_ok=True)
 APP=['ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims',
      'NativeConnectionRecovery','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeMultiplayerClient','NativeGameplayClient']
-SERVER=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js']
+SERVER=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
 FILES=[f'ios/App/{name}.swift' for name in APP]+['ios/App/NativeActorAnimation.swift',*SERVER,
        'smoke_native_recovery.swift','smoke_native_recovery_server.js','smoke_native_recovery.py']
 inputs={p:(ROOT/p).read_bytes() for p in FILES}

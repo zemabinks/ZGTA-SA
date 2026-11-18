@@ -7,6 +7,7 @@ const OptionalDiscord = require('./optional_discord');
 const weaponInventory = require('./weapon_inventory');
 const worldCollision = require('./world_collision');
 const LocalProjectiles = require('./local_projectiles');
+const PlayerPlacement = require('./player_placement');
 let meleeProfiles=[];
 try {meleeProfiles=JSON.parse(fs.readFileSync(path.join(__dirname,'local-only/native/melee.json'),'utf8')).weapons;}
 catch(error){if(error.code!=='ENOENT')console.error('Could not load melee profiles:',error.message);}
@@ -335,6 +336,24 @@ function savedGarage(value, cars) {
       parkedHome: homeAt(item?.parkedHome) ? item.parkedHome : null};
   });
 }
+// Independent persistence of an admitted mission BODY, never its occupant or
+// a driver's queued actions. The exact current factory code is checked again
+// when the task reconstructs its vehicle after loading. The angle bound uses
+// the existing placement-record numeric domain; it is a persistence sanity
+// bound, not a retail steering/rotation limit or a suspension adjustment.
+function savedMissionVehicle(value,job,code=null) {
+  if(!job?.vehicleId||!validMissionId(job.vehicleId)||!value||value.version!==1||
+     value.id!==job.vehicleId||value.job!==job.id||typeof value.code!=='string'||
+     !value.code.length||value.code.length>64||(code!==null&&value.code!==code)||
+     !Array.isArray(value.pose)||value.pose.length!==6||!value.pose.every(Number.isFinite)||
+     Math.abs(value.pose[0])>6000||Math.abs(value.pose[1])>6000||value.pose[2]< -200||value.pose[2]>1000||
+     value.pose.slice(3).some(angle=>Math.abs(angle)>1_000_000)||
+     !Number.isInteger(value.health)||value.health<0||value.health>1000||
+     typeof value.damage!=='string'||value.damage.length>512||
+     !Number.isInteger(value.work)||value.work<0||value.work>2500)return null;
+  return{version:1,job:job.id,id:job.vehicleId,code:value.code,pose:[...value.pose],
+    health:value.health,damage:value.damage,work:value.work};
+}
 function repairCost(entry) {
   return entry.health >= 1000 && !entry.damage ? 0 :
     Math.max(50, Math.ceil((1000 - entry.health) / 5));
@@ -458,6 +477,11 @@ class LocalGame {
     // may still be in flight behind the acknowledged fatal-health message.
     // This record grants no seat, driving, reservation or repair authority.
     this.terminalVehicleReports = new Map();
+    this.placement=PlayerPlacement.create({
+      isCurrent:peer=>this.peers.has(peer)&&peer.ready&&!peer.closed,
+      validFoot:(player,value)=>this.validPlacementFoot(player,value),
+      validTarget:(player,value)=>this.validPlacementTarget(player,value),
+    });
     this.coupling=VehicleCoupling?.create(couplingCatalog) || null;
     this.nextVehicle = 1;
     this.race = null;
@@ -513,7 +537,8 @@ class LocalGame {
           taxiLastFareAt: Math.max(0, finite(value.taxiLastFareAt)),
           heistCooldownUntil: Math.max(0, finite(value.heistCooldownUntil)),
           racesFinished: money(value.racesFinished), racesWon: money(value.racesWon),
-          health: Math.max(1, Math.min(100, Math.round(finite(value.health, 100)))),
+          health: Math.max(0, Math.min(100, Math.round(finite(value.health, 100)))),
+          lastDeath:Math.max(0,finite(value.lastDeath)),
           armour: Math.max(0, Math.min(100, Math.round(finite(value.armour)))),
           wanted: Math.max(0, Math.min(6, Math.round(finite(value.wanted)))),
           wantedUntil: finite(value.wantedUntil), passive: value.passive === true,
@@ -531,9 +556,11 @@ class LocalGame {
           cars, garage: savedGarage(value.garage, cars),
           homes: Array.isArray(value.homes) ? value.homes.filter(home => HOME_CATALOG.some(item => item.id === home)).slice(0, 32) : [],
           job: savedJob(value.job),
+          missionVehicle:savedMissionVehicle(value.missionVehicle,savedJob(value.job)),
           discord: value.discord && /^\d{17,22}$/.test(String(value.discord.id || '')) ?
             {id: String(value.discord.id), name: safeName(value.discord.name) || 'Discord player',
               bonusClaimed: value.discord.bonusClaimed === true} : null,
+          reconnectPlacement:PlayerPlacement.normalize(value.reconnectPlacement),
           settings: value.settings && typeof value.settings === 'object' ? value.settings : {}});
       }
     } catch (error) { if (error.code !== 'ENOENT') console.error('Could not load local players:', error.message); }
@@ -566,7 +593,7 @@ class LocalGame {
         taxiLastFareAt: p.taxiLastFareAt,
         heistCooldownUntil: p.heistCooldownUntil,
         racesFinished: p.racesFinished, racesWon: p.racesWon,
-        health: p.health, armour: p.armour, wanted: p.wanted,
+        health: p.health, lastDeath:p.lastDeath, armour: p.armour, wanted: p.wanted,
         wantedUntil: p.wantedUntil, passive: p.passive,
         passiveWaitUntil: p.passiveWaitUntil,
         kills: p.kills, deaths: p.deaths, arrests: p.arrests,
@@ -574,7 +601,9 @@ class LocalGame {
         discoveries: p.discoveries, trackedDiscovery: p.trackedDiscovery,
         supplies: p.supplies,
         flightGear:p.flightGear,cars: p.cars, garage: p.garage, homes: p.homes, job: p.job,
-        discord: p.discord, settings: p.settings, inventory: p.inventory}]));
+        discord: p.discord, settings: p.settings, inventory: p.inventory,
+        missionVehicle:this.missionVehicleSnapshot(p),
+        reconnectPlacement:this.placement.snapshot(p)}]));
     fs.mkdirSync(path.dirname(STATE_FILE), {recursive: true});
     fs.writeFileSync(STATE_FILE + '.partial', JSON.stringify({version: 1,
       territories: this.territories, players}, null, 2) + '\n', {mode: 0o600});
@@ -595,7 +624,7 @@ class LocalGame {
         gang: null, gangSwitchUntil: 0, turfCaptures: 0,
         discoveries: [], trackedDiscovery: null,
         supplies: savedSupplies(),
-        flightGear:{parachute:false,jetpack:false},cars: [], garage: [], homes: [], job: null,
+        flightGear:{parachute:false,jetpack:false},cars: [], garage: [], homes: [], job: null,missionVehicle:null,
         discord: null, settings: {}});
       this.save();
     }
@@ -632,6 +661,65 @@ class LocalGame {
     if(passenger?.active)peer.state=this.passengerPose(passenger);
     return peer ? {x: peer.state.x, y: peer.state.y,
       z: finite(peer.state.z, 13), peer} : null;
+  }
+
+  placementHome(player,id) {
+    return typeof id==='string'&&player.homes.includes(id)?homeAt(id):null;
+  }
+
+  validPlacementFoot(player,value) {
+    const [x,y,z,heading]=value.spot;
+    if(![x,y,z,heading].every(Number.isFinite)||Math.abs(x)>6000||Math.abs(y)>6000)return false;
+    if(value.home) {
+      const home=this.placementHome(player,value.home),entry=home&&clientCatalog.interior_spawns?.[home.kind];
+      if(!Array.isArray(entry)||entry.length!==4||!entry.every(Number.isFinite)||
+         Math.hypot(x-entry[0],y-entry[1],z-entry[2])>80)return false;
+    } else if(z< -200||z>1000)return false;
+    // Reuse the bounded SCL2 downward query and its coverage flag. This is a
+    // grounded-foot admission check, not capsule clearance or anti-cheat.
+    const ground=worldCollision.height(x,y,z);
+    // height() also searches above its input for other physics callers. Such
+    // a ceiling/floor is not a verified foot anchor; permit numerical dust only.
+    return worldCollision.lastQueryComplete&&Number.isFinite(ground)&&ground<=z+1e-6;
+  }
+
+  validPlacementTarget(player,value) {
+    const same=(a,b)=>a.length===b.length&&a.every((v,i)=>Math.abs(v-b[i])<1e-9);
+    if(value.source==='spawn'||value.source==='respawn')
+      return value.home===null&&same(value.spot,PlayerPlacement.DEFAULT_SPOT);
+    if(value.source.startsWith('home.')) {
+      const home=this.placementHome(player,value.context);
+      const inside=value.source==='home.enter';
+      const at=home&&(inside?clientCatalog.interior_spawns?.[home.kind]:home.out);
+      return !!home&&Array.isArray(at)&&at.length===4&&at.every(Number.isFinite)&&
+        value.home===(inside?home.id:null)&&same(value.spot,[at[0],at[1],at[2],at[3]*Math.PI/180]);
+    }
+    if(value.source==='pilot') {
+      const airport=airportAt(value.context),r=airport?.runway;
+      return value.home===null&&!!r&&same(value.spot,[rounded(r[0]-Math.sin(r[3])*7),
+        rounded(r[1]-Math.cos(r[3])*7),r[2]+1,r[3]]);
+    }
+    // A passenger correction uses a body origin. It fences the live command,
+    // but is not proof of a safe reconnect foot point beside that hull.
+    return false;
+  }
+
+  sendTeleport(peer,packet,options) {
+    if(!peer.positionAckEnabled){peer.send(packet);return;}
+    const wire=this.placement.issue(peer,packet,options);
+    this.terminalVehicleReports.delete(peer);
+    for(const claim of this.vehicleClaims.values())if(claim.peer===peer)
+      this.releaseVehicleClaim(claim,{removeActor:claim.driving});
+    const passenger=this.passengerClaims.get(peer);
+    if(passenger)this.releasePassengerClaim(passenger);
+    if(this.coupling?.releasePeer(peer))this.broadcastCouplings();
+    peer.player.insideHome=options.home||null;
+    // Old me frames must not complete an exit, grant a seat, damage a hull or
+    // count job distance after this server-authored placement transaction.
+    peer.state=null;peer.lastSeen=0;
+    for(const other of this.peers)if(other!==peer&&other.ready)
+      other.send({t:'gone',id:String(peer.player.number)});
+    this.save();peer.send(wire);
   }
 
   partyOf(player) {
@@ -1036,11 +1124,14 @@ class LocalGame {
         this.abortHeist(peer.player,'you were defeated');
       }
     } else if (message.kind==='respawn' && peer.player.health===0 &&
-               Date.now()-(peer.player.lastDeath || 0)>2000) {
+               Date.now()-(peer.player.lastDeath || 0)>2000 &&
+               (!peer.positionAckEnabled||this.placement.canIssue(peer))) {
       this.terminalVehicleReports.delete(peer);
       peer.player.health=100;peer.player.armour=0;
       peer.lastRespawnSequence=message.s;
       peer.nativeOxygen=1150;peer.nativeDrownFraction=0;peer.nativeOxygenTime=0;changed=true;
+      if(peer.positionAckEnabled)this.sendTeleport(peer,{t:'tp',x:1480,y:-1738,z:13,h:0,g:1},
+        {source:'respawn'});
     }
     if (changed) this.save();
     reply();
@@ -1352,8 +1443,35 @@ class LocalGame {
       rounded(point[0] + (pilot ? 0 : 4)), rounded(point[1] + (pilot ? 0 : 3)),
       rounded(point[2] + 1.1), pilot ? rounded(point[3]) : 0,
       0, 0, mechanic ? 350 : thief ? 800 : 1000, '', null];
+    const restored=savedMissionVehicle(player.missionVehicle,job,row[2]);
+    if(restored) {
+      // Saved poses are already admitted body origins. Never apply the initial
+      // task-anchor offsets or a guessed ground/suspension correction again.
+      row.splice(3,6,...restored.pose);row[9]=restored.health;row[10]=restored.damage;
+      while(row.length<17)row.push(null);row[16]=restored.work;
+    }
     this.vehicles.set(id, {id, owner: null, missionOwner: player, row});
+    player.missionVehicle=this.missionVehicleSnapshot(player);
     for (const peer of this.peers) if (peer.ready) peer.send({t: 'spawned', v: row});
+  }
+
+  missionVehicleSnapshot(player) {
+    const vehicle=this.vehicles.get(player.job?.vehicleId);
+    if(!vehicle||vehicle.missionOwner!==player||vehicle.id!==player.job?.vehicleId)return null;
+    return savedMissionVehicle({version:1,job:player.job.id,id:vehicle.id,code:vehicle.row[2],
+      pose:vehicle.row.slice(3,9),health:vehicle.row[9],damage:vehicle.row[10],work:vehicle.row[16]??0},
+      player.job,vehicle.row[2]);
+  }
+
+  saveMissionVehicle(vehicle,force=false) {
+    const player=vehicle.missionOwner;
+    if(!player||this.vehicles.get(vehicle.id)!==vehicle||player.job?.vehicleId!==vehicle.id)return;
+    const snapshot=this.missionVehicleSnapshot(player);
+    if(!snapshot)return;
+    player.missionVehicle=snapshot;
+    if(force||Date.now()-(vehicle.lastMissionSave||0)>=5000) {
+      vehicle.lastMissionSave=Date.now();this.save();
+    }
   }
 
   removeMissionVehicle(player) {
@@ -1465,7 +1583,8 @@ class LocalGame {
       peer.send({t:'enter',v:claim.vehicle.id,seat:claim.seat,ok:false});
       if(peer.player.health>0 && !peer.player.insideHome && claim.active) {
         const row=claim.vehicle.row;
-        peer.send({t:'tp',x:row[3],y:row[4],z:row[5],h:tpHeadingFromRadians(finite(row[6])),g:1});
+        this.sendTeleport(peer,{t:'tp',x:row[3],y:row[4],z:row[5],h:tpHeadingFromRadians(finite(row[6])),g:1},
+          {source:'passenger'});
       }
     }
     if(publish)this.publishPlayerRows();
@@ -1517,7 +1636,8 @@ class LocalGame {
         const at=peer.state;
         // The archive has no passenger reservation RPC. Its normal tp handler
         // cancels ub and restores foot ownership after a rejected implicit seat.
-        if(this.validVehiclePose(at))peer.send({t:'tp',x:at.x,y:at.y,z:at.z,h:tpHeadingFromRadians(finite(at.heading)),g:1});
+        if(this.validVehiclePose(at))this.sendTeleport(peer,{t:'tp',x:at.x,y:at.y,z:at.z,h:tpHeadingFromRadians(finite(at.heading)),g:1},
+          {source:'passenger'});
       }
       return null;
     }
@@ -1704,6 +1824,7 @@ class LocalGame {
   }
 
   saveVehicleGarage(vehicle,force=false) {
+    if(vehicle.missionOwner){this.saveMissionVehicle(vehicle,force);return;}
     const entry=vehicle.owner?.garage[vehicle.slot];
     if(!entry)return;
     entry.position=vehicle.row.slice(3,7);entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];
@@ -1852,6 +1973,7 @@ class LocalGame {
         Math.abs(message.x)>6000 || Math.abs(message.y)>6000 || message.z< -200 || message.z>1000 ||
         Math.hypot(at.x-vehicle.row[3],at.y-vehicle.row[4],at.z-vehicle.row[5])>80 ||
         Math.hypot(at.x-message.x,at.y-message.y,at.z-message.z)>80) return;
+    const condition=`${vehicle.row[9]}:${vehicle.row[10]}`;
     vehicle.row[3]=rounded(message.x);vehicle.row[4]=rounded(message.y);vehicle.row[5]=rounded(message.z);
     vehicle.row[6]=rounded(message.h);vehicle.row[7]=rounded(message.p);vehicle.row[8]=rounded(message.r);
     if (Number.isFinite(message.hp)) vehicle.row[9]=Math.min(vehicle.row[9],
@@ -1866,7 +1988,7 @@ class LocalGame {
       entry.position=vehicle.row.slice(3,7);entry.health=vehicle.row[9];entry.damage=vehicle.row[10];
       entry.pitch=vehicle.row[7];entry.roll=vehicle.row[8];entry.work=vehicle.row[16] || 0;
       if (Date.now()-vehicle.lastGarageSave>5000) {vehicle.lastGarageSave=Date.now();this.save();}
-    }
+    }else if(vehicle.missionOwner)this.saveMissionVehicle(vehicle,condition!==`${vehicle.row[9]}:${vehicle.row[10]}`);
     for (const other of this.peers) if (other!==peer && other.ready && !other.player.insideHome)
       other.send({t:'veh',v:vehicle.row});
   }
@@ -1912,6 +2034,10 @@ class LocalGame {
 
   action(player, action, input) {
     const pos = this.position(player);
+    const relocates=['home.enter','home.exit','home.visit'].includes(action)||
+      action==='job.start'&&input.job==='pilot';
+    if(relocates&&pos?.peer.positionAckEnabled&&!this.placement.canIssue(pos.peer))
+      throw new Error('Placement session expired. Reconnect before teleporting.');
     let message;
     this.expireRace();
     if (action === 'explore.track') {
@@ -2337,9 +2463,10 @@ class LocalGame {
           minHealth: 1000, reportedHealth: false,
           started: Date.now()};
         this.addMissionVehicle(player);
-        pos.peer.send({t: 'tp', x: rounded(from.runway[0] - Math.sin(from.runway[3]) * 7),
+        this.sendTeleport(pos.peer,{t: 'tp', x: rounded(from.runway[0] - Math.sin(from.runway[3]) * 7),
           y: rounded(from.runway[1] - Math.cos(from.runway[3]) * 7),
-          z: from.runway[2] + 1, h: tpHeadingFromRadians(from.runway[3]), g: 1});
+          z: from.runway[2] + 1, h: tpHeadingFromRadians(from.runway[3]), g: 1},
+          {source:'pilot',context:from.id});
         message = `Pilot flight started on the ${from.name} runway. Board the marked ${aircraft.name}, climb 35 m, then land at ${to.name} within ten minutes.`;
       } else if (job.id === 'fire') {
         const home = nearestHome(pos, 180);
@@ -2870,9 +2997,11 @@ class LocalGame {
       if (Math.hypot(pos.x - home.out[0], pos.y - home.out[1], pos.z - home.out[2]) > 8)
         throw new Error('Stand within 8 m of your home entrance.');
       const entry = clientCatalog.interior_spawns?.[home.kind];
-      if (!Array.isArray(entry) || entry.length !== 4) throw new Error('This interior is unavailable.');
-      player.insideHome = home.id;
-      pos.peer.send({t: 'tp', x: entry[0], y: entry[1], z: entry[2], h: entry[3], g: 1});
+      if (!Array.isArray(entry) || entry.length !== 4 || !entry.every(Number.isFinite))
+        throw new Error('This interior is unavailable.');
+      if(!pos.peer.positionAckEnabled)player.insideHome = home.id;
+      this.sendTeleport(pos.peer,{t: 'tp', x: entry[0], y: entry[1], z: entry[2], h: entry[3], g: 1},
+        {source:'home.enter',home:home.id,context:home.id});
       message = `Entered ${home.name}. Use Exit Home to return outside.`;
     } else if (action === 'home.exit') {
       const home = homeAt(player.insideHome);
@@ -2880,17 +3009,18 @@ class LocalGame {
       const entry = clientCatalog.interior_spawns?.[home.kind];
       if (!entry || Math.hypot(pos.x-entry[0], pos.y-entry[1], pos.z-entry[2]) > 80)
         throw new Error('Return to your home interior before leaving.');
-      player.insideHome = null;
-      pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2], h: home.out[3], g: 1});
+      if(!pos.peer.positionAckEnabled)player.insideHome = null;
+      this.sendTeleport(pos.peer,{t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2], h: home.out[3], g: 1},
+        {source:'home.exit',context:home.id});
       message = `Left ${home.name}.`;
     } else if (action === 'home.visit') {
       const home = HOME_CATALOG.find(item => item.id === input.home);
       if (!home || !player.homes.includes(home.id)) throw new Error('You do not own this home.');
       if (!home.out) throw new Error('This starter home has no world entrance.');
       if (!pos) throw new Error('Enter the game before visiting your home.');
-      player.insideHome = null;
-      pos.peer.send({t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2],
-        h: home.out[3], g: 1});
+      if(!pos.peer.positionAckEnabled)player.insideHome = null;
+      this.sendTeleport(pos.peer,{t: 'tp', x: home.out[0], y: home.out[1], z: home.out[2],
+        h: home.out[3], g: 1},{source:'home.visit',context:home.id});
       message = `Travelling to ${home.name}.`;
     } else throw new Error('Unknown action.');
     this.note(player, message);
@@ -3030,6 +3160,7 @@ class LocalGame {
   onMessage(peer, message) {
     if (!message || typeof message !== 'object') return;
     if(!this.peers.has(peer) || peer.closed)return;
+    if(message.t==='me'&&peer.positionAckEnabled&&!this.placement.matches(peer,message.placement))return;
     this.pruneVehicleClaims();
     const terminalCompleted=message.t==='me' && this.completeTerminalVehicleReport(peer,message)===true;
     if(this.coupling?.prune(this.vehicles,this.peers))this.broadcastCouplings();
@@ -3050,7 +3181,8 @@ class LocalGame {
       this.projectiles.detonate(String(peer.player.number)); return;
     }
     if (message.t === 'hi') {
-      peer.player.insideHome = null;
+      const wasReady=peer.ready;
+      if(!peer.positionAckEnabled)peer.player.insideHome = null;
       peer.inventoryEnabled = peer.inventoryEnabled || message.nativeInventory === true;
       if (peer.inventoryEnabled && message.inventoryAck===1) {
         peer.inventoryAckEnabled=true;
@@ -3063,13 +3195,17 @@ class LocalGame {
       if(peer.inventoryAckEnabled&&message.couplingAck===1&&this.coupling?.enabled){
         peer.couplingAckEnabled=true;peer.processedCouplingSequence ??=0;
       }
+      if(!wasReady&&peer.inventoryAckEnabled&&peer.healthAckEnabled&&message.positionAck===1)
+        peer.positionAckEnabled=true;
       peer.ready = true;
+      const placement=peer.positionAckEnabled?this.placement.begin(peer):null;
       peer.send({t: 'hello', protocol: 38, time: Date.now(), day: {shift: 0, hold: null},
         weather: 0, account: true, admin: false, rank: 'player',
-        spot: [1480, -1738, 13, 0],
+        spot: placement?.spot || [1480, -1738, 13, 0],
         life: [peer.player.health, peer.player.armour],...this.healthState(peer), out: [1480, -1738],
         zombies: false, traffic: 0, peds: 0, party: 0,
         ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {}),
+        ...(placement?{positionAck:1,placement:placement.placement}:{}),
         ...(peer.couplingAckEnabled?{couplingAck:1}:{})});
       if(peer.couplingAckEnabled)peer.send({t:'couplings',state:this.coupling.snapshot()});
       peer.send(this.fullState(peer));
@@ -3242,6 +3378,7 @@ class LocalGame {
         }
       }
       this.finishVehicleReport(peer,message,vehicleChange);
+      if(peer.positionAckEnabled&&this.placement.observe(peer,message))this.save();
       if (typeof message.say === 'string' && message.say.trim()) this.say(peer, message.say);
       return;
     }

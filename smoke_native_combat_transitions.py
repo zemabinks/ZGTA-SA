@@ -6,7 +6,7 @@ import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/native-physics/tests/combat-transitions'
 OUT.mkdir(parents=True,exist_ok=True)
-SERVER=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js']
+SERVER=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
 APP=['ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery']
 FILES=SERVER+[f'ios/App/{p}.swift' for p in APP]+['smoke_native_combat_transitions.swift','smoke_native_combat_transitions.py']
 inputs={p:(ROOT/p).read_bytes() for p in FILES}

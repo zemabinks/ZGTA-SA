@@ -6,7 +6,7 @@ const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'zgta-armour-sync-'));let g
 function check(value,message){checks++;assert(value,message)}
 try{
  const data=path.join(temporary,'local-only/selfhost');fs.mkdirSync(data,{recursive:true});
- for(const n of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,n),path.join(temporary,n));
+ for(const n of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,n),path.join(temporary,n));
  fs.writeFileSync(path.join(data,'client-catalog.json'),JSON.stringify({vehicles:[],homes:[]}));
  fs.writeFileSync(path.join(data,'weapon-catalog.json'),JSON.stringify({items:[],shops:[]}));
  game=require(path.join(temporary,'selfhost_backend'));

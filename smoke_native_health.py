@@ -47,7 +47,7 @@ def main():
         game = work / 'game'
         data = game / 'local-only/selfhost'
         data.mkdir(parents=True)
-        for name in ['selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js']:
+        for name in ['selfhost_backend.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js', 'player_placement.js']:
             shutil.copyfile(ROOT / name, game / name)
         (data / 'client-catalog.json').write_text(json.dumps({'vehicles': [], 'homes': []}))
         (data / 'weapon-catalog.json').write_text(json.dumps({'items': [], 'shops': []}))

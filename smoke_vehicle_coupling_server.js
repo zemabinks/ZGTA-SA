@@ -10,7 +10,7 @@ for(let i=0;i<args.length;i++){
   else if(args[i]==='--report-dir'&&args[i+1])reportDirectory=path.resolve(args[++i]);
   else throw Error(`Unknown or incomplete argument: ${args[i]}`);
 }
-const files=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js','vehicle_coupling.js'];
+const files=['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js','vehicle_coupling.js'];
 const hash=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
 const sourcePaths=Object.fromEntries(files.map(file=>[file,file==='vehicle_coupling.js'&&baselineModule?baselineModule:path.join(__dirname,file)]));
 const captured=Object.fromEntries(files.map(file=>[file,fs.readFileSync(sourcePaths[file])]));

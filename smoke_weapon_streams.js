@@ -9,7 +9,7 @@ try {
   Date.now=()=>now;
   const local=path.join(temporary,'local-only'),selfhost=path.join(local,'selfhost'),world=path.join(local,'site/game/world'),native=path.join(local,'site/game/native');
   fs.mkdirSync(selfhost,{recursive:true});fs.mkdirSync(world,{recursive:true});fs.mkdirSync(native,{recursive:true});
-  for(const name of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
+  for(const name of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
   fs.copyFileSync(path.join(__dirname,'local-only/site/game/native/foot-animation.json'),path.join(native,'foot-animation.json'));
   const stats=JSON.parse(fs.readFileSync(path.join(__dirname,'local-only/site/game/native/weapons.json'))).stats;
   fs.writeFileSync(path.join(selfhost,'weapon-catalog.json'),JSON.stringify({items:[37,41,42].map(id=>({id,name:'Stream fixture',ammo:500,capacity:500,price:0,slot:id,fire:'AREA_EFFECT',stats:stats[id]})),shops:[]}));

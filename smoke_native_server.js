@@ -4,7 +4,7 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(),'zgta-native-server-'));
 try {
   const local = path.join(temporary,'local-only'); fs.mkdirSync(path.join(local,'selfhost'),{recursive:true});
   fs.symlinkSync(path.join(__dirname,'local-only/site'),path.join(local,'site'));
-  for (const name of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js']) fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
+  for (const name of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js']) fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
   for (const name of ['client-catalog.json','weapon-catalog.json']) fs.copyFileSync(path.join(__dirname,'local-only/selfhost',name),path.join(local,'selfhost',name));
   const game = require(path.join(temporary,'selfhost_backend.js'));
   const catalog = require('./local-only/selfhost/weapon-catalog.json');

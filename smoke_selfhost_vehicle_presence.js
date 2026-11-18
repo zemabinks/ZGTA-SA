@@ -5,7 +5,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const http=require('node:http'),net=require('node:net'),crypto=require('node:crypto');
 const ROOT=__dirname,OUT=path.join(ROOT,'local-only/research/vehicle-presence');
-const SOURCES=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js','vehicle_coupling.js'];
+const SOURCES=['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js','vehicle_coupling.js'];
 const hashes=()=>Object.fromEntries(SOURCES.map(name=>[name,crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT,name))).digest('hex')]));
 const before=hashes(),fixture=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'zgta-presence-'));
 let archivedSerializer=null;

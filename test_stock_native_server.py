@@ -19,7 +19,7 @@ import prepare_native_stock_img as img
 ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/stock-native-server';OUT.mkdir(parents=True,exist_ok=True)
 DEPENDENCIES=['serve_local.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','native_resource_server.js',
-              'optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js',
+              'optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js',
               'local_gameplay.js','native_radio_server.js','radio_streams.js','prepare_native_radio_audio.py']
 events=[];checks=0
 def check(value,label):

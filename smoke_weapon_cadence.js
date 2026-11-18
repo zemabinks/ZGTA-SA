@@ -61,7 +61,7 @@ try {
   Date.now=()=>now;
   const local=path.join(temporary,'local-only');fs.mkdirSync(path.join(local,'selfhost'),{recursive:true});
   fs.symlinkSync(path.join(__dirname,'local-only/site'),path.join(local,'site'));
-  for(const name of ['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
+  for(const name of ['selfhost_backend.js','player_placement.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,name),path.join(temporary,name));
   fs.copyFileSync(path.join(__dirname,'local-only/selfhost/client-catalog.json'),path.join(local,'selfhost/client-catalog.json'));
   fs.writeFileSync(path.join(local,'selfhost/weapon-catalog.json'),JSON.stringify(extracted));
   game=require(path.join(temporary,'selfhost_backend.js'));

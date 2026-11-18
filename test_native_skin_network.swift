@@ -21,6 +21,12 @@ let catalog=request("game/native/samp-skins.json")["skins"]as![[String:Any]]
 check(index["7"]=="male01" && index["14"]=="bmori" && index["2"]=="maccer","Overlay HTTP still uses compact skin IDs")
 check(catalog.first{$0["legacyID"]as?Int==2}?["model"]as?String=="maccer","Maccer catalogue source missing")
 let client=NativeMultiplayerClient(server:server,session:session)
+// Explicit headless placement owner; this fixture does not render a world.
+var observedPlacement:SIMD3<Float>?
+client.onTeleport={point,heading in
+ check([point.x,point.y,point.z].allSatisfy(\.isFinite) && heading?.isFinite != false,"Invalid authoritative placement")
+ observedPlacement=point
+}
 defer{client.disconnect();session.invalidateAndCancel()}
 client.connect();wait("Actual native client not ready"){client.isReady}
 check(client.localSkin==7,"Native default changed unexpectedly")

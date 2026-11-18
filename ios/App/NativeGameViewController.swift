@@ -460,13 +460,22 @@ final class NativeGameViewController: UIViewController {
             self.updateRadioControl()
         }
         network.onTeleport = { [weak self] point, heading in
-            if let self,self.renderer?.isPassenger==true {
+            guard let self else{return}
+            if self.network.positionAcknowledgements {
+                // The server has already revoked occupancy. An ordinary Exit
+                // would emit stale reports and choose a different foot offset.
+                self.renderer?.revokeVehicleForServerPlacement()
+                self.currentVehicle=nil;self.setDrivingControls(false)
+                self.vehicleButton.setTitle("ENTER CAR",for:.normal)
+                self.gameHUD.updateVehicle(name:nil,speed:0);self.radio.stop()
+                self.previousAudioPosition=nil
+            }else if self.renderer?.isPassenger==true {
                 self.network.sendPassengerExit(point,heading:heading ?? self.renderer?.direction ?? 0)
                 self.renderer?.revokePassenger(at:point);self.currentVehicle=nil;self.setDrivingControls(false)
                 self.vehicleButton.setTitle("ENTER CAR",for:.normal);self.gameHUD.updateVehicle(name:nil,speed:0);self.radio.stop()
             }
-            self?.resetControls()
-            self?.renderer?.teleport(x: point.x, y: point.y, z: point.z, direction: heading)
+            self.resetControls()
+            self.renderer?.teleport(x: point.x, y: point.y, z: point.z, direction: heading)
         }
         network.onEnvironment = { [weak self] weather, shift, hold in
             guard let self else{return}
@@ -1531,6 +1540,11 @@ final class NativeGameViewController: UIViewController {
             leaveForOriginalTeleport()
             if network.originalRespawnWasDead{originalEffects.reset();renderer?.setOriginalActorEffects(burning:false,coughing:false);weapons.reviveOriginalWeapons()}
             renderer?.teleport(x:1154.13,y:-1771.15,z:16.6,direction:-3.7064 * .pi/180)
+            status.text="RESPAWNED";return
+        }
+        if network.positionAcknowledgements {
+            // The fenced TP has already placed the actor. A late health ACK
+            // must not undo a newer placement or revoke newly acquired roles.
             status.text="RESPAWNED";return
         }
         if currentVehicle != nil {

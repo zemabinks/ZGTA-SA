@@ -39,6 +39,14 @@ _=control("seed",["id":guestID])
 var now=1000.0
 let probe=Probe(),session=URLSession(configuration:.default,delegate:probe,delegateQueue:nil)
 let client=NativeMultiplayerClient(server:server,session:session,clock:{now},automaticRecoveryTimer:false)
+
+// Headless protocol owner records the actual authoritative placement. This
+// fixture exercises transport/state, not a rendered world or physical egress.
+var observedPlacement:SIMD3<Float>?
+client.onTeleport={point,heading in
+ precondition([point.x,point.y,point.z].allSatisfy(\.isFinite) && heading?.isFinite != false)
+ observedPlacement=point
+}
 let http=NativeGameplayClient(server:server)
 defer {
     client.disconnect();session.invalidateAndCancel()
