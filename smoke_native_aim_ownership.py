@@ -56,7 +56,10 @@ def main():
     sources=[]
     for n in names[2:]:
         f=work/f'{n}.swift';f.write_text(inputs[n]);sources.append(str(f))
+    # ARM CI can exhaust Swift's default expression budget on the unchanged
+    # nested SIMD/min climb expression. Keep literal source and all assertions.
     exe=work/'verify';command=['nice','-n','15','swiftc','-O','-whole-module-optimization','-num-threads','1','-swift-version','5',
+                             '-Xfrontend','-solver-expression-time-threshold=60',
                              '-module-cache-path',str(work/'modules'),*sources,str(work/'main.swift'),'-o',str(exe)]
     manifest={'prepared':True,'compiled':False,'executed':False,'historical':historical,'historicalFlight':a.expect_historical_flight_aim,'sourceRoot':str(root),
               'sourceHashes':{n:hashlib.sha256(s.encode()).hexdigest() for n,s in inputs.items()},
