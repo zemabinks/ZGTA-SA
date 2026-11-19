@@ -32,6 +32,8 @@ Core 143 separates world lighting from model shading and repairs a demonstrated 
 
 Core 144 adds typed legacy-server gravity to native force owners and fixes a demonstrated low-gravity airborne-bike rest condition. Source, real host physics and frame-rate regressions pass. Two native protocol profiles also agree with an owned open.mp server through per-player/global gravity and physical-sync checks; installed-build acceptance remains distinct. [Gravity evidence and limits](research/movement/CORE_PHYSICS_AUDIT.md#legacy-server-gravity-144) describe the supported scope.
 
+Core 145 adds an explicit native-size vehicle texture family, hardware sampling and prepared-install admission. Authored GPU checks and all 212 owner-local family pixel/readback checks pass; complete installed-build acceptance remains separate. Existing server assets were preserved. [Texture scope and remaining differences](research/vehicles/CORE_VEHICLE_PAINT_105.md#native-size-vehicle-images-and-hardware-sampling-145) include generated-versus-stored mips and the unresolved world/material gaps.
+
 ## Where we're going
 
 The project's priorities are **stable shared world state**, **accurate player and vehicle appearances**, **correct passengers/vehicle authority**, **complete original resources**, **authentic NPCs and traffic**, and **original free-roam gameplay fidelity**. Original campaign missions are explicitly not the target.

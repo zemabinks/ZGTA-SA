@@ -43,10 +43,11 @@ function createLibrary(options={}) {
     const inputs=files.map(file=>({file,sha256:inputHash(path.join(game,file))}));
     return {sha256:createHash('sha256').update(JSON.stringify({version:3,sourceSHA256,assets,inputs})).digest('hex'),sourceSHA256,inputs};
   }
-  function cached(definition,output){
+  function cached(definition,output,options={}){
     const base=path.join(output,definition.model+'.rig');
     if(!['.bin','.png','.json','.normals.bin'].every(suffix=>fs.existsSync(base+suffix)&&fs.statSync(base+suffix).size>0))return false;
-    try{return JSON.parse(fs.readFileSync(base+'.json','utf8')).cacheSignature===signature(definition).sha256}catch{return false}
+    try{const metadata=JSON.parse(fs.readFileSync(base+'.json','utf8'));
+      return metadata.version===(options.nativeTextures?3:2)&&metadata.cacheSignature===signature(definition).sha256}catch{return false}
   }
   function build(id) {
     const definition=catalogue.Wd.find(row=>Number(row.id)===Number(id));if(!definition)throw Error('Unknown vehicle '+id);
@@ -84,6 +85,8 @@ function createLibrary(options={}) {
 }
 
 function exportRig(built,output,options={}) {
+  const nativeTextures=options.nativeTextures===true;
+  if(nativeTextures&&options.atlas===false)throw Error('Native textures require a complete atlas family');
   const {T,root,definition,motion,textures,geometry}=built,model=root.userData.model;
   model.updateMatrixWorld(true);
   const objects=[];model.traverse(object=>objects.push(object));const indices=new Map(objects.map((object,index)=>[object,index]));
@@ -99,7 +102,11 @@ function exportRig(built,output,options={}) {
     if(!texture)return 0;
     if(slots.has(texture))return slots.get(texture);
     const slot=textureRows.length+1,name=[...textures].find(([,candidate])=>candidate===texture)?.[0]??'unnamed';
+    if(nativeTextures&&(![1000,1001,1002].includes(texture.wrapS)||![1000,1001,1002].includes(texture.wrapT)||
+      ![1003,1006].includes(texture.magFilter)||![1003,1004,1005,1006,1007,1008].includes(texture.minFilter)||texture.flipY!==false||texture.format!==1023))
+      throw Error('Unsupported original texture sampler '+name);
     slots.set(texture,slot);textureRows.push({name,width:texture.image.width,height:texture.image.height,
+      sampler:{wrapS:texture.wrapS,wrapT:texture.wrapT,magFilter:texture.magFilter,minFilter:texture.minFilter,generateMipmaps:texture.generateMipmaps===true},
       rgba:Buffer.from(texture.image.data).toString('base64')});return slot;
   }
   const positions=[],normals=[],uvs=[],colors=[],layers=[],triangles=[],draws=[];
@@ -137,7 +144,7 @@ function exportRig(built,output,options={}) {
   const bytes=Buffer.alloc(16+count*12+count*8+triangles.length*4+count*4+count*2+(count%2?2:0)+count*4+textureCount*2);
   // Distinguish neutral painted RGB from legacy WRL2 baked material colour.
   // The native rig loader verifies this family before adapting the header.
-  let at=0;for(const value of [0x32435056,count,triangles.length,textureCount]){bytes.writeUInt32LE(value,at);at+=4}
+  let at=0;for(const value of [nativeTextures?0x33435056:0x32435056,count,triangles.length,textureCount]){bytes.writeUInt32LE(value,at);at+=4}
   for(const value of positions){bytes.writeFloatLE(value,at);at+=4}for(const value of uvs){bytes.writeFloatLE(value,at);at+=4}
   for(const value of triangles){bytes.writeUInt32LE(value,at);at+=4}Buffer.from(colors).copy(bytes,at);at+=count*4;
   for(const value of layers){bytes.writeUInt16LE(value,at);at+=2}if(count%2)at+=2;Buffer.from(colors).copy(bytes,at);at+=count*4;
@@ -146,11 +153,11 @@ function exportRig(built,output,options={}) {
   const joints=loadJoints(built,objects,indices);
   const waterMasks=objects.filter(object=>object.isMesh&&object.userData.keepsWaterOut).map(object=>({
     node:indices.get(object),positions:[...object.geometry.attributes.position.array],indices:[...object.geometry.index.array]}));
-  const metadata={version:2,id:built.id,model:definition.model,kind:motion.kind,axes:'GTA DFF x,y,z; local geometry + hierarchical matrices',
+  const metadata={version:nativeTextures?3:2,id:built.id,model:definition.model,kind:motion.kind,axes:'GTA DFF x,y,z; local geometry + hierarchical matrices',
     cacheSignature:options.atlas===false?null:built.cache.sha256,cacheSourceSHA256:built.cache.sourceSHA256,cacheInputs:built.cache.inputs,
     dffSHA256:createHash('sha256').update(built.bytes).digest('hex'),rigFactorySHA256:built.rig.sha256,
     origin:root.position.y,nodes,frames,draws,joints,waterMasks,textures:textureRows.map(({name,width,height},index)=>({name,width,height,layer:index+1})),
-    vertices:count,indices:triangles.length,paint:built.paint,binaryEncoding:'VPC2',
+    vertices:count,indices:triangles.length,paint:built.paint,binaryEncoding:nativeTextures?'VPC3':'VPC2',
     binarySHA256:createHash('sha256').update(bytes).digest('hex'),atlasSHA256:null,normalsSHA256:null};
   fs.mkdirSync(output,{recursive:true});const base=path.join(output,definition.model+'.rig');
   fs.writeFileSync(base+'.bin.tmp',bytes,{mode:0o600});fs.renameSync(base+'.bin.tmp',base+'.bin');
@@ -158,9 +165,11 @@ function exportRig(built,output,options={}) {
   metadata.normalsSHA256=createHash('sha256').update(normalBytes).digest('hex');
   fs.writeFileSync(base+'.normals.bin.tmp',normalBytes,{mode:0o600});fs.renameSync(base+'.normals.bin.tmp',base+'.normals.bin');
   if(options.atlas!==false) {
-    const atlas=spawnSync(process.env.PYTHON??'python3',[path.join(require('node:path').resolve(__dirname, '../..'),'tools/assets/prepare_native_vehicle_rig_atlas.py'),base+'.png'],{input:JSON.stringify(textureRows),encoding:'utf8'});
+    const atlas=spawnSync(process.env.PYTHON??'python3',[path.join(require('node:path').resolve(__dirname, '../..'),'tools/assets/prepare_native_vehicle_rig_atlas.py'),base+'.png',...(nativeTextures?['--native-textures']:[])],{input:JSON.stringify(textureRows),encoding:'utf8'});
     if(atlas.status!==0)throw Error('Atlas creation failed: '+atlas.stderr);
     metadata.atlasSHA256=createHash('sha256').update(fs.readFileSync(base+'.png')).digest('hex');
+    if(nativeTextures){const layout=JSON.parse(atlas.stdout);
+      metadata.nativeTextures={...layout,samplers:[{wrapS:1000,wrapT:1000,magFilter:1003,minFilter:1003,generateMipmaps:false},...textureRows.map(row=>row.sampler)]};}
   }
   // Publish the cache marker last, only after all geometry/atlas writes pass.
   fs.writeFileSync(base+'.json.tmp',JSON.stringify(metadata),{mode:0o600});fs.renameSync(base+'.json.tmp',base+'.json');
@@ -211,8 +220,9 @@ function main() {
   if(!definitions.length)throw Error('Specify vehicle model IDs or --all');
   const output=path.join(library.game,'native/models'),failures=[];let vertices=0,reused=0,prepared=0;
   for(const definition of definitions)try {
-    if(process.argv.includes('--if-needed')&&library.cached(definition,output)){reused++;continue}
-    const result=exportRig(library.build(definition.id),output,{atlas:!process.argv.includes('--no-atlas')});prepared++;vertices+=result.vertices;console.log(result.id,result.model,result.nodes.length+'nodes',result.draws.length+'draws',result.vertices+'vertices')}
+    const nativeTextures=process.argv.includes('--native-textures');
+    if(process.argv.includes('--if-needed')&&library.cached(definition,output,{nativeTextures})){reused++;continue}
+    const result=exportRig(library.build(definition.id),output,{atlas:!process.argv.includes('--no-atlas'),nativeTextures});prepared++;vertices+=result.vertices;console.log(result.id,result.model,result.nodes.length+'nodes',result.draws.length+'draws',result.vertices+'vertices')}
   catch(error){failures.push({id:definition.id,error:error.stack});console.error(definition.id,error.message)}
   console.log('Prepared',prepared,'complete local vehicle rigs, reused',reused,'valid caches,',vertices,'vertices,',failures.length,'failures');
   if(failures.length)process.exitCode=1;

@@ -73,7 +73,7 @@ private struct Image {
 }
 private final class ProductionDeferredCarrier {
     struct Mesh {let vertices:MTLBuffer,indices:MTLBuffer,indexCount:Int,atlas:MTLTexture}
-    struct TransparentVehicleDraw {let mesh:Mesh,part:NativeVehicleRig.Draw,uniforms:Uniforms,pipeline:MTLRenderPipelineState;let painted:Bool,depth:Float}
+    struct TransparentVehicleDraw {let mesh:Mesh,part:NativeVehicleRig.Draw,uniforms:Uniforms,pipeline:MTLRenderPipelineState;let painted:Bool,depth:Float;var bindTextures:((MTLRenderCommandEncoder)->Bool)?=nil}
     let depth:MTLDepthStencilState,pipeline:MTLRenderPipelineState
     init(depth:MTLDepthStencilState,pipeline:MTLRenderPipelineState){self.depth=depth;self.pipeline=pipeline}
     // ACTUAL_DEFERRED_ENCODER

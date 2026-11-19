@@ -125,13 +125,14 @@ enum NativePreparedRuntimeVerifier {
             if value.repairedUVComponents > 0 { repairedUVs[path] = value.repairedUVComponents }
             return value
         }
-        func image(_ data: Data, path: String, layers: Int, cell: Int, columns: Int) throws {
+        func image(_ data: Data, path: String, layers: Int, cell: Int, columns: Int, exactSize: SIMD2<Int>? = nil) throws {
             guard let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) == 1,
                   CGImageSourceGetStatus(source) == .statusComplete,
                   let type = CGImageSourceGetType(source), type as String == "public.png",
                   let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
                   let width = integer(properties[kCGImagePropertyPixelWidth]), let height = integer(properties[kCGImagePropertyPixelHeight]),
-                  width == cell * columns, height >= ((layers + columns - 1) / columns) * cell,
+                  width == (exactSize?.x ?? cell * columns),
+                  (exactSize.map { height == $0.y } ?? (height >= ((layers + columns - 1) / columns) * cell)),
                   height <= 16_384, width * height <= 64 * 1_024 * 1_024,
                   let decoded = CGImageSourceCreateImageAtIndex(source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
                   decoded.width == width, decoded.height == height,
@@ -343,7 +344,11 @@ enum NativePreparedRuntimeVerifier {
                             guard rig.validatesAssetFamily(binary: binary, atlas: atlas), let decoded = rig.meshData(binary) else { throw Failure.invalid(base, "vehicle family hashes/encoding mismatch") }
                             let rigMesh = try mesh(decoded, path: base + ".rig.bin")
                             guard rig.document.draws.allSatisfy({ $0.start <= rigMesh.indices.count && $0.count <= rigMesh.indices.count - $0.start && $0.start % 3 == 0 && $0.count % 3 == 0 }) else { throw Failure.invalid(base, "vehicle draw exceeds geometry") }
-                            try image(atlas, path: base + ".rig.png", layers: rigMesh.layers, cell: 128, columns: 8)
+                            if rig.document.version==3,let layout=rig.document.nativeTextures {
+                                guard rig.validatesNativeTextureMesh(layerCount:rigMesh.layers,indexCount:rigMesh.indices.count,
+                                    layerAtIndex:{rigMesh.vertices[Int(rigMesh.indices[$0])].uvLayer.z})else{throw Failure.invalid(base,"vehicle native image/geometry mismatch")}
+                                try image(atlas,path:base+".rig.png",layers:rigMesh.layers,cell:128,columns:8,exactSize:SIMD2(layout.width,layout.height))
+                            }else{try image(atlas, path: base + ".rig.png", layers: rigMesh.layers, cell: 128, columns: 8)}
                             let normalPath = base + ".rig.normals.bin", normalResource = try require(normalPath)
                             let normals = try bytes(normalPath)
                             guard normals.count == rigMesh.vertices.count * 12, rig.document.normalsSHA256.map({ $0 == normalResource.sha256 }) ?? true else { throw Failure.invalid(base, "vehicle normal family mismatch") }

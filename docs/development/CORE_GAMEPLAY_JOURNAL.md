@@ -1,5 +1,12 @@
 # Core gameplay audit journal
 
+## 2026-11-19 — Native-size vehicle image families (145)
+
+An explicit VPC3 path preserves archived vehicle base-image dimensions and exact RGBA pixels, replaces fixed-square atlas sampling with bounded native-size Metal images, and connects hardware wrapping/filtering and explicit generated mip chains. Per-part image/lamp selection, paint, damage, node transforms and deferred transparency remain independent; legacy VPC2/WRL2 behavior is preserved. The prepared installer validates the new format through the same native geometry/image contract. Host setup selects both ordinary and working native families.
+
+Focused authored checks pass 2,132 native/GPU assertions over 1,296 renders plus thirteen converter checks. All 212 owner-local families pass source pixel and native GPU readback checks, with unchanged geometry after the format marker. No served owner files were replaced. The full selected Core145 chain passes with physics, audio, transport and required Metal gates; SDK and normal installed-game acceptance remain separate; original stored mips, retail fidelity, known world/material gaps and ambient simulation remain open. See [vehicle texture scope](../research/vehicles/CORE_VEHICLE_PAINT_105.md#native-size-vehicle-images-and-hardware-sampling-145).
+
+
 ## 2026-11-19 — Legacy gravity and airborne force ownership (144)
 
 Initial and updated legacy server gravity now reach the native force owners through typed, generation-fenced events. Context changes preserve pose, momentum, camera/input ownership and fixed clocks. Foot, driven and promoted vehicle forces use the normalized scalar once; remote poses remain authoritative. Spawn/spectator lifetimes retain the value and disconnects retire it. A demonstrated low-gravity airborne-bike rest clamp is corrected for this profile, preserving the nil browser baseline.

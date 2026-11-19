@@ -27,7 +27,9 @@ for(const row of manifest.models){
 const scratch=path.join(require('node:path').resolve(__dirname, '../..'),'local-only/research/working-stage-gate');fs.mkdirSync(scratch,{recursive:true});
 const temporary=fs.mkdtempSync(path.join(scratch,'fixture-'));
 try{
- const row=manifest.models[0],prefix=path.join(temporary,row.model),metadataPath=prefix+'.rig.json';
+ const row=manifest.models.find(row=>JSON.parse(fs.readFileSync(path.join(models,row.model+'.rig.json'),'utf8')).joints.working.parts.length>0);
+ check(!!row,'Working-node rejection fixture requires a concrete working part');
+ const prefix=path.join(temporary,row.model),metadataPath=prefix+'.rig.json';
  for(const name of Object.keys(row.files))fs.copyFileSync(path.join(models,name),path.join(temporary,name));
  const original=fs.readFileSync(metadataPath),metadata=JSON.parse(original);
  const validate=()=>validateFamily(temporary,row.model,row.id,metadata.cacheSignature);
@@ -48,7 +50,7 @@ try{
   if(rehash){const field={'.rig.bin':'binarySHA256','.rig.png':'atlasSHA256','.rig.normals.bin':'normalsSHA256'}[suffix];document[field]=hash(value);fs.writeFileSync(metadataPath,JSON.stringify(document))}
   try{rejects(validate,message,pattern)}finally{fs.writeFileSync(file,before);fs.writeFileSync(metadataPath,original)}
  }
- badMetadata(m=>m.version=3,'Unknown schema must fail',/identity/);
+ badMetadata(m=>m.version=4,'Unknown schema must fail',/identity/);
  badMetadata(m=>m.id++,'Relabelled model must fail',/identity/);
  badMetadata(m=>m.vertices=1000000,'Excessive vertex count must fail',/buffer counts/);
  badMetadata(m=>m.indices=3.5,'Fractional index count must fail',/buffer counts/);
@@ -58,9 +60,9 @@ try{
  badMetadata(m=>m.draws[0].count=m.indices+3,'Out-of-buffer draw must fail',/hierarchy/);
  badMetadata(m=>m.draws[0].texture=m.textures.length+1,'Out-of-atlas draw must fail',/hierarchy/);
  badMetadata(m=>m.nodes[0].matrix[0]=null,'Nonfinite node matrix must fail',/hierarchy/);
- badMetadata(m=>m.joints.working.parts[0]&&(m.joints.working.parts[0].node=m.nodes.length),'Invalid working node must fail',/working/);
- if(originalMetadata.version===2){
-  check(binary.subarray(0,4).toString()==='VPC2','Neutral stage requires VPC2');
+ badMetadata(m=>m.joints.working.parts[0].node=m.nodes.length,'Invalid working node must fail',/working/);
+ if(originalMetadata.version>=2){
+  check(binary.subarray(0,4).toString()===(originalMetadata.version===3?'VPC3':'VPC2'),'Neutral stage requires matching VPC encoding');
   for(const suffix of ['.rig.bin','.rig.png','.rig.normals.bin'])badComponent(suffix,b=>b[b.length-1]^=1,'Tampered v2 component must fail its hash',/hash mismatch/);
   badMetadata(m=>m.version=1,'Relabelled v2 must not bypass hashes/encoding',/Legacy rig/);
   badMetadata(m=>m.binaryEncoding='WRL2','Mixed v2 declaration must fail',/encoding/);
@@ -74,7 +76,16 @@ try{
   badComponent('.rig.bin',b=>b.writeUInt32LE(originalMetadata.vertices,16+originalMetadata.vertices*20),'Out-of-range vertex with updated hash must fail',/vertex index/,true);
   badComponent('.rig.bin',b=>b.writeUInt16LE(originalMetadata.textures.length+1,16+originalMetadata.vertices*20+originalMetadata.indices*4+originalMetadata.vertices*4),'Out-of-range layer with updated hash must fail',/texture layer/,true);
   badComponent('.rig.normals.bin',b=>b.writeFloatLE(Infinity,0),'Nonfinite normal with updated hash must fail',/Nonfinite/,true);
-  badComponent('.rig.png',b=>b.writeUInt32BE(1,16),'Wrong atlas size with updated hash must fail',/atlas mismatch/,true);
+  badComponent('.rig.png',b=>b.writeUInt32BE(1,16),'Wrong atlas size with updated hash must fail',/atlas mismatch|layout mismatch/,true);
+  if(originalMetadata.version===3){
+   badMetadata(m=>m.nativeTextures.rects[1][2]--,'Resized source image rejected',/source image resized/);
+   badMetadata(m=>m.nativeTextures.rects[1][0]=m.nativeTextures.rects[0][0],'Overlapping source rectangles rejected',/rectangles/);
+   badMetadata(m=>m.nativeTextures.samplers[1].minFilter=1009,'Unknown sampler rejected',/sampler/);
+   badMetadata(m=>m.nativeTextures.samplers[1].generateMipmaps=false,'Missing required generated mip chain rejected',/sampler/);
+   badMetadata(m=>m.nativeTextures.rgbaBytes++,'Wrong native image budget rejected',/byte budget/);
+   badMetadata(m=>m.nativeTextures.width=4097,'Oversized native image rejected',/layout mismatch/);
+   badMetadata(m=>m.draws[0].texture=(m.draws[0].texture+1)%(m.textures.length+1),'Mixed original draw/image relationship rejected',/draw\/image/);
+  }else{
   // An independently constructed legacy-format contract is still accepted.
   // It is a format compatibility test, not a claim of legacy visual parity.
   const legacy=JSON.parse(original),legacyBytes=Buffer.from(binary);legacy.version=1;legacyBytes.writeUInt32LE(0x324c5257,0);
@@ -83,6 +94,7 @@ try{
   check(!!validate(),'Explicit legacy WRL2 contract must remain accepted');
   fs.writeFileSync(prefix+'.rig.bin',binary);rejects(validate,'Neutral binary must not upload as legacy',/binary\/metadata/);
   fs.writeFileSync(metadataPath,original);
+  }
  }else{check(binary.subarray(0,4).toString()==='WRL2','Legacy stage requires WRL2')}
  if(legacyRoot)for(const entry of manifest.models){
   const doc=JSON.parse(fs.readFileSync(path.join(legacyRoot,entry.model+'.rig.json'),'utf8'));

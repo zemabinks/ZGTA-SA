@@ -33,7 +33,7 @@ private final class EncoderSpy {
 private typealias MTLRenderCommandEncoder=EncoderSpy
 private final class RendererCarrier {
  struct Mesh {let vertices:Int,indices:Int,indexCount:Int,atlas:Int}
- struct TransparentVehicleDraw {let mesh:Mesh,part:NativeVehicleRig.Draw,uniforms:Uniforms,pipeline:Int;let painted:Bool,depth:Float}
+ struct TransparentVehicleDraw {let mesh:Mesh,part:NativeVehicleRig.Draw,uniforms:Uniforms,pipeline:Int;let painted:Bool,depth:Float;var bindTextures:((MTLRenderCommandEncoder)->Bool)?=nil}
  let depth=9,pipeline=99
  // ACTUAL_ENCODER
  func test(){
@@ -48,6 +48,12 @@ private final class RendererCarrier {
   for (at,i)in [1,2,0].enumerated(){check(e.events[at]==[100+i,300+i,400+i,9,200+i,i*24,6],"Independent mesh/atlas/pipeline/index/offset state survives deferred ordering");check(e.paints[at].x==Float(i),"Per-instance paint survives sorting")}
   check(e.alphas==[1,1,1],"Source opacity not multiplied into instance alpha again")
   check(e.pipeline==99 && e.depth==9,"Encoder restores normal world pipeline/depth")
+  packets[1].bindTextures={_ in false}
+  packets[0].bindTextures={encoder in encoder.setFragmentTexture(777,index:0);return true}
+  let native=EncoderSpy();encodeTransparentVehicles(packets,encoder:native)
+  check(native.events.map{$0[0]}==[102,100],"Failed native image binding cannot draw a stale atlas")
+  check(native.events.map{$0[1]}==[302,777],"Sorted native image closure retains its instance; legacy atlas remains independent")
+  check(native.pipeline==99 && native.depth==9,"Mixed native/legacy transparency restores the production states")
  }
 }
 @main private enum Test {
