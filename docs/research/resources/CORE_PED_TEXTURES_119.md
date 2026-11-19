@@ -179,3 +179,16 @@ atomic scene publication, normal package import, animated near/far seams and
 alpha, cache churn, A14 allocations and cold/warm timing still require the
 separate consumer/device acceptance. No 1:1 visual claim follows from these
 producer tests.
+
+## Opaque D3D9 texture preparation
+
+The preparation converter now discards the unused high byte of D3D format 22 when producing RGBA, matching the native decoder's existing BGRX behavior. Format 21 retains its original alpha. The [Microsoft D3DFORMAT reference](https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dformat) distinguishes these RGB and ARGB formats.
+
+The authored opacity test covers every possible padding/alpha byte, RGB preservation, both prepared pedestrian-family versions and deterministic content-addressed output. The literal prior converter fails the X8 opacity assertion; the corrected path passes 523 checks. No owner game data is embedded in these fixtures.
+
+```sh
+python3 tests/resources/test_native_texture_opacity.py
+python3 tests/resources/test_native_ped_atlas.py
+```
+
+This is a preparation-format correction, not evidence that an existing visible world defect was caused by X8 padding. Existing installed assets are retained; affected newly prepared families receive their normal content-addressed resource identities. Rendered appearance and complete original-resource coverage remain separate gates.
