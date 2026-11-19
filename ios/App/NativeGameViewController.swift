@@ -352,6 +352,9 @@ final class NativeGameViewController: UIViewController {
         weapons.onNeedsResync = { [weak self] in self?.network.requestInventoryResync() }
         network.onInventoryConnection = { [weak self] nonce in
             guard let self else{return}
+            if self.network.legacy == nil && !self.network.usesOriginalWorldProtocol {
+                self.renderer?.setSelfhostBreathConnection(nonce)
+            }
             self.renderer?.setVehicleCouplingConnection(nonce)
             self.weaponCycle.disconnected()
             self.gameplay.inventoryConnection=nonce

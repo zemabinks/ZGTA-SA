@@ -20,7 +20,9 @@
 
 Build 136 includes persisted resource-import corrections, owned/parked wheel-phase continuity, browser radio delivery and swimming-exit input/turn ownership fixes. Its source regressions, unsigned Simulator/device builds and selected normal Simulator import/join/walk/camera checks passed. Audio output, full hardware behavior and exhaustive original-retail parity remain unverified.
 
-Repository cleanup groups reports, tests and converters while retaining the public launch commands. See the [cleanup record](development/REPOSITORY-CLEANUP.md) for scope and validation.
+Repository cleanup is merged in [PR #3](https://github.com/zemabinks/ZGTA-SA/pull/3): 671 public files moved and the root reduced from 711 to 40 files. The full optional core chain, both SDK builds, source/history audit and corrected GitHub CI passed. Existing prepared resources were retained. The public launch commands remain available. See the [cleanup record](development/REPOSITORY-CLEANUP.md) for scope and validation.
+
+Core 140 repairs independent-server breath lifetimes, stale HTTP breath-display writes and respawn oxygen clocks. Focused native-method and actual backend/Peer checks pass; full current regression and SDK validation are in progress. Rendered and hardware acceptance remain separate.
 
 ## Where we're going
 

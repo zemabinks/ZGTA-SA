@@ -29,6 +29,7 @@ jobs:
       - run: node tests/combat/smoke_weapon_transport.js
       - run: node tests/combat/smoke_weapon_frame_batches.js
       - run: node tests/combat/smoke_health_ack.js
+      - run: node tests/server/smoke_selfhost_breath_lifecycle.js
       - run: node tests/vehicles/smoke_native_terminal_vehicle.js
       - run: node tests/network/smoke_native_skin_network_child.js
       - run: node tests/combat/smoke_browser_armour_sync.js
@@ -56,4 +57,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python3 tests/core/smoke_core_136.py
+      - run: python3 tests/core/smoke_core_140.py

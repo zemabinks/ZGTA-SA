@@ -19,7 +19,7 @@ Native implementation folders, independent server modules and the simple public 
 
 The work uses a dedicated worktree and recoverable local commits. Source-safety checks now traverse `docs`, `tests` and `tools`; private-file denies remain enforced. The layout verifier checks package imports, documentation links, stable entrypoints and negative safety fixtures inside all three relocated trees.
 
-The complete build-136 regression chain and sequential Simulator/device SDK builds are required before publication. Final outcomes are recorded in the [project status](../PROJECT-STATUS.md). Authored tests and successful builds do not establish physical-device or original-retail gameplay acceptance.
+The complete build-136 chain passed with optional physics/audio checks. The actual build entrypoint passed universal Simulator Debug and unsigned arm64 device Release builds at one job/thread, with all 216 frozen inputs and 39 dependencies held. The corrected GitHub checks and final public-only history audit passed. [Cleanup PR #3](https://github.com/zemabinks/ZGTA-SA/pull/3) is merged. Five prepared/raw installed metadata hashes remained unchanged. Authored tests and successful builds do not establish physical-device or original-retail gameplay acceptance.
 
 Existing Mac-hosted resources and prepared Simulator installation metadata are retained. No original game files, converted assets, saves, credentials or private development history belong in the public cleanup commit. Public publication starts from public Git history and uses a public-safe generated Xcode project.
 

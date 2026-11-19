@@ -228,6 +228,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var characterActive = false
     private var pendingNativeJump: Double = 0
     private let swimController = NativeSwimController()
+    private var selfhostBreathConnection: String?
     private let personalFlight=NativePersonalFlightController()
     private(set) var hasParachute=false
     var personalFlightDown=false
@@ -1184,6 +1185,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var swimmingPitch: Float { Float(swimController.pitch) }
     var swimmingRatio: Float { Float(swimController.ratio) }
     var swimmingBreath: Int? { swimController.displayBreath }
+    /// A fresh independent-server Peer starts a fresh oxygen pool. Keep that
+    /// lifecycle separate from health, locomotion and external server profiles.
+    func setSelfhostBreathConnection(_ nonce: String?) {
+        guard let nonce else { selfhostBreathConnection = nil; return }
+        guard selfhostBreathConnection != nonce else { return }
+        selfhostBreathConnection = nonce
+        swimController.revive()
+    }
     var aimDirection: SIMD3<Float> {
         if driving,let frame = gameCameraFrame { return simd_normalize(frame.target-frame.source) }
         return SIMD3(sin(heading)*cos(cameraPitch),cos(heading)*cos(cameraPitch),sin(cameraPitch))

@@ -506,7 +506,8 @@ final class NativeGameHUD: UIView {
     }
     func updateWorld(state: [String: Any]) {
         radar.updateWorld(state: state)
-        if let breath = (state["breath"] as? NSNumber)?.intValue { updateBreath(breath) }
+        // Gameplay's local swim forecast owns this display; an older HTTP
+        // snapshot must not overwrite its current breath/recovery progress.
     }
 }
 

@@ -174,6 +174,8 @@ final class Scene {
  var onReloadTaskCancelled:(()->Void)?
  var isClimbing=false,swimming=false,isChuting=false,crouching=false,passengerOK=true
  var cancels=0,entries=0,teleports=0
+ var breathConnections:[String?]=[]
+ func setSelfhostBreathConnection(_ nonce:String?){breathConnections.append(nonce)}
  func setFlightGear(parachute:Bool,jetpack:Bool){}
  func setVehicleCouplingConnection(_ nonce:String?){}
  func cancelWeaponInput(){}
@@ -198,6 +200,7 @@ final class OwnedWeapons {
  func reviveOriginalWeapons(){}
 }
 final class Peer {
+ var legacy:Int?
  var vehicles=["car":Vehicle(id:"car")],usesClientOwnedWeapons=false,positionAcknowledgements=false
  var usesOriginalWorldProtocol=false,originalRespawnWasDead=false,inventoryConnection:String?="peer"
  var onEnter:((String,Bool)->Void)?,onPassengerEnter:((String,Int,Bool)->Void)?
