@@ -68,7 +68,7 @@ resource store or declare the game playable.
 
 ```sh
 python3 build_installer_bridge.py
-python3 smoke_native_installer_bridge.py
+python3 tests/resources/smoke_native_installer_bridge.py
 ```
 
 Build outputs stay under this clone's ignored `local-only/native-installer/`:
@@ -80,7 +80,7 @@ For actual read-only owner ISO tests, provide the existing accepted selected
 resource tree:
 
 ```sh
-python3 smoke_native_installer_bridge.py --iso /path/to/original.iso --accepted-root /path/to/accepted/installed-selected
+python3 tests/resources/smoke_native_installer_bridge.py --iso /path/to/original.iso --accepted-root /path/to/accepted/installed-selected
 ```
 
 This additionally tests six exact accepted cabinet resource paths and SHA-256s,

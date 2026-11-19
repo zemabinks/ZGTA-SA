@@ -17,7 +17,7 @@ if ! [[ "$port" =~ '^[0-9]{1,5}$' ]] || (( port < 1024 || port > 65535 )); then
   exit 1
 fi
 if [[ ! -f "$local_dir/site/index.html" || ! -f "$local_dir/manifest.json" ]]; then
-  print -u2 'Local archive missing. Run python3 archive_site.py first.'
+  print -u2 'Local archive missing. Run python3 tools/archive/archive_site.py first.'
   exit 1
 fi
 zsh "$project_dir/prepare_native_runtime.sh"

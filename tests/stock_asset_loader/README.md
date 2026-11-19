@@ -76,7 +76,7 @@ is delivered as cancellation. Callers must also check their own connection/world
 generation before asynchronous GPU registration. Stock asset loading is
 independent of the custom downloaded-artwork RPC184/185 readiness barrier.
 
-Run `python3 test_samp_stock_asset_loader.py`. The suite starts a real loopback
+Run `python3 tests/network/test_samp_stock_asset_loader.py`. The suite starts a real loopback
 HTTP server and exercises independently generated valid textured RW resources,
 child/parent precedence, byte/hash/CRC corruption, chunked overruns/truncation,
 headers, redirects, timeouts, URL/path containment, unsupported/missing models,

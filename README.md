@@ -57,4 +57,4 @@ This repository contains **project source code and tools**, not Rockstar's game 
 
 Source is **AGPL-3.0-only**; third-party components have their own notices. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md). This is an independent fan development effort, **not affiliated with or endorsed by Rockstar Games**.
 
-**For developers:** [Project map](docs/development/PROJECT-MAP.md) · [Technical documentation](docs/DEVELOPMENT.md) · [Detailed feature matrix](FEATURE_MATRIX.md) · [Proposed safe repository cleanup](docs/development/REPOSITORY-CLEANUP.md).
+**For developers:** [Project map](docs/development/PROJECT-MAP.md) · [Technical documentation](docs/DEVELOPMENT.md) · [Detailed feature matrix](docs/development/FEATURE_MATRIX.md) · [Proposed safe repository cleanup](docs/development/REPOSITORY-CLEANUP.md).

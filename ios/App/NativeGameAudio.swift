@@ -4,7 +4,7 @@ import UIKit
 import simd
 
 /// Plays the archived WAV banks directly from the owner's Mac. Routing and
-/// loop points are extracted by prepare_native_audio.py into ignored data.
+/// loop points are extracted by tools/assets/prepare_native_audio.py into ignored data.
 /// All public methods are called on the main thread with gameplay events.
 final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     // Pure explosion planning is kept separate from AVFoundation playback so

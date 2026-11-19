@@ -240,7 +240,7 @@ function create(options = {}) {
         await new Promise((resolve, reject) => {
           const command = decoder || options.python || process.env.ZGTA_PYTHON || process.env.PYTHON || 'python3';
           const args = decoder ? [track.file, String(track.offset), String(track.size), partial] :
-            [path.join(__dirname, 'prepare_native_radio_audio.py'), input, partial];
+            [path.join(__dirname, 'tools/assets/prepare_native_radio_audio.py'), input, partial];
           const child = spawn(command, args,
             {stdio: ['ignore', 'pipe', 'pipe']});
           let errors = '', metadata = '';

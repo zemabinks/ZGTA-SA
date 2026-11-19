@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Actual original23895.vX parked chassis and Rapier shape ray references.
-const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require('../../smoke_vehicle_dynamics');
+const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main(){
  const load=archivedModules(),R=load(55077);await R.init();const T=load(85339),original=load(23895),groups=load(39943),root=path.resolve(__dirname,'../..'),models=JSON.parse(fs.readFileSync(path.join(root,'local-only/site/game/native/vehicles.physics.json'))).models,cases=[];
  for(const model of [420,432,449,481,520,539])for(const tilted of [false,true]){

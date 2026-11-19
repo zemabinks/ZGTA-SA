@@ -33,7 +33,7 @@ Raw availability of thousands of names is not proof of render/gameplay parity fo
 all assets. Breakability, special lamp effects, inherited LOD/timed collision and
 all supplemental SA-MP model packs are separate acceptance work.
 
-Run `python3 test_samp_stock_runtime.py` where localhost fixture sockets and a
+Run `python3 tests/network/test_samp_stock_runtime.py` where localhost fixture sockets and a
 physical Metal device are available. The test compiles actual extracted Renderer
 methods, with real metadata/asset HTTP, shared bounded loader, RW parsers, Metal
 upload/draw and Rapier collision. Its carrier supplies the device/render formats

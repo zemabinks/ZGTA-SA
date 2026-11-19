@@ -1,4 +1,4 @@
-Run `python3 test_native_renderware_txd.py` from the repository root. The default
+Run `python3 tests/resources/test_native_renderware_txd.py` from the repository root. The default
 run checks the owner-local `local-only/site/game/*.txd` corpus as well as generated
 fixtures. Use `--no-corpus` for the generated tests alone. Swift, CryptoKit (test
 hashing only), Python, and Pillow must be available. No network requests occur.
@@ -6,7 +6,7 @@ hashing only), Python, and Pillow must be available. No network requests occur.
 All manifests, generated fixtures, build products, hashes, and reports are placed
 under `local-only/research/renderware-txd`; original archives are opened read-only
 and their hashes checked again after testing. No original image data is embedded
-in these tests. `prepare_native_models.py` is imported only to cross-check its
+in these tests. `tools/assets/prepare_native_models.py` is imported only to cross-check its
 existing base-mip converter; its CLI and output-generation functions are not run.
 
 The production reader returns CPU images; it does not create Metal textures or

@@ -168,7 +168,7 @@ covers 8,280 frames across 15 scenes with maximum position error 2.09e-17 m.
 These measurements validate the selected native math path; platform machine
 code and the complete untested state space are separate claims.
 
-`prepare_native_collision_fallback.js i148` reconstructs the sole missing
+`tools/assets/prepare_native_collision_fallback.js i148` reconstructs the sole missing
 publisher collision cell from the archived WRL2 loader, spatial range builder
 and actual render-mesh collision function. The generated file is explicitly
 labeled as reconstructed, with asset/function hashes and the original nine

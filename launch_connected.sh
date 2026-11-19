@@ -10,7 +10,7 @@ key_path="$local_dir/connected.key"
 profile_dir="$local_dir/connected-chrome-profile"
 
 if [[ ! -f "$local_dir/site/index.html" || ! -f "$local_dir/manifest.json" ]]; then
-  print -u2 'Local archive missing. Run python3 archive_site.py first.'
+  print -u2 'Local archive missing. Run python3 tools/archive/archive_site.py first.'
   exit 1
 fi
 if [[ ! -x "$chrome_bin" ]]; then

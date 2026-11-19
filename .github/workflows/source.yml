@@ -15,36 +15,37 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python3 check_public_source.py
-      - run: python3 smoke_public_source.py
-      - run: python3 smoke_de_menu_import.py
-      - run: python3 smoke_native_project.py
-      - run: python3 smoke_host.py
-      - run: python3 test_native_stock_package.py
+      - run: python3 tests/hosting/check_public_source.py
+      - run: python3 tools/development/verify_repository_layout.py
+      - run: python3 tests/hosting/smoke_public_source.py
+      - run: python3 tests/hosting/smoke_de_menu_import.py
+      - run: python3 tests/hosting/smoke_native_project.py
+      - run: python3 tests/hosting/smoke_host.py
+      - run: python3 tests/resources/test_native_stock_package.py
       - run: python3 -m pip install Pillow==11.3.0
-      - run: python3 test_native_ped_atlas.py
-      - run: node smoke_discord.js
-      - run: node smoke_inventory_ack.js
-      - run: node smoke_weapon_transport.js
-      - run: node smoke_weapon_frame_batches.js
-      - run: node smoke_health_ack.js
-      - run: node smoke_native_terminal_vehicle.js
-      - run: node smoke_native_skin_network_child.js
-      - run: node smoke_browser_armour_sync.js
-      - run: node smoke_native_melee_server.js
-      - run: node smoke_native_melee_assets.js
-      - run: node smoke_native_working_assets.js
-      - run: node smoke_vehicle_coupling_server.js
-      - run: node smoke_radio_import_bounds.js
-      - run: node smoke_radio_development.js
-      - run: node smoke_browser_radio.js
-      - run: node smoke_browser_radio_http.js
-      - run: node smoke_selfhost_tp_units.js
-      - run: node smoke_selfhost_position_resume.js
-      - run: node smoke_selfhost_mission_persistence.js
-      - run: node smoke_browser_recovery.js
-      - run: node smoke_browser_entry_epochs.js
-      - run: node smoke_browser_task_policy_http.js
+      - run: python3 tests/resources/test_native_ped_atlas.py
+      - run: node tests/server/smoke_discord.js
+      - run: node tests/combat/smoke_inventory_ack.js
+      - run: node tests/combat/smoke_weapon_transport.js
+      - run: node tests/combat/smoke_weapon_frame_batches.js
+      - run: node tests/combat/smoke_health_ack.js
+      - run: node tests/vehicles/smoke_native_terminal_vehicle.js
+      - run: node tests/network/smoke_native_skin_network_child.js
+      - run: node tests/combat/smoke_browser_armour_sync.js
+      - run: node tests/combat/smoke_native_melee_server.js
+      - run: node tests/combat/smoke_native_melee_assets.js
+      - run: node tests/vehicles/smoke_native_working_assets.js
+      - run: node tests/vehicles/smoke_vehicle_coupling_server.js
+      - run: node tests/audio/smoke_radio_import_bounds.js
+      - run: node tests/audio/smoke_radio_development.js
+      - run: node tests/audio/smoke_browser_radio.js
+      - run: node tests/audio/smoke_browser_radio_http.js
+      - run: node tests/server/smoke_selfhost_tp_units.js
+      - run: node tests/network/smoke_selfhost_position_resume.js
+      - run: node tests/server/smoke_selfhost_mission_persistence.js
+      - run: node tests/browser/smoke_browser_recovery.js
+      - run: node tests/browser/smoke_browser_entry_epochs.js
+      - run: node tests/browser/smoke_browser_task_policy_http.js
   native-foundation:
     runs-on: macos-latest
     steps:
@@ -55,4 +56,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python3 smoke_core_136.py
+      - run: python3 tests/core/smoke_core_136.py

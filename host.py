@@ -78,35 +78,35 @@ def setup(args):
     if args.import_site:
         import_site(args.import_site)
     if args.download:
-        for script in ('archive_site.py', 'archive_public_models.py',
-                       'archive_public_audio.py', 'archive_public_interiors.py'):
+        for script in ('tools/archive/archive_site.py', 'tools/archive/archive_public_models.py',
+                       'tools/archive/archive_public_audio.py', 'tools/archive/archive_public_interiors.py'):
             run(script)
     require_assets()
-    run('extract_client_catalog.py')
+    run('tools/assets/extract_client_catalog.py')
     if args.native:
         try:
             import PIL  # noqa: F401
         except ImportError:
             raise ValueError('Native asset conversion needs Pillow. Use the virtual-environment steps in HOSTING.md.')
         scripts = [
-            ('prepare_native_assets.py', '--all-details'),
-            ('prepare_native_models.py', '--all'),
-            ('prepare_native_skeletons.py', '--all', '--archive-all-blocks'),
-            ('prepare_native_hud.py',), ('prepare_native_weapons.py',),
-            ('prepare_native_audio.py',), ('prepare_native_contact_audio.js',),
-            ('prepare_native_environment.py',), ('prepare_native_atmosphere.py',),
-            ('prepare_native_water_waves.py',), ('prepare_native_camera.py',),
-            ('prepare_native_effects.py',), ('prepare_native_particle_effects.js',),
-            ('prepare_native_physics.js',),
-            ('prepare_native_vehicle_coupling.js',),
-            ('prepare_native_vehicle_treads.js',),
-            ('prepare_native_vehicle_rigs.js', '--all', '--if-needed'),
-            ('prepare_native_working_vehicles.js',),
-            ('prepare_native_riders.py',), ('prepare_native_seating.py',),
-            ('prepare_native_foot_animation.js',),
-            ('prepare_native_flight_assets.js', '--archive-missing'),
-            ('prepare_native_radio.js',),
-            ('prepare_native_resource_package.py',),
+            ('tools/assets/prepare_native_assets.py', '--all-details'),
+            ('tools/assets/prepare_native_models.py', '--all'),
+            ('tools/assets/prepare_native_skeletons.py', '--all', '--archive-all-blocks'),
+            ('tools/assets/prepare_native_hud.py',), ('tools/assets/prepare_native_weapons.py',),
+            ('tools/assets/prepare_native_audio.py',), ('tools/assets/prepare_native_contact_audio.js',),
+            ('tools/assets/prepare_native_environment.py',), ('tools/assets/prepare_native_atmosphere.py',),
+            ('tools/assets/prepare_native_water_waves.py',), ('tools/assets/prepare_native_camera.py',),
+            ('tools/assets/prepare_native_effects.py',), ('tools/assets/prepare_native_particle_effects.js',),
+            ('tools/assets/prepare_native_physics.js',),
+            ('tools/assets/prepare_native_vehicle_coupling.js',),
+            ('tools/assets/prepare_native_vehicle_treads.js',),
+            ('tools/assets/prepare_native_vehicle_rigs.js', '--all', '--if-needed'),
+            ('tools/assets/prepare_native_working_vehicles.js',),
+            ('tools/assets/prepare_native_riders.py',), ('tools/assets/prepare_native_seating.py',),
+            ('tools/assets/prepare_native_foot_animation.js',),
+            ('tools/assets/prepare_native_flight_assets.js', '--archive-missing'),
+            ('tools/assets/prepare_native_radio.js',),
+            ('tools/assets/prepare_native_resource_package.py',),
         ]
         for command in scripts:
             run(*command)

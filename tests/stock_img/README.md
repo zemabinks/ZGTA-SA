@@ -1,10 +1,10 @@
-`prepare_native_stock_img.py` creates an owner-local VER2 IMG index and a separate
+`tools/assets/prepare_native_stock_img.py` creates an owner-local VER2 IMG index and a separate
 virtual stock-model manifest. It reads and hashes source ranges without bulk
 extracting their files. Inputs are an existing schema1 stock metadata manifest
 and explicitly selected owned PC archives:
 
 ```sh
-python3 prepare_native_stock_img.py \
+python3 tools/assets/prepare_native_stock_img.py \
   --archive /path/to/owned/models/gta3.img \
   --archive /path/to/owned/models/gta_int.img \
   --manifest local-only/original-world-assets/game/native/stock-models.json \
@@ -73,7 +73,7 @@ The current clump-only native decoder and this provider explicitly exclude
 those files. Their exclusion is a format/animation limitation, not evidence
 that the source files are corrupt. No reference implementation is copied.
 
-Run `python3 test_stock_img_assets.py`. Generated cases cover valid declared
+Run `python3 tests/resources/test_stock_img_assets.py`. Generated cases cover valid declared
 payload zeros, complete extra extensions, directory corruption, allocation
 bounds, duplicate names, source mutation, actual HTTP bytes/status, cancellation,
 queue/resident budgets and shutdown. Eight owned ranges are checked against the

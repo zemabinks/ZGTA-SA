@@ -46,7 +46,7 @@ Installed mode reads static assets locally and **does not silently fall back to 
 3. Let the app read and extract it. The original ISO is kept unchanged.
 4. Choose **VERIFY SAVED RAW RESOURCES** to check what was extracted.
 
-**Stop here if your goal is to play from the ISO:** these are *raw* original game resources, **not yet converted into the runtime's verified native formats**. Extracting them does **not** activate installed mode. Future work must connect extraction to conversion, package verification and playable local loading. See [the technical extraction report](../CORE_NATIVE_RAW_ISO_108.md).
+**Stop here if your goal is to play from the ISO:** these are *raw* original game resources, **not yet converted into the runtime's verified native formats**. Extracting them does **not** activate installed mode. Future work must connect extraction to conversion, package verification and playable local loading. See [the technical extraction report](research/resources/CORE_NATIVE_RAW_ISO_108.md).
 
 ## Why can't I just select an ISO and press Play?
 
@@ -61,6 +61,6 @@ This is a development limitation, not a request for users to find another unoffi
 - Do **not** publish the original ISO, derived proprietary assets, usernames, passwords or saved profiles to GitHub.
 - When changing installations, verify the new package before removing a working one.
 
-**Detailed technical notes:** [Native resource storage](../CORE_NATIVE_RESOURCES_107.md) · [ISO bridge](../CORE_NATIVE_INSTALLER_107.md) · [Runtime validation](../CORE_RESOURCE_TRANSPORT_109.md).
+**Detailed technical notes:** [Native resource storage](research/resources/CORE_NATIVE_RESOURCES_107.md) · [ISO bridge](research/resources/CORE_NATIVE_INSTALLER_107.md) · [Runtime validation](research/resources/CORE_RESOURCE_TRANSPORT_109.md).
 
 [← All guides](README.md)

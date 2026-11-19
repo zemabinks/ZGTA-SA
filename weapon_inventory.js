@@ -179,7 +179,7 @@ function create(catalog = {}, options = {}) {
       inventory.reload = {weapon: id, until: now + reloadMs(item)};
       message = `Reloading ${item.name}.`;
     } else {
-      if (!items.length) throw new Error('Weapon shop data is unavailable. Run prepare_native_weapons.py on the Mac.');
+      if (!items.length) throw new Error('Weapon shop data is unavailable. Run tools/assets/prepare_native_weapons.py on the Mac.');
       const shop = nearestShop(pos);
       if (!shop?.within) throw new Error('Stand within 8 m of an Ammu-Nation entrance or counter.');
       if (!(pos.walking === true || pos.peer?.state?.walking === true))

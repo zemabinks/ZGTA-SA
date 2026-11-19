@@ -3,7 +3,7 @@
 import Foundation
 import simd
 
-/// Builds the same SKN1 contract as our own prepare_native_skeletons.py exporter.
+/// Builds the same SKN1 contract as our own tools/assets/prepare_native_skeletons.py exporter.
 /// A static object, unsupported rig or incompatible morph model fails explicitly;
 /// this bridge never substitutes an unanimated actor or a generic pedestrian.
 enum NativeRenderWareSkeleton {

@@ -1,6 +1,6 @@
 # Authored COL instances in the real native Rapier world
 
-Run `python3 smoke_native_renderware_collision_world.py` after building the
+Run `python3 tests/resources/smoke_native_renderware_collision_world.py` after building the
 owned Core102 host native library. `--library /absolute/directory` selects a
 different host archive. The driver verifies `source-stamp.json` before linking;
 it never builds, copies, or changes platform libraries. All test products remain

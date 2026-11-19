@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 const fs=require('node:fs'),path=require('node:path');
-const {archivedModules}=require('../../smoke_vehicle_dynamics');
+const {archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 (async()=>{const R=archivedModules()(55077);await R.init();const world=new R.World({x:0,y:0,z:0});
 const cases=[];for(const kind of ['velocity','position']){
  const body=world.createRigidBody(kind==='velocity'?R.RigidBodyDesc.kinematicVelocityBased():R.RigidBodyDesc.kinematicPositionBased());

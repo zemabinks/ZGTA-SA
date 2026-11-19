@@ -1,4 +1,4 @@
-`prepare_native_stock_models.py` generates owner-local stock model metadata from
+`tools/assets/prepare_native_stock_models.py` generates owner-local stock model metadata from
 an owned game data tree and a read-only raw DFF/TXD directory. It follows only
 active IDE declarations from `data/default.dat` and `data/gta.dat`; an explicit
 `--extra-ide` can add a separately supplied SA-MP supplemental definition file.
@@ -9,7 +9,7 @@ IDs, missing files and parent cycles are never replaced with a similar model.
 Generated metadata and all reference files must remain under `local-only`. Example:
 
 ```
-python3 prepare_native_stock_models.py \
+python3 tools/assets/prepare_native_stock_models.py \
   --game-root local-only/research/stock-models/retail-ide \
   --asset-root local-only/site/game \
   --output local-only/original-world-assets/game/native/stock-models.json
@@ -51,7 +51,7 @@ SA-MP-added objects such as 19379/19353/19480 are absent from retail GTA metadat
 and require their actual supplemental definitions/assets. Merged browser world
 tiles are not substituted for those exact standalone objects.
 
-Run `python3 test_samp_stock_models.py`. Generated cases check active-file loading,
+Run `python3 tests/network/test_samp_stock_models.py`. Generated cases check active-file loading,
 mixed separators, exact paths, parent/generic ordering, missing files, cycles,
 malformed metadata, traversal and size limits. Owner-local cases resolve actual
 weapon/vehicle files and verify their size and SHA-256. Reports and source hashes

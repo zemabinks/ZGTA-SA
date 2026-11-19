@@ -56,7 +56,7 @@ supporting engine behavior. Exact retail transitions, collision treatment, untim
 switch duration and spectator offsets still require original-game comparison.
 Successful tests do not establish retail camera feel or a full gameplay port.
 
-Run `python3 test_samp_game_camera.py`. Tests cover 15/30/60/120Hz sampling, explicit
+Run `python3 tests/network/test_samp_game_camera.py`. Tests cover 15/30/60/120Hz sampling, explicit
 curve values, independent tracks, interruptions, endpoints, zero duration, clock
 regression, explicit untimed policy, actual injected player/vehicle views, fixed
 tracking, missing/invalid subjects, stale generations, spawn/behind transitions and

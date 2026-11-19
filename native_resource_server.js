@@ -28,7 +28,7 @@ function create({localOnly}) {
       if(data.manifest?.schema!==1||data.manifest?.profile!=='zgta-prepared-v1'||!digest.test(data.manifest.contentID)||!data.files)throw Error('Invalid resource catalogue');
       cached=data;signature=revision;
     }catch{
-      res.writeHead(pathname.startsWith(cjPrefix)?404:503,{'Content-Type':'text/plain; charset=utf-8'});res.end('Prepare the Mac resource index with prepare_native_resource_package.py');return;
+      res.writeHead(pathname.startsWith(cjPrefix)?404:503,{'Content-Type':'text/plain; charset=utf-8'});res.end('Prepare the Mac resource index with tools/assets/prepare_native_resource_package.py');return;
     }
     if(pathname==='/game/native/resource-manifest.json'){
       const bytes=Buffer.from(JSON.stringify(data.manifest));res.writeHead(200,{'Content-Type':'application/json','Content-Length':bytes.length,'Cache-Control':'no-cache'});res.end(req.method==='HEAD'?undefined:bytes);return;
