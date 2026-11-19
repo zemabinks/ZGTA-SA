@@ -89,3 +89,55 @@ parity result. The existing linear/inset/fract/no-mip sampling remains deliberat
 compatibility behavior; original RenderWare wrap/filter/mip behavior, physical
 A14 memory/FPS, retail lighting and matched original animation still require
 their own comparisons. All original and converted game resources stay local.
+
+## Detailed-world high-resolution images (146)
+
+The archived detailed-world mesh ends with a UInt16 plus-one image table: zero
+keeps the base atlas, while positive entries select a separate 256px image.
+The native parser previously skipped this table and the renderer never loaded
+the corresponding HD resources. It now retains the table, admits only matching
+bounded index/image profiles, and uploads each declared image to an individual
+Metal array slice without resizing it. The shader keeps the existing world
+lighting, fog and alpha behavior and falls back to the base image per layer.
+
+Host world preparation converts available HD WebP files to exact RGBA8 PNGs.
+Missing optional HD files preserve the required base-world installation. The
+normal prepared-resource packager already includes PNG members; existing
+installed packages remain usable without a bulk reimport. Their absent HD files
+continue using base detail until the owner prepares and repairs those resources.
+
+Only the active central detailed cell receives HD residency. Encoded reads are
+capped at 64 MiB. A serial utility worker retains at most one active decode and
+one replaceable pending image; cancelled/source-retired results cannot publish.
+PNG dimensions are checked before decode. Each admitted texture array and its
+map have a 96 MiB allocation cap, including generated mip levels. That cap is
+not a total process-memory measurement: encoded images, staging textures,
+in-flight render references and other engine resources consume additional RAM.
+Upload completion waits only on the utility worker, never the render thread.
+
+Focused authored evidence passes 46 layout/manifest/ownership checks, 162 actual
+Metal assertions over 100 renders, and 89 existing material/batch assertions over
+39 pixels. Pixel tests cover transparent RGB, all declared plus-one mappings,
+negative/edge UVs, repeat filtering, generated minification, a standalone image
+reference, budget/queue rejection, inline completion ownership and base fallback.
+The first WebP fixture accidentally discarded invisible RGB before invoking the
+producer; its failure is retained and the fixture now explicitly preserves it.
+
+The complete selected Core146 chain passes with required Metal, physics,
+audio and transport gates (742.1 seconds), with all 225 frozen app/build inputs
+unchanged. Native-project, host and repository-layout checks also pass. A
+separate owner-local native audit passes 1,113 checks over all 311 detailed
+cells and 186 exact RGBA GPU image readbacks for the central exterior. Its
+observed texture/map allocation is 73,928,704 bytes on Intel UHD 630. Original
+archive files and served resources remain unchanged. SDK and normal installed
+acceptance remain separate pending checks.
+
+The owner archive declares 302 nonzero HD families across 311 detailed cells;
+250 source files are present and 52 interior HD files are unavailable. This
+resource path closes a demonstrated archived-client omission. It does not
+establish full original-PC texture coverage, recover original TXD stored mips,
+implement adjacent-cell HD residency or prove retail renderer fidelity. World
+purple surfaces, complete transparent sorting/depth behavior, full lighting,
+reflections, ambient AI and matched classic-retail comparisons remain open.
+Full-chain, SDK, installed-scene and physical-device evidence are tracked
+separately from these focused source tests.

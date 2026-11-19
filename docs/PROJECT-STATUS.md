@@ -34,6 +34,8 @@ Core 144 adds typed legacy-server gravity to native force owners and fixes a dem
 
 Core 145 adds an explicit native-size vehicle texture family, hardware sampling and prepared-install admission. Authored GPU checks and all 212 owner-local family pixel/readback checks pass; complete installed-build acceptance remains separate. Existing server assets were preserved. [Texture scope and remaining differences](research/vehicles/CORE_VEHICLE_PAINT_105.md#native-size-vehicle-images-and-hardware-sampling-145) include generated-versus-stored mips and the unresolved world/material gaps.
 
+Core 146 connects the archived world's previously unused high-resolution image table to optional native resources, bounded background loading and Metal sampling. Existing installed base resources remain usable. The full selected regression chain and 311-cell resource/186-image GPU readback audit pass; SDK and installed-scene acceptance remain separate. The archive still lacks 52 declared interior HD files. See [resource scope and memory limits](research/rendering/CORE_PED_RENDERING_119.md#detailed-world-high-resolution-images-146); this is not full original-PC world or gameplay parity.
+
 ## Where we're going
 
 The project's priorities are **stable shared world state**, **accurate player and vehicle appearances**, **correct passengers/vehicle authority**, **complete original resources**, **authentic NPCs and traffic**, and **original free-roam gameplay fidelity**. Original campaign missions are explicitly not the target.

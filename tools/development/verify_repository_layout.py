@@ -20,7 +20,7 @@ def verify(root):
     for name in ['host.py','build_native.sh','README.md','docs/START-HERE.md','docs/GAME-FILES.md','docs/MULTIPLAYER.md',
                  'docs/TROUBLESHOOTING.md','docs/DEVELOPMENT.md','docs/PROJECT-STATUS.md',
                  'docs/development/CORE_GAMEPLAY_PARITY.md','docs/development/CORE_GAMEPLAY_JOURNAL.md',
-                 'docs/development/CORE_RETAIL_REFERENCE.md','tests/core/smoke_core_136.py','tests/core/smoke_core_140.py','tests/core/smoke_core_142.py','tests/core/smoke_core_143.py','tests/core/smoke_core_144.py','tests/core/smoke_core_145.py']:
+                 'docs/development/CORE_RETAIL_REFERENCE.md','tests/core/smoke_core_136.py','tests/core/smoke_core_140.py','tests/core/smoke_core_142.py','tests/core/smoke_core_143.py','tests/core/smoke_core_144.py','tests/core/smoke_core_145.py','tests/core/smoke_core_146.py']:
         check((root/name).is_file(),'Missing stable entrypoint or guide: '+name)
     for directory in ['tests','tools']:
         for p in (root/directory).rglob('*.py'):

@@ -189,3 +189,27 @@ fragment half4 ordinaryPedNativeFragment(Raster in [[stage_in]],
     return ordinaryActorShade(in,color,uniforms);
 }
 
+
+// Optional detailed-cell sharp map uses the original plus-one WRL2 lookup.
+fragment half4 worldSharpFragment(Raster in [[stage_in]],
+    texture2d<half> atlas [[texture(0)]],texture2d_array<half> sharpImages [[texture(1)]],
+    sampler originalSampler [[sampler(0)]],constant Uniforms &uniforms [[buffer(1)]],
+    constant uint *sharpMap [[buffer(2)]]) {
+    half4 textureColor=nativeAtlasColor(in,atlas,uniforms);
+    float layer=round(in.layer);
+    if(isfinite(layer) && layer>=0.0 && layer<float(sharpMap[0])) {
+        uint selected=sharpMap[4+uint(layer)];
+        if(selected>0 && selected<=sharpMap[1] && selected<=sharpImages.get_array_size())
+            textureColor=sharpImages.sample(originalSampler,in.uv,selected-1);
+    }
+    if (textureColor.a * in.tint.a < 0.1) discard_fragment();
+    // Exterior prelighting is an illumination term, separate from model tint.
+    half3 day = min(half3(in.tint.rgb) + half3(0.30h), half3(1.0h));
+    half3 night = min(half3(in.dusk.rgb) + half3(0.10h,0.10h,0.15h), half3(1.0h));
+    half3 light = mix(day,night,half(clamp(uniforms.settings.z,0.0,1.0)));
+    half3 color = textureColor.rgb * light * half3(uniforms.tintColor.rgb);
+    float fog = uniforms.fogSettings.z * clamp((in.depth - uniforms.fogSettings.x) /
+        max(1.0, uniforms.fogSettings.y - uniforms.fogSettings.x), 0.0, 1.0);
+    color = mix(color,half3(uniforms.fogColor.rgb),half(fog));
+    return half4(color,textureColor.a * half(in.tint.a * uniforms.tintColor.a));
+}

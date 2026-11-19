@@ -148,7 +148,14 @@ private final class BatchEncoder {
     func setRenderPipelineState(_ value: String) { state = value }
     func setDepthBias(_ value: Float, slopeScale: Float, clamp: Float) { bias = value }
 }
-private func productionBatch(_ encoder: BatchEncoder, meshes: [String: BatchMesh], activeDetails: Set<String>) {
+private final class SharpBind {
+    var fail=false,binds=0
+    func bind(encoder:BatchEncoder,queue:Int)throws{binds+=1;if fail{throw Failure.check("authored unavailable upload")}}
+}
+private func productionBatch(_ encoder: BatchEncoder, meshes: [String: BatchMesh], activeDetails: Set<String>,
+    worldSharpName:String?=nil,worldSharpSource:String?=nil,worldSharpGPU:SharpBind?=nil,worldSharpPipeline:String?="sharp") {
+    let queue=0
+    func fixedCJSourceIdentity()->String{"current"}
     let worldPipeline = "world", pipeline = "ordinary", matrix = matrix_identity_float4x4
     func draw(mesh: BatchMesh, cellSize: Float, matrix: simd_float4x4, encoder: BatchEncoder) {
         encoder.draws.append((mesh.id, cellSize, encoder.state, encoder.bias))
@@ -202,6 +209,18 @@ private func productionBatch(_ encoder: BatchEncoder, meshes: [String: BatchMesh
             try check(batch.state == "ordinary" && batch.bias == 0, "world pass restores generic material and depth bias")
             let empty = BatchEncoder(); productionBatch(empty, meshes: [:], activeDetails: [])
             try check(empty.draws.isEmpty && empty.state == "ordinary" && empty.bias == 0, "empty world pass preserves later model state")
+            let images=SharpBind(),sharp=BatchEncoder()
+            productionBatch(sharp,meshes:["t0":.init(id:10),"c0":.init(id:20),"c1":.init(id:21)],activeDetails:["c0","c1"],
+                worldSharpName:"c0",worldSharpSource:"current",worldSharpGPU:images)
+            try check(images.binds==1 && sharp.draws.first?.2=="world" && sharp.draws.first(where:{$0.0==20})?.2=="sharp" && sharp.draws.first(where:{$0.0==21})?.2=="world","Only the admitted central cell uses the HD pipeline")
+            try check(sharp.state=="ordinary" && sharp.bias==0,"HD batch restores ordinary state")
+            for failure in ["source","upload","pipeline"] {
+                let failed=SharpBind(),fallback=BatchEncoder();failed.fail=failure=="upload"
+                productionBatch(fallback,meshes:["c0":.init(id:20)],activeDetails:["c0"],worldSharpName:"c0",
+                    worldSharpSource:failure=="source" ? "retired":"current",worldSharpGPU:failed,
+                    worldSharpPipeline:failure=="pipeline" ? nil:"sharp")
+                try check(fallback.draws.count==1 && fallback.draws[0].2=="world","Unavailable HD family retains actual base material: "+failure)
+            }
             report["status"] = "PASS"
         } catch { report["status"] = "FAIL"; report["error"] = String(describing: error) }
         report["checks"] = checks; report["renderedPixels"] = rendered
