@@ -127,6 +127,9 @@ final class NativeFootAnimation {
         var ending = false
         var down: Double?
         var speed: Double = 1
+        // Ordinary landing owns a gait restart; unrelated actions using the
+        // same animation clip do not acquire that completion side effect.
+        var restartsGait = false
     }
     private struct Script {
         var clip: String
@@ -528,6 +531,7 @@ final class NativeFootAnimation {
             let landing: String? = input.land ?? (airTime <= 0.2 ? nil : airTime > 1.5 ? "collapse" : fell || airTime > 0.9 ? "fallLand" : ratio > 1.5 ? "land" : "fallLand")
             if let landing, death == nil, !Self.floorKinds.contains(action?.kind ?? ""), start(landing) > 0 {
                 action?.weight = 1
+                action?.restartsGait = ["land","fallLand","collapse"].contains(landing)
                 if ["fallLand","collapse"].contains(landing) { step(landing) }
                 if input.sprint && ratio >= 1.5 { action?.speed = 2 }
                 if ["koSkidBack","fallFront"].contains(landing) { action?.down = 0.7 }
@@ -633,7 +637,12 @@ final class NativeFootAnimation {
             current.weight = fade(current.weight, !current.ending, 8, 5)
             add(current.clip, current.time, current.weight, replace: true, zeroSide: rolling)
             travel += displacement(current.clip, previous, current.time, false, side: rolling) * current.weight
-            action = current.ending && current.weight <= 0 ? nil : current
+            let completed = current.ending && current.weight <= 0
+            // Complete this step's root displacement before changing the
+            // gait clock. Resetting between its before/after samples would
+            // fabricate backwards travel or an entire extra cycle.
+            if completed && current.restartsGait { phase = 0 }
+            action = completed ? nil : current
         }
         if gunState != .fire { gunSpare = 0 }
         let previousGunTime = gunTime
