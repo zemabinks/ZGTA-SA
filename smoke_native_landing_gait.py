@@ -25,7 +25,13 @@ rows=[]
 with tempfile.TemporaryDirectory(prefix='gate-',dir=out) as directory:
     work=Path(directory)
     for label,source in ([('historical',args.negative_root.resolve()/'ios/App/NativeFootAnimation.swift')] if args.negative_root else [])+[('current',paths[4])]:
-        text=common+'\n'+source.read_text()+'\n'+harness
+        original=source.read_text()
+        marker='final class NativeFootAnimation {'
+        assert original.count(marker)==1
+        observer='\n    var gateHasMovementAction:Bool { action != nil }'
+        observed=original.replace(marker,marker+observer)
+        assert observed.replace(observer,'')==original
+        text=common+'\n'+observed+'\n'+harness
         generated=work/(label+'.swift');generated.write_text(text);binary=work/label
         start=time.monotonic()
         compile=subprocess.run(['xcrun','swiftc','-O','-whole-module-optimization','-num-threads','1','-module-cache-path',str(out/'modules'),str(generated),'-o',str(binary)],capture_output=True,text=True,timeout=240)
@@ -43,6 +49,7 @@ with tempfile.TemporaryDirectory(prefix='gate-',dir=out) as directory:
 assert all(hashlib.sha256(Path(name).read_bytes()).hexdigest()==digest for name,digest in before.items())
 report=dict(status='PASS',actualNice=os.getpriority(os.PRIO_PROCESS,0),results=rows,sourceHashes=before,sourceUnchanged=True,
             scope='Actual CLP decoder and foot/gun/swim/flight animation code; authored clips. Optional owned clips remain private CPU evidence.',
+            readOnlyTaskObserver='One getter exposes actual action lifetime; the animation algorithm is byte-preserved',
             noGPUDeviceOrRetailClaim=True)
 (out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps({k:report[k] for k in ['status','actualNice','results']},indent=2))

@@ -53,7 +53,7 @@ func ordinary(_ library:NativeSkeletalAnimationLibrary,_ kind:String,_ clip:Stri
         let dt=schedule[i%schedule.count],f=e.update(delta:dt,input:input)
         try check(f.travel.x.isFinite && f.travel.y.isFinite,"nonfinite landing travel")
         try check(f.travel.y >= -1e-6 && f.travel.y <= dt*12+1e-5,"landing reset fabricated backwards/cycle root displacement")
-        if !f.blends.contains(where:{$0.clip==clip}){
+        if !e.gateHasMovementAction{
             // The retiring frame already integrated its old before/after
             // samples. Observe the new stored clock without adding time.
             let atBoundary=e.update(delta:0,input:input)
@@ -80,7 +80,7 @@ func exclusions(_ library:NativeSkeletalAnimationLibrary)throws{
         try near(try gait(after,e,library),before,"interrupted landing acquired completion reset")
         if action=="replace"{
             var ended=false
-            for _ in 0..<150{let f=e.update(delta:0.013,input:input);if !f.blends.contains(where:{$0.clip=="ped/crouch_roll_r"}){try check(try gait(e.update(delta:0,input:input),e,library)>0.0001,"replacement action inherited landing completion");ended=true;break}}
+            for _ in 0..<150{_ = e.update(delta:0.013,input:input);if !e.gateHasMovementAction{try check(try gait(e.update(delta:0,input:input),e,library)>0.0001,"replacement action inherited landing completion");ended=true;break}}
             try check(ended,"roll replacement never retired")
         }
     }
