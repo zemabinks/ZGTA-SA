@@ -28,6 +28,8 @@ Resource preparation also preserves opaque X8 texture semantics while retaining 
 
 A native original-navigation reader and explicit Game Files route checks now provide a pedestrian/vehicle data foundation. Authored raw-store/lease/menu lifecycle checks pass. Ambient traffic, pedestrian AI and original route-selection policy remain open. See [original navigation](research/resources/CORE_NATIVE_RAW_ISO_108.md#original-navigation-reader-142) for scope; build and normal UI results are tracked separately.
 
+Core 143 separates world lighting from model shading and repairs a demonstrated native texture repeat-edge difference with bounded original-size Metal arrays. Authored GPU and resource-owner regressions pass; build and installed-game acceptance are tracked separately. This remains a scoped renderer repair, with retail fidelity and ambient AI still open. See the [rendering record](research/rendering/CORE_PED_RENDERING_119.md#material-ownership-and-native-pedestrian-samplers-143).
+
 ## Where we're going
 
 The project's priorities are **stable shared world state**, **accurate player and vehicle appearances**, **correct passengers/vehicle authority**, **complete original resources**, **authentic NPCs and traffic**, and **original free-roam gameplay fidelity**. Original campaign missions are explicitly not the target.

@@ -7,7 +7,7 @@ from pathlib import Path as _zgta_Path
 _ZGTA_ROOT = _zgta_Path(__file__).resolve().parents[2]
 if str(_ZGTA_ROOT) not in _zgta_sys.path: _zgta_sys.path.insert(0, str(_ZGTA_ROOT))
 
-import argparse, hashlib, json, os, subprocess, time
+import argparse, hashlib, json, os, re, subprocess, time
 from pathlib import Path
 from tests.resources.smoke_native_ped_atlas_support import family, png, digest, canonical
 from tests.vehicles.smoke_native_vehicle_transparency import block
@@ -18,7 +18,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--metal', type=Path)
     parser.add_argument('--compile-only', action='store_true')
+    parser.add_argument('--source-root', type=Path, default=ROOT/'ios/App', help='Explicit native source snapshot for regression comparisons; authored fixtures only.')
     args = parser.parse_args()
+    native = args.source_root.resolve(strict=True)
     out = ROOT / 'local-only/research/ped-atlas-120/gpu' / str(time.time_ns())
     stage = out / 'source'; stage.mkdir(parents=True)
     fixtures = out / 'fixtures'; fixtures.mkdir()
@@ -62,15 +64,21 @@ def main():
             (target/('tile-'+str(layer['slot'])+'.png')).write_bytes(png(w,h,tile))
         descriptions.append(value['model'])
     (fixtures/'cases.json').write_text(json.dumps(descriptions))
-    names=['NativeWorldRenderer.swift','WorldBinary.swift','NativePedAtlasLayout.swift','WorldShaders.metal','SkeletalShaders.metal']
+    names=['NativeWorldRenderer.swift','WorldBinary.swift','NativePedAtlasLayout.swift','WorldShaders.metal','SkeletalShaders.metal','NativePedTextureArrays.swift']
     tests=['tests/resources/smoke_native_ped_atlas_gpu.py','tests/resources/smoke_native_ped_atlas_gpu.swift','tests/resources/smoke_native_ped_atlas_support.py','tests/vehicles/smoke_native_vehicle_transparency.py']
-    inputs=[ROOT/'ios/App'/n for n in names]+[ROOT/n for n in tests]
+    inputs=[native/n for n in names]+[ROOT/n for n in tests]
     before={str(p.relative_to(ROOT)):digest(p.read_bytes()) for p in inputs}
-    renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
-    pipeline=renderer[renderer.index('        let descriptor = MTLRenderPipelineDescriptor()'):renderer.index('        descriptor.colorAttachments[0].writeMask = []')]
-    source=(ROOT/'tests/resources/smoke_native_ped_atlas_gpu.swift').read_text().replace('// ACTUAL_UNIFORMS',block(renderer,'    private struct Uniforms {')).replace('// ACTUAL_PIPELINE',pipeline)
+    renderer=(native/'NativeWorldRenderer.swift').read_text()
+    # The generic model descriptor ends before the separate world material.
+    # The world-material gate executes the complete constructor independently.
+    start=renderer.index('        let descriptor = MTLRenderPipelineDescriptor()')
+    world_boundary=renderer.find('        descriptor.fragmentFunction = worldFragment',start)
+    end=world_boundary if world_boundary>=0 else renderer.index('        descriptor.colorAttachments[0].writeMask = []',start)
+    pipeline=renderer[start:end]
+    ordinary=re.search(r'let fragment = library\.makeFunction\(name: "([^"]+)"\)',renderer[renderer.index('    init?(preferredDevice:'):]).group(1)
+    source=(ROOT/'tests/resources/smoke_native_ped_atlas_gpu.swift').read_text().replace('// ACTUAL_UNIFORMS',block(renderer,'    private struct Uniforms {')).replace('// ACTUAL_PIPELINE',pipeline).replace('MODEL_FRAGMENT_NAME',ordinary)
     (stage/'main.swift').write_text(source)
-    for name in names[1:]: (stage/name).write_bytes((ROOT/'ios/App'/name).read_bytes())
+    for name in names[1:]: (stage/name).write_bytes((native/name).read_bytes())
     world=(stage/'WorldShaders.metal').read_text()
     reference='\n\n'.join(['#include <metal_stdlib>\nusing namespace metal;',
         block(world,'struct Uniforms {')+';',block(world,'struct Raster {')+';',
@@ -104,7 +112,7 @@ fragment half4 nativePedReferenceFragment(Raster in [[stage_in]],
         air=stage/(name+'.air'); airs.append(air)
         run([compiler,'-target','air64-apple-macos13.0','-isysroot',sdk,'-fmodules-cache-path='+str(out/'metal-modules'),'-c',stage/(name+'.metal'),'-o',air],'metal-'+name)
     run([compiler.with_name('metallib'),*airs,'-o',out/'production.metallib'],'link-metal')
-    run(['xcrun','swiftc','-whole-module-optimization','-num-threads','1','-Onone','-swift-version','5','-module-cache-path',out/'modules',stage/'WorldBinary.swift',stage/'NativePedAtlasLayout.swift',stage/'main.swift','-o',out/'verify'],'swift')
+    run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-Onone','-swift-version','5','-module-cache-path',out/'modules',stage/'WorldBinary.swift',stage/'NativePedAtlasLayout.swift',stage/'NativePedTextureArrays.swift',stage/'main.swift','-o',out/'verify'],'swift')
     if args.compile_only:
         print(json.dumps({'status':'COMPILED_ONLY','work':str(out)})); return
     run([out/'verify',out],'runtime')

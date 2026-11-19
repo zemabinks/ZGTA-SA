@@ -95,6 +95,7 @@
 		6539704B80776C292A532C26 /* NativeGameFilesViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D814DFE5896243282CE57780 /* NativeGameFilesViewController.swift */; };
 		67281AE616BD7DD8A5DCACCA /* SwiftRapierWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A5F440C2D502D65DBB92549 /* SwiftRapierWorld.swift */; };
 		6897348A9C09CE4C90346A6D /* NativeRenderWareCollision.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31AC14CE95B647949BA39489 /* NativeRenderWareCollision.swift */; };
+		6B411414B98C18E197081B8F /* NativePedTextureArrays.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA47A6CFB247B4E737D85613 /* NativePedTextureArrays.swift */; };
 		6C334A7225A6AE90E81A5525 /* NativeRadioSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC15EF8624A53D88078459DB /* NativeRadioSelection.swift */; };
 		6DDF956AD596AC0C149DD77E /* NativeGunAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8654E6D711414A5DC2C08238 /* NativeGunAnimation.swift */; };
 		6F7EDF83F0653AC9348A647B /* NativeRadioArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3602A602BF8F0E6B5B08AEA /* NativeRadioArchive.swift */; };
@@ -348,6 +349,7 @@
 		B3E50DA4B9256B0F78126AF8 /* NativeRateAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRateAudio.swift; sourceTree = "<group>"; };
 		B506B699DA67F074C2954D4E /* NativeCJPedModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJPedModel.swift; sourceTree = "<group>"; };
 		B9388F60B4020A35441B2389 /* NativeISOExtraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeISOExtraction.swift; sourceTree = "<group>"; };
+		BA47A6CFB247B4E737D85613 /* NativePedTextureArrays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativePedTextureArrays.swift; sourceTree = "<group>"; };
 		BBC82BCB75D5520EBAFB5BAE /* NativeStockAssetAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStockAssetAccess.swift; sourceTree = "<group>"; };
 		BBEEA20F7CADAA527F2CCCDC /* NativeOptionsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOptionsViewController.swift; sourceTree = "<group>"; };
 		BEC3159E0B6CE0CDDA1E14E8 /* NativeOtherVehicles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOtherVehicles.swift; sourceTree = "<group>"; };
@@ -508,6 +510,7 @@
 				6A3F68897CC41114E79F10D9 /* NativePedAtlasLayout.swift */,
 				4DFC1747FD063F85D265C317 /* NativePedAtlasLoader.swift */,
 				57FD67E1D1161EFB1AEF6C8A /* NativePedestrianReaction.swift */,
+				BA47A6CFB247B4E737D85613 /* NativePedTextureArrays.swift */,
 				53186CE890365391FC7540E7 /* NativePersonalFlightController.swift */,
 				AAD27E3A04D7D3DC915B9A00 /* NativePreparedRuntimeVerifier.swift */,
 				C3602A602BF8F0E6B5B08AEA /* NativeRadioArchive.swift */,
@@ -799,6 +802,7 @@
 				31D8D111A774EA69DE95E520 /* NativePausePanel.swift in Sources */,
 				D9AF4A11F9FD110119FE312D /* NativePedAtlasLayout.swift in Sources */,
 				A5443E6FDF8A8B2748F2FE18 /* NativePedAtlasLoader.swift in Sources */,
+				6B411414B98C18E197081B8F /* NativePedTextureArrays.swift in Sources */,
 				04B40C99D7BE0124F276906E /* NativePedestrianReaction.swift in Sources */,
 				3DF56650D1DDEC0560887D66 /* NativePersonalFlightController.swift in Sources */,
 				7DE136DB20B6F955FDFAAE71 /* NativePreparedRuntimeVerifier.swift in Sources */,
