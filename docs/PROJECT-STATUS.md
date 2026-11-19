@@ -22,7 +22,9 @@ Build 136 includes persisted resource-import corrections, owned/parked wheel-pha
 
 Repository cleanup is merged in [PR #3](https://github.com/zemabinks/ZGTA-SA/pull/3): 671 public files moved and the root reduced from 711 to 40 files. The full optional core chain, both SDK builds, source/history audit and corrected GitHub CI passed. Existing prepared resources were retained. The public launch commands remain available. See the [cleanup record](development/REPOSITORY-CLEANUP.md) for scope and validation.
 
-Core 140 repairs independent-server breath lifetimes, stale HTTP breath-display writes and respawn oxygen clocks. Focused native-method and actual backend/Peer checks pass; full current regression and SDK validation are in progress. Rendered and hardware acceptance remain separate.
+Core 140 repairs independent-server breath lifetimes, stale HTTP breath-display writes and respawn oxygen clocks. Focused native/backend checks, the complete optional core chain and both SDK builds pass. A normal Simulator update retains prepared/raw resources and passes join, walking, camera and pause/resume checks. Real-time drowning and hardware acceptance remain unverified. [Breathing repair #4](https://github.com/zemabinks/ZGTA-SA/pull/4) is merged.
+
+Resource preparation also preserves opaque X8 texture semantics while retaining A8 alpha, with authored decoder and prepared-family regression coverage. Existing installed game files remain intact.
 
 ## Where we're going
 

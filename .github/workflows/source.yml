@@ -24,6 +24,7 @@ jobs:
       - run: python3 tests/resources/test_native_stock_package.py
       - run: python3 -m pip install Pillow==11.3.0
       - run: python3 tests/resources/test_native_ped_atlas.py
+      - run: python3 tests/resources/test_native_texture_opacity.py
       - run: node tests/server/smoke_discord.js
       - run: node tests/combat/smoke_inventory_ack.js
       - run: node tests/combat/smoke_weapon_transport.js

@@ -171,7 +171,10 @@ def textures(path):
                 mode = {b'DXT1': 1, b'DXT3': 2, b'DXT5': 3}[code]
                 image = Image.frombytes('RGBA', (width, height), pixels, 'bcn', mode)
             elif code in (struct.pack('<I', 21), struct.pack('<I', 22)) and len(pixels) == width * height * 4:
+                # X8 padding is not alpha; A8 retains its original coverage.
                 image = Image.frombytes('RGBA', (width, height), pixels, 'raw', 'BGRA')
+                if code == struct.pack('<I', 22):
+                    image.putalpha(255)
             else:
                 continue
             result[name] = image
