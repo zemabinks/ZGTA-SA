@@ -25,7 +25,7 @@ def main():
  paths=[]
  for n in names:p=out/n;p.write_bytes((ROOT/'ios/App'/n).read_bytes());paths.append(p)
  mainfile=out/'main.swift';mainfile.write_text(source)
- with(out/'compile.log').open('w')as log:subprocess.run(['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-Onone','-module-cache-path',str(out/'modules'),*map(str,paths),str(mainfile),'-o',str(out/'verify')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=600)
+ with(out/'compile.log').open('w')as log:subprocess.run(['xcrun','swiftc','-parse-as-library','-j','1','-num-threads','1','-whole-module-optimization','-Onone','-module-cache-path',str(out/'modules'),*map(str,paths),str(mainfile),'-o',str(out/'verify')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=600)
  result=subprocess.run([str(out/'verify')],capture_output=True,text=True,check=True,timeout=30);(out/'runtime.log').write_text(result.stdout+result.stderr)
  assert all(hashlib.sha256((ROOT/p).read_bytes()).hexdigest()==sha for p,sha in before.items())
  report={'status':'PASS','sourceUnchanged':True,'sourceHashes':before,'output':result.stdout.strip(),'originalDataUsed':False,'runtimeGPUOrUIUsed':False}

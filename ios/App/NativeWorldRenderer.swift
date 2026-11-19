@@ -54,6 +54,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let painted:Bool,depth:Float
         var bindTextures:((MTLRenderCommandEncoder)->Bool)?=nil
     }
+    private struct TransparentWorldDraw {
+        let mesh:Mesh,range:NativeWorldDrawPlan.Range,uniforms:Uniforms
+        let native:NativeWorldSharpTextures?,depth:Float
+    }
+    private var deferredWorldSurfaces:[TransparentWorldDraw]=[]
+    // Nil keeps the standalone actor encoder's existing behavior. A scene
+    // frame captures packets so world glass can participate in the same order.
+    private var deferredVehicleSurfaces:[TransparentVehicleDraw]?
     private struct ActorPart: Decodable {
         let name: String
         let start: Int
@@ -128,6 +136,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let pipeline: MTLRenderPipelineState
     private let worldPipeline: MTLRenderPipelineState
     private let worldSharpPipeline: MTLRenderPipelineState?
+    private let worldSurfacePipelines:[String:MTLRenderPipelineState]
     private let vehiclePipeline: MTLRenderPipelineState?
     private let vehiclePaintPipeline: MTLRenderPipelineState?
     private let vehicleNativePipeline: MTLRenderPipelineState?
@@ -166,7 +175,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let markerDepth: MTLDepthStencilState
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
-    private struct WorldSharpBase {let layers:Int,mapping:[UInt16],source:String}
+    private struct WorldSharpBase {let layers:Int,mapping:[UInt16],source:String;let indices:Int,center:SIMD3<Float>}
     private var worldSharpBase:[String:WorldSharpBase]=[:]
     private var worldSharpManifest:NativeWorldSharpManifest?,worldSharpSource:String?
     private var worldSharpIndexTask:NativeResourceTask?,worldSharpTicket:NativeWorldSharpTicket?
@@ -910,6 +919,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard let worldPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
         descriptor.fragmentFunction = library.makeFunction(name:"worldSharpFragment")
         let worldSharpPipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        var worldSurfacePipelines:[String:MTLRenderPipelineState]=[:]
+        for (kind,function) in [("base","worldSurfaceFragment"),("sharp","worldSharpSurfaceFragment")] {
+            descriptor.fragmentFunction=library.makeFunction(name:function)
+            for (phase,blended) in [("solid",false),("clear",true)] {
+                descriptor.colorAttachments[0].isBlendingEnabled=blended
+                if descriptor.fragmentFunction != nil,let state=try? device.makeRenderPipelineState(descriptor:descriptor) {
+                    worldSurfacePipelines[kind+"."+phase]=state
+                }
+            }
+        }
+        descriptor.colorAttachments[0].isBlendingEnabled=true
         descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].writeMask = []
         let vehicleMaskPipeline=try? device.makeRenderPipelineState(descriptor:descriptor)
@@ -982,6 +1002,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.pipeline = pipeline
         self.worldPipeline = worldPipeline
         self.worldSharpPipeline = worldSharpPipeline
+        self.worldSurfacePipelines=worldSurfacePipelines
         self.vehiclePipeline = vehiclePipeline
         self.vehiclePaintPipeline = vehiclePaintPipeline
         self.vehicleNativePipeline = vehicleNativePipeline
@@ -2926,7 +2947,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.meshes[name] = Mesh(vertices: vertices, indices: indices,
                                          indexCount: world.indices.count, atlas: atlas)
                 if !name.hasPrefix("t") {
-                    self.worldSharpBase[name]=WorldSharpBase(layers:world.layers,mapping:world.sharpLayers,source:source)
+                    var low=SIMD3<Float>(repeating:.greatestFiniteMagnitude),high = -low
+                    for vertex in world.vertices {
+                        let p=SIMD3(vertex.position.x,vertex.position.y,vertex.position.z)
+                        low=simd_min(low,p);high=simd_max(high,p)
+                    }
+                    self.worldSharpBase[name]=WorldSharpBase(layers:world.layers,mapping:world.sharpLayers,source:source,
+                        indices:world.indices.count,center:low*0.5+high*0.5)
                     self.loadWorldSharpIfNeeded()
                 }
                 self.onStatus?("CITY READY: \(name.uppercased())")
@@ -4155,8 +4182,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         encoder.setDepthStencilState(depth)
         drawWorldMeshes(matrix: matrix,encoder: encoder)
         particleDrawDelta=Double(delta)
+        deferredVehicleSurfaces=[]
         drawActors(encoder: encoder,matrix: matrix)
+        let transparentVehicles=deferredVehicleSurfaces ?? [];deferredVehicleSurfaces=nil
         drawLegacyObjects(encoder:encoder,matrix:matrix,eye:eye)
+        encodeWorldAndVehicleSurfaces(vehicles:transparentVehicles,encoder:encoder)
+        deferredWorldSurfaces.removeAll(keepingCapacity:true)
         if !indoors { drawWater(eye: eye,matrix: matrix,encoder: encoder) }
         if let atmosphereSnapshot { drawAtmosphereQuads(atmosphereSnapshot.quads.filter { !$0.paintedOnSky },matrix: matrix,encoder: encoder) }
         drawEffects(encoder:encoder,matrix:matrix,eye:eye,viewMatrix:viewMatrix,projection:projection,delta:Double(delta))
@@ -4169,6 +4200,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawWorldMeshes(matrix: simd_float4x4, encoder: MTLRenderCommandEncoder) {
+        deferredWorldSurfaces.removeAll(keepingCapacity:true)
         encoder.setRenderPipelineState(worldPipeline)
         defer {
             encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
@@ -4180,12 +4212,68 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
         for name in activeDetails {if let mesh=meshes[name] {
+            if stageWorldSurface(name:name,mesh:mesh,matrix:matrix,encoder:encoder){continue}
             if name==worldSharpName,worldSharpSource==fixedCJSourceIdentity(),let images=worldSharpGPU,
                let worldSharpPipeline,(try? images.bind(encoder:encoder,queue:queue)) != nil {
                 encoder.setRenderPipelineState(worldSharpPipeline)
             }else{encoder.setRenderPipelineState(worldPipeline)}
             draw(mesh:mesh,cellSize:128,matrix:matrix,encoder:encoder)
         }}
+    }
+
+    /// Admit the split only against the exact current source and geometry.
+    private func stageWorldSurface(name:String,mesh:Mesh,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder)->Bool {
+        let source=fixedCJSourceIdentity()
+        guard worldSharpSource==source,let base=worldSharpBase[name],base.source==source,
+              let entry=worldSharpManifest?.entries[name],entry.layers==base.layers,
+              let plan=NativeWorldDrawPlan(indexCount:mesh.indexCount,triangles:entry.triangles,blend:entry.blend),
+              base.indices==mesh.indexCount,worldSurfacePipelines["base.solid"] != nil,
+              worldSurfacePipelines["base.clear"] != nil else{return false}
+        var native:NativeWorldSharpTextures?
+        if name==worldSharpName,let images=worldSharpGPU,
+           worldSurfacePipelines["sharp.solid"] != nil,worldSurfacePipelines["sharp.clear"] != nil {native=images}
+        var uniforms=Uniforms(viewProjection:matrix,settings:SIMD4(Float(mesh.atlas.width),Float(mesh.atlas.height),night,128))
+        configureEnvironment(&uniforms)
+        if plan.solid.count>0 {
+            guard encodeWorldSurface(mesh:mesh,range:plan.solid,uniforms:uniforms,native:native,clear:false,encoder:encoder)else{return false}
+        }
+        if plan.clear.count>0 {
+            deferredWorldSurfaces.append(.init(mesh:mesh,range:plan.clear,uniforms:uniforms,native:native,
+                depth:NativeVehicleRig.projectedDepth(base.center,matrix:matrix)))
+        }
+        return true
+    }
+    @discardableResult private func encodeWorldSurface(mesh:Mesh,range:NativeWorldDrawPlan.Range,uniforms:Uniforms,
+        native:NativeWorldSharpTextures?,clear:Bool,encoder:MTLRenderCommandEncoder)->Bool {
+        guard range.start>=0,range.count>0,range.count<=mesh.indexCount,range.start<=mesh.indexCount-range.count,
+              range.start%3==0,range.count%3==0 else{return false}
+        var images=native
+        if let candidate=images,(try? candidate.bind(encoder:encoder,queue:queue))==nil{images=nil}
+        let key=(images==nil ? "base.":"sharp.")+(clear ? "clear":"solid")
+        guard let state=worldSurfacePipelines[key]else{return false}
+        var current=uniforms,phase:UInt32=clear ? 1:0
+        encoder.setRenderPipelineState(state);encoder.setDepthStencilState(clear ? markerDepth:depth)
+        encoder.setDepthBias(0,slopeScale:0,clamp:0)
+        encoder.setVertexBuffer(mesh.vertices,offset:0,index:0)
+        encoder.setVertexBytes(&current,length:MemoryLayout<Uniforms>.stride,index:1)
+        encoder.setFragmentBytes(&current,length:MemoryLayout<Uniforms>.stride,index:1)
+        encoder.setFragmentBytes(&phase,length:MemoryLayout<UInt32>.stride,index:3)
+        encoder.setFragmentTexture(mesh.atlas,index:0)
+        encoder.drawIndexedPrimitives(type:.triangle,indexCount:range.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:range.start*4)
+        return true
+    }
+    private func encodeWorldAndVehicleSurfaces(vehicles:[TransparentVehicleDraw],encoder:MTLRenderCommandEncoder) {
+        let world=deferredWorldSurfaces
+        // Stable ties retain creation order: world cells precede actor parts.
+        let depths=world.map(\.depth)+vehicles.map(\.depth)
+        for index in NativeVehicleRig.farToNear(depths) {
+            if index<world.count {
+                let packet=world[index]
+                encodeWorldSurface(mesh:packet.mesh,range:packet.range,uniforms:packet.uniforms,native:packet.native,clear:true,encoder:encoder)
+            }else{encodeTransparentVehicles([vehicles[index-world.count]],encoder:encoder)}
+        }
+        encoder.setDepthBias(0,slopeScale:0,clamp:0)
+        encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(depth)
     }
 
     private func makeObjectiveMarker() -> Mesh? {
@@ -4472,7 +4560,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let bind=packet.bindTextures {guard bind(encoder)else{continue}}
             else{encoder.setFragmentTexture(mesh.atlas,index:0)}
             encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
-            if packet.painted {
+            // Every vehicle packet owns this ABI even after a world clear
+            // draw has bound a four-byte phase at fragment slot3.
+            if packet.painted || packet.bindTextures != nil {
                 var paint=part.paint
                 encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
             }
@@ -4996,7 +5086,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             encoder.setDepthStencilState(depth)
         }
-        encodeTransparentVehicles(transparentVehicleDraws,encoder:encoder)
+        if deferredVehicleSurfaces != nil {deferredVehicleSurfaces=transparentVehicleDraws}
+        else{encodeTransparentVehicles(transparentVehicleDraws,encoder:encoder)}
         let visible = Set(modelInstances.map { $0.0 } + modelInstances.compactMap { weaponModels[String($0.6)] })
         for name in Array(pedAtlasLoads.keys) where !visible.contains(name) && !pedAtlasDemand.contains(name) {
             pedAtlasLoads.removeValue(forKey:name)?.request?.cancel();pedAtlasAdmission.removeValue(forKey:name)
