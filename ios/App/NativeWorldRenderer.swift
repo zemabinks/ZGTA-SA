@@ -52,6 +52,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let mesh:Mesh,part:NativeVehicleRig.Draw,uniforms:Uniforms
         let pipeline:MTLRenderPipelineState
         let painted:Bool,depth:Float
+        var bindTextures:((MTLRenderCommandEncoder)->Bool)?=nil
     }
     private struct ActorPart: Decodable {
         let name: String
@@ -128,6 +129,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let worldPipeline: MTLRenderPipelineState
     private let vehiclePipeline: MTLRenderPipelineState?
     private let vehiclePaintPipeline: MTLRenderPipelineState?
+    private let vehicleNativePipeline: MTLRenderPipelineState?
     private let vehicleMaskPipeline:MTLRenderPipelineState?
     private let animatedPipeline: MTLRenderPipelineState
     private let skeletalPipeline: MTLRenderPipelineState?
@@ -223,6 +225,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var actorParts: [String: [ActorPart]] = [:]
     private var vehicleRigs:[String:NativeVehicleRig] = [:]
     private var vehicleRigMeshes:[String:Mesh] = [:]
+    private var vehicleTextures:[String:NativeVehicleTextures] = [:]
     private var vehicleWaterMasks:[String:[(Int,Mesh)]] = [:]
     private var vehicleRigStates:[String:NativeVehicleRig.State] = [:]
     private var vehicleRigTimes:[String:Double] = [:]
@@ -904,6 +907,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let vehiclePipeline = descriptor.fragmentFunction.flatMap {_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
         descriptor.fragmentFunction = library.makeFunction(name:"vehiclePaintFragment")
         let vehiclePaintPipeline = descriptor.fragmentFunction.flatMap {_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        descriptor.fragmentFunction = library.makeFunction(name:"vehicleNativeFragment")
+        let vehicleNativePipeline = descriptor.fragmentFunction.flatMap {_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
         descriptor.fragmentFunction = fragment
         descriptor.vertexFunction = animatedVertex
         guard let animatedPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
@@ -967,6 +972,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.worldPipeline = worldPipeline
         self.vehiclePipeline = vehiclePipeline
         self.vehiclePaintPipeline = vehiclePaintPipeline
+        self.vehicleNativePipeline = vehicleNativePipeline
         self.vehicleMaskPipeline = vehicleMaskPipeline
         self.animatedPipeline = animatedPipeline
         self.skeletalPipeline = skeletalPipeline
@@ -3275,12 +3281,18 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let stagedActor=skeleton.flatMap{NativeSkeletalActor(data:$0,vertexCount:world.vertices.count,device:self.device)}
             guard !isPed || stagedActor != nil else{return}
             var stagedRig:NativeVehicleRig?,stagedRigMesh:Mesh?,stagedMasks:[(Int,Mesh)]=[]
+            var stagedVehicleTextures:NativeVehicleTextures?
             if let rigBinary,let rigImage,let rigMetadata,let rig=NativeVehicleRig(data:rigMetadata),
                rig.validatesAssetFamily(binary:rigBinary,atlas:rigImage),
-               let meshData=rig.meshData(rigBinary),let geometry=try? WorldBinary(data:meshData),rig.document.draws.allSatisfy({$0.start+$0.count<=geometry.indices.count}),
+               let meshData=rig.meshData(rigBinary),let geometry=try? WorldBinary(data:meshData),rig.document.draws.allSatisfy({$0.start<=geometry.indices.count && $0.count<=geometry.indices.count-$0.start}),
                let atlas=try? self.textureLoader.newTexture(data:rigImage,options:[.SRGB:false]),
                let vertices=self.device.makeBuffer(bytes:geometry.vertices,length:geometry.vertices.count*MemoryLayout<NativeVertex>.stride),
                let indices=self.device.makeBuffer(bytes:geometry.indices,length:geometry.indices.count*4) {
+                if rig.document.version==3 {
+                    guard self.vehicleNativePipeline != nil,
+                          let textures=try? NativeVehicleTextures(device:self.device,queue:self.queue,atlas:atlas,rig:rig,world:geometry) else{return}
+                    stagedVehicleTextures=textures
+                }
                 rig.installSortCenters(positions:geometry.vertices.map{SIMD3($0.position.x,$0.position.y,$0.position.z)},indices:geometry.indices)
                 stagedRig=rig
                 stagedRigMesh=Mesh(vertices:vertices,indices:indices,indexCount:geometry.indices.count,atlas:atlas)
@@ -3299,6 +3311,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let stagedActor{self.skeletalActors[name]=stagedActor}
             if let rig=stagedRig,let mesh=stagedRigMesh{
                 self.vehicleRigs[name]=rig;self.vehicleRigMeshes[name]=mesh;self.vehicleWaterMasks[name]=stagedMasks
+                self.vehicleTextures[name]=stagedVehicleTextures
                 if self.activeVehicleModel==String(rig.document.id){self.groundVehicle?.setDamageHinges(rig.damageHinges)}
             }
             self.actorRetryAfter.removeValue(forKey:name)
@@ -4341,6 +4354,35 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    private func bindVehicleTextures(_ textures:NativeVehicleTextures,name:String,slot:Int,encoder:MTLRenderCommandEncoder)->Bool {
+        guard vehicleTextures[name] === textures else{return false}
+        do{try textures.bind(slot:slot,encoder:encoder,queue:queue);return true}
+        catch{
+            // A failed family retries as one unit. Never sample its staging
+            // image with an old atlas shader or keep a permanently blank rig.
+            if vehicleTextures[name] === textures {
+                vehicleTextures.removeValue(forKey:name);vehicleRigs.removeValue(forKey:name)
+                vehicleRigMeshes.removeValue(forKey:name);vehicleWaterMasks.removeValue(forKey:name)
+                actorMeshes.removeValue(forKey:name);actorRetryAfter[name]=Date().addingTimeInterval(2)
+                onStatus?("VEHICLE TEXTURES WILL RETRY")
+            }
+            return false
+        }
+    }
+    private func encodeNativeVehicle(frame:NativeVehicleRig.Frame,textures:NativeVehicleTextures,name:String,mesh:Mesh,
+                                     uniforms:Uniforms,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder) {
+        for part in frame.draws {
+            guard bindVehicleTextures(textures,name:name,slot:part.texture,encoder:encoder)else{break}
+            var current=uniforms;current.viewProjection=matrix*part.transform
+            var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
+            var paint=part.paint
+            encoder.setVertexBytes(&current,length:MemoryLayout<Uniforms>.stride,index:1)
+            encoder.setFragmentBytes(&current,length:MemoryLayout<Uniforms>.stride,index:1)
+            encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
+            encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
+            encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
+        }
+    }
     private func encodeTransparentVehicles(_ packets:[TransparentVehicleDraw],encoder:MTLRenderCommandEncoder) {
         // Archived transparent vehicle materials retain depthWrite=true. Phase
         // ordering and stable back-to-front compositing are the missing policy.
@@ -4353,7 +4395,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.setVertexBuffer(mesh.vertices,offset:0,index:0)
             encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
             encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
-            encoder.setFragmentTexture(mesh.atlas,index:0)
+            if let bind=packet.bindTextures {guard bind(encoder)else{continue}}
+            else{encoder.setFragmentTexture(mesh.atlas,index:0)}
             encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
             if packet.painted {
                 var paint=part.paint
@@ -4782,20 +4825,30 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     // Keep opaque hulls in the normal actor phase. Transparent
                     // materials must wait until every opaque rider has drawn.
                     let frame=completeFrame.opaque
-                    if rig.hasDynamicPaint {
+                    let nativeTextures=vehicleTextures[name]
+                    if rig.document.version==3 {
+                        guard nativeTextures != nil,let vehicleNativePipeline else{continue}
+                        encoder.setRenderPipelineState(vehicleNativePipeline)
+                    }else if rig.hasDynamicPaint {
                         guard let vehiclePaintPipeline else{onStatus?("VEHICLE PAINT SHADER IS UNAVAILABLE");continue}
                         encoder.setRenderPipelineState(vehiclePaintPipeline)
                     }else{encoder.setRenderPipelineState(vehiclePipeline ?? pipeline)}
-                    let alphaPipeline=rig.hasDynamicPaint ? vehiclePaintPipeline:(vehiclePipeline ?? pipeline)
+                    let alphaPipeline=rig.document.version==3 ? vehicleNativePipeline:rig.hasDynamicPaint ? vehiclePaintPipeline:(vehiclePipeline ?? pipeline)
                     if let alphaPipeline {
                         for part in completeFrame.transparent {
                             var partUniforms=uniforms
                             partUniforms.viewProjection=matrix*transform*part.transform
                             transparentVehicleDraws.append(.init(mesh:mesh,part:part,uniforms:partUniforms,pipeline:alphaPipeline,
-                                painted:rig.hasDynamicPaint,depth:NativeVehicleRig.projectedDepth(part.sortCenter,matrix:partUniforms.viewProjection)))
+                                painted:rig.hasDynamicPaint,depth:NativeVehicleRig.projectedDepth(part.sortCenter,matrix:partUniforms.viewProjection),
+                                bindTextures:nativeTextures.map{textures in { [weak self] encoder in
+                                    guard let self else{return false}
+                                    return self.bindVehicleTextures(textures,name:name,slot:part.texture,encoder:encoder)
+                                }}))
                         }
                     }
-                    for part in frame.draws {
+                    if let nativeTextures {
+                        encodeNativeVehicle(frame:frame,textures:nativeTextures,name:name,mesh:mesh,uniforms:uniforms,matrix:matrix*transform,encoder:encoder)
+                    }else{for part in frame.draws {
                         uniforms.viewProjection=matrix*transform*part.transform
                         var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
                         encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
@@ -4806,7 +4859,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                             encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
                         }
                         encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
-                    }
+                    }}
                     if let vehicleMaskPipeline {
                         encoder.setRenderPipelineState(vehicleMaskPipeline)
                         for (node,mask) in vehicleWaterMasks[name] ?? [] {
@@ -4883,6 +4936,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             pedAtlasGPU=pedAtlasGPU.filter{visible.contains($0.key)}
             vehicleRigs=vehicleRigs.filter{visible.contains($0.key)}
             vehicleRigMeshes=vehicleRigMeshes.filter{visible.contains($0.key)}
+            vehicleTextures=vehicleTextures.filter{visible.contains($0.key)}
             vehicleWaterMasks=vehicleWaterMasks.filter{visible.contains($0.key)}
         }
     }

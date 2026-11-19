@@ -25,7 +25,12 @@ def main():
  before={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in files}
  for n in names:(stage/n).write_bytes((ROOT/'ios/App'/n).read_bytes())
  renderer=(stage/'NativeWorldRenderer.swift').read_text()
- pipeline=renderer[renderer.index('        let descriptor = MTLRenderPipelineDescriptor()'):renderer.index('        descriptor.colorAttachments[0].writeMask = []')]
+ start=renderer.index('        let descriptor = MTLRenderPipelineDescriptor()')
+ # This fixture receives its requested model fragment as an argument. Capture
+ # the complete generic descriptor before the separate world-material branch;
+ # the world-material gate executes that full constructor independently.
+ end=renderer.index('        descriptor.fragmentFunction = worldFragment',start)
+ pipeline=renderer[start:end]
  depth=renderer[renderer.index('        let depthDescriptor = MTLDepthStencilDescriptor()'):renderer.index('        self.view = view',renderer.index('        let depthDescriptor ='))]
  source=(ROOT/'tests/vehicles/smoke_native_vehicle_alpha.swift').read_text().replace('// ACTUAL_UNIFORMS',block(renderer,'    private struct Uniforms {')).replace('// ACTUAL_PIPELINE',pipeline).replace('// ACTUAL_DEPTH',depth).replace('// ACTUAL_DEFERRED_ENCODER',block(renderer,'    private func encodeTransparentVehicles('))
  (stage/'main.swift').write_text(source)
@@ -36,7 +41,7 @@ def main():
  for name in ['WorldShaders','VehicleShaders','SkeletalShaders']:
   air=stage/(name+'.air');run([compiler,'-target','air64-apple-macos13.0','-isysroot',sdk,'-fmodules-cache-path='+str(out/'metal-modules'),'-c',stage/(name+'.metal'),'-o',air],'compile-'+name);airs.append(air)
  run([compiler.with_name('metallib'),*airs,'-o',out/'production.metallib'],'link-metal')
- run(['xcrun','swiftc','-whole-module-optimization','-Onone','-module-cache-path',out/'swift-modules',stage/'NativeVehicleRig.swift',stage/'NativeVehiclePaint.swift',stage/'main.swift','-o',out/'probe'],'compile-swift')
+ run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-Onone','-module-cache-path',out/'swift-modules',stage/'NativeVehicleRig.swift',stage/'NativeVehiclePaint.swift',stage/'main.swift','-o',out/'probe'],'compile-swift')
  if args.compile_only:print(json.dumps({'status':'COMPILED_ONLY_NOT_RUNTIME_ACCEPTED','work':str(out)}));return
  run([out/'probe',ROOT,out],'runtime')
  report=json.loads((out/'gpu-report.json').read_text());assert all(hashlib.sha256((ROOT/p).read_bytes()).hexdigest()==sha for p,sha in before.items())

@@ -1,5 +1,65 @@
 # Per-instance vehicle paint
 
+## Native-size vehicle images and hardware sampling (145)
+
+The earlier fixed atlas resized every decoded vehicle image to a 128×128 square.
+The new explicit VPC3 family keeps the original base-image dimensions and RGBA
+bytes in a bounded staging PNG. Native runtime upload copies those rectangles
+to individual original-size Metal textures. No original base texels are
+resampled. Hardware sampler states preserve the decoded archived texture
+object's wrapping and minification/magnification modes. Requested mip chains
+are generated explicitly on the GPU; these are not recovered original TXD
+mip images or a claim about a particular retail renderer.
+
+The producer emits a distinct encoding, complete geometry/image digests and
+validated layout/sampler metadata. The independent host setup selects this
+profile for ordinary and working vehicle families. Existing VPC2 and explicit
+legacy WRL2 families retain their previous shaders, paint and atlas behavior.
+VPC3 cannot silently fall back to the old atlas shader. Its prepared-install
+verifier and runtime share the same material/image/geometry admission check;
+short native staging images use exact dimensions rather than a fixed-cell
+coverage assumption. Existing verified packages stay usable.
+
+Each draw retains its selected image through paint, lamp replacement, damage,
+node transforms and deferred transparency. Different images cannot merge into
+one draw. Upload and subsequent rendering share one command queue without a
+main-thread GPU wait. Preflight and actual GPU allocations are bounded to
+8 MiB per family. Failed or retired bindings skip the draw and retry the
+complete family instead of sampling a stale atlas. Draw-range checks avoid
+integer-overflow admission. No physics, seating or network pose is replaced.
+
+Authored evidence passes 2,132 actual native/Metal checks over 1,296 offscreen
+renders, plus thirteen converter pixel/bounds checks. The same GPU samples are
+compared to isolated original-size images across edge/negative/out-of-range
+UVs, wrapping modes and all six supported minification modes. Actual prepared
+image-verifier methods cover native and legacy dimension admission. Separate
+owner-local evidence covers all 212 families: 4,771 producer checks, 4,552 exact
+packed-image checks and 6,722 native decoder/GPU readback checks. All geometry
+bytes after the encoding marker equal their prior VPC2 families. The largest
+observed native texture family allocated 1,994,752 GPU bytes. Every converted
+image and original input remains local; current served families were untouched.
+
+The six working families pass 89 complete-family/corruption/output-boundary
+checks. A preserved fixture failure revealed a no-op invalid-node mutation when
+the first configured model had no working node; the test now selects a concrete
+part and requires it. A separate older alpha fixture captured a later world
+material branch with an unbound variable; its descriptor boundary is corrected
+while retaining the actual deferred encoder and existing pixel assertions.
+Earlier private helper entrypoint/channel-order/type-check failures remain
+recorded separately. Source checks, complete SDK builds, normal installed-game
+acceptance and retail comparisons remain distinct.
+
+Supporting static REA artifact evidence is
+`ev_c12be01d7ce7e7c978c5b9cad79b1fca31344d2fa4ae86a5649bf2c448e5f7a4`.
+Its semantic coverage is partial after the bounded worker heap limit. The
+separate offline factory probe establishes decoded object values; neither
+observation is an original retail gameplay recording. Stored TXD mip parity,
+advanced paintjobs, reflections, complete lighting/glass fidelity and purple
+city gaps remain open. The pink foreground object in the sampler QA captures
+is the server-scripted bed model1700; the earlier parked-car label was incorrect. This change
+does not establish complete resource coverage or 1:1 GTA San Andreas fidelity.
+
+
 Core105 fixes the reproduced case where the same `420.6.1.0.` taxi was yellow
 in the browser and grey in the native app. It preserves the existing vehicle
 geometry, working poses and nonpaint surfaces. Original reference data,

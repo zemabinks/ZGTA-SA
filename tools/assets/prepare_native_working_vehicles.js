@@ -20,12 +20,12 @@ function validateFamily(directory,model,id,expectedSignature){
     files[name]={bytes:bytes.length,sha256:digest(bytes)};components[suffix]=bytes;
   }
   const metadata=JSON.parse(components['.rig.json'].toString('utf8')),bytes=components['.rig.bin'];
-  if(![1,2].includes(metadata.version)||metadata.id!==id||metadata.model!==model||metadata.cacheSignature!==expectedSignature)throw Error('Rig identity/signature mismatch '+model);
-  if(metadata.version===2){
+  if(![1,2,3].includes(metadata.version)||metadata.id!==id||metadata.model!==model||metadata.cacheSignature!==expectedSignature)throw Error('Rig identity/signature mismatch '+model);
+  if(metadata.version>=2){
     for(const [key,suffix]of [['binarySHA256','.rig.bin'],['atlasSHA256','.rig.png'],['normalsSHA256','.rig.normals.bin']]){
       if(!sha(metadata[key])||metadata[key]!==files[model+suffix].sha256)throw Error('Rig component hash mismatch '+model+suffix);
     }
-    if(metadata.binaryEncoding!=='VPC2')throw Error('Neutral rig encoding mismatch '+model);
+    if(metadata.binaryEncoding!==(metadata.version===3?'VPC3':'VPC2'))throw Error('Neutral rig encoding mismatch '+model);
     const paint=metadata.paint,validColor=value=>integer(value,0,(paint?.palette?.length??0)-1)||integer(value,0x1000000,0x1ffffff);
     if(!paint||paint.version!==1||paint.vertexRGB!=='neutral-paint-slot-rgb'||paint.customFlag!==0x1000000||paint.customLimit!==0x2000000||
        !Array.isArray(paint.palette)||!integer(paint.palette.length,1,1024)||paint.palette.some(rgb=>!Array.isArray(rgb)||rgb.length!==3||rgb.some(c=>!integer(c,0,255)))||
@@ -38,7 +38,7 @@ function validateFamily(directory,model,id,expectedSignature){
   }
   if(!integer(metadata.vertices,1,999999)||!integer(metadata.indices,3,2999999)||metadata.indices%3!==0||
      !Array.isArray(metadata.textures)||metadata.textures.length>=1024||metadata.textures.some((row,index)=>!row||row.layer!==index+1||!integer(row.width,1,16384)||!integer(row.height,1,16384)))throw Error('Invalid rig buffer counts/textures '+model);
-  if(bytes.length<16||bytes.readUInt32LE(0)!==(metadata.version===2?0x32435056:0x324c5257)||bytes.readUInt32LE(4)!==metadata.vertices||bytes.readUInt32LE(8)!==metadata.indices||bytes.readUInt32LE(12)!==metadata.textures.length+1)throw Error('Rig binary/metadata mismatch '+model);
+  if(bytes.length<16||bytes.readUInt32LE(0)!==({1:0x324c5257,2:0x32435056,3:0x33435056}[metadata.version])||bytes.readUInt32LE(4)!==metadata.vertices||bytes.readUInt32LE(8)!==metadata.indices||bytes.readUInt32LE(12)!==metadata.textures.length+1)throw Error('Rig binary/metadata mismatch '+model);
   const n=metadata.vertices,i=metadata.indices,t=metadata.textures.length+1,indexAt=16+n*20,colorAt=indexAt+i*4,layerAt=colorAt+n*4;
   const expected=16+n*12+n*8+i*4+n*4+n*2+(n%2?2:0)+n*4+t*2,normals=components['.rig.normals.bin'];
   if(bytes.length!==expected||normals.length!==n*12)throw Error('Truncated rig buffers '+model);
@@ -49,9 +49,26 @@ function validateFamily(directory,model,id,expectedSignature){
   if(!Array.isArray(metadata.nodes)||!integer(metadata.nodes.length,1,4095)||metadata.nodes.some((node,index)=>!node||!integer(node.parent,-1,index-1)||!vector(node.position,3)||!vector(node.rotation,4)||!vector(node.scale,3)||!vector(node.matrix,16))||
      !Array.isArray(metadata.draws)||metadata.draws.length>50000||metadata.draws.some(draw=>!draw||!integer(draw.node,0,metadata.nodes.length-1)||!integer(draw.start,0,i)||!integer(draw.count,0,i-draw.start)||draw.start%3!==0||draw.count%3!==0||
        !integer(draw.texture,0,t-1)||!integer(draw.litTexture,0,t-1)||!Number.isFinite(draw.alphaTest)||draw.alphaTest<0||draw.alphaTest>1||
-       (metadata.version===2&&(!integer(draw.paint,-1,3)||!vector(draw.color,3)||draw.color.some(v=>v<0||v>1)))))throw Error('Invalid hierarchy/draw ranges '+model);
+       (metadata.version>=2&&(!integer(draw.paint,-1,3)||!vector(draw.color,3)||draw.color.some(v=>v<0||v>1)))))throw Error('Invalid hierarchy/draw ranges '+model);
   const png=components['.rig.png'];
-  if(png.length<33||!png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||png.readUInt32BE(8)!==13||png.subarray(12,16).toString()!=='IHDR'||png.readUInt32BE(16)!==1024||png.readUInt32BE(20)!==Math.ceil(t/8)*128)throw Error('Rig atlas mismatch '+model);
+  if(png.length<33||!png.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||png.readUInt32BE(8)!==13||png.subarray(12,16).toString()!=='IHDR')throw Error('Rig atlas mismatch '+model);
+  if(metadata.version===3){
+    const layout=metadata.nativeTextures;
+    if(!layout||layout.version!==1||!integer(layout.width,1,4096)||!integer(layout.height,1,4096)||
+       png.readUInt32BE(16)!==layout.width||png.readUInt32BE(20)!==layout.height||!integer(t,1,128)||
+       !Array.isArray(layout.rects)||layout.rects.length!==t||!Array.isArray(layout.samplers)||layout.samplers.length!==t||!integer(layout.rgbaBytes,1,4*1024*1024))throw Error('Native rig image layout mismatch '+model);
+    let total=0;
+    for(let slot=0;slot<t;slot++){
+      const r=layout.rects[slot],s=layout.samplers[slot];
+      if(!Array.isArray(r)||r.length!==4||!integer(r[0],0,layout.width-1)||!integer(r[1],0,layout.height-1)||!integer(r[2],1,Math.min(2048,layout.width-r[0]))||!integer(r[3],1,Math.min(2048,layout.height-r[1]))||
+         layout.rects.slice(0,slot).some(o=>r[0]<o[0]+o[2]&&o[0]<r[0]+r[2]&&r[1]<o[1]+o[3]&&o[1]<r[1]+r[3]))throw Error('Native rig image rectangles overlap or exceed bounds '+model);
+      total+=r[2]*r[3]*4;
+      if(!s||![1000,1001,1002].includes(s.wrapS)||![1000,1001,1002].includes(s.wrapT)||![1003,1006].includes(s.magFilter)||!integer(s.minFilter,1003,1008)||typeof s.generateMipmaps!=='boolean'||([1004,1005,1007,1008].includes(s.minFilter)&&!s.generateMipmaps))throw Error('Unsupported native rig sampler '+model);
+      if(slot===0?(r[2]!==1||r[3]!==1):(r[2]!==metadata.textures[slot-1].width||r[3]!==metadata.textures[slot-1].height))throw Error('Native rig source image resized '+model);
+    }
+    if(total!==layout.rgbaBytes)throw Error('Native rig image byte budget mismatch '+model);
+    for(const draw of metadata.draws)for(let at=draw.start;at<draw.start+draw.count;at++)if(bytes.readUInt16LE(layerAt+bytes.readUInt32LE(indexAt+at*4)*2)!==draw.texture)throw Error('Native rig draw/image mismatch '+model);
+  }else if(metadata.nativeTextures!=null||png.readUInt32BE(16)!==1024||png.readUInt32BE(20)!==Math.ceil(t/8)*128)throw Error('Legacy rig atlas mismatch '+model);
   const working=metadata.joints?.working;
   if(!working||typeof working.tow!=='boolean'||!Number.isFinite(working.turn)||!Number.isFinite(working.lift)||!Array.isArray(working.parts)||working.parts.length>32768||
      working.parts.some(part=>!part||!integer(part.node,0,metadata.nodes.length-1)||typeof part.role!=='string'||part.role.length>64||!vector(part.rest,4)||!vector(part.home,3)))throw Error('Invalid working rig metadata '+model);
@@ -81,7 +98,7 @@ function main(){
   const manifestPath=path.join(parent,'manifest.json');
   try{
     const library=createLibrary(),models=[];
-    for(const id of ids){const built=library.build(id),row=exportRig(built,temporary);models.push(validateFamily(temporary,row.model,id,row.cacheSignature))}
+    for(const id of ids){const built=library.build(id),row=exportRig(built,temporary,{nativeTextures:args.includes('--native-textures')});models.push(validateFamily(temporary,row.model,id,row.cacheSignature))}
     const manifest={kind:'owner-local complete working rig families; do not publish',models};
     fs.writeFileSync(path.join(stage,'manifest.json'),JSON.stringify(manifest,null,2)+'\n',{mode:0o600});
     // Preserve the previous local stage so a failed replacement is reversible.

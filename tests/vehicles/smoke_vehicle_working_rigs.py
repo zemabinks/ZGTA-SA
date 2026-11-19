@@ -11,7 +11,7 @@ import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/native-physics/tests/working-rigs'
 JS=r'''
-const fs=require('node:fs'),path=require('node:path'),{createLibrary,exportRig}=require('./prepare_native_vehicle_rigs');
+const fs=require('node:fs'),path=require('node:path'),{createLibrary,exportRig}=require('./tools/assets/prepare_native_vehicle_rigs');
 const output=process.argv[1],library=createLibrary(),cases=[];
 for(const id of [406,443,486,525,530,592]){
  const built=library.build(id),metadata=exportRig(built,output,{atlas:false}),objects=[];
@@ -60,7 +60,7 @@ def main():
         (work/'main.swift').write_text(SWIFT)
         rig=work/'NativeVehicleRig.swift';rig.write_bytes(snapshot['ios/App/NativeVehicleRig.swift']);exe=work/'verify'
         paint=work/'NativeVehiclePaint.swift';paint.write_bytes(snapshot['ios/App/NativeVehiclePaint.swift'])
-        result=subprocess.run(['xcrun','swiftc','-module-cache-path',str(OUT/'modules'),str(paint),str(rig),str(work/'main.swift'),'-o',str(exe)],capture_output=True,text=True)
+        result=subprocess.run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-module-cache-path',str(OUT/'modules'),str(paint),str(rig),str(work/'main.swift'),'-o',str(exe)],capture_output=True,text=True)
         (OUT/'compile.log').write_text(result.stdout+result.stderr);result.check_returncode()
         result=subprocess.run([str(exe),str(work)],capture_output=True,text=True)
         unchanged=all((ROOT/name).read_bytes()==data for name,data in snapshot.items())
