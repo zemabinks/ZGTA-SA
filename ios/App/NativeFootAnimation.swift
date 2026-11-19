@@ -114,7 +114,11 @@ final class NativeFootAnimation {
         var figurePitch: Float = 0
         var figureRoll: Float = 0
         var legBend=SIMD2<Float>.zero
-        var flight:NativeFlightAnimation.Frame?    }
+        var flight:NativeFlightAnimation.Frame?
+        /// Ordered remote presentation targets. An empty list retains the
+        /// ordinary single-sample draw; nil entries retire a landed canopy.
+        var canopySamples:[NativeFlightAnimation.Canopy?] = []
+    }
     private struct Action {
         var kind: String
         var clip: String

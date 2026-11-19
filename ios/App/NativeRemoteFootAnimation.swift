@@ -39,11 +39,76 @@ final class NativeRemoteFootAnimation {
     private var fired: Int?
     private var flight: Flight?
     private var ground: Double?
+    private var displayTime: Double?
+    private var displaySnapshot: Snapshot?
+    private var displayFrame: NativeFootAnimation.Frame?
     var hasUnsupportedFlight: Bool = false
 
     init(library: NativeSkeletalAnimationLibrary,style: NativeFootAnimationStyle,weapons: [Int:NativeFootWeaponAnimation],random: ()->Double = {Double.random(in:0..<1)}) {
         animator = NativeFootAnimation(library:library,style:style,random:random)
         self.weapons = weapons
+    }
+
+    /// A pose owner starts when it is first sampled, rather than inheriting
+    /// another actor's last draw. Visibility and application suspension rebase
+    /// this clock without resetting the character's animation/task state.
+    func resetDisplayClock() { displayTime = nil; displaySnapshot = nil }
+
+    func update(at time: Double, active: Bool, snapshot state: Snapshot) -> NativeFootAnimation.Frame? {
+        guard active, time.isFinite, (time*1000).isFinite else {
+            resetDisplayClock()
+            return heldDisplayFrame()
+        }
+        let before = displayTime, previous = displaySnapshot
+        displayTime = time; displaySnapshot = state
+        let elapsed = before.map { time - $0 } ?? 0
+        // A real discontinuity observes the current state at zero elapsed;
+        // it cannot replay background time, shots or old flight velocity.
+        guard elapsed.isFinite, elapsed >= 0, elapsed <= 0.5 else {
+            displayFrame = update(delta:0,nowMilliseconds:time*1000,snapshot:state)
+            return displayFrame
+        }
+        if elapsed == 0 {
+            displayFrame = update(delta:0,nowMilliseconds:time*1000,snapshot:state)
+            return displayFrame
+        }
+        let count = min(30,max(1,Int(ceil(elapsed*60 - 1e-10))))
+        let step = elapsed / Double(count)
+        var totalTravel = SIMD2<Double>.zero, steps:[String] = [], shots:[Bool] = []
+        var shot = false, shotLeft = false
+        var canopySamples:[NativeFlightAnimation.Canopy?] = []
+        var final:NativeFootAnimation.Frame?
+        for index in 1...count {
+            var sample = state
+            if let previous {
+                // Only interpolate observed endpoints. Holding the final
+                // position for every substep would invent a velocity impulse
+                // followed by zero velocity in the jetpack's leg pendulum.
+                let share = Double(index)/Double(count)
+                sample.position = previous.position + (state.position-previous.position)*share
+                let turn = atan2(sin(state.heading-previous.heading),cos(state.heading-previous.heading))
+                sample.heading = previous.heading + turn*share
+            }
+            let frame = update(delta:step,nowMilliseconds:(time-elapsed+Double(index)*step)*1000,snapshot:sample)
+            totalTravel += frame.travel; steps += frame.steps; shots += frame.shots
+            if frame.shot { shot = true; shotLeft = frame.shotLeft }
+            canopySamples.append(frame.flight?.canopy)
+            final = frame
+        }
+        guard var frame = final else { return heldDisplayFrame() }
+        frame.travel = totalTravel; frame.steps = steps; frame.shots = shots
+        frame.shot = shot; if shot { frame.shotLeft = shotLeft }
+        frame.canopySamples = canopySamples
+        displayFrame = frame
+        return frame
+    }
+
+    private func heldDisplayFrame() -> NativeFootAnimation.Frame? {
+        guard var frame = displayFrame else { return nil }
+        frame.travel = .zero; frame.steps = []; frame.shots = []; frame.shot = false
+        frame.canopySamples = []
+        frame.flight?.canopy?.easing = 0
+        return frame
     }
 
     func update(delta: Double,nowMilliseconds now: Double,snapshot state: Snapshot) -> NativeFootAnimation.Frame {

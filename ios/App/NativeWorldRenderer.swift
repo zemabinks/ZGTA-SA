@@ -328,6 +328,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var flight:NativeFlightAnimation.Frame?
         var identity:String?
         var ownFoot:Bool
+        var canopySamples:[NativeFlightAnimation.Canopy?] = []
     }
     /// A draw occurrence owns its source, even when another body has the same
     /// model and position. None of these render identities grants body control.
@@ -1241,7 +1242,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if acceptedStreamRay?.weapon != equippedWeapon || !weaponTriggerHeld || !weaponReady || weaponReloading ||
             health<=0 || driving || swimming || climb != nil {acceptedStreamRay=nil}
     }
-    func resetDisplayClock() {renderClock.reset();riderPoseClock.reset(at:riderMonotonicNow())}
+    func resetDisplayClock() {
+        renderClock.reset();riderPoseClock.reset(at:riderMonotonicNow())
+        for (_,cached) in remoteFootAnimations { cached.1.resetDisplayClock() }
+    }
     var hasNativeFootWeaponTiming:Bool {
         guard footAnimator != nil,let definition=footWeaponDefinitions[equippedWeapon],
               ["gun","stream","launch","throw"].contains(definition.use ?? ""),climb==nil,!driving,!swimming,!personalFlight.chuting else{return false}
@@ -4298,6 +4302,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         remoteBikeAnimations = remoteBikeAnimations.filter { riderIDs.contains($0.key) }
         let footIDs = Set(remotePlayers.filter { Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID) }.map(\.id))
         remoteFootAnimations = remoteFootAnimations.filter { footIDs.contains($0.key) }
+        var sampledRemoteFootIDs=Set<String>()
         remoteBikeFrames.removeAll(keepingCapacity:true)
         let flightIDs=Set(remotePlayers.map(\.id)).union(["own"])
         flightCanopyPoses=flightCanopyPoses.filter{flightIDs.contains($0.key)}
@@ -4311,9 +4316,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // co-located players with the same skin. No position key is needed.
         var actorOverrides: [ActorPoseOverride] = []
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
-                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false) {
+                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = []) {
             let occurrence = actorOverrides.count
-            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot))
+            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil,occurrence))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
@@ -4484,6 +4489,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 var pose:NativeSkeletalActor.Pose?
                 var original=false
                 var flight:NativeFlightAnimation.Frame?
+                var canopySamples:[NativeFlightAnimation.Canopy?] = []
                 var handWeapon=player.weapon
                 if let actor=skeletalActors[name],let library=skeletalLibrary,let definitions=footDefinitions {
                     let animator:NativeRemoteFootAnimation
@@ -4504,16 +4510,20 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         weapon:player.weapon,aim:player.aim.map(Double.init),action:player.action,shots:player.shotCount,life:Double(player.life),
                         armour:Double(player.armour),down:player.down,paused:player.paused,pitch:Double(player.pitch),roll:Double(player.roll),script:player.scriptAnimation,
                         nearFlooredTarget:groundContext)
-                    let frame=animator.update(delta:riderDelta,nowMilliseconds:riderTime*1000,snapshot:state)
+                    sampledRemoteFootIDs.insert(player.id)
+                    if let frame=animator.update(at:riderTime,
+                        active:UIApplication.shared.applicationState == .active && view.window != nil,snapshot:state) {
                     if !frame.handWeaponVisible { handWeapon=0 }
                     flight=frame.flight
+                    canopySamples=frame.canopySamples
                     if !animator.hasUnsupportedFlight {
                         pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)
                         original=true
                     }
+                    }
                 }
                 if (10...16).contains(player.action & 63) || (20...25).contains(player.action & 63) { handWeapon=0 }
-                appendPed(name,footPosition,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id)
+                appendPed(name,footPosition,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id,canopySamples:canopySamples)
                 continue
             }
             let context=remoteVehicleDrawContext(name:name,player:player)
@@ -4565,6 +4575,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 Self.rotationX(player.pitch) * Self.rotationY(player.roll) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
             appendPed(ped,player.position,player.heading,0,"",0,0,pose:pose,transform:car,original:true)
+        }
+        for (id,cached) in remoteFootAnimations where !sampledRemoteFootIDs.contains(id) {
+            cached.1.resetDisplayClock()
         }
         let drivenVehicleIDs = Set(remotePlayers.compactMap(\.vehicleID))
         for projectile in weaponEffects.projectiles {
@@ -4760,8 +4773,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             } else if let weaponName = weaponModels[String(heldWeapon)], heldWeapon > 0 {
                 loadActor(weaponName)
             }
-            if let flight=queued?.flight,let identity=queued?.identity,let pose,let actor=skeletalActors[name] {
-                drawFlightAttachments(flight,identity:identity,actor:actor,pose:pose,transform:transform,matrix:matrix,encoder:encoder,opacity:opacity)
+            if let queued,queued.flight != nil || !queued.canopySamples.isEmpty,
+               let identity=queued.identity,let pose,let actor=skeletalActors[name] {
+                drawFlightAttachments(queued.flight ?? .init(),identity:identity,actor:actor,pose:pose,transform:transform,matrix:matrix,encoder:encoder,opacity:opacity,canopySamples:queued.canopySamples)
             }
             encoder.setDepthStencilState(depth)
         }
@@ -4846,20 +4860,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawFlightAttachments(_ flight:NativeFlightAnimation.Frame,identity:String,actor:NativeSkeletalActor,pose:NativeSkeletalActor.Pose,
-                                       transform:simd_float4x4,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder,opacity:Float=1) {
+                                       transform:simd_float4x4,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder,opacity:Float=1,canopySamples:[NativeFlightAnimation.Canopy?] = []) {
         if flightCanopyMesh==nil || flightJetMesh==nil {loadFlightAssets()}
-        if let canopy=flight.canopy,let mesh=flightCanopyMesh,let accessory=flightCanopyActor,let library=skeletalLibrary,let skeletalPipeline {
-            let posed=accessory.canopyPose(clip:canopy.clip,time:canopy.time,easing:canopy.easing,pitch:canopy.pitch,roll:canopy.roll,library:library,previous:flightCanopyPoses[identity])
-            flightCanopyPoses[identity]=posed
-            if canopy.landed && flightCanopyLanded[identity]==nil {flightCanopyLanded[identity]=transform}
-            if !canopy.landed {flightCanopyLanded[identity]=nil}
+        let targets=canopySamples.isEmpty ? [flight.canopy]:canopySamples
+        for target in targets {
+            if let canopy=target,flightCanopyMesh != nil,let accessory=flightCanopyActor,let library=skeletalLibrary {
+                flightCanopyPoses[identity]=accessory.canopyPose(clip:canopy.clip,time:canopy.time,easing:canopy.easing,pitch:canopy.pitch,roll:canopy.roll,library:library,previous:flightCanopyPoses[identity])
+                if canopy.landed && flightCanopyLanded[identity]==nil {flightCanopyLanded[identity]=transform}
+                if !canopy.landed {flightCanopyLanded[identity]=nil}
+            } else {flightCanopyLanded[identity]=nil}
+        }
+        if let canopy=flight.canopy,let posed=flightCanopyPoses[identity],let mesh=flightCanopyMesh,let accessory=flightCanopyActor,let skeletalPipeline {
             let parent=canopy.landed ? flightCanopyLanded[identity] ?? transform:transform
             var scale=matrix_identity_float4x4;scale.columns.0.x=Float(canopy.scale);scale.columns.1.y=Float(canopy.scale);scale.columns.2.z=Float(canopy.scale)
             if canopy.visible {
                 encoder.setRenderPipelineState(skeletalPipeline);accessory.bind(pose:posed,encoder:encoder)
                 draw(mesh:mesh,cellSize:128,matrix:matrix*parent*scale,encoder:encoder,tint:SIMD4(1,1,1,canopy.landed ? 1:opacity))
             }
-        } else {flightCanopyLanded[identity]=nil}
+        }
         if let jet=flight.jet,let mesh=flightJetMesh,let document=flightJetAssets,let spine=actor.transform(bone:3,in:pose) {
             flightAudioVoices.append(.init(id:identity,sound:jet.sound,position:SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z),thrust:Float(jet.thrust)))
             let matrices=document.jetPose(jet)
