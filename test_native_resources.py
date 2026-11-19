@@ -7,7 +7,7 @@ ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/resources-107'
 SWIFT=['ServerAddress.swift','NativeStockAssetAccess.swift','NativeResourceManifest.swift','NativeResourceStore.swift','NativeResourceSession.swift']
 ANIMATION_SWIFT=['NativeSkeletalActor.swift','NativeActorAnimation.swift','NativeFootAnimation.swift','NativeGunAnimation.swift','NativeSwimAnimation.swift','NativeFlightAnimation.swift','NativeRiderAnimation.swift']
-SERVER=['serve_local.js','browser_recovery_hook.js','browser_recovery.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','native_radio_server.js','radio_streams.js','prepare_native_radio_audio.py','selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
+SERVER=['serve_local.js','browser_recovery_hook.js','browser_task_policy.js','browser_recovery.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','native_radio_server.js','radio_streams.js','prepare_native_radio_audio.py','selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
 REQUIRED=['game/world/index.json','game/native/models/index.json','game/native/vehicles.physics.json','game/native/foot-animation.json','game/native/models/animations.clips.bin','game/native/weapons.json','game/native/seating.json','game/native/riders.json']
 
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -194,7 +194,7 @@ def main():
         (gate_local/'selfhost').mkdir(exist_ok=True);(gate_local/'selfhost/client-catalog.json').write_text('{"vehicles":[],"homes":[]}')
         code,text=run([sys.executable,str(snapshot/'prepare_native_resource_package.py'),'--local-only',str(gate_local),'--verify'],work,work/'producer-gate.log');check(code==0,'actual gate fixture catalog bound to its own resources')
         port=free_port();assert port not in [8766,8780,8801,8803,8804,8805,8806]
-        approved='resources-qa.invalid:'+str(port);code_secret=secrets.token_hex(24);env={**os.environ,'ZGTA_SELFHOST':'1','PORT':str(port),'BIND_HOST':'127.0.0.1','ZGTA_JOIN_CODE':code_secret,'ZGTA_JOIN_CODE_FILE':'','ZGTA_ALLOWED_HOSTS':approved}
+        approved='resources-qa.invalid:'+str(port);code_secret=secrets.token_hex(24);env={**os.environ,'ZGTA_BROWSER_TASK_POLICY_PLAN':'','ZGTA_SELFHOST':'1','PORT':str(port),'BIND_HOST':'127.0.0.1','ZGTA_JOIN_CODE':code_secret,'ZGTA_JOIN_CODE_FILE':'','ZGTA_ALLOWED_HOSTS':approved}
         gate_log=(work/'gated-http.log').open('w');handles.append(gate_log);gate=subprocess.Popen(['node','serve_local.js'],cwd=gate_root,env=env,stdout=gate_log,stderr=subprocess.STDOUT,start_new_session=True)
         limit=time.time()+10
         while time.time()<limit and gate.poll() is None:
