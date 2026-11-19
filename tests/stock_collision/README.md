@@ -1,12 +1,12 @@
 # Exact stock collision association
 
-`prepare_native_stock_collision.py` independently reads PC `VER2` IMG directories
+`tools/assets/prepare_native_stock_collision.py` independently reads PC `VER2` IMG directories
 and bounded COL record headers. Inputs are an owned stock IDE manifest, its exact
 IMG archives and optional explicit COLFILEs. Outputs stay under `local-only`; no
 original geometry, model-name catalog, fixture or oracle is public source.
 
 ```sh
-python3 prepare_native_stock_collision.py \
+python3 tools/assets/prepare_native_stock_collision.py \
   --img /path/to/owned/models/gta3.img \
   --img /path/to/owned/models/gta_int.img \
   --stock-models local-only/stock-models.json \
@@ -61,8 +61,8 @@ I/O, then call `catalog.prepare(_:for:)`. Preparation rechecks size, both hashes
 name, raw header hint and version before returning one authored COL model.
 
 ```sh
-python3 smoke_native_stock_collision.py
-python3 smoke_native_stock_collision.py \
+python3 tests/resources/smoke_native_stock_collision.py
+python3 tests/resources/smoke_native_stock_collision.py \
   --owner-catalog local-only/stock-overlay/game/native/stock-collision/catalog.json \
   --owner-overlay local-only/stock-overlay \
   --oracle-root local-only/research/runtime-collision

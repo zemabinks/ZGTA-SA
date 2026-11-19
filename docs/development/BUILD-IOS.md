@@ -85,7 +85,7 @@ To create/open the source project manually, follow [NATIVE_BUILD.md](../../NATIV
 
 ## Testing and preserving work
 
-Run the relevant existing smoke tests before marking a change verified. The repository includes extensive `smoke_*.py`, `smoke_*.js`, `smoke_*.swift` and other test scripts. For a baseline overview, see [FEATURE_MATRIX.md](../../FEATURE_MATRIX.md) and [CORE_GAMEPLAY_JOURNAL.md](../../CORE_GAMEPLAY_JOURNAL.md).
+Run the relevant existing smoke tests before marking a change verified. The repository includes extensive `smoke_*.py`, `smoke_*.js`, `smoke_*.swift` and other test scripts. For a baseline overview, see [FEATURE_MATRIX.md](FEATURE_MATRIX.md) and [CORE_GAMEPLAY_JOURNAL.md](CORE_GAMEPLAY_JOURNAL.md).
 
 Keep `local-only/`, player accounts, saves, original disc images and downloaded game content **outside public Git commits**. Keep useful local Git checkpoints. Fewer GitHub pushes are fine; do not risk losing work by leaving the only copy on an unreliable drive.
 

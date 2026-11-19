@@ -2,7 +2,7 @@
 // Actual JS binding timing for creation, pending additional mass and explicit
 // recomputation. Generated state stays in ignored local-only/.
 const fs=require('node:fs'),path=require('node:path');
-const {archivedModules}=require('../../smoke_vehicle_dynamics');
+const {archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main(){
   const R=archivedModules()(55077);await R.init();
   const world=new R.World({x:0,y:0,z:0}),com={x:.2,y:0,z:0},frame={x:0,y:0,z:0,w:1};

@@ -3,7 +3,7 @@
 // stay local. This records engine contact events, not publisher damage rules.
 const fs = require('node:fs');
 const path = require('node:path');
-const {archivedModules} = require('../../smoke_vehicle_dynamics');
+const {archivedModules} = require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main() {
   const R = archivedModules()(55077); await R.init();
   const world = new R.World({x:0,y:-9.81,z:0});

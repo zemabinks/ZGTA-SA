@@ -1,6 +1,6 @@
 # ZGTA:SA project status
 
-**Snapshot date: 18 November 2026.** This page describes source and reported test evidence in the repository, **not** a guarantee of gameplay on every device. See the linked technical records for exact scope. New code may appear after this snapshot.
+**Snapshot date: 19 November 2026.** This page describes source and reported test evidence in the repository, **not** a guarantee of gameplay on every device. See the linked technical records for exact scope. New code may appear after this snapshot.
 
 ## At a glance
 
@@ -16,6 +16,12 @@
 | **Sandbox** | Many free-roam systems and simulation foundations | Complete original ambient traffic, pedestrians, police, world interactions and all behavior |
 | **Public downloads** | Public source repository | No packaged public iPhone release in GitHub Releases |
 
+## Latest verified implementation
+
+Build 136 includes persisted resource-import corrections, owned/parked wheel-phase continuity, browser radio delivery and swimming-exit input/turn ownership fixes. Its source regressions, unsigned Simulator/device builds and selected normal Simulator import/join/walk/camera checks passed. Audio output, full hardware behavior and exhaustive original-retail parity remain unverified.
+
+Repository cleanup groups reports, tests and converters while retaining the public launch commands. See the [cleanup record](development/REPOSITORY-CLEANUP.md) for scope and validation.
+
 ## Where we're going
 
 The project's priorities are **stable shared world state**, **accurate player and vehicle appearances**, **correct passengers/vehicle authority**, **complete original resources**, **authentic NPCs and traffic**, and **original free-roam gameplay fidelity**. Original campaign missions are explicitly not the target.
@@ -28,13 +34,13 @@ We distinguish **written source**, **unit/fixture tests**, **successful builds**
 
 For detailed evidence and gaps, see:
 
-- [Feature matrix](../FEATURE_MATRIX.md)
-- [Core gameplay checklist](../CORE_GAMEPLAY_PARITY.md)
-- [Development journal](../CORE_GAMEPLAY_JOURNAL.md)
-- [Original-game reference](../CORE_RETAIL_REFERENCE.md)
-- [Server compatibility](../SERVER_COMPATIBILITY.md)
-- [Raw ISO extraction](../CORE_NATIVE_RAW_ISO_108.md)
-- [Persistent resource storage](../CORE_NATIVE_RESOURCES_107.md)
+- [Feature matrix](development/FEATURE_MATRIX.md)
+- [Core gameplay checklist](development/CORE_GAMEPLAY_PARITY.md)
+- [Development journal](development/CORE_GAMEPLAY_JOURNAL.md)
+- [Original-game reference](development/CORE_RETAIL_REFERENCE.md)
+- [Server compatibility](development/SERVER_COMPATIBILITY.md)
+- [Raw ISO extraction](research/resources/CORE_NATIVE_RAW_ISO_108.md)
+- [Persistent resource storage](research/resources/CORE_NATIVE_RESOURCES_107.md)
 
 **When updating this page:** reflect the latest tested revision, mention the exact scenario/platform, and leave untested items marked as unverified. Do not list unfinished source features as publicly downloadable.
 

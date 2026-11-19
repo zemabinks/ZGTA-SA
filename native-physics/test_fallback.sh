@@ -8,7 +8,7 @@ case "$(uname -m)" in
   x86_64) PHYSICS_LIB="$PHYSICS_OUTPUT/macos-x86_64"; PHYSICS_TRIPLE=x86_64-apple-macosx13.0 ;;
   *) print -u2 'Unsupported host'; exit 2 ;;
 esac
-node "$PROJECT_ROOT/prepare_native_collision_fallback.js" i148
+node "$PROJECT_ROOT/tools/assets/prepare_native_collision_fallback.js" i148
 PHYSICS_SNAPSHOT="$PHYSICS_OUTPUT/tests/snapshots/fallback"
 mkdir -p "$PHYSICS_SNAPSHOT"
 cp "$PROJECT_ROOT/ios/App/SwiftRapierWorld.swift" "$PHYSICS_ROOT/tests/fallback/main.swift" "$PHYSICS_SNAPSHOT/"

@@ -131,7 +131,7 @@ original GTA recordings. Our adapter/parser/build/test source is AGPL-3.0-only.
 ## Tests
 
 ```sh
-python3 test_native_radio_audio.py --all-platforms --sanitize
+python3 tests/audio/test_native_radio_audio.py --all-platforms --sanitize
 ```
 
 For a repeat regression, `--library-root` and `--sanitized-library-root` may

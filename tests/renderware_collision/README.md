@@ -1,6 +1,6 @@
 # Authored RenderWare/GTA collision regression
 
-Run `python3 smoke_native_renderware_collision.py` on the owner development Mac,
+Run `python3 tests/resources/smoke_native_renderware_collision.py` on the owner development Mac,
 or add `--no-archive` to run only original generated inputs. Outputs, owner
 collision data and optional third-party reference files stay beneath ignored
 `local-only/research/runtime-collision`. No exporter or original script runs.

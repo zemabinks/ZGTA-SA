@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Public Rapier API exercised through the owner's actual archived WASM.
-const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{archivedModules}=require('../../smoke_vehicle_dynamics');
+const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main(){
  const load=archivedModules(),R=load(55077);await R.init();const cases=[];
  const v=a=>({x:a[0],y:a[1],z:a[2]}),state=b=>{
@@ -113,7 +113,7 @@ async function main(){
  }
  assert(standalone.every(row=>JSON.stringify(row.collider)===JSON.stringify([-8,3,4])),'Standalone local setter did not remain a no-op');aloneWorld.free();
  const sha=bytes=>crypto.createHash('sha256').update(bytes).digest('hex');
- const provenance={archivedFactory55077:sha(load.factories[55077].toString()),generator:sha(fs.readFileSync(__filename)),loader:sha(fs.readFileSync(path.join(__dirname,'../../smoke_vehicle_dynamics.js')))};
+ const provenance={archivedFactory55077:sha(load.factories[55077].toString()),generator:sha(fs.readFileSync(__filename)),loader:sha(fs.readFileSync(path.join(__dirname,'../../tests/vehicles/smoke_vehicle_dynamics.js')))};
  const out=path.resolve(__dirname,'../../local-only/physics-fixtures/spherical-joints.json');fs.mkdirSync(path.dirname(out),{recursive:true});
  fs.writeFileSync(out,JSON.stringify({version:2,engine:R.version(),provenance,cases,overlap,parentLocal,standalone,staleWorldRays}),{mode:0o600});
  console.log(`PASS: recorded six disjoint joint trajectories, two real overlap/contact cases, ${parentLocal.length} parent-local checkpoints and standalone no-op; ${staleWorldRays} recorded stale whole-world rays`);

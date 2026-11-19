@@ -2,7 +2,7 @@
 // Synthetic original-engine fixture for the source trailer-leg Average rule.
 // Calibration shapes are explicit; no publisher vehicle geometry is invented.
 const fs=require('node:fs'),path=require('node:path');
-const {archivedModules}=require('../../smoke_vehicle_dynamics');
+const {archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main(){
   const R=archivedModules()(55077);await R.init();
   const cases=[];

@@ -54,7 +54,7 @@ loader receives 401 until the application supplies a legitimate authenticated
 transport. This integration does not bypass that gate or establish physical
 iPhone gameplay, GPU registration, collision-world installation or parity.
 
-Run `python3 test_stock_native_server.py` for actual HTTP regression. Every test
+Run `python3 tests/resources/test_stock_native_server.py` for actual HTTP regression. Every test
 server uses a temporary copy of the independent server source, synthetic site
 files and separate saves. Owned archives/full catalogs are only read. Twelve
 owned resources are verified across the four common props. Generated COL cases

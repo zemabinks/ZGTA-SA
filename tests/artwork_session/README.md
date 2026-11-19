@@ -38,14 +38,14 @@ no wall-clock quiet-period guess. An outstanding184/185 transaction is serialize
 across world changes because185 has no generation identifier. Caller-side batch
 draining can explicitly invoke `advance()` if desired.
 
-Run `python3 test_samp_artwork_session.py` for real localhost HTTP/cache tests with
+Run `python3 tests/network/test_samp_artwork_session.py` for real localhost HTTP/cache tests with
 independently generated, valid textured RW files and the production CPU importer.
 They hold actual import completions to verify the184 barrier, reject a real
 unsupported skin import, and cover duplicate/stale completions, reconnects,
 catalog growth/replacement, empty catalogs, limits, transfer failures and deadlines.
 The cache's default cookie-free requests and SAMP user agent are checked.
 
-`python3 test_samp_artwork_session_server.py` additionally requires the existing
+`python3 tests/network/test_samp_artwork_session_server.py` additionally requires the existing
 local QA Docker image and native transport library. It creates separate disposable
 localhost UDP/TCP7793 servers for a textured model and an empty catalog. The model
 case performs actual DL join/catalog/HTTP verification, native CPU decode plus

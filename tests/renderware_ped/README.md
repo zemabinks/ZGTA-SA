@@ -1,6 +1,6 @@
 # Native RenderWare pedestrian render regression
 
-Run `python3 smoke_native_renderware_ped.py` on the owner development Mac.
+Run `python3 tests/resources/smoke_native_renderware_ped.py` on the owner development Mac.
 The test compiles the unchanged, actual `NativeSkeletalActor` and its animation
 dependencies. It reads local DFF/TXD/CLP1/SKN1 resources; all generated fixtures,
 executables, logs, shader products and GPU readbacks stay in

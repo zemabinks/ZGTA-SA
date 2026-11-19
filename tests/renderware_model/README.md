@@ -1,4 +1,4 @@
-Run `python3 test_native_renderware_model.py` for generated CPU regressions and,
+Run `python3 tests/resources/test_native_renderware_model.py` for generated CPU regressions and,
 when accessible, native Metal offscreen readback. Add
 `--owner-corpus local-only/site/game` for a read-only pass over local DFFs and
 their same-name TXDs. Generated outputs and reports remain under

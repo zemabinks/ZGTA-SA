@@ -31,5 +31,5 @@ xcrun swiftc -parse-as-library -whole-module-optimization -Onone -target "$PHYSI
  -L "$PHYSICS_LIBRARY" -lzgtasa_native_physics -framework Security -framework CoreFoundation -o "$PHYSICS_SNAPSHOT/swift-verify"
 "$PHYSICS_SNAPSHOT/swift-verify"
 if [[ -n "${PHYSICS_SPHERE_REFERENCE_DIR:-}" ]]; then
- python3 "$PROJECT_ROOT/smoke_native_sphere_world.py" "$PHYSICS_SPHERE_REFERENCE_DIR"
+ python3 "$PROJECT_ROOT/tests/movement/smoke_native_sphere_world.py" "$PHYSICS_SPHERE_REFERENCE_DIR"
 fi

@@ -2,7 +2,7 @@
 // Observe original body/collider/query synchronization, without inventing a
 // replacement broadphase or changing current native immediate-query callers.
 const fs=require('node:fs'),path=require('node:path');
-const {archivedModules}=require('../../smoke_vehicle_dynamics');
+const {archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main(){
   const R=archivedModules()(55077);await R.init();const world=new R.World({x:0,y:0,z:0});
   const body=world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(0,1,0));

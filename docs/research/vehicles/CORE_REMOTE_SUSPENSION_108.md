@@ -1,0 +1,18 @@
+# Remote visual suspension — Core108
+
+The paired Core107 taxi capture showed a real tire gap. The wire/body frame was correct: the taxi road was lower than the nearby curb used by the initial pedestrian spawn. The original browser's remote car poser rotated wheels without applying its local driver's suspension travel. The native remote default reproduced that omission. Moving the car body or changing its imported model origin would also move the chassis and seated actors and would conceal the cause.
+
+`NativeRemoteSuspension` now projects wheel travel at the exact final draw matrix, using owner-imported wheel centres, radii and upper/lower travel. It changes only the rig's wheel-local offsets. Spin, steering, working parts, body/model origins, riders and network identity retain their existing owners. Existing owned and dynamic unattended physical suspension takes priority.
+
+Queries require real loaded collision coverage. Static geometry and fixed parents may support a tire; pedestrian, dynamic and kinematic vehicle colliders cannot become its support. Missing coverage or an absent world leaves the original visual pose, without inventing a floor. A known clear ray extends to imported lower travel. Projection has no elapsed-time state, so equal poses and coverage produce equal travel across frame schedules.
+
+The first supported classes are ordinary cars and trailers. Bikes, bicycles, trains, boats, aircraft, inverted/scaled frames and explicitly hydraulic configurations retain their specialized paths. Per-instance hydraulic/modification states that have no native representation remain outside this correction. Nearby native projection is limited to 120 m and 64 wheel queries per actor draw pass, with bounded rejection of nonstatic obstructions. Farther or budget-excluded visuals retain their previous pose.
+
+The independent browser adapter provides the same wheel-local correction for an optional owner-local mirror overlay. The patch preparation tool requires the exact input SHA, one recognized remote wheel-call boundary, a fresh ignored output, and safe output ancestors. It never modifies the input bundle. The adapter requires actual static contacts; the exposed browser interface lacks complete-cell coverage, so a miss restores canonical wheel locals instead of claiming known airborne droop. Unsupported/hydraulic owners are preserved. No browser service or overlay has been activated by these tests. An unmodified external browser client still uses its original remote poser.
+
+Public regressions use independently authored planes, curbs, vectors and patch inputs only:
+
+- `python3 tests/vehicles/test_native_remote_suspension.py` exercises the actual native helper, extracted Renderer contact method and native Rapier. Contact geometry, self-collider rejection, absent coverage, imported travel, unsupported classes and frame schedules are checked without original game input.
+- `node tests/browser/test_browser_remote_suspension.js` checks the authored adapter, synthetic contact conditions, unchanged body/rotation, missing-world behavior, hydraulic ownership, SHA/boundary checks and output-path protections. It does not execute original browser code.
+
+Separate owner-only regression carriers and all original-factory execution, real model/collision fixtures, numerical goldens and prepared browser bundles remain under ignored `local-only/research/remote-suspension-108`. They establish agreement with the inspected archived browser solver and actual native rig math, not retail gameplay feel or visible UIKit/WebGL/Metal acceptance. Full App builds, actual rendered comparisons and hardware tests remain separate. No 1:1 gameplay claim is made.

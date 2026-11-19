@@ -59,7 +59,7 @@ with the emitted driver actually using two threads and all 202 inputs unchanged.
 This establishes a complete optimized build, not iPhone FPS or a speed comparison
 against builds run under different system load.
 
-The [Definitive Edition menu](NATIVE_DE_MENU.md) optionally loads owner-provided
+The [Definitive Edition menu](docs/development/guides/NATIVE_DE_MENU.md) optionally loads owner-provided
 art/fonts/sounds from ignored `local-only/menu-bundle/OwnerMenu`. Without that
 folder the source-only menu remains functional using text/color fallbacks.
 Original resources must remain separate from public source and build uploads.
@@ -75,7 +75,7 @@ not remove a resource reference from the generated project.
 For manual project generation, run `cd ios && xcodegen generate --spec project.yml`
 for the source-only configuration, or select `project-owner-menu.yml` after
 importing the owner bundle. Regenerate when switching configurations. Verify
-both isolated project-generation paths with `python3 smoke_native_project.py`;
+both isolated project-generation paths with `python3 tests/hosting/smoke_native_project.py`;
 this does not build the app or change the checkout's generated Xcode project.
 
 The script regenerates XcodeGen, builds the required platform and prints the
@@ -101,7 +101,7 @@ python3 build_samp_transport.py --test
 
 The second command runs race-enabled host tests, builds both iOS platforms and
 links the real C ABI against their SDKs. Cached libraries alone do not establish
-server interoperability. See [server compatibility](SERVER_COMPATIBILITY.md)
+server interoperability. See [server compatibility](docs/development/SERVER_COMPATIBILITY.md)
 for the separately verified join/gameplay boundaries.
 
 Mac server launchers prepare runtime data separately with

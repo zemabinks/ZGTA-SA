@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Actual archived62540 contact closure +66242 damage, running original WASM.
-const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{archivedModules}=require('../../smoke_vehicle_dynamics');
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),{archivedModules}=require('../../tests/vehicles/smoke_vehicle_dynamics');
 async function main(){
  const load=archivedModules(),R=load(55077);await R.init();const T=load(85339),D=load(66242),source=fs.readFileSync(path.join(__dirname,'../../local-only/reverse-engineering/vehicle-physics/module-62540.js'),'utf8');
  const start=source.indexOf('let { world: e, events: t } = o,'),end=source.indexOf('})(),\n          tc(e)',start);if(start<0||end<0)throw Error('Archived contact closure changed');

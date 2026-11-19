@@ -52,7 +52,7 @@ Primary references checked on 2026-11-16:
 - [SetObjectMaterial](https://open.mp/docs/scripting/functions/SetObjectMaterial) specifies color0 inheritance, model -1 and0 semantics, and removal of vertex lighting when the color changes.
 - [SetObjectMaterialText](https://open.mp/docs/scripting/functions/SetObjectMaterialText), [sizes](https://open.mp/docs/scripting/resources/materialtextsizes), and [alignments](https://open.mp/docs/scripting/resources/textalignments) specify text parameters and embedding.
 
-Run `python3 test_samp_object_materials.py` with access to the native Metal device.
+Run `python3 tests/network/test_samp_object_materials.py` with access to the native Metal device.
 It checks native font/image behavior, exact background/alpha channels and all
 published dimensions; reads uploaded text pixels; checks exact lookup and cache
 budgets; then renders real offscreen draws to verify texture/sampler/color/prelit

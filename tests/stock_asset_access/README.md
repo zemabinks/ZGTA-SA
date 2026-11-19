@@ -42,7 +42,7 @@ again before each file request, and existing loader cancel/reset generation
 rules still apply. Account/session changes must invalidate the caller's active
 asset owner rather than keeping old work alive.
 
-Run `python3 test_stock_asset_access.py`. Pure checks exercise origin/path/domain,
+Run `python3 tests/resources/test_stock_asset_access.py`. Pure checks exercise origin/path/domain,
 expiry, Secure, Port, token and ambiguity boundaries. Real HTTP cases include
 gated stock resources with default 401 and explicit own-cookie success, expired
 and wrong-origin refusal, same/cross-origin redirect rejection, and unrelated

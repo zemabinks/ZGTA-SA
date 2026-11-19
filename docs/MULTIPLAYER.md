@@ -48,7 +48,7 @@ In the native app's **MULTIPLAYER** screen, enter the address of a suitable **Ma
 
 The dedicated form accepts a server address/port, nickname, optional server password and a protocol profile such as 0.3.7/open.mp or 0.3.DL. The *asset origin* supplies locally prepared models; the *game server* supplies multiplayer gameplay. Those are two different connections.
 
-Some controlled open.mp joins and custom-asset scenarios are documented, but **arbitrary public SA-MP servers are not guaranteed**. Server-specific launchers, custom anti-cheat, voice/CEF plugins and other extensions may be unsupported. See the [technical compatibility report](../SERVER_COMPATIBILITY.md).
+Some controlled open.mp joins and custom-asset scenarios are documented, but **arbitrary public SA-MP servers are not guaranteed**. Server-specific launchers, custom anti-cheat, voice/CEF plugins and other extensions may be unsupported. See the [technical compatibility report](development/SERVER_COMPATIBILITY.md).
 
 ## Option 3 — Try the original browser world
 
