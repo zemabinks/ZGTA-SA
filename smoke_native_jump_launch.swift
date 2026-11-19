@@ -50,10 +50,29 @@ do{
         try check(try selected(e,input)==(right ? "ped/jump_launch_r":"ped/jump_launch"),"sprint priority blend threshold")
         cases+=1
     }
+    var sharedStyle=NativeFootAnimationStyle();sharedStyle.sprint=sharedStyle.run
+    for (warm,right) in [(0.05998,true),(0.06,false),(0.06002,true)]{
+        let e=seeded(l,0.193,sharedStyle);var input=NativeFootAnimation.Input();input.ratio=2;input.sprint=true
+        _ = e.update(delta:warm,input:input)
+        try check(try selected(e,input)==(right ? "ped/jump_launch_r":"ped/jump_launch"),"shared clip collapsed distinct gait association weights")
+        cases+=1
+    }
     var missing=NativeFootAnimationStyle();missing.walk="invented/missing-walk";missing.run="invented/missing-run";missing.sprint="invented/missing-sprint"
     let absent=seeded(l,0.8,missing);var moving=NativeFootAnimation.Input();moving.ratio=2
     _ = absent.update(delta:0,input:moving)
     try check(try selected(absent,moving)=="ped/jump_launch","missing gait manufactured active association")
+    let stale=seeded(l,0.193);var active=NativeFootAnimation.Input();active.ratio=0.7
+    _ = stale.update(delta:0,input:active)
+    try check(try selected(stale,active)=="ped/jump_launch_r","active association setup")
+    stale.cancelQueuedLaunch();active.ratio=0
+    _ = stale.update(delta:0,input:active)
+    try check(try selected(stale,active)=="ped/jump_launch","idle retained obsolete gait association weight")
+    let changed=seeded(l,0.193);active.ratio=0.7
+    _ = changed.update(delta:0,input:active)
+    changed.setModelStyle(missing)
+    _ = changed.update(delta:0,input:active)
+    try check(try selected(changed,active)=="ped/jump_launch","skin replacement retained unavailable gait associations")
+    cases+=2
     for schedule in [[1.0/15],[1.0/30],[1.0/60],[1.0/120],[0.011,0.029,0.017,0.023]]{
         let e=seeded(l,0.193);var input=NativeFootAnimation.Input();input.ratio=0.7
         var time=0.0,index=0
