@@ -1809,6 +1809,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             footAirTime = 0;footAirFall = 0;footAirFell = false;footJumped = false;footLaunchRemaining = nil
         }
         guard swimController.on else { swimController.ashore(delta);return intended }
+        if swimController.completeIfWaterMissing(delta:delta,depth:depth) {
+            // Water-only pulses expire here. The succeeding foot task still
+            // receives the current stick and its unspent sprint tap this tick.
+            pendingDive = false;pendingSwimJump = false
+            return intended
+        }
         headingContinuity.external(.swimming)
         let pace:Double
         if health>0 {

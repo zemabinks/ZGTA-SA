@@ -60,6 +60,14 @@ final class NativeSwimController {
         state = depth > 3 ? .glide : .tread;angle = depth > 3 ? 80*Double.pi/180 : 0
     }
     func stop() { on = false;haul = nil;ratio = 0;angle = 0;floatTurn = 0 }
+    /// This boundary is already a certain completion in step(). Retire it
+    /// before the caller spends swim input or writes swim facing. A held haul
+    /// owns its clock/root even if the current water query is unavailable.
+    func completeIfWaterMissing(delta: Double,depth: Double?) -> Bool {
+        guard on,delta > 0,delta.isFinite,depth == nil,haul == nil else { return false }
+        stop();diveRequested = false
+        return true
+    }
     func steer(push: Double = 0,sprint: Double = 0,dive: Bool = false,pitch: Double = 0) {
         self.push = push;self.sprint = sprint
         if !diveRequested { diveRequested = dive }
