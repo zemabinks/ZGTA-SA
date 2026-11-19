@@ -1,5 +1,22 @@
 # Core GTA San Andreas gameplay parity
 
+## 2026-11-19 — Detailed-world high-resolution resources (146)
+
+The native parser and renderer now consume the archived world's plus-one HD
+image table. Available 256px images retain their pixels in bounded Metal array
+slices, with hardware repeat/minification and per-layer base fallback. The
+producer prepares optional HD PNGs; existing installed base resources remain
+usable. One central cell is admitted at a time, with bounded transfers, a serial
+latest-intent worker and source-fenced publication.
+
+The full selected Core146 physics/audio/transport/Metal chain and a separate
+311-cell native resource/186-image GPU readback audit pass. The owner
+archive still lacks 52 declared interior HD source files. Full-chain, SDK and
+normal installed-scene acceptance remain separate; original PC stored mips,
+full world materials, ambient simulation and retail parity remain open. See the
+[resource and memory scope](../research/rendering/CORE_PED_RENDERING_119.md#detailed-world-high-resolution-images-146).
+
+
 ## 2026-11-19 — Native-size vehicle image families (145)
 
 An explicit VPC3 path preserves archived vehicle base-image dimensions and exact RGBA pixels, replaces fixed-square atlas sampling with bounded native-size Metal images, and connects hardware wrapping/filtering and explicit generated mip chains. Per-part image/lamp selection, paint, damage, node transforms and deferred transparency remain independent; legacy VPC2/WRL2 behavior is preserved. The prepared installer validates the new format through the same native geometry/image contract. Host setup selects both ordinary and working native families.

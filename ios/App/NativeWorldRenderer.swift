@@ -127,6 +127,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
     private let worldPipeline: MTLRenderPipelineState
+    private let worldSharpPipeline: MTLRenderPipelineState?
     private let vehiclePipeline: MTLRenderPipelineState?
     private let vehiclePaintPipeline: MTLRenderPipelineState?
     private let vehicleNativePipeline: MTLRenderPipelineState?
@@ -165,6 +166,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let markerDepth: MTLDepthStencilState
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
+    private struct WorldSharpBase {let layers:Int,mapping:[UInt16],source:String}
+    private var worldSharpBase:[String:WorldSharpBase]=[:]
+    private var worldSharpManifest:NativeWorldSharpManifest?,worldSharpSource:String?
+    private var worldSharpIndexTask:NativeResourceTask?,worldSharpTicket:NativeWorldSharpTicket?
+    private var worldSharpName:String?,worldSharpGPU:NativeWorldSharpTextures?
+    private var worldSharpRetry:[String:Date]=[:]
+    private var worldSharpIndexReady=false,worldSharpIndexRetry=Date.distantPast
+    private let worldSharpLoader=NativeWorldSharpLoader()
     let legacyObjects=NativeSAMPObjects.Store()
     var legacyVirtualWorld:Int32=0
     var legacyLocalPlayerID:UInt16?
@@ -899,6 +908,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
         descriptor.fragmentFunction = worldFragment
         guard let worldPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        descriptor.fragmentFunction = library.makeFunction(name:"worldSharpFragment")
+        let worldSharpPipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
         descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].writeMask = []
         let vehicleMaskPipeline=try? device.makeRenderPipelineState(descriptor:descriptor)
@@ -970,6 +981,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.queue = queue
         self.pipeline = pipeline
         self.worldPipeline = worldPipeline
+        self.worldSharpPipeline = worldSharpPipeline
         self.vehiclePipeline = vehiclePipeline
         self.vehiclePaintPipeline = vehiclePaintPipeline
         self.vehicleNativePipeline = vehicleNativePipeline
@@ -989,6 +1001,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         fixedCJObserver=NativeResourceStore.shared.observe {[weak self] _ in
             guard let self else{return}
             self.invalidatePedAtlasSourceIfChanged()
+            self.loadNearby()
             _ = self.actorSelection.invalidateSource(self.fixedCJSourceIdentity())
             if self.fixedCJ?.invalidateIfSourceChanged()==true,self.needsFixedCJ{self.ensureFixedCJ()}
         }
@@ -2333,6 +2346,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             collisionRequests.request(coverage.cells,now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
             desiredPhysicsCells=collisionRequests.retained(now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
             for name in desiredPhysicsCells {loadCollision(name:name)}
+        loadWorldSharpIfNeeded()
         }
         var excluded=excluding
         if let queries=character?.queries {excluded.formUnion([queries.walker,queries.probe])}
@@ -2784,6 +2798,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func loadNearby() {
+        refreshWorldSharpSource()
         // The far mesh is divided into sixteen 4×4 blocks. Detailed cells are
         // 375 m squares with a 16-column grid and origin (-3000, -3000).
         let anchor=scenePosition
@@ -2829,6 +2844,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if indoors { far = [] }
         activeFar = far
         meshes = meshes.filter { detailNames.contains($0.key) || far.contains($0.key) }
+        worldSharpBase=worldSharpBase.filter{detailNames.contains($0.key)}
         collisions = collisions.filter { desiredPhysicsCells.contains($0.key) }
         groundVehicle?.retainCells(desiredPhysicsCells)
         for name in far { load(name: name) }
@@ -2856,6 +2872,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private func load(name: String) {
         guard meshes[name] == nil, !loading.contains(name),
               Date() >= (retryAfter[name] ?? .distantPast), let server else { return }
+        let source=fixedCJSourceIdentity()
         loading.insert(name)
         onStatus?("LOADING CITY: \(name.uppercased())")
         let binURL = server.path("game/world/\(name).bin")
@@ -2882,7 +2899,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             group.leave()
         }.resume()
         group.notify(queue: .main) { [weak self] in
-            guard let self else { return }
+            guard let self,self.fixedCJSourceIdentity()==source else { return }
             self.loading.remove(name)
             if name.hasPrefix("c") || name.hasPrefix("i"), !self.activeDetails.contains(name) { return }
             if name.hasPrefix("t"), !self.activeFar.contains(name) { return }
@@ -2908,6 +2925,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
                 self.meshes[name] = Mesh(vertices: vertices, indices: indices,
                                          indexCount: world.indices.count, atlas: atlas)
+                if !name.hasPrefix("t") {
+                    self.worldSharpBase[name]=WorldSharpBase(layers:world.layers,mapping:world.sharpLayers,source:source)
+                    self.loadWorldSharpIfNeeded()
+                }
                 self.onStatus?("CITY READY: \(name.uppercased())")
             } catch {
                 self.retryAfter[name] = Date().addingTimeInterval(5)
@@ -2916,11 +2937,69 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// All state here belongs to the renderer's main-thread scene. Only the
+    /// bounded decoder and GPU upload run off-main; no stale result may publish.
+    private func refreshWorldSharpSource() {
+        let source=fixedCJSourceIdentity()
+        if worldSharpSource != source {
+            worldSharpIndexTask?.cancel();worldSharpIndexTask=nil
+            worldSharpTicket?.cancel();worldSharpTicket=nil;worldSharpGPU=nil;worldSharpName=nil
+            worldSharpManifest=nil;worldSharpBase.removeAll();worldSharpRetry.removeAll()
+            worldSharpIndexReady=false;worldSharpIndexRetry = .distantPast
+            if worldSharpSource != nil{meshes.removeAll();loading.removeAll();retryAfter.removeAll()}
+            worldSharpSource=source
+        }
+        guard !worldSharpIndexReady,worldSharpIndexTask==nil,Date()>=worldSharpIndexRetry,let server else{return}
+        let task=NativeResourceTransport.boundedDataTask(with:server.path("game/world/index.json"),maximumBytes:2*1024*1024){[weak self] data,response,_ in
+            guard let data,(response as?HTTPURLResponse)?.statusCode==200,
+                  let document=try? JSONSerialization.jsonObject(with:data) as? [String:Any],
+                  let rows=document["water"] as? [[NSNumber]] else {
+                DispatchQueue.main.async {
+                    guard let self,self.worldSharpSource==source,self.fixedCJSourceIdentity()==source else{return}
+                    self.worldSharpIndexTask=nil;self.worldSharpIndexRetry=Date().addingTimeInterval(5)
+                };return
+            }
+            let water=NativeWorldWater(rows:rows.map{$0.map(\.floatValue)})
+            let cells=(document["inside"] as? [String:Any])?["cells"] as? [[String:Any]] ?? []
+            let inside=Set(cells.compactMap{$0["cell"] as? Int})
+            let sharp=try? NativeWorldSharpManifest(data:data)
+            DispatchQueue.main.async {
+                guard let self,self.worldSharpSource==source,self.fixedCJSourceIdentity()==source else{return}
+                self.worldSharpIndexTask=nil;self.worldSharpIndexReady=true;self.worldSharpManifest=sharp
+                self.worldWater=water;self.waterMesh=self.makeWater(water);self.insideCells=inside
+                self.loadNearby()
+            }
+        }
+        worldSharpIndexTask=task;task.resume()
+    }
+    private func loadWorldSharpIfNeeded() {
+        let name=activeDetail,source=fixedCJSourceIdentity()
+        if worldSharpName != name {
+            worldSharpTicket?.cancel();worldSharpTicket=nil;worldSharpGPU=nil;worldSharpName=name
+        }
+        guard worldSharpPipeline != nil,worldSharpSource==source,worldSharpGPU==nil,worldSharpTicket==nil,
+              Date()>=(worldSharpRetry[name] ?? .distantPast),let server,
+              let entry=worldSharpManifest?.entries[name],entry.sharpLayers>0,
+              let base=worldSharpBase[name],base.source==source,base.layers==entry.layers,
+              let layout=try? NativeWorldSharpLayout(baseLayers:base.layers,mapping:base.mapping,
+                sharpLayers:entry.sharpLayers,width:2048,height:((entry.sharpLayers+7)/8)*256) else{return}
+        let ticket=NativeWorldSharpTicket();worldSharpTicket=ticket
+        worldSharpLoader.load(url:server.path("game/world/\(name).hd.png"),layout:layout,device:device,queue:queue,ticket:ticket){[weak self] result in
+            guard let self,!ticket.isCancelled,self.worldSharpTicket === ticket,self.worldSharpName==name,
+                  self.activeDetail==name,self.worldSharpSource==source,self.fixedCJSourceIdentity()==source else{return}
+            self.worldSharpTicket=nil
+            switch result {
+            case .success(let textures):self.worldSharpGPU=textures
+            case .failure:self.worldSharpRetry[name]=Date().addingTimeInterval(30)
+            }
+        }
+    }
+
     var server: ServerAddress? {didSet{
         if oldValue != server {invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
-    deinit {pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    deinit {worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
     private var needsFixedCJ:Bool {
         localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
     }
@@ -3068,18 +3147,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let anchors = document.mapValues { $0.compactMapValues { ($0 as? [NSNumber])?.map(\.floatValue) } }
             DispatchQueue.main.async { self?.pedestrianAnchors = anchors }
         }.resume()
-        NativeResourceTransport.dataTask(with: server.path("game/world/index.json")) { [weak self] data, _, _ in
-            guard let self, let data,
-                  let document = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let rows = document["water"] as? [[NSNumber]] else { return }
-            let water = NativeWorldWater(rows: rows.map { $0.map(\.floatValue) })
-            let cells = (document["inside"] as? [String: Any])?["cells"] as? [[String: Any]] ?? []
-            let inside = Set(cells.compactMap { $0["cell"] as? Int })
-            DispatchQueue.main.async {
-                self.worldWater = water; self.waterMesh = self.makeWater(water); self.insideCells = inside
-                self.loadNearby()
-            }
-        }.resume()
+        refreshWorldSharpSource()
         NativeResourceTransport.dataTask(with: server.path("game/native/models/index.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let index = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
@@ -4111,7 +4179,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             draw(mesh: mesh,cellSize: 64,matrix: matrix,encoder: encoder)
         }
         encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
-        for name in activeDetails { if let mesh = meshes[name] { draw(mesh: mesh,cellSize: 128,matrix: matrix,encoder: encoder) } }
+        for name in activeDetails {if let mesh=meshes[name] {
+            if name==worldSharpName,worldSharpSource==fixedCJSourceIdentity(),let images=worldSharpGPU,
+               let worldSharpPipeline,(try? images.bind(encoder:encoder,queue:queue)) != nil {
+                encoder.setRenderPipelineState(worldSharpPipeline)
+            }else{encoder.setRenderPipelineState(worldPipeline)}
+            draw(mesh:mesh,cellSize:128,matrix:matrix,encoder:encoder)
+        }}
     }
 
     private func makeObjectiveMarker() -> Mesh? {

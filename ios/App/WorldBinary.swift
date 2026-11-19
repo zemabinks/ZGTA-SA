@@ -15,6 +15,9 @@ struct WorldBinary {
     let vertices: [NativeVertex]
     let indices: [UInt32]
     let layers: Int
+    /// Original plus-one high-resolution layer map; zero selects the base
+    /// image. Its target bounds belong to the separately declared HD family.
+    let sharpLayers: [UInt16]
     /// Malformed source UV components are mapped to zero before GPU upload.
     /// This is a deterministic fallback, not recovery of an unknown original UV.
     let repairedUVComponents: Int
@@ -74,6 +77,7 @@ struct WorldBinary {
         vertices = madeVertices
         indices = madeIndices
         layers = layerCount
+        sharpLayers = (0..<layerCount).map { u16(duskStart + count * 4 + $0 * 2) }
         repairedUVComponents = repairedUVs
     }
 }
