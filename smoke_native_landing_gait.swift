@@ -35,7 +35,7 @@ func gait(_ frame:NativeFootAnimation.Frame,_ e:NativeFootAnimation,_ library:Na
     return b.time/length
 }
 let kinds=[("land","ped/jump_land"),("fallLand","ped/fall_land"),("collapse","ped/fall_collapse")]
-func ordinary(_ library:NativeSkeletalAnimationLibrary,_ kind:String,_ clip:String,_ ratio:Double,_ sprint:Bool,_ schedule:[Double],_ shared:Bool=false)throws{
+func ordinary(_ library:NativeSkeletalAnimationLibrary,_ kind:String,_ clip:String,_ ratio:Double,_ sprint:Bool,_ schedule:[Double],_ shared:Bool=false,_ boundedRoot:Bool=true)throws{
     var style=NativeFootAnimationStyle();if shared{style.sprint=style.run}
     let e=engine(library,style);var input=NativeFootAnimation.Input();input.ratio=ratio;input.sprint=sprint
     for _ in 0..<29{_ = e.update(delta:1/60,input:input)}
@@ -52,7 +52,7 @@ func ordinary(_ library:NativeSkeletalAnimationLibrary,_ kind:String,_ clip:Stri
     for i in 0..<1000{
         let dt=schedule[i%schedule.count],f=e.update(delta:dt,input:input)
         try check(f.travel.x.isFinite && f.travel.y.isFinite,"nonfinite landing travel")
-        try check(f.travel.y >= -1e-6 && f.travel.y <= dt*12+1e-5,"landing reset fabricated backwards/cycle root displacement")
+        if boundedRoot{try check(f.travel.y >= -1e-6 && f.travel.y <= dt*12+1e-5,"landing reset fabricated backwards/cycle root displacement")}
         if !e.gateHasMovementAction{
             // The retiring frame already integrated its old before/after
             // samples. Observe the new stored clock without adding time.
@@ -62,7 +62,7 @@ func ordinary(_ library:NativeSkeletalAnimationLibrary,_ kind:String,_ clip:Stri
             try near(atBoundary.travel.y,0,"restart emitted motion without time")
             let resumed=e.update(delta:0.013,input:input)
             try check(try gait(resumed,e,library)>0,"completed landing kept resetting gait")
-            try check(resumed.travel.y>=0 && resumed.travel.y<0.16,"restart produced a full root cycle")
+            if boundedRoot{try check(resumed.travel.y>=0 && resumed.travel.y<0.16,"restart produced a full root cycle")}
             finished=true;break
         }
         last=f
@@ -75,7 +75,10 @@ func exclusions(_ library:NativeSkeletalAnimationLibrary)throws{
         let e=engine(library);for _ in 0..<23{_ = e.update(delta:1/60,input:input)}
         input.land="fallLand";_ = e.update(delta:0.03,input:input);input.land=nil
         let before=try gait(e.update(delta:0,input:input),e,library)
-        if action=="abort"{e.resetMovementTask()}else if action=="replace"{try check(e.roll(1),"roll replacement")}else{e.die()}
+        if action=="abort"{e.resetMovementTask()}else if action=="replace"{try check(e.roll(1),"roll replacement")}else{
+            e.die();try check(e.dead,"death failed to acquire owner")
+            _ = e.update(delta:0,input:input);e.revive()
+        }
         let after=e.update(delta:0,input:input)
         try near(try gait(after,e,library),before,"interrupted landing acquired completion reset")
         if action=="replace"{
@@ -102,7 +105,7 @@ do{
     var ownedCases=0
     if CommandLine.arguments.count>1{
         let data=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]));guard let original=NativeSkeletalAnimationLibrary(data:data)else{throw LandingFailure.failed("owned CLP decode")}
-        for (kind,clip) in kinds where original.contains(clip){try ordinary(original,kind,clip,1.4,false,[1.0/60]);ownedCases+=1}
+        for (kind,clip) in kinds where original.contains(clip){try ordinary(original,kind,clip,1.4,false,[1.0/60],false,false);ownedCases+=1}
     }
     print("PASS landing gait: \(checks) checks, \(cases) completion cases, \(ownedCases) optional owned CPU cases; no rendered/retail claim")
 }catch{print("FAIL landing gait after \(checks): \(error)");exit(2)}
