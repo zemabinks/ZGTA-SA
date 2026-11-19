@@ -21,7 +21,7 @@ private func pipeline(_ vertex:MTLFunction,_ fragment:MTLFunction)->MTLRenderPip
 }
 private let routes=["worldVertex","animatedActorVertex","skeletalActorVertex"]
 private var pipelines:[String:MTLRenderPipelineState]=[:]
-for route in routes {for fragment in ["ordinaryPedAtlasFragment","worldFragment","nativePedReferenceFragment"] {
+for route in routes {for fragment in ["ordinaryPedAtlasFragment","ordinaryPedNativeFragment","MODEL_FRAGMENT_NAME","nativePedReferenceFragment"] {
     guard let vertex=library.makeFunction(name:route),let function=library.makeFunction(name:fragment),let value=pipeline(vertex,function) else{throw Failure.unavailable(route+fragment)}
     pipelines[route+fragment]=value
 }}
@@ -35,6 +35,7 @@ private let indices:[UInt32]=[0,1,2,0,2,3]
 private let indexBuffer=device.makeBuffer(bytes:indices,length:indices.count*4,options:.storageModeShared)!
 private struct Fixture {
     let name:String,layout:NativePedAtlasLayout,validated:NativePedAtlasLayout.Validated,texture:MTLTexture,pixels:[UInt8],tiles:[MTLTexture]
+    let native:NativePedTextureArrays?
 }
 private let loader=MTKTextureLoader(device:device)
 private let names=try JSONDecoder().decode([String].self,from:Data(contentsOf:output.appendingPathComponent("fixtures/cases.json")))
@@ -47,10 +48,15 @@ for name in names {
     let texture=try loader.newTexture(data:png,options:[.SRGB:false,.generateMipmaps:false])
     try require(texture.width==validated.width && texture.height==validated.height && texture.mipmapLevelCount==1,"Actual PNG dimensions/no generated mips: "+name)
     let tiles=try layout.layers.map{try loader.newTexture(data:Data(contentsOf:root.appendingPathComponent("tile-\($0.slot).png")),options:[.SRGB:false,.generateMipmaps:false])}
-    fixtures.append(.init(name:name,layout:layout,validated:validated,texture:texture,pixels:Array(try Data(contentsOf:root.appendingPathComponent("pixels.rgba"))),tiles:tiles))
+    let native:NativePedTextureArrays?
+    if layout.schema==2 {
+        guard let plan=validated.hardware else{throw Failure.unavailable("Native hardware texture plan")}
+        native=try NativePedTextureArrays(device:device,queue:queue,atlas:texture,plan:plan)
+    }else{native=nil}
+    fixtures.append(.init(name:name,layout:layout,validated:validated,texture:texture,pixels:Array(try Data(contentsOf:root.appendingPathComponent("pixels.rgba"))),tiles:tiles,native:native))
 }
 private let clear:[Float]=[12/255,18/255,25/255,1]
-private func render(_ fixture:Fixture,route:String,uv:SIMD2<Float>,slot:Float,night:Float=0,alpha:Float=1,owner:Float=1,fog:Float=0,legacy:Bool=false,version:Float?=nil,badSampling:SIMD4<Float>?=nil,reference:Bool=false)->[UInt8] {
+private func render(_ fixture:Fixture,route:String,uv:SIMD2<Float>,slot:Float,night:Float=0,alpha:Float=1,owner:Float=1,fog:Float=0,legacy:Bool=false,version:Float?=nil,badSampling:SIMD4<Float>?=nil,reference:Bool=false,compatibility:Bool=false,badEntry:SIMD2<UInt32>?=nil,badGroup:UInt32?=nil,badRect:SIMD4<Float>?=nil)->[UInt8] {
     renders+=1
     let tint=SIMD4<Float>(0.45,0.32,0.2,alpha),dusk=SIMD4<Float>(0.18,0.3,0.5,alpha)
     let vertices=points.map{NativeVertex(position:$0,uvLayer:SIMD4(uv.x,uv.y,slot,0),tint:tint,dusk:dusk)}
@@ -60,11 +66,14 @@ private func render(_ fixture:Fixture,route:String,uv:SIMD2<Float>,slot:Float,ni
     var layout=fixture.validated.vectors
     if let version{layout[0].w=version}
     if let badSampling,fixture.layout.schema==2{layout[2]=badSampling}
+    if let badRect,fixture.layout.schema==2{layout[1]=badRect}
     let pass=MTLRenderPassDescriptor();pass.colorAttachments[0].texture=target
     pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
     pass.colorAttachments[0].clearColor=MTLClearColorMake(Double(clear[0]),Double(clear[1]),Double(clear[2]),1)
     let command=queue.makeCommandBuffer()!,encoder=command.makeRenderCommandEncoder(descriptor:pass)!
-    encoder.setRenderPipelineState(pipelines[route+(reference ? "nativePedReferenceFragment":legacy ? "worldFragment":"ordinaryPedAtlasFragment")]!)
+    let native=fixture.layout.schema==2 && !reference && !legacy && !compatibility
+    let fragment=reference ? "nativePedReferenceFragment":legacy ? "MODEL_FRAGMENT_NAME":native ? "ordinaryPedNativeFragment":"ordinaryPedAtlasFragment"
+    encoder.setRenderPipelineState(pipelines[route+fragment]!)
     encoder.setCullMode(.none);encoder.setVertexBuffer(vertexBuffer,offset:0,index:0)
     encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
     encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
@@ -72,7 +81,17 @@ private func render(_ fixture:Fixture,route:String,uv:SIMD2<Float>,slot:Float,ni
         var filter=Float(fixture.layout.layers[Int(slot)].sampler!.filter)
         encoder.setFragmentBytes(&filter,length:4,index:2);encoder.setFragmentTexture(fixture.tiles[Int(slot)],index:0)
     } else {
-        encoder.setFragmentBytes(layout,length:layout.count*16,index:2);encoder.setFragmentTexture(fixture.texture,index:0)
+        encoder.setFragmentBytes(layout,length:layout.count*16,index:2)
+        if native {
+            let index=slot.isFinite && slot>=0 && slot<Float(fixture.layout.layers.count) ? Int(slot.rounded()):0
+            let group=Int(fixture.native!.plan.entries[index].x)
+            try! fixture.native!.bind(group:group,encoder:encoder,queue:queue)
+            if let badEntry {
+                var entries=fixture.native!.plan.entries;entries[index]=badEntry
+                encoder.setFragmentBytes(entries,length:entries.count*MemoryLayout<SIMD2<UInt32>>.stride,index:3)
+            }
+            if var badGroup {encoder.setFragmentBytes(&badGroup,length:4,index:4)}
+        }else{encoder.setFragmentTexture(fixture.texture,index:0)}
     }
     if route=="animatedActorVertex" {
         // packed_float3: twelve-byte stride. Interpolated positions equal points.
@@ -149,10 +168,17 @@ for fixture in fixtures {
     for slot in fixture.layout.layers.indices {for uv in positions {for (night,alpha,owner,fog) in policies {
         let reference=render(fixture,route:routes[0],uv:uv,slot:Float(slot),night:night,alpha:alpha,owner:owner,fog:fog)
         let want=expected(fixture,uv:uv,slot:slot,night:night,alpha:alpha,owner:owner,fog:fog),actual=center(reference)
-        try require(zip(want,actual).allSatisfy{abs($0-$1)<=3},"CPU bilinear/light/fog/alpha: \(fixture.name), slot \(slot), uv \(uv), expected \(want), actual \(actual)")
+        // Keep every ideal-arithmetic assertion on the compatibility atlas
+        // algorithm it describes. Production v2 uses the strict independent
+        // hardware sampler below, including the original repeat-edge inputs.
+        let arithmetic=fixture.layout.schema==2 ? center(render(fixture,route:routes[0],uv:uv,slot:Float(slot),night:night,alpha:alpha,owner:owner,fog:fog,compatibility:true)):actual
+        try require(zip(want,arithmetic).allSatisfy{abs($0-$1)<=3},"CPU bilinear/light/fog/alpha: \(fixture.name), slot \(slot), uv \(uv), expected \(want), actual \(arithmetic)")
+        if fixture.layout.schema==2 && (abs(uv.x)>=8388608 || abs(uv.y)>=8388608) {
+            try require(zip(want,actual).allSatisfy{abs($0-$1)<=3},"Exact large Float integer repeat policy: \(fixture.name)")
+        }
         if fixture.layout.schema==2 && abs(uv.x)<100 && abs(uv.y)<100 {
             let independent=render(fixture,route:routes[0],uv:uv,slot:Float(slot),night:night,alpha:alpha,owner:owner,fog:fog,reference:true)
-            try require(zip(center(independent),actual).allSatisfy{abs($0-$1)<=3},"Independent isolated-texture hardware repeat sampler: \(fixture.name), slot \(slot), uv \(uv)")
+            try require(zip(center(independent),actual).allSatisfy{abs($0-$1)<=3},"Independent isolated-texture hardware repeat sampler: \(fixture.name), slot \(slot), uv \(uv), atlas \(actual), isolated \(center(independent)), ideal \(want)")
         }
         for route in routes.dropFirst() {
             let image=render(fixture,route:route,uv:uv,slot:Float(slot),night:night,alpha:alpha,owner:owner,fog:fog)
@@ -172,10 +198,33 @@ for fixture in fixtures {
         for uv in [SIMD2<Float>(.nan,0),SIMD2<Float>(0,.nan),SIMD2<Float>(.infinity,0),SIMD2<Float>(0,-.infinity)] {
             try require(render(fixture,route:routes[0],uv:uv,slot:0)==background,"Nonfinite v2 interpolants are discarded before integer conversion")
         }
+        for entry in [SIMD2<UInt32>(999,0),SIMD2<UInt32>(0,UInt32.max)] {
+            try require(render(fixture,route:routes[0],uv:.zero,slot:0,badEntry:entry)==background,"Invalid native group/slice is discarded")
+        }
+        try require(render(fixture,route:routes[0],uv:.zero,slot:0,badGroup:999)==background,"Wrong bound native group is discarded")
+        for rect in [SIMD4<Float>(0,0,0,1),SIMD4<Float>(0,0,4097,1),SIMD4<Float>(0,0,.nan,1)] {
+            try require(render(fixture,route:routes[0],uv:.zero,slot:0,badRect:rect)==background,"Invalid native image dimensions are discarded")
+        }
         for sampling in [SIMD4<Float>(0,1,1,0),SIMD4<Float>(3,1,1,0),SIMD4<Float>(1,2,1,0),SIMD4<Float>(6,1,2,0),SIMD4<Float>(6,1,1,1)] {
             try require(render(fixture,route:routes[0],uv:.zero,slot:0,badSampling:sampling)==background,"Invalid v2 GPU sampler record is discarded")
         }
     }
+}
+private func binary(layers:Int,faces:[Int])->Data {
+    var data=Data()
+    func u32(_ value:UInt32){var value=value.littleEndian;withUnsafeBytes(of:&value){data.append(contentsOf:$0)}}
+    func u16(_ value:UInt16){var value=value.littleEndian;withUnsafeBytes(of:&value){data.append(contentsOf:$0)}}
+    func f32(_ value:Float){u32(value.bitPattern)}
+    let vertices=faces.count*3
+    for value in [UInt32(0x324c5257),UInt32(vertices),UInt32(vertices),UInt32(layers)]{u32(value)}
+    for _ in faces {for point:[Float] in [[-0.8,-0.8,0.5],[0.8,-0.8,0.5],[0,0.8,0.5]]{point.forEach(f32)}}
+    for _ in 0..<vertices{f32(0.5);f32(0.5)}
+    for index in 0..<vertices{u32(UInt32(index))}
+    data.append(Data(repeating:255,count:vertices*4))
+    for slot in faces{for _ in 0..<3{u16(UInt16(slot))}}
+    if vertices%2 != 0{u16(0)}
+    data.append(Data(repeating:128,count:vertices*4));data.append(Data(count:layers*2))
+    return data
 }
 private let byName=Dictionary(uniqueKeysWithValues:fixtures.map{($0.name,$0)})
 private let oldEdge=render(byName["v1compare"]!,route:routes[0],uv:.zero,slot:1)
@@ -191,9 +240,76 @@ for name in ["v2nearest","v2linear","v2linear2","v2mixed"] {
     try require(zip(center(a),center(b)).allSatisfy{abs($0-$1)<=3},"V2 periodic repeat including negative UV")
 }
 try require(render(byName["v2linear"]!,route:routes[0],uv:SIMD2(0.17,0.73),slot:1)==render(byName["v2linear2"]!,route:routes[0],uv:SIMD2(0.17,0.73),slot:1),"Native2/6 use identical base-linear texels for one-level PNGs")
+// The real resource owner must encode alternating array groups in original
+// triangle order, including a clipped part range. The independent path draws
+// the original PNGs individually with hardware samplers and the same blend ABI.
+private let orderedFixture=byName["v2mixed"]!,orderedFaces=[2,1,2]
+private let orderedWorld=try WorldBinary(data:binary(layers:orderedFixture.layout.layers.count,faces:orderedFaces))
+private let orderedPlan=try NativePedAtlasLayout.HardwarePlan(world:orderedWorld,rects:orderedFixture.layout.layers.map(\.rect),width:orderedFixture.texture.width,height:orderedFixture.texture.height,maximumBytes:orderedFixture.layout.logicalRGBA8Bytes)
+private let orderedNative=try NativePedTextureArrays(device:device,queue:queue,atlas:orderedFixture.texture,plan:orderedPlan)
+private let orderedIndices=device.makeBuffer(bytes:orderedWorld.indices,length:orderedWorld.indices.count*4,options:.storageModeShared)!
+private func orderedRender(_ range:Range<Int>,reference:Bool,sortGroups:Bool=false)throws->[UInt8] {
+    renders+=1
+    let pass=MTLRenderPassDescriptor();pass.colorAttachments[0].texture=target
+    pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
+    pass.colorAttachments[0].clearColor=MTLClearColorMake(Double(clear[0]),Double(clear[1]),Double(clear[2]),1)
+    let command=queue.makeCommandBuffer()!,encoder=command.makeRenderCommandEncoder(descriptor:pass)!
+    encoder.setRenderPipelineState(pipelines["worldVertex"+(reference ? "nativePedReferenceFragment":"ordinaryPedNativeFragment")]!)
+    let vertex=device.makeBuffer(bytes:orderedWorld.vertices,length:orderedWorld.vertices.count*MemoryLayout<NativeVertex>.stride,options:.storageModeShared)!
+    var uniforms=Uniforms(viewProjection:matrix_identity_float4x4,settings:SIMD4(Float(orderedFixture.texture.width),Float(orderedFixture.texture.height),0,128))
+    encoder.setCullMode(.none);encoder.setVertexBuffer(vertex,offset:0,index:0)
+    encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+    encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+    if reference {
+        var faces=Array(range.lowerBound/3..<range.upperBound/3)
+        if sortGroups {faces.sort{orderedPlan.entries[orderedFaces[$0]].x<orderedPlan.entries[orderedFaces[$1]].x}}
+        for face in faces {
+            let slot=orderedFaces[face];var filter=Float(orderedFixture.layout.layers[slot].sampler!.filter)
+            encoder.setFragmentBytes(&filter,length:4,index:2);encoder.setFragmentTexture(orderedFixture.tiles[slot],index:0)
+            encoder.drawIndexedPrimitives(type:.triangle,indexCount:3,indexType:.uint32,indexBuffer:orderedIndices,indexBufferOffset:face*3*4)
+        }
+    }else{
+        encoder.setFragmentBytes(orderedFixture.validated.vectors,length:orderedFixture.validated.vectors.count*16,index:2)
+        try orderedNative.encode(indices:orderedIndices,encoder:encoder,queue:queue,range:range)
+    }
+    encoder.endEncoding();let blit=command.makeBlitCommandEncoder()!
+    blit.copy(from:target,sourceSlice:0,sourceLevel:0,sourceOrigin:MTLOrigin(x:0,y:0,z:0),sourceSize:MTLSize(width:size,height:size,depth:1),to:readback,destinationOffset:0,destinationBytesPerRow:row,destinationBytesPerImage:row*size)
+    blit.endEncoding();command.commit();command.waitUntilCompleted()
+    try require(command.status == .completed && command.error==nil,"Ordered native upload/draw completed on its queue")
+    let raw=readback.contents().assumingMemoryBound(to:UInt8.self)
+    return (0..<size).flatMap{y in Array(UnsafeBufferPointer(start:raw+y*row,count:size*4))}
+}
+for range in [0..<9,0..<3,3..<9,6..<9,3..<3] {
+    let native=try orderedRender(range,reference:false),independent=try orderedRender(range,reference:true)
+    try require(native==independent,"Ordered group encoding and actual part range \(range) match isolated PNG draws")
+}
+try require(try orderedRender(0..<9,reference:true) != orderedRender(0..<9,reference:true,sortGroups:true),"Fixture detects changed transparent triangle ordering")
+private func rejectsResource(_ expected:NativePedTextureArrays.Failure,_ action:()throws->Void)throws {
+    do{try action();throw Failure.assertion("Resource accepted invalid \(expected)")}
+    catch let error as NativePedTextureArrays.Failure{try require(error==expected,"Resource failure \(error) expected \(expected)")}
+}
+for limit in [0,32,NativePedTextureArrays.maximumAllocationBytes+1] {
+    try rejectsResource(.budget){_=try NativePedTextureArrays(device:device,queue:queue,atlas:orderedFixture.texture,plan:orderedPlan,maximumAllocationBytes:limit)}
+}
+try require(orderedNative.allocatedBytes>orderedPlan.copiedTexelBytes && orderedNative.allocatedBytes<=NativePedTextureArrays.maximumAllocationBytes,"Actual native allocations are counted and bounded")
+// No invalid draw reaches the GPU. Each failure is caught before endEncoding.
+do {
+    let command=queue.makeCommandBuffer()!,pass=MTLRenderPassDescriptor();pass.colorAttachments[0].texture=target
+    pass.colorAttachments[0].loadAction = .dontCare;pass.colorAttachments[0].storeAction = .dontCare
+    let encoder=command.makeRenderCommandEncoder(descriptor:pass)!,other=device.makeCommandQueue()!
+    try rejectsResource(.queue){try orderedNative.bind(group:0,encoder:encoder,queue:other)}
+    for group in [-1,orderedNative.textures.count] {try rejectsResource(.group){try orderedNative.bind(group:group,encoder:encoder,queue:queue)}}
+    for range in [(-3)..<0,0..<12,1..<3,0..<4] {try rejectsResource(.indexBuffer){try orderedNative.encode(indices:orderedIndices,encoder:encoder,queue:queue,range:range)}}
+    for length in [1,4,32] {
+        let short=device.makeBuffer(length:length,options:.storageModeShared)!
+        try rejectsResource(.indexBuffer){try orderedNative.encode(indices:short,encoder:encoder,queue:queue)}
+    }
+    encoder.endEncoding();command.commit();command.waitUntilCompleted()
+    try require(command.status == .completed && command.error==nil,"Rejected resources did not encode an invalid GPU draw")
+}
 let report:[String:Any]=["status":"PASS","checks":checks,"renders":renders,"device":device.name,"fixtures":names,
     "unmodifiedProductionShaders":true,"actualPNGTextureLoader":true,"actualBlendAndUniformABI":true,
-    "independentIsolatedHardwareRepeatSampler":true,
+    "independentIsolatedHardwareRepeatSampler":true,"actualNativeArrayUploadAndOrderedRanges":true,"resourceFailureChecks":true,
     "vertexRoutes":routes,"retailRuntimeVerified":false,"phoneOrSimulatorUsed":false,
     "samplingPolicy":"V1 exact existing inset; V2 found-native repeat nearest/base-linear, no generated mips; retail runtime remains unverified"]
 try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:output.appendingPathComponent("gpu-report.json"))

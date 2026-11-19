@@ -90,11 +90,59 @@ struct NativePedAtlasLayout:Decodable {
         }
     }
     struct Layer:Decodable {let slot:Int;let texture:String?;let rect:[Int];let sampler:Sampler?}
+    /// Native-size images share array storage only when their dimensions match.
+    /// Draw runs preserve the original triangle order and index-buffer offsets.
+    struct HardwarePlan {
+        struct Copy {let slot:Int,rect:[Int]}
+        struct Group {let width:Int,height:Int;var copies:[Copy]}
+        struct Draw {let group:Int,indexOffset:Int;var indexCount:Int}
+        let groups:[Group],entries:[SIMD2<UInt32>],draws:[Draw],copiedTexelBytes:Int
+        init(world:WorldBinary,rects:[[Int]],width:Int,height:Int,maximumBytes:Int)throws {
+            guard (1...4096).contains(width),(1...4096).contains(height),
+                  (1...512*1024).contains(maximumBytes),!rects.isEmpty,rects.count<=4096,
+                  world.layers==rects.count,!world.indices.isEmpty,world.indices.count%3==0 else{throw Invalid.mesh}
+            var groups:[Group]=[],entries:[SIMD2<UInt32>]=[],current:[SIMD2<Int>:Int]=[:],bytes=0
+            for (slot,r) in rects.enumerated() {
+                guard r.count==4,r[0]>=0,r[0]<width,r[1]>=0,r[1]<height,
+                      r[2]>0,r[2]<=width-r[0],r[3]>0,r[3]<=height-r[1] else{throw Invalid.rectangles}
+                let count=r[2]*r[3]*4
+                guard count<=maximumBytes-bytes else{throw Invalid.dimensions};bytes+=count
+                let size=SIMD2(r[2],r[3]),index:Int
+                if let old=current[size],groups[old].copies.count<256 {index=old}
+                else {index=groups.count;groups.append(Group(width:r[2],height:r[3],copies:[]));current[size]=index}
+                entries.append(SIMD2(UInt32(index),UInt32(groups[index].copies.count)))
+                groups[index].copies.append(Copy(slot:slot,rect:r))
+            }
+            var draws:[Draw]=[]
+            for first in stride(from:0,to:world.indices.count,by:3) {
+                var slot:Int?
+                for index in first..<first+3 {
+                    let vertex=Int(world.indices[index])
+                    guard vertex<world.vertices.count else{throw Invalid.mesh}
+                    let value=world.vertices[vertex].uvLayer.z
+                    guard value.isFinite,value>=0,value<Float(rects.count),value.rounded()==value else{throw Invalid.mesh}
+                    let next=Int(value)
+                    guard slot==nil || slot==next else{throw Invalid.mesh};slot=next
+                }
+                let group=Int(entries[slot!].x)
+                if let last=draws.last,last.group==group {draws[draws.count-1].indexCount+=3}
+                else {
+                    guard draws.count<4096 else{throw Invalid.mesh}
+                    draws.append(Draw(group:group,indexOffset:first,indexCount:3))
+                }
+            }
+            self.groups=groups;self.entries=entries;self.draws=draws;copiedTexelBytes=bytes
+        }
+    }
     struct Validated {
         /// Fragment buffer2: dimensions/count/version, followed by pixel rects.
         /// These do not share the vertex-stage skin/palette binding namespace.
         let vectors:[SIMD4<Float>]
         let width:Int,height:Int,textureBytes:Int
+        let hardware:HardwarePlan?
+        init(vectors:[SIMD4<Float>],width:Int,height:Int,textureBytes:Int,hardware:HardwarePlan?=nil) {
+            self.vectors=vectors;self.width=width;self.height=height;self.textureBytes=textureBytes;self.hardware=hardware
+        }
     }
     let schema:Int,layout:String,sampling:String
     let cell:[Int],columns:Int,atlas:[Int],layers:[Layer]
@@ -138,6 +186,7 @@ struct NativePedAtlasLayout:Decodable {
                 values.append(SIMD4(Float(sampler.filter),Float(sampler.addressU),Float(sampler.addressV),0))
             }
         }
-        return Validated(vectors:values,width:atlas[0],height:atlas[1],textureBytes:logicalRGBA8Bytes)
+        let hardware=version==2 ? try HardwarePlan(world:world,rects:layers.map(\.rect),width:atlas[0],height:atlas[1],maximumBytes:logicalRGBA8Bytes):nil
+        return Validated(vectors:values,width:atlas[0],height:atlas[1],textureBytes:logicalRGBA8Bytes,hardware:hardware)
     }
 }

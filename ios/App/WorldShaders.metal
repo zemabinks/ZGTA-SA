@@ -78,9 +78,7 @@ static half4 ordinaryActorShade(Raster in,half4 textureColor,constant Uniforms &
     return half4(color, textureColor.a * half(in.tint.a * uniforms.tintColor.a));
 }
 
-fragment half4 worldFragment(Raster in [[stage_in]],
-                             texture2d<half> atlas [[texture(0)]],
-                             constant Uniforms &uniforms [[buffer(1)]]) {
+static half4 nativeAtlasColor(Raster in, texture2d<half> atlas, constant Uniforms &uniforms) {
     constexpr sampler sampleAtlas(coord::normalized, address::clamp_to_edge,
                                   filter::linear, mip_filter::none);
     float layer = max(0.0, round(in.layer));
@@ -89,8 +87,29 @@ fragment half4 worldFragment(Raster in [[stage_in]],
     float2 cell = float2(fmod(layer, columns), floor(layer / columns));
     float2 tiledUV = fract(in.uv);
     float2 atlasUV = (cell * cellSize + 0.5 + tiledUV * (cellSize - 1.0)) / uniforms.settings.xy;
-    half4 textureColor = atlas.sample(sampleAtlas, atlasUV);
-    return ordinaryActorShade(in,textureColor,uniforms);
+    return atlas.sample(sampleAtlas, atlasUV);
+}
+
+fragment half4 ordinaryModelFragment(Raster in [[stage_in]],
+                                     texture2d<half> atlas [[texture(0)]],
+                                     constant Uniforms &uniforms [[buffer(1)]]) {
+    return ordinaryActorShade(in,nativeAtlasColor(in,atlas,uniforms),uniforms);
+}
+
+fragment half4 worldFragment(Raster in [[stage_in]],
+                             texture2d<half> atlas [[texture(0)]],
+                             constant Uniforms &uniforms [[buffer(1)]]) {
+    half4 textureColor = nativeAtlasColor(in,atlas,uniforms);
+    if (textureColor.a * in.tint.a < 0.1) discard_fragment();
+    // Exterior prelighting is an illumination term, separate from model tint.
+    half3 day = min(half3(in.tint.rgb) + half3(0.30h), half3(1.0h));
+    half3 night = min(half3(in.dusk.rgb) + half3(0.10h,0.10h,0.15h), half3(1.0h));
+    half3 light = mix(day,night,half(clamp(uniforms.settings.z,0.0,1.0)));
+    half3 color = textureColor.rgb * light * half3(uniforms.tintColor.rgb);
+    float fog = uniforms.fogSettings.z * clamp((in.depth - uniforms.fogSettings.x) /
+        max(1.0, uniforms.fogSettings.y - uniforms.fogSettings.x), 0.0, 1.0);
+    color = mix(color,half3(uniforms.fogColor.rgb),half(fog));
+    return half4(color,textureColor.a * half(in.tint.a * uniforms.tintColor.a));
 }
 
 // The per-model rectangle layout belongs to the fragment stage only.
@@ -137,5 +156,36 @@ fragment half4 ordinaryPedAtlasFragment(Raster in [[stage_in]],
     float2 atlasUV=(rect.xy+0.5+fract(in.uv)*(rect.zw-1.0))/layout[0].xy;
     half4 textureColor=atlas.sample(sampleAtlas,atlasUV);
     return ordinaryActorShade(in,textureColor,uniforms);
+}
+
+// Native-sized array slices let Metal apply the original repeat sampler at
+// the image's own dimensions, including the device's sampling precision.
+fragment half4 ordinaryPedNativeFragment(Raster in [[stage_in]],
+    texture2d_array<half> images [[texture(0)]],
+    constant Uniforms &uniforms [[buffer(1)]],
+    constant float4 *layout [[buffer(2)]],
+    constant uint2 *entries [[buffer(3)]],
+    constant uint &group [[buffer(4)]]) {
+    float slot=round(in.layer);
+    if (!isfinite(slot) || !isfinite(layout[0].z) || layout[0].z<1.0 || layout[0].z>4096.0 ||
+        slot<0.0 || slot>=layout[0].z || layout[0].w!=2.0 || !all(isfinite(in.uv))) {
+        discard_fragment();return half4(0.0);
+    }
+    float4 rect=layout[uint(slot)*2+1],sampling=layout[uint(slot)*2+2];
+    uint2 entry=entries[uint(slot)];
+    if (!all(isfinite(rect)) || any(rect.zw<1.0) || any(rect.zw>4096.0) ||
+        entry.x!=group || entry.y>=images.get_array_size() ||
+        any(uint2(rect.zw)!=uint2(images.get_width(),images.get_height())) ||
+        (sampling.x!=1.0 && sampling.x!=2.0 && sampling.x!=6.0) ||
+        sampling.y!=1.0 || sampling.z!=1.0 || sampling.w!=0.0) {
+        discard_fragment();return half4(0.0);
+    }
+    // Float32 values at this magnitude have no fractional component. Reduce
+    // exact large integers to zero before hardware address conversion.
+    float2 uv=select(in.uv,float2(0.0),abs(in.uv)>=float2(8388608.0));
+    constexpr sampler point(coord::normalized,address::repeat,filter::nearest,mip_filter::none);
+    constexpr sampler linear(coord::normalized,address::repeat,filter::linear,mip_filter::none);
+    half4 color=sampling.x==1.0 ? images.sample(point,uv,entry.y):images.sample(linear,uv,entry.y);
+    return ordinaryActorShade(in,color,uniforms);
 }
 

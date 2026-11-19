@@ -125,6 +125,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let device: MTLDevice
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
+    private let worldPipeline: MTLRenderPipelineState
     private let vehiclePipeline: MTLRenderPipelineState?
     private let vehiclePaintPipeline: MTLRenderPipelineState?
     private let vehicleMaskPipeline:MTLRenderPipelineState?
@@ -134,8 +135,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let pedAtlasPipeline:MTLRenderPipelineState?
     private let pedAtlasAnimatedPipeline:MTLRenderPipelineState?
     private let pedAtlasSkeletalPipeline:MTLRenderPipelineState?
+    private let pedNativePipeline:MTLRenderPipelineState?
+    private let pedNativeAnimatedPipeline:MTLRenderPipelineState?
+    private let pedNativeSkeletalPipeline:MTLRenderPipelineState?
     private struct PedAtlasGPU {
         let family:String,source:String,layout:MTLBuffer,textureBytes:Int
+        let native:NativePedTextureArrays?
+        init(family:String,source:String,layout:MTLBuffer,textureBytes:Int,native:NativePedTextureArrays?=nil) {
+            self.family=family;self.source=source;self.layout=layout;self.textureBytes=textureBytes;self.native=native
+        }
     }
     private var pedAtlasFamilies:[String:String]=[:]
     private var pedAtlasV2Names=Set<String>()
@@ -866,7 +874,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
               let library = device.makeDefaultLibrary(),
               let vertex = library.makeFunction(name: "worldVertex"),
               let animatedVertex = library.makeFunction(name: "animatedActorVertex"),
-              let fragment = library.makeFunction(name: "worldFragment") else { return nil }
+              let fragment = library.makeFunction(name: "ordinaryModelFragment"),
+              let worldFragment = library.makeFunction(name: "worldFragment") else { return nil }
         let view = MTKView(frame: .zero, device: device)
         view.colorPixelFormat = .bgra8Unorm
         view.depthStencilPixelFormat = .depth32Float
@@ -885,6 +894,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         descriptor.colorAttachments[0].sourceAlphaBlendFactor = .one
         descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
         guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        descriptor.fragmentFunction = worldFragment
+        guard let worldPipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        descriptor.fragmentFunction = fragment
         descriptor.colorAttachments[0].writeMask = []
         let vehicleMaskPipeline=try? device.makeRenderPipelineState(descriptor:descriptor)
         descriptor.colorAttachments[0].writeMask = .all
@@ -904,6 +916,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let pedAtlasAnimatedPipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
         descriptor.vertexFunction=library.makeFunction(name:"skeletalActorVertex")
         let pedAtlasSkeletalPipeline=descriptor.vertexFunction.flatMap{_ in
+            descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        }
+        descriptor.fragmentFunction=library.makeFunction(name:"ordinaryPedNativeFragment")
+        descriptor.vertexFunction=vertex
+        let pedNativePipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        descriptor.vertexFunction=animatedVertex
+        let pedNativeAnimatedPipeline=descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
+        descriptor.vertexFunction=library.makeFunction(name:"skeletalActorVertex")
+        let pedNativeSkeletalPipeline=descriptor.vertexFunction.flatMap{_ in
             descriptor.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:descriptor)}
         }
 
@@ -943,12 +964,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         self.device = device
         self.queue = queue
         self.pipeline = pipeline
+        self.worldPipeline = worldPipeline
         self.vehiclePipeline = vehiclePipeline
         self.vehiclePaintPipeline = vehiclePaintPipeline
         self.vehicleMaskPipeline = vehicleMaskPipeline
         self.animatedPipeline = animatedPipeline
         self.skeletalPipeline = skeletalPipeline
         self.pedAtlasPipeline=pedAtlasPipeline;self.pedAtlasAnimatedPipeline=pedAtlasAnimatedPipeline;self.pedAtlasSkeletalPipeline=pedAtlasSkeletalPipeline
+        self.pedNativePipeline=pedNativePipeline;self.pedNativeAnimatedPipeline=pedNativeAnimatedPipeline;self.pedNativeSkeletalPipeline=pedNativeSkeletalPipeline
         self.skyPipeline = skyPipeline
         self.atmospherePipelines = atmospherePipelines
         self.waterPipeline = waterPipeline
@@ -3328,8 +3351,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let source=fixedCJSourceIdentity()
         if let bound=pedAtlasGPU[name],bound.family==family,bound.source==source,
            actorMeshes[name] != nil,skeletalActors[name] != nil{return}
-        guard pedAtlasSource==source,NativePedAtlasFamily.version(in:family,model:name)==(pedAtlasV2Names.contains(name) ? 2:1),
-              pedAtlasPipeline != nil,pedAtlasAnimatedPipeline != nil,pedAtlasSkeletalPipeline != nil,
+        let native=pedAtlasV2Names.contains(name)
+        let shadersReady=native ? (pedNativePipeline != nil && pedNativeAnimatedPipeline != nil && pedNativeSkeletalPipeline != nil):
+            (pedAtlasPipeline != nil && pedAtlasAnimatedPipeline != nil && pedAtlasSkeletalPipeline != nil)
+        guard pedAtlasSource==source,NativePedAtlasFamily.version(in:family,model:name)==(native ? 2:1),shadersReady,
               let server else{
             pedAtlasError(name,"PED ATLAS FAMILY/SHADER IS UNAVAILABLE: \(name)");return
         }
@@ -3366,9 +3391,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     guard files["hand"]==nil || hand != nil,files["parts"]==nil || parts != nil,
                           owned?.isCancelled != true,self.fixedCJSourceIdentity()==source,
                           self.pedAtlasSource==source,self.pedAtlasFamilies[name]==family,self.pedAtlasAdmission[name]==token else{return false}
+                    guard (validated.hardware != nil)==native else{return false}
+                    if native,let parts {
+                        guard parts.parts.allSatisfy({$0.start>=0 && $0.count>0 && $0.count<=world.indices.count &&
+                            $0.start<=world.indices.count-$0.count && $0.start%3==0 && $0.count%3==0 &&
+                            $0.pivot.count==3 && $0.pivot.allSatisfy(\.isFinite)}) else{return false}
+                    }
+                    let images:NativePedTextureArrays?
+                    if let plan=validated.hardware {
+                        guard let uploaded=try? NativePedTextureArrays(device:self.device,queue:self.queue,atlas:atlas,plan:plan) else{return false}
+                        images=uploaded
+                    }else{images=nil}
+                    guard owned?.isCancelled != true,self.fixedCJSourceIdentity()==source,self.pedAtlasSource==source,
+                          self.pedAtlasFamilies[name]==family,self.pedAtlasAdmission[name]==token else{return false}
                     self.actorMeshes[name]=Mesh(vertices:vertices,indices:indices,indexCount:world.indices.count,atlas:atlas)
                     self.skeletalActors[name]=actor
-                    self.pedAtlasGPU[name]=PedAtlasGPU(family:family,source:source,layout:rectangles,textureBytes:validated.textureBytes)
+                    self.pedAtlasGPU[name]=PedAtlasGPU(family:family,source:source,layout:rectangles,
+                        textureBytes:validated.textureBytes+(images?.allocatedBytes ?? 0),native:images)
                     self.actorAnimations.removeValue(forKey:name)
                     if let hand{self.actorAttachments[name]=hand}else{self.actorAttachments.removeValue(forKey:name)}
                     if let parts {
@@ -4024,13 +4063,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             drawAtmosphereQuads(atmosphereSnapshot.quads.filter(\.paintedOnSky),matrix: matrix,encoder: encoder)
             drawSkyDetails(atmosphereSnapshot,eye: eye,matrix: matrix,encoder: encoder)
         }
-        encoder.setRenderPipelineState(pipeline); encoder.setDepthStencilState(depth)
-        for (name,mesh) in meshes where name.hasPrefix("t") {
-            encoder.setDepthBias(0.0005,slopeScale: 0,clamp: 0)
-            draw(mesh: mesh,cellSize: 64,matrix: matrix,encoder: encoder)
-        }
-        encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
-        for name in activeDetails { if let mesh = meshes[name] { draw(mesh: mesh,cellSize: 128,matrix: matrix,encoder: encoder) } }
+        encoder.setDepthStencilState(depth)
+        drawWorldMeshes(matrix: matrix,encoder: encoder)
         particleDrawDelta=Double(delta)
         drawActors(encoder: encoder,matrix: matrix)
         drawLegacyObjects(encoder:encoder,matrix:matrix,eye:eye)
@@ -4043,6 +4077,20 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         drawObjective(encoder: encoder,matrix: matrix)
         encoder.endEncoding(); command.present(drawable); command.commit(); onFrame?()
+    }
+
+    private func drawWorldMeshes(matrix: simd_float4x4, encoder: MTLRenderCommandEncoder) {
+        encoder.setRenderPipelineState(worldPipeline)
+        defer {
+            encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
+            encoder.setRenderPipelineState(pipeline)
+        }
+        for (name,mesh) in meshes where name.hasPrefix("t") {
+            encoder.setDepthBias(0.0005,slopeScale: 0,clamp: 0)
+            draw(mesh: mesh,cellSize: 64,matrix: matrix,encoder: encoder)
+        }
+        encoder.setDepthBias(0,slopeScale: 0,clamp: 0)
+        for name in activeDetails { if let mesh = meshes[name] { draw(mesh: mesh,cellSize: 128,matrix: matrix,encoder: encoder) } }
     }
 
     private func makeObjectiveMarker() -> Mesh? {
@@ -4695,85 +4743,94 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }}catch{onStatus?("CUSTOM CHARACTER DRAW FAILED: \(error)");continue}
             } else if let mesh {
             if let pose, let actor = skeletalActors[name], let skeletalPipeline {
-                if pedAtlasGPU[name] != nil {guard let pedAtlasSkeletalPipeline else{continue};encoder.setRenderPipelineState(pedAtlasSkeletalPipeline)}
+                if let bound=pedAtlasGPU[name] {guard let selected=bound.native == nil ? pedAtlasSkeletalPipeline:pedNativeSkeletalPipeline else{continue};encoder.setRenderPipelineState(selected)}
                 else{encoder.setRenderPipelineState(skeletalPipeline)}
                 actor.bind(pose: pose, encoder: encoder)
             } else if let frames = actorAnimations[name]?.sample(clip: clip, elapsed: elapsed) {
-                if pedAtlasGPU[name] != nil {guard let pedAtlasAnimatedPipeline else{continue};encoder.setRenderPipelineState(pedAtlasAnimatedPipeline)}
+                if let bound=pedAtlasGPU[name] {guard let selected=bound.native == nil ? pedAtlasAnimatedPipeline:pedNativeAnimatedPipeline else{continue};encoder.setRenderPipelineState(selected)}
                 else{encoder.setRenderPipelineState(animatedPipeline)}
                 encoder.setVertexBuffer(frames.0, offset: 0, index: 2)
                 encoder.setVertexBuffer(frames.1, offset: 0, index: 3)
                 var blend = frames.2
                 encoder.setVertexBytes(&blend, length: MemoryLayout<Float>.stride, index: 4)
             } else {
-                if pedAtlasGPU[name] != nil {guard let pedAtlasPipeline else{continue};encoder.setRenderPipelineState(pedAtlasPipeline)}
+                if let bound=pedAtlasGPU[name] {guard let selected=bound.native == nil ? pedAtlasPipeline:pedNativePipeline else{continue};encoder.setRenderPipelineState(selected)}
                 else{encoder.setRenderPipelineState(pipeline)}
             }
             if let layout=pedAtlasGPU[name] {encoder.setFragmentBuffer(layout.layout,offset:0,index:2)}
             encoder.setVertexBuffer(mesh.vertices, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentTexture(mesh.atlas, index: 0)
-            if clip.isEmpty,let context=vehicleContext,let rig=vehicleRigs[name],vehicleRigMeshes[name] != nil {
-                let completeFrame=vehicleRigFrame(position:position,modelTransform:transform,rig:rig,context:context)
-                // Keep opaque hulls in the normal actor phase. Transparent
-                // materials must wait until every opaque rider has drawn.
-                let frame=completeFrame.opaque
-                if rig.hasDynamicPaint {
-                    guard let vehiclePaintPipeline else{onStatus?("VEHICLE PAINT SHADER IS UNAVAILABLE");continue}
-                    encoder.setRenderPipelineState(vehiclePaintPipeline)
-                }else{encoder.setRenderPipelineState(vehiclePipeline ?? pipeline)}
-                let alphaPipeline=rig.hasDynamicPaint ? vehiclePaintPipeline:(vehiclePipeline ?? pipeline)
-                if let alphaPipeline {
-                    for part in completeFrame.transparent {
-                        var partUniforms=uniforms
-                        partUniforms.viewProjection=matrix*transform*part.transform
-                        transparentVehicleDraws.append(.init(mesh:mesh,part:part,uniforms:partUniforms,pipeline:alphaPipeline,
-                            painted:rig.hasDynamicPaint,depth:NativeVehicleRig.projectedDepth(part.sortCenter,matrix:partUniforms.viewProjection)))
-                    }
-                }
-                for part in frame.draws {
-                    uniforms.viewProjection=matrix*transform*part.transform
-                    var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
-                    encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
-                    encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
-                    encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
+            let native=pedAtlasGPU[name]?.native
+            func drawActorRange(count:Int,offset:Int)throws {
+                guard count>=0,offset>=0,count<=mesh.indexCount,offset<=mesh.indexCount-count else{throw NativePedTextureArrays.Failure.indexBuffer}
+                if let native {try native.encode(indices:mesh.indices,encoder:encoder,queue:queue,range:offset..<offset+count)}
+                else{encoder.drawIndexedPrimitives(type:.triangle,indexCount:count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:offset*4)}
+            }
+            do {
+                if native==nil{encoder.setFragmentTexture(mesh.atlas,index:0)}
+                if clip.isEmpty,let context=vehicleContext,let rig=vehicleRigs[name],vehicleRigMeshes[name] != nil {
+                    let completeFrame=vehicleRigFrame(position:position,modelTransform:transform,rig:rig,context:context)
+                    // Keep opaque hulls in the normal actor phase. Transparent
+                    // materials must wait until every opaque rider has drawn.
+                    let frame=completeFrame.opaque
                     if rig.hasDynamicPaint {
-                        var paint=part.paint
-                        encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
+                        guard let vehiclePaintPipeline else{onStatus?("VEHICLE PAINT SHADER IS UNAVAILABLE");continue}
+                        encoder.setRenderPipelineState(vehiclePaintPipeline)
+                    }else{encoder.setRenderPipelineState(vehiclePipeline ?? pipeline)}
+                    let alphaPipeline=rig.hasDynamicPaint ? vehiclePaintPipeline:(vehiclePipeline ?? pipeline)
+                    if let alphaPipeline {
+                        for part in completeFrame.transparent {
+                            var partUniforms=uniforms
+                            partUniforms.viewProjection=matrix*transform*part.transform
+                            transparentVehicleDraws.append(.init(mesh:mesh,part:part,uniforms:partUniforms,pipeline:alphaPipeline,
+                                painted:rig.hasDynamicPaint,depth:NativeVehicleRig.projectedDepth(part.sortCenter,matrix:partUniforms.viewProjection)))
+                        }
                     }
-                    encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
-                }
-                if let vehicleMaskPipeline {
-                    encoder.setRenderPipelineState(vehicleMaskPipeline)
-                    for (node,mask) in vehicleWaterMasks[name] ?? [] {
-                        let m=frame.matrices[node],local=simd_float4x4(columns:(SIMD4<Float>(m[0]),SIMD4<Float>(m[1]),SIMD4<Float>(m[2]),SIMD4<Float>(m[3])))
-                        draw(mesh:mask,cellSize:128,matrix:matrix*transform*local,encoder:encoder)
+                    for part in frame.draws {
+                        uniforms.viewProjection=matrix*transform*part.transform
+                        var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
+                        encoder.setVertexBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+                        encoder.setFragmentBytes(&uniforms,length:MemoryLayout<Uniforms>.stride,index:1)
+                        encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
+                        if rig.hasDynamicPaint {
+                            var paint=part.paint
+                            encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
+                        }
+                        encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
                     }
-                }
-            } else if clip.isEmpty, let parts = actorParts[name], !parts.isEmpty {
-                let speed=vehicleContext?.own?.speed ?? 0
-                for part in parts {
-                    let pivot = SIMD3<Float>(part.pivot[0], part.pivot[1], part.pivot[2])
-                    var local = matrix_identity_float4x4
-                    if let wheel = part.wheel {
-                        let index = wheel.contains("lf_") ? 0 : wheel.contains("lb_") || wheel.contains("lr_") ? 1 : wheel.contains("rf_") ? 2 : 3
-                        let state=Self.legacyVehicleWheel(index:index,front:wheel.contains("f_dummy"),context:vehicleContext,time:Float(ProcessInfo.processInfo.systemUptime))
-                        local = Self.translation(SIMD3(0,0,state.offset)) * Self.translation(pivot) *
-                            Self.rotationZ(state.turn) * Self.rotationX(state.spin) * Self.translation(-pivot)
-                    } else if part.name.hasPrefix("static_prop") && speed != 0 {
-                        local = Self.translation(pivot) * Self.rotationY(Float(ProcessInfo.processInfo.systemUptime) * 35) * Self.translation(-pivot)
-                    } else if part.name.hasPrefix("static_rotor") && speed != 0 {
-                        local = Self.translation(pivot) * Self.rotationZ(Float(ProcessInfo.processInfo.systemUptime) * 35) * Self.translation(-pivot)
+                    if let vehicleMaskPipeline {
+                        encoder.setRenderPipelineState(vehicleMaskPipeline)
+                        for (node,mask) in vehicleWaterMasks[name] ?? [] {
+                            let m=frame.matrices[node],local=simd_float4x4(columns:(SIMD4<Float>(m[0]),SIMD4<Float>(m[1]),SIMD4<Float>(m[2]),SIMD4<Float>(m[3])))
+                            draw(mesh:mask,cellSize:128,matrix:matrix*transform*local,encoder:encoder)
+                        }
                     }
-                    uniforms.viewProjection = matrix * transform * local
-                    encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-                    encoder.drawIndexedPrimitives(type: .triangle, indexCount: part.count,
-                        indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: part.start * 4)
+                } else if clip.isEmpty, let parts = actorParts[name], !parts.isEmpty {
+                    let speed=vehicleContext?.own?.speed ?? 0
+                    for part in parts {
+                        let pivot = SIMD3<Float>(part.pivot[0], part.pivot[1], part.pivot[2])
+                        var local = matrix_identity_float4x4
+                        if let wheel = part.wheel {
+                            let index = wheel.contains("lf_") ? 0 : wheel.contains("lb_") || wheel.contains("lr_") ? 1 : wheel.contains("rf_") ? 2 : 3
+                            let state=Self.legacyVehicleWheel(index:index,front:wheel.contains("f_dummy"),context:vehicleContext,time:Float(ProcessInfo.processInfo.systemUptime))
+                            local = Self.translation(SIMD3(0,0,state.offset)) * Self.translation(pivot) *
+                                Self.rotationZ(state.turn) * Self.rotationX(state.spin) * Self.translation(-pivot)
+                        } else if part.name.hasPrefix("static_prop") && speed != 0 {
+                            local = Self.translation(pivot) * Self.rotationY(Float(ProcessInfo.processInfo.systemUptime) * 35) * Self.translation(-pivot)
+                        } else if part.name.hasPrefix("static_rotor") && speed != 0 {
+                            local = Self.translation(pivot) * Self.rotationZ(Float(ProcessInfo.processInfo.systemUptime) * 35) * Self.translation(-pivot)
+                        }
+                        uniforms.viewProjection = matrix * transform * local
+                        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                        try drawActorRange(count:part.count,offset:part.start)
+                    }
+                } else {
+                    try drawActorRange(count:mesh.indexCount,offset:0)
                 }
-            } else {
-                encoder.drawIndexedPrimitives(type: .triangle, indexCount: mesh.indexCount,
-                                              indexType: .uint32, indexBuffer: mesh.indices, indexBufferOffset: 0)
+            }catch{
+                clearPedAtlas(name);actorRetryAfter[name]=Date().addingTimeInterval(2)
+                pedAtlasError(name,"NATIVE PED TEXTURE DRAW FAILED: \(name)");continue
             }
             }
             let heldWeapon = NativeWeaponAttachment.selectedWeapon(weapon,swimming:false,

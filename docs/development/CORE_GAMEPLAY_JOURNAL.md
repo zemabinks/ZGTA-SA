@@ -1,5 +1,12 @@
 # Core gameplay audit journal
 
+## 2026-11-19 — World materials and native texture sampling (143)
+
+World tiles now have a dedicated additive-prelight material, preserving existing model shading. A pre-existing v2 atlas repeat-edge discrepancy is repaired with bounded original-size Metal texture arrays. Ordered material runs, body-part ranges, static/baked/skeletal bindings, source fences and failure recovery remain explicit. Focused actual-GPU evidence passes 6,157 checks over 7,155 authored renders, with separate pure-plan and literal owner tests. The original hardware-sampler comparison still uses its original edge inputs and tolerance.
+
+This establishes the scoped renderer/resource behavior, not 1:1 retail visual or gameplay fidelity. Full regression, SDK and normal installed-game results are tracked separately. Native mip chains, sharp-map/glass coverage, ambient AI and other checklist gaps remain open. See [material and sampler scope](../research/rendering/CORE_PED_RENDERING_119.md#material-ownership-and-native-pedestrian-samplers-143).
+
+
 ## 2026-11-19 — Original navigation foundation (142)
 
 An explicit Game Files action now decodes verified original pedestrian and vehicle navigation data and performs nearest-node and route queries. The native loader checks copied bytes and source/content/selection/generation identity, closes leases after each bounded read, supports cancellation and survives screen dismissal. The new source gate runs authored DAT fixtures through actual raw-store, lease and coordinator implementations; its lifecycle fixture passes 252 checks. Existing file-management and bounded ISO tests pass 67 and 23 checks.

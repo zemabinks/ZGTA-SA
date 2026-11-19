@@ -24,6 +24,7 @@ final class TextureLoader {
     }
 }
 final class MTLRenderCommandEncoder {
+    enum Primitive {case triangle};enum Index {case uint32}
     var pipeline:Int?,vertexBuffers:[Int:MTLBuffer]=[:],fragmentBuffers:[Int:MTLBuffer]=[:],textures:[Int:MTLTexture]=[:]
     var vertexBytes:Set<Int>=[],fragmentBytes:Set<Int>=[]
     var vertexByteValues:[Int:Data]=[:]
@@ -34,6 +35,26 @@ final class MTLRenderCommandEncoder {
     func setVertexBytes(_ b:UnsafeRawPointer,length:Int,index:Int){vertexBytes.insert(index);vertexByteValues[index]=Data(bytes:b,count:length)}
     func setFragmentBytes<T>(_ b:inout T,length:Int,index:Int){fragmentBytes.insert(index)}
     func setFragmentTexture(_ v:MTLTexture,index:Int){textures[index]=v}
+    func drawIndexedPrimitives(type:Primitive,indexCount:Int,indexType:Index,indexBuffer:MTLBuffer,indexBufferOffset:Int){}
+}
+// GPU upload/encoding is an explicit storage boundary. The separate real Metal
+// gate executes NativePedTextureArrays; this spy tests the literal consumer.
+final class NativePedTextureArrays {
+    enum Failure:Error {case indexBuffer}
+    static var fail=false,onCreate:(()->Void)?,created=0
+    let allocatedBytes:Int,id:Int
+    var failEncode=false,encodes=0,ranges:[Range<Int>]=[]
+    let mapping=MTLBuffer(Data([3]))
+    init(device:MTLDevice,queue:Int,atlas:MTLTexture,plan:NativePedAtlasLayout.HardwarePlan)throws {
+        if Self.fail{throw NativePedAtlasLoader.Failure.unavailable}
+        Self.created+=1;id=Self.created;allocatedBytes=plan.copiedTexelBytes
+        let callback=Self.onCreate;Self.onCreate=nil;callback?()
+    }
+    func encode(indices:MTLBuffer,encoder:MTLRenderCommandEncoder,queue:Int,range:Range<Int>?=nil)throws {
+        if failEncode{throw NativePedAtlasLoader.Failure.unavailable}
+        encodes+=1;if let range{ranges.append(range)};encoder.setFragmentBuffer(mapping,offset:0,index:3)
+        var group:UInt32=0;encoder.setFragmentBytes(&group,length:4,index:4)
+    }
 }
 // ACTUAL_SKIN_PARSER
 // ACTUAL_HAND_PARSER
@@ -48,6 +69,7 @@ final class Owner {
     // ACTUAL_GPU_TYPES
     // ACTUAL_UNIFORMS
     var pedAtlasPipeline:Int?=4,pedAtlasAnimatedPipeline:Int?=5,pedAtlasSkeletalPipeline:Int?=6
+    var pedNativePipeline:Int?=7,pedNativeAnimatedPipeline:Int?=8,pedNativeSkeletalPipeline:Int?=9
     let pipeline=1,animatedPipeline=2,skeletalPipeline:Int?=3
     var pedAtlasFamilies:[String:String]=[:],pedAtlasGPU:[String:PedAtlasGPU]=[:],pedAtlasSource:String?
     var pedAtlasV2Names=Set<String>()
@@ -59,6 +81,8 @@ final class Owner {
     var pedModels=["7":"authored"],vehicleModels=["420":"car"],weaponModels=["22":"pistol"],localSkin=7
     var server:ServerAddress?=ServerAddress("http://127.0.0.1:1"),source="one",statuses:[String]=[]
     let device=MTLDevice(),textureLoader=TextureLoader()
+    let queue=1
+    var attachments=0
     var onStatus:((String)->Void)?
     init(_ peer:Peer){pedAtlasLoader=NativePedAtlasLoader(transfer:peer.make);onStatus={[weak self] in self?.statuses.append($0)}}
     func fixedCJSourceIdentity()->String{source}
@@ -67,11 +91,22 @@ final class Owner {
         // ACTUAL_GENERIC_GUARD
         return true
     }
-    func dispatch(_ name:String,pose:NativeSkeletalActor.Pose?,clip:String="",elapsed:Double=0)->MTLRenderCommandEncoder {
+    func dispatch(_ name:String,pose:NativeSkeletalActor.Pose?,clip:String="",elapsed:Double=0,ranges:[Range<Int>]?=nil)->MTLRenderCommandEncoder {
         let encoder=MTLRenderCommandEncoder();var uniforms=Uniforms(viewProjection:matrix_identity_float4x4,settings:SIMD4(1,1,0,128))
         for name in [name] {
             guard let mesh=actorMeshes[name] else{continue}
             // ACTUAL_DRAW_DISPATCH
+            let native=pedAtlasGPU[name]?.native
+            // ACTUAL_NATIVE_RANGE
+            // ACTUAL_TEXTURE_BIND
+            do {
+                if let ranges{for range in ranges{try drawActorRange(count:range.count,offset:range.lowerBound)}}
+                else{try drawActorRange(count:mesh.indexCount,offset:0)}
+            }
+            // ACTUAL_NATIVE_CATCH
+            // Actual held-weapon/flight attachment work follows the mesh draw.
+            // Count that unrelated boundary to detect an accidental early exit.
+            attachments+=1
         }
         return encoder
     }
@@ -97,9 +132,10 @@ for version in ["valid","validv2"] {
     let pose=NativeSkeletalActor.Pose(palette:[matrix_identity_float4x4],hand:matrix_identity_float4x4,pelvis:matrix_identity_float4x4,
         localTurns:[],localPlaces:[],nativeGlobals:[],rootTurn:simd_quatf(angle:0,axis:SIMD3(0,0,1)),rootHeight:0)
     let staticDraw=owner.dispatch("authored",pose:nil)
-    check(staticDraw.pipeline==4 && staticDraw.fragmentBuffers[2] === owner.pedAtlasGPU["authored"]!.layout,"static explicit atlas pipeline/buffer")
+    let native=version=="validv2"
+    check(staticDraw.pipeline==(native ? 7:4) && staticDraw.fragmentBuffers[2] === owner.pedAtlasGPU["authored"]!.layout,"static explicit versioned material pipeline/buffer")
     let skinDraw=owner.dispatch("authored",pose:pose)
-    check(skinDraw.pipeline==6 && skinDraw.vertexBuffers[2] === actor.skinVertices && skinDraw.vertexBytes.contains(3),"actual skeletal parser/bind remains in vertex namespace")
+    check(skinDraw.pipeline==(native ? 9:6) && skinDraw.vertexBuffers[2] === actor.skinVertices && skinDraw.vertexBytes.contains(3),"actual skeletal parser/bind remains in vertex namespace")
     check(skinDraw.fragmentBuffers[2] === owner.pedAtlasGPU["authored"]!.layout,"fragment buffer does not overwrite skin")
     var otherMatrix=matrix_identity_float4x4;otherMatrix.columns.3.x=2
     let otherPose=NativeSkeletalActor.Pose(palette:[otherMatrix],hand:matrix_identity_float4x4,pelvis:matrix_identity_float4x4,
@@ -108,7 +144,11 @@ for version in ["valid","validv2"] {
     check(otherDraw.vertexByteValues[3] != skinDraw.vertexByteValues[3] && otherDraw.fragmentBuffers[2] === skinDraw.fragmentBuffers[2],"same-model occurrences aliased pose or failed to share immutable layout")
     owner.actorAnimations["authored"]=Frames()
     let baked=owner.dispatch("authored",pose:nil)
-    check(baked.pipeline==5 && baked.vertexBuffers[2] === owner.actorAnimations["authored"]!.a && baked.vertexBytes.contains(4),"baked vertex route preserved")
+    check(baked.pipeline==(native ? 8:5) && baked.vertexBuffers[2] === owner.actorAnimations["authored"]!.a && baked.vertexBytes.contains(4),"baked vertex route preserved")
+    if native {
+        check(owner.pedAtlasGPU["authored"]!.native!.encodes==4 && baked.fragmentBuffers[3] != nil && baked.fragmentBytes.contains(4),"v2 delegates native draws with separate fragment metadata")
+        check(owner.attachments==4,"native draw skipped following attachments")
+    }else{check(owner.pedAtlasGPU["authored"]!.native==nil,"v1 acquired native v2 resources")}
     owner.actorMeshes["legacy"]=owner.actorMeshes["authored"]
     let legacy=owner.dispatch("legacy",pose:nil)
     check(legacy.pipeline==1 && legacy.fragmentBuffers[2]==nil,"legacy actor does not acquire layout")
@@ -116,6 +156,43 @@ for version in ["valid","validv2"] {
     owner.source="two";owner.invalidatePedAtlasSourceIfChanged()
     check(owner.actorMeshes["authored"]==nil && owner.skeletalActors["authored"]==nil && owner.pedAtlasGPU["authored"]==nil,"source change releases complete family")
     check(owner.actorMeshes["legacy"] != nil && owner.pedAtlasFamilies["authored"] != nil,"source invalidation neither clears unrelated actor nor silently downgrades")
+}
+do {
+    let peer=Peer(root),owner=Owner(peer);load(owner,peer,"validpartsv2");complete(owner,peer)
+    check(owner.actorParts["authored"]?.count==1,"valid native parts were dropped")
+    _=owner.dispatch("authored",pose:nil,ranges:[0..<3,3..<3])
+    check(owner.pedAtlasGPU["authored"]!.native!.ranges==[0..<3,3..<3] && owner.attachments==1,"literal native draw helper lost original part ranges or following attachments")
+    _=owner.dispatch("authored",pose:nil,ranges:[0..<6])
+    check(owner.actorMeshes.isEmpty && owner.attachments==1,"invalid native range was drawn or left attachments")
+}
+do {
+    let peer=Peer(root),owner=Owner(peer);load(owner,peer,"unalignedv2");complete(owner,peer,false)
+    check(owner.actorMeshes.isEmpty && owner.pedAtlasGPU.isEmpty,"non-triangle native part was admitted")
+}
+do {
+    let peer=Peer(root),owner=Owner(peer);owner.pedNativeSkeletalPipeline=nil
+    load(owner,peer,"validv2")
+    check(peer.all.isEmpty && owner.actorMeshes.isEmpty,"v2 silently used compatibility shader when native route was unavailable")
+}
+do {
+    let peer=Peer(root),owner=Owner(peer);NativePedTextureArrays.fail=true
+    load(owner,peer,"validv2");complete(owner,peer,false);NativePedTextureArrays.fail=false
+    check(owner.actorMeshes.isEmpty && owner.skeletalActors.isEmpty && owner.pedAtlasGPU.isEmpty,"native allocation failure published partial resources")
+}
+do {
+    let peer=Peer(root),owner=Owner(peer);var changed=false
+    NativePedTextureArrays.onCreate={
+        changed=true;owner.source="away";owner.invalidatePedAtlasSourceIfChanged();owner.source="one";load(owner,peer,"validv2")
+    }
+    load(owner,peer,"validv2");complete(owner,peer)
+    check(changed && owner.pedAtlasGPU["authored"]!.native!.id==NativePedTextureArrays.created && owner.pedAtlasLoads.isEmpty,"source change during native upload admitted obsolete resources")
+}
+do {
+    let peer=Peer(root),owner=Owner(peer);load(owner,peer,"validv2");complete(owner,peer)
+    owner.pedAtlasGPU["authored"]!.native!.failEncode=true
+    _=owner.dispatch("authored",pose:nil)
+    check(owner.actorMeshes.isEmpty && owner.pedAtlasGPU.isEmpty && owner.actorRetryAfter["authored"]!>Date(),"failed native upload/draw was not invalidated for bounded retry")
+    check(owner.attachments==0 && owner.statuses.contains{$0.contains("DRAW FAILED")},"failed native body left floating attachments or hid failure")
 }
 do {
     let peer=Peer(root),owner=Owner(peer)

@@ -19,8 +19,12 @@ def block(s,marker):
 def main():
  out=ROOT/'local-only/research/ped-atlas-120/dispatch';out.mkdir(parents=True,exist_ok=True);w=Path(tempfile.mkdtemp(prefix='gate-',dir=out));files=w/'files';files.mkdir()
  rows=[]
- for label in ['valid','variant','badskin','badhand','badparts','validv2','variantv2']:
+ for label in ['valid','variant','badskin','badhand','badparts','validv2','variantv2','validpartsv2','unalignedv2']:
   v=family('authored',body=(16,8) if label.startswith('variant') else (8,16),version=2 if label.endswith('v2') else 1)
+  if label in ['validpartsv2','unalignedv2']:
+   raw=canonical({'parts':[{'name':'body','start':0,'count':3 if label=='validpartsv2' else 2,'pivot':[0,0,0]}]})
+   v['files']['parts']=raw;v['manifest']['resources']['parts']={'path':'game/native/models/ped-atlas-v2/'+digest(raw)+'/authored.parts.json','bytes':len(raw),'sha256':digest(raw)}
+   v['metadata']=canonical(v['manifest'])+b'\n';v['path']='game/native/models/ped-atlas-v2/'+digest(v['metadata'])+'/authored.json'
   if label.startswith('bad'):
    role={'badskin':'skeleton','badhand':'hand','badparts':'parts'}[label]
    raw=b'invalid authored carrier';suffix={'skeleton':'.skel.bin','hand':'.hand.bin','parts':'.parts.json'}[role]
@@ -41,14 +45,19 @@ def main():
  types='\n'.join(block(r,m).replace('private ','') for m in ['private struct Mesh {','private struct ActorPart:','private struct ActorParts:'])
  gpu='\n'.join(block(r,m).replace('private ','') for m in ['private struct PedAtlasGPU {','private struct PedAtlasLoad {'])
  first=r.index('            if let pose, let actor = skeletalActors[name], let skeletalPipeline {',r.index('private func drawActors('))
- end=r.index('\n            if clip.isEmpty,let context=vehicleContext',first)
+ end=r.index('\n            let native=pedAtlasGPU[name]?.native',first)
  dispatch=r[first:end]
+ native_range=block(r,'            func drawActorRange(')
+ recovery_start=r.index('            }catch{\n                clearPedAtlas(name);actorRetryAfter[name]',end)
+ recovery=block(r[recovery_start:],'catch{')
+ texture_bind=next(line.strip() for line in r.splitlines() if 'if native==nil{encoder.setFragmentTexture(mesh.atlas,index:0)}' in line)
+ assert 'try drawActorRange(count:part.count,offset:part.start)' in r
  guard=next(x.strip() for x in r.splitlines() if 'guard self.fixedCJSourceIdentity()==actorSource,self.pedAtlasFamilies[name]==nil' in x)
  # The production callback returns Void. Only expose whether it continued;
  # retain its exact predicate instead of replacing it with a fixture constant.
  guard=guard.replace('else{return}','else{return false}')
  main=(ROOT/'tests/resources/smoke_native_ped_atlas_dispatch.swift').read_text()
- for key,value in {'ACTUAL_SKIN_PARSER':skin,'ACTUAL_HAND_PARSER':hand,'ACTUAL_LOADER_TEST_SUPPORT':support,'ACTUAL_MESH_TYPES':types,'ACTUAL_GPU_TYPES':gpu,'ACTUAL_UNIFORMS':block(r,'    private struct Uniforms {').replace('private ',''),'ACTUAL_OWNER_METHODS':methods,'ACTUAL_GENERIC_GUARD':guard,'ACTUAL_DRAW_DISPATCH':dispatch}.items():main=main.replace('// '+key,value)
+ for key,value in {'ACTUAL_SKIN_PARSER':skin,'ACTUAL_HAND_PARSER':hand,'ACTUAL_LOADER_TEST_SUPPORT':support,'ACTUAL_MESH_TYPES':types,'ACTUAL_GPU_TYPES':gpu,'ACTUAL_UNIFORMS':block(r,'    private struct Uniforms {').replace('private ',''),'ACTUAL_OWNER_METHODS':methods,'ACTUAL_GENERIC_GUARD':guard,'ACTUAL_DRAW_DISPATCH':dispatch,'ACTUAL_NATIVE_RANGE':native_range,'ACTUAL_NATIVE_CATCH':recovery,'ACTUAL_TEXTURE_BIND':texture_bind}.items():main=main.replace('// '+key,value)
  (w/'main.swift').write_text(main);sources=[]
  for n in ['WorldBinary','NativePedAtlasLayout','NativePedAtlasLoader','ServerAddress']:
   p=w/(n+'.swift');p.write_text(data[n]);sources.append(str(p))

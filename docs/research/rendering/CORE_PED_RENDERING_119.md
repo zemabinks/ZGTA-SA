@@ -1,5 +1,47 @@
 # Ordinary character rendering and loading, Core119
 
+## Material ownership and native pedestrian samplers (143)
+
+World tiles now use a separate Metal material with additive day/night prelight;
+static and animated model consumers keep their existing shading. Literal renderer
+constructor/batch checks and actual offscreen authored pixels cover the split.
+This matches the inspected archived-browser base-lighting rule, not a verified
+retail PC lighting comparison. Sharp maps and full transparency policy remain open.
+
+A strict original-sized Metal sampler comparison also reproduced a pre-existing
+v2 atlas repeat-edge discrepancy on the Intel host. The production v2 path now
+copies validated rectangles into original-size texture arrays, retaining the raw
+UVs for hardware repeat sampling. Matching image dimensions share bounded array
+slices; alternating group runs retain original triangle order. Body-part ranges
+retain their own transforms and index offsets, including clipped runs. Static,
+baked and skeletal vertex bindings remain independent of fragment metadata.
+
+The independently authored GPU gate passes 6,157 checks over 7,155 offscreen
+renders on Intel UHD Graphics 630. It checks the production shaders and actual
+PNG uploads against isolated original-size hardware samplers, including the
+repeat-edge input which failed before the fix. Existing ideal-arithmetic CPU
+assertions remain on the explicit compatibility atlas algorithm; the strict
+hardware comparison and its UV inputs/tolerance remain on production v2. The
+legacy v1 path retains its prior behavior. Large integral Float UVs repeat at
+zero; no new mip levels are generated.
+
+Texture plans cap copied pixels at 512 KiB and 256 slices per group. Device-size
+preflight and actual allocation accounting cap additional native resources at
+2 MiB per model. Uploads precede draws on the same command queue without a CPU
+wait. Queue, group, bounds, budget and malformed-part failures refuse publication
+or clear the complete affected family for bounded retry. A source/generation
+change cannot admit an obsolete upload. Failed bodies do not leave attachments.
+
+Pure authored plan checks and literal renderer-owner tests separately cover
+bounded runs, source changes, resource failures, all three vertex routes,
+attachments and part-range delegation. `smoke_core_143.py --require-gpu` requires
+the actual Metal gates locally; source-only CI reports unavailable hardware
+honestly. Full-chain, SDK and normal Simulator results are recorded in the
+release evidence after they run. Physical iPhone sampling/performance, original
+retail animation/lighting, complete mip support and full-game fidelity remain
+unverified. Original resources and comparison evidence remain local.
+
+
 The ordinary-pedestrian renderer previously assumed that every texture occupied
 a 128-pixel square. The optional `pedAtlasV1` resource family instead carries
 validated pixel rectangles, so a 128×256 body image can retain its source detail.
