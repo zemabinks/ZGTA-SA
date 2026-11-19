@@ -31,7 +31,8 @@ func engine(_ library:NativeSkeletalAnimationLibrary,_ style:NativeFootAnimation
 func gait(_ frame:NativeFootAnimation.Frame,_ e:NativeFootAnimation,_ library:NativeSkeletalAnimationLibrary)throws->Double{
     let names=Set([e.style.walk,e.style.run,e.style.sprint])
     guard let b=frame.blends.first(where:{names.contains($0.clip) && $0.weight>0.001})else{throw LandingFailure.failed("missing active gait")}
-    return b.time/library.duration(of:b.clip)
+    guard let length=library.duration(of:b.clip),length>0 else{throw LandingFailure.failed("invalid active gait duration")}
+    return b.time/length
 }
 let kinds=[("land","ped/jump_land"),("fallLand","ped/fall_land"),("collapse","ped/fall_collapse")]
 func ordinary(_ library:NativeSkeletalAnimationLibrary,_ kind:String,_ clip:String,_ ratio:Double,_ sprint:Bool,_ schedule:[Double],_ shared:Bool=false)throws{

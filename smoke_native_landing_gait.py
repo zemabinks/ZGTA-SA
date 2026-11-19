@@ -30,6 +30,7 @@ with tempfile.TemporaryDirectory(prefix='gate-',dir=out) as directory:
         start=time.monotonic()
         compile=subprocess.run(['xcrun','swiftc','-O','-whole-module-optimization','-num-threads','1','-module-cache-path',str(out/'modules'),str(generated),'-o',str(binary)],capture_output=True,text=True,timeout=240)
         (out/(label+'-compile.log')).write_text(compile.stdout+compile.stderr)
+        if compile.returncode:print((compile.stdout+compile.stderr)[-12000:],flush=True)
         assert compile.returncode==0,'Compilation failed; retained separately, not an accepted historical negative'
         command=[str(binary)]+([str(args.owned_library.resolve())] if args.owned_library else [])
         result=subprocess.run(command,capture_output=True,text=True,timeout=90)
