@@ -37,7 +37,11 @@ fragment float4 native_rw_model_fragment(NativeRWOut in [[stage_in]],
                                         texture2d<float> image [[texture(0)]],
                                         sampler imageSampler [[sampler(0)]],
                                         constant NativeRWUniforms &u [[buffer(1)]]) {
-    float4 color = image.sample(imageSampler, in.uv) * in.color;
+    // No-map materials have no texture operation. A bound identity texture
+    // alone is insufficient: a border sampler can turn it into zero outside
+    // the image. The fallback binding still satisfies Metal's resource ABI.
+    float4 texel = u.settings.w > 0.5f ? image.sample(imageSampler, in.uv) : float4(1);
+    float4 color = texel * in.color;
     if (color.a < u.settings.y) discard_fragment();
     float n2 = dot(in.normal, in.normal);
     float l2 = dot(u.lightDirectionAmbient.xyz, u.lightDirectionAmbient.xyz);

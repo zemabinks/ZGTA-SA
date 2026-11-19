@@ -21,11 +21,13 @@ let white = SIMD4<UInt8>(repeating: 255)
 func material(_ texture: String? = nil, color: SIMD4<UInt8> = SIMD4(repeating: 255), filtering: UInt32? = 0x1101) -> DFF.Material {
     DFF.Material(flags: 0, color: color, textureName: texture, maskName: nil, textureFilterAndAddressing: filtering, surface: nil)
 }
-func geometry(_ materials: [DFF.Material] = [material()], skin: DFF.Skin? = nil) -> DFF.Geometry {
+// Existing material-color assertions deliberately exercise MODULATE. The new
+// flags-off fixtures below cover its independent source-color suppression.
+func geometry(_ materials: [DFF.Material] = [material()], skin: DFF.Skin? = nil, flags: UInt16 = 0x40) -> DFF.Geometry {
     let positions: [SIMD3<Float>] = [SIMD3(-1,-1,0), SIMD3(1,-1,0), SIMD3(-1,1,0), SIMD3(1,1,0)]
     let normals = [SIMD3<Float>](repeating: SIMD3(0,0,1), count: 4)
     let target = DFF.MorphTarget(boundingSphere: SIMD4(0,0,0,2), positions: positions, normals: normals)
-    return DFF.Geometry(flags: 0, vertexCount: 4, textureCoordinates: [[SIMD2(0,0), SIMD2(1,0), SIMD2(0,1), SIMD2(1,1)]],
+    return DFF.Geometry(flags: flags, vertexCount: 4, textureCoordinates: [[SIMD2(0,0), SIMD2(1,0), SIMD2(0,1), SIMD2(1,1)]],
                         prelitColors: [white,white,white,white], triangles: [DFF.Triangle(a: 0,b: 1,c: 2,material: 0), DFF.Triangle(a: 2,b: 1,c: 3,material: 0)],
                         materials: materials, morphTargets: [target], skin: skin)
 }
@@ -155,6 +157,93 @@ let unrelated = try Model.prepare(dff: clump(geometry([material("CHECK",filterin
 require(unrelated.isComplete && unrelated.textures.count == 1 && unrelated.geometries[0].materials[0].sampler.filter == 1,
         "unselected invalid native texture is not promoted into this model")
 
+// Authored material-state fixtures. Geometry flags, prelight, UVs and source
+// RGBA stay separate; this gate does not implement browser-only brightening.
+func authoredGeometry(flags: UInt16, source: DFF.Material,
+                      prelit: SIMD4<UInt8> = white,
+                      uv: SIMD2<Float> = SIMD2(0.5,0.5)) -> DFF.Geometry {
+    let base = geometry([source],flags: flags)
+    return DFF.Geometry(flags: flags,vertexCount: base.vertexCount,
+        textureCoordinates: [[SIMD2<Float>](repeating: uv,count: base.vertexCount)],
+        prelitColors: [SIMD4<UInt8>](repeating: prelit,count: base.vertexCount),
+        triangles: base.triangles,materials: base.materials,morphTargets: base.morphTargets,skin: nil)
+}
+func solidDictionary(_ rgba: [UInt8], filtering: UInt32 = 0x1101,
+                     name: String = "SOLID") -> NativeRenderWareTXD.TextureDictionary {
+    precondition(rgba.count == 4)
+    let transparent = rgba[3] != 255
+    let value = NativeRenderWareTXD.Texture(name: name,maskName: "",filterAddressing: filtering,
+        rasterFormat: 0x500,d3dFormat: 21,depth: 32,nativeFlags: 1,
+        mipLevels: [.init(width: 1,height: 1,encodedByteCount: 4,rgba8: Data(rgba),containsTransparentPixels: transparent)])
+    return .init(version: 0,deviceID: 2,textures: [value],decodedByteCount: 4)
+}
+let materialCPUStart = checks
+for modulates in [false,true] { for sourceAlpha in [UInt8(0),128,255] {
+    let flags: UInt16 = (modulates ? 0x40:0) | 0x18
+    let rgba = SIMD4<UInt8>(31,67,143,sourceAlpha)
+    let source = DFF.Material(flags: 0x11223344,color: rgba,textureName: nil,maskName: nil,
+                              textureFilterAndAddressing: nil,surface: SIMD3<Float>(0.25,0.5,0.75))
+    let value = try Model.prepare(dff: clump(authoredGeometry(flags: flags,source: source)),txd: nil)
+    let actual = value.geometries[0].materials[0]
+    require(actual.modulatesMaterial == modulates,"geometry MODULATE controls the material flag")
+    require(actual.source.flags == 0x11223344 && actual.source.color == rgba &&
+            actual.source.surface == SIMD3<Float>(0.25,0.5,0.75),
+            "material flag selection preserves original flags RGBA and surface")
+    require(actual.usesBlending == (sourceAlpha != 255),
+            "raw source material alpha retains blend selection in both MODULATE modes")
+    require(value.isComplete && actual.textureIndex == nil && value.textures.isEmpty,
+            "authored unnamed material remains explicitly untextured")
+} }
+for modulates in [false,true] { for prelitAlpha in [UInt8(0),128,255] {
+    let flags: UInt16 = (modulates ? 0x40:0) | 0x18
+    let prelit = SIMD4<UInt8>(128,64,255,prelitAlpha)
+    let value = try Model.prepare(dff: clump(authoredGeometry(flags: flags,source: material(color: SIMD4(19,37,73,255)),prelit: prelit)),txd: nil)
+    require(value.geometries[0].vertices.allSatisfy { $0.color == SIMD4<Float>(128,64,255,Float(prelitAlpha))/255 },
+            "prelight RGB and alpha remain raw with and without MODULATE")
+    require(value.geometries[0].materials[0].usesBlending == (prelitAlpha != 255),
+            "prelight alpha still selects blending without source-color modulation")
+} }
+for modulates in [false,true] { for textureAlpha in [UInt8(0),128,255] {
+    let flags: UInt16 = (modulates ? 0x40:0) | 0x18
+    let dictionary = solidDictionary([53,107,181,textureAlpha])
+    let value = try Model.prepare(dff: clump(authoredGeometry(flags: flags,source: material("solid",color: SIMD4(29,59,113,255)))),txd: dictionary)
+    require(value.geometries[0].materials[0].textureIndex == 0 && value.textureByteCount == 4,
+            "named texture stays selected under both MODULATE modes")
+    require(value.geometries[0].materials[0].usesBlending == (textureAlpha != 255),
+            "texture alpha still selects blending without source-color modulation")
+} }
+let noMapUVs: [SIMD2<Float>] = [SIMD2(-3,2),SIMD2(-0.25,0.25),SIMD2(0,1),
+    SIMD2(0.5,0.5),SIMD2(2,-2),SIMD2(1e20,-1e20)]
+let noMapPrelit = SIMD4<UInt8>(128,255,64,255)
+let noMapRGBA = SIMD4<UInt8>(201,151,99,255)
+for filter in [1,2] { for u in 1...4 { for v in 1...4 { for uv in noMapUVs {
+    let packed = UInt32(filter | u << 8 | v << 12)
+    let expectedSampler = try Model.sampler(packed)
+    let value = try Model.prepare(dff: clump(authoredGeometry(flags: 0x58,
+        source: material("",color: noMapRGBA,filtering: packed),prelit: noMapPrelit,uv: uv)),txd: nil)
+    require(value.isComplete && value.textures.isEmpty && value.geometries[0].materials[0].textureIndex == nil,
+            "finite no-map UV and valid sampler profiles retain an untextured plan")
+    require(value.geometries[0].vertices.allSatisfy { $0.uv == uv } &&
+            value.geometries[0].materials[0].sampler == expectedSampler,
+            "no-map preparation neither guesses UVs nor rewrites sampler metadata")
+} } } }
+for invalidUV in [SIMD2<Float>(.nan,0),SIMD2<Float>(0,.infinity)] {
+    failure("untextured finite guard remains strict") {
+        _ = try Model.prepare(dff: clump(authoredGeometry(flags: 0x18,source: material(),uv: invalidUV)),txd: nil)
+    }
+}
+let missingWithValidDictionary = try Model.prepare(dff: clump(authoredGeometry(flags: 0x18,
+    source: material("genuinely-absent",color: SIMD4(31,63,127,64)))),txd: solidDictionary([255,255,255,255]))
+require(!missingWithValidDictionary.isComplete && missingWithValidDictionary.textures.isEmpty &&
+        missingWithValidDictionary.diagnostics == [.missingTexture(geometry: 0,material: 0,name: "genuinely-absent")],
+        "no-map shader support does not admit genuinely absent referenced names")
+require(missingWithValidDictionary.geometries[0].materials[0].source.textureName == "genuinely-absent" &&
+        !missingWithValidDictionary.geometries[0].materials[0].modulatesMaterial,
+        "unresolved name and source flags remain diagnostic data")
+let materialCPUChecks = checks - materialCPUStart
+var noMapGPUDraws = 0
+var materialGPUDraws = 0
+
 var gpuResult = cpuOnly ? "disabled-by-cpu-only-test-option" : "unavailable"
 var gpuDevice: String?
 if !cpuOnly, let device = MTLCreateSystemDefaultDevice() {
@@ -203,11 +292,134 @@ if !cpuOnly, let device = MTLCreateSystemDefaultDevice() {
     var expected: [UInt8] = []
     for y in 0..<4 { for x in 0..<4 { let sample = ((y < 2 ? 1 : 0) * 2 + x / 2) * 4; expected.append(contentsOf: colors[sample..<sample+4]) } }
     require(pixels == expected, "Metal shader UV/color orientation and full-resolution texels")
+    // Every following pixel assertion reads the actual render target through a
+    // blit. It neither trusts uploaded CPU texture memory nor substitutes a shader.
+    func drawPixels(_ subject: Model.Uploaded, overrides: Model.DrawOverrides = Model.DrawOverrides()) throws -> [UInt8] {
+        guard let command = queue.makeCommandBuffer() else { fatalError("material readback command") }
+        let pass = MTLRenderPassDescriptor(); pass.colorAttachments[0].texture = color
+        pass.colorAttachments[0].loadAction = .clear; pass.colorAttachments[0].storeAction = .store
+        pass.colorAttachments[0].clearColor = MTLClearColorMake(0,0,0,0)
+        pass.depthAttachment.texture = depth; pass.depthAttachment.loadAction = .clear
+        pass.depthAttachment.storeAction = .dontCare; pass.depthAttachment.clearDepth = 1
+        guard let encoder = command.makeRenderCommandEncoder(descriptor: pass) else { fatalError("material readback encoder") }
+        encoder.setViewport(MTLViewport(originX: 0,originY: 0,width: 4,height: 4,znear: 0,zfar: 1))
+        try subject.encode(drawIndex: 0,encoder: encoder,pipelines: pipelines,
+            viewProjection: matrix_identity_float4x4,modelTransform: matrix_identity_float4x4,overrides: overrides)
+        encoder.endEncoding()
+        guard let staging = device.makeBuffer(length: 256*4,options: .storageModeShared),
+              let copy = command.makeBlitCommandEncoder() else { fatalError("material readback staging") }
+        copy.copy(from: color,sourceSlice: 0,sourceLevel: 0,sourceOrigin: MTLOrigin(x: 0,y: 0,z: 0),
+            sourceSize: MTLSize(width: 4,height: 4,depth: 1),to: staging,destinationOffset: 0,
+            destinationBytesPerRow: 256,destinationBytesPerImage: 1024)
+        copy.endEncoding();command.commit();command.waitUntilCompleted()
+        require(command.status == .completed,"authored material GPU command completed")
+        let bytes = staging.contents().assumingMemoryBound(to: UInt8.self)
+        return (0..<4).flatMap { row in Array(UnsafeBufferPointer(start: bytes+row*256,count: 16)) }
+    }
+    func solidPixels(_ pixels: [UInt8], _ expected: SIMD4<Float>, _ label: String) {
+        let target = (0..<4).map { Int((max(0,min(1,expected[$0]))*255).rounded()) }
+        let actual = stride(from: 0,to: pixels.count,by: 4)
+        require(pixels.count == 64 && actual.allSatisfy { offset in
+            (0..<4).allSatisfy { abs(Int(pixels[offset+$0])-target[$0]) <= 2 }
+        },label)
+    }
+    func uploadAuthored(flags: UInt16, rgba: SIMD4<UInt8>, prelit: SIMD4<UInt8> = white,
+                        name: String? = nil, filtering: UInt32? = nil,
+                        uv: SIMD2<Float> = SIMD2(0.5,0.5),
+                        dictionary: NativeRenderWareTXD.TextureDictionary? = nil) throws -> Model.Uploaded {
+        let value = try Model.prepare(dff: clump(authoredGeometry(flags: flags,
+            source: material(name,color: rgba,filtering: filtering),prelit: prelit,uv: uv)),txd: dictionary)
+        require(value.isComplete,"authored GPU model has complete declared resources")
+        return try Model.Uploaded(plan: value,device: device)
+    }
+
+    // Specific literal historical-shader negative: the old fragment samples the
+    // bound white image with border addressing and discards these outside UVs.
+    let borderNoMap = try uploadAuthored(flags: 0x18,rgba: SIMD4(71,129,193,64),
+        name: "",filtering: 0x4401,uv: SIMD2(2,2))
+    solidPixels(try drawPixels(borderNoMap),SIMD4<Float>(repeating: 1),
+                "no-map border sampling bypass preserves the material")
+    noMapGPUDraws += 1
+    let expectedNoMap = SIMD4<Float>(Float(noMapRGBA.x)*Float(noMapPrelit.x)/Float(255*255),
+        Float(noMapRGBA.y)*Float(noMapPrelit.y)/Float(255*255),
+        Float(noMapRGBA.z)*Float(noMapPrelit.z)/Float(255*255),1)
+    for filter in [1,2] { for u in 1...4 { for v in 1...4 { for uv in noMapUVs {
+        let packed = UInt32(filter | u << 8 | v << 12)
+        let subject = try uploadAuthored(flags: 0x58,rgba: noMapRGBA,prelit: noMapPrelit,
+            name: "",filtering: packed,uv: uv)
+        solidPixels(try drawPixels(subject),expectedNoMap,"no-map UV independence across filter and address modes")
+        noMapGPUDraws += 1
+    } } } }
+
+    // Presence of an actual named texture must keep texture sampling active.
+    let solid = solidDictionary([17,83,191,255],filtering: 0x4401)
+    let namedInside = try uploadAuthored(flags: 0x18,rgba: SIMD4(91,103,211,0),
+        name: "solid",uv: SIMD2(0.5,0.5),dictionary: solid)
+    solidPixels(try drawPixels(namedInside),SIMD4<Float>(17,83,191,255)/255,
+                "named texture is sampled when bound and MODULATE is off")
+    materialGPUDraws += 1
+    let namedOutside = try uploadAuthored(flags: 0x18,rgba: white,
+        name: "solid",uv: SIMD2(2,2),dictionary: solid)
+    solidPixels(try drawPixels(namedOutside),SIMD4<Float>(repeating: 0),
+                "named border texture control still samples and discards outside UV")
+    materialGPUDraws += 1
+
+    let overrideDescriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm,width: 1,height: 1,mipmapped: false)
+    overrideDescriptor.storageMode = .shared;overrideDescriptor.usage = .shaderRead
+    guard let overrideTexture = device.makeTexture(descriptor: overrideDescriptor) else { fatalError("authored override texture") }
+    let overrideRGBA: [UInt8] = [31,63,127,255]
+    overrideRGBA.withUnsafeBytes { overrideTexture.replace(region: MTLRegionMake2D(0,0,1,1),mipmapLevel: 0,
+        withBytes: $0.baseAddress!,bytesPerRow: 4) }
+    var textureOverrides = Model.DrawOverrides();textureOverrides.textureOverride = overrideTexture
+    // The no-map plan has no selected source image; its actual override must
+    // nevertheless set the shader's bound-texture state.
+    let overrideNoMap = try uploadAuthored(flags: 0x18,rgba: SIMD4(9,27,81,0))
+    solidPixels(try drawPixels(overrideNoMap,overrides: textureOverrides),SIMD4<Float>(31,63,127,255)/255,
+                "textureOverride activates sampling for an otherwise untextured plan")
+    materialGPUDraws += 1
+    solidPixels(try drawPixels(namedInside,overrides: textureOverrides),SIMD4<Float>(31,63,127,255)/255,
+                "textureOverride has priority over the selected named image")
+    materialGPUDraws += 1
+
+    let a128 = Float(128)/255
+    for modulates in [false,true] {
+        let flags: UInt16 = (modulates ? 0x40:0) | 0x18
+        let subject = try uploadAuthored(flags: flags,rgba: SIMD4(31,67,143,128))
+        let expected: SIMD4<Float> = modulates
+            ? SIMD4(Float(31)/255*a128,Float(67)/255*a128,Float(143)/255*a128,a128)
+            : SIMD4(repeating: 1)
+        solidPixels(try drawPixels(subject),expected,"MODULATE controls effective RGBA while prior blend selection is retained")
+        materialGPUDraws += 1
+        var materialOverrides = Model.DrawOverrides()
+        materialOverrides.materialColorOverride = SIMD4(0.4,0.8,0.2,0.5)
+        materialOverrides.tint = SIMD4(0.5,0.25,1,0.5)
+        // Result before framebuffer blending is (0.2,0.2,0.2,0.25).
+        solidPixels(try drawPixels(subject,overrides: materialOverrides),SIMD4(0.05,0.05,0.05,0.25),
+                    "explicit materialColorOverride and tint retain priority in both flag modes")
+        materialGPUDraws += 1
+    }
+    let prelitAlpha = try uploadAuthored(flags: 0x18,rgba: SIMD4(7,11,13,0),prelit: SIMD4(255,128,64,128))
+    solidPixels(try drawPixels(prelitAlpha),SIMD4(a128,a128*a128,Float(64)/255*a128,a128),
+                "prelight alpha remains effective when source color alpha is not modulated")
+    materialGPUDraws += 1
+    let textureAlpha = try uploadAuthored(flags: 0x18,rgba: SIMD4(7,11,13,0),
+        name: "solid",dictionary: solidDictionary([64,128,255,128]))
+    solidPixels(try drawPixels(textureAlpha),SIMD4(Float(64)/255*a128,a128*a128,a128,a128),
+                "texture alpha remains effective when source color alpha is not modulated")
+    materialGPUDraws += 1
+    let combined = try uploadAuthored(flags: 0x58,rgba: SIMD4(255,255,255,128),prelit: SIMD4(255,255,255,128),
+        name: "solid",dictionary: solidDictionary([255,255,255,128]))
+    let combinedAlpha = a128*a128*a128
+    solidPixels(try drawPixels(combined),SIMD4(combinedAlpha,combinedAlpha,combinedAlpha,combinedAlpha),
+                "source prelight and texture alpha multiply without replacing one another")
+    materialGPUDraws += 1
     gpuResult = "passed-offscreen-4x4-rgba-and-mip-readback"
 }
 var report: [String: Any] = ["cpu": "passed", "metal": gpuResult, "metalDevice": gpuDevice as Any? ?? NSNull(),
     "gpuReadback": "explicit texture-to-shared-buffer blit; discrete GPU texture CPU mapping may be stale",
-    "sharedGeometryInstances": 20, "samplerConfigurations": 96,"checks":checks,"foundNativeSamplerCases":"passed"]
+    "sharedGeometryInstances": 20, "samplerConfigurations": 96,"checks":checks,"foundNativeSamplerCases":"passed",
+    "materialStateCPUChecks":materialCPUChecks,"noMapGPUDraws":noMapGPUDraws,"materialGPUDraws":materialGPUDraws,
+    "newMaterialScope":"authored MODULATE/no-map/override semantics only; strict resource admission retained; no retail-pixel claim"]
 var ownerFailures = false
 if testArguments.count >= 3 {
     let folder = URL(fileURLWithPath: testArguments[2])

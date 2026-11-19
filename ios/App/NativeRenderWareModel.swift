@@ -52,6 +52,9 @@ enum NativeRenderWareModel {
         let textureIndex: Int?
         let sampler: Sampler
         let usesBlending: Bool
+        /// Geometry MODULATE controls the source color. Explicit server draw
+        /// overrides remain independently meaningful even without that flag.
+        var modulatesMaterial: Bool = true
     }
     struct Part {
         let material: Int
@@ -144,7 +147,8 @@ enum NativeRenderWareModel {
                 indices.reserveCapacity(newIndices)
                 for (materialIndex, material) in source.materials.enumerated() {
                     if buckets[materialIndex].isEmpty {
-                        materials.append(Material(source: material, textureIndex: nil, sampler: try sampler(0x1102), usesBlending: false))
+                        materials.append(Material(source: material, textureIndex: nil, sampler: try sampler(0x1102), usesBlending: false,
+                                                  modulatesMaterial: source.flags & 0x40 != 0))
                         continue
                     }
                     var selected: Int?
@@ -176,8 +180,10 @@ enum NativeRenderWareModel {
                     // Preserve both raw fields; use the found texture's state.
                     let sampler = try sampler(texture?.filterAddressing ?? material.textureFilterAndAddressing ?? 0x1102)
                     let prelitAlpha = buckets[materialIndex].contains { source.prelitColors.isEmpty ? false : source.prelitColors[Int($0)].w != 255 }
+                    let modulatesMaterial = source.flags & 0x40 != 0
                     materials.append(Material(source: material, textureIndex: selected, sampler: sampler,
-                                              usesBlending: material.color.w != 255 || prelitAlpha || (texture?.containsTransparentPixels ?? false)))
+                                              usesBlending: material.color.w != 255 || prelitAlpha || (texture?.containsTransparentPixels ?? false),
+                                              modulatesMaterial: modulatesMaterial))
                     if !buckets[materialIndex].isEmpty {
                         parts.append(Part(material: materialIndex, indexStart: indices.count, indexCount: buckets[materialIndex].count))
                         indices.append(contentsOf: buckets[materialIndex])
@@ -335,12 +341,16 @@ enum NativeRenderWareModel {
                   overrides.alphaCutoff.isFinite, overrides.ambient.isFinite, overrides.diffuse.isFinite, finite(overrides.lightDirection) else { throw Failure.malformed("draw transform/lighting") }
             let normalMatrix = simd_transpose(simd_inverse(model))
             guard finite(normalMatrix) else { throw Failure.malformed("normal transform overflow") }
-            let materialColor = overrides.materialColorOverride ?? (SIMD4(Float(color.x), Float(color.y), Float(color.z), Float(color.w)) / 255)
+            let sourceColor = material.modulatesMaterial
+                ? SIMD4(Float(color.x), Float(color.y), Float(color.z), Float(color.w)) / 255
+                : SIMD4<Float>(repeating: 1)
+            let materialColor = overrides.materialColorOverride ?? sourceColor
             guard materialColor.x.isFinite, materialColor.y.isFinite, materialColor.z.isFinite, materialColor.w.isFinite else { throw Failure.malformed("material color override") }
+            let boundTexture = overrides.textureOverride ?? material.textureIndex.map { textures[$0] }
             var uniforms = Uniforms(viewProjection: viewProjection, model: model, normalMatrix: normalMatrix,
                                     color: materialColor * overrides.tint,
                                     lightDirectionAmbient: SIMD4(overrides.lightDirection, overrides.ambient),
-                                    settings: SIMD4(overrides.diffuse, max(0, min(1, overrides.alphaCutoff)), overrides.ignoreVertexColor ? 1:0, 0))
+                                    settings: SIMD4(overrides.diffuse, max(0, min(1, overrides.alphaCutoff)), overrides.ignoreVertexColor ? 1:0, boundTexture == nil ? 0:1))
             let blend = overrides.blendOverride ?? (material.usesBlending || materialColor.w < 1 || overrides.tint.w < 1)
             encoder.setRenderPipelineState(blend ? pipelines.blended : pipelines.opaque)
             encoder.setDepthStencilState(blend ? pipelines.blendedDepth : pipelines.opaqueDepth)
@@ -348,7 +358,7 @@ enum NativeRenderWareModel {
             encoder.setVertexBuffer(geometries[instance.geometry].vertices, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentTexture(overrides.textureOverride ?? material.textureIndex.map { textures[$0] } ?? whiteTexture, index: 0)
+            encoder.setFragmentTexture(boundTexture ?? whiteTexture, index: 0)
             encoder.setFragmentSamplerState(overrides.samplerOverride ?? samplers[material.sampler], index: 0)
             encoder.drawIndexedPrimitives(type: .triangle, indexCount: part.indexCount, indexType: .uint32,
                                           indexBuffer: geometries[instance.geometry].indices, indexBufferOffset: part.indexStart * 4)
