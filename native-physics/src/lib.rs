@@ -149,6 +149,20 @@ pub unsafe extern "C" fn zgtaphys_world_free(ptr: *mut ZGTAPhysicsWorld) {
     }
 }
 #[no_mangle]
+pub unsafe extern "C" fn zgtaphys_world_set_gravity(
+    ptr: *mut ZGTAPhysicsWorld, x: f32, y: f32, z: f32,
+) -> u32 {
+    if ![x, y, z].iter().all(|v| v.is_finite()) { return 0 }
+    let Some(w) = world(ptr) else { return 0 };
+    w.gravity = Vector::new(x, y, z);
+    // Resting bodies must respond to changed (including inverted) gravity.
+    // Waking retains their current poses and velocities.
+    for (_, body) in w.bodies.iter_mut() {
+        if body.is_dynamic() { body.wake_up(true); }
+    }
+    1
+}
+#[no_mangle]
 pub unsafe extern "C" fn zgtaphys_world_step(ptr: *mut ZGTAPhysicsWorld) -> u32 {
     let Some(w) = world(ptr) else { return 0 };
     if let Some((base, ulp, index)) = w.archived_step {

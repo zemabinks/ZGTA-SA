@@ -151,6 +151,8 @@ class ClassOwner{
             ui.receive(message)
         }
         try initialize(client)
+        try check(client.gravity==0.008,"InitGame gravity was not retained")
+        try rpc(client,146){$0.float(0.004)}
         let first=spawn(version,skin:7,point:SIMD3(100,200,30),angle:45)
         try classReply(client,first)
         try check(events.filter{$0["t"]as?String=="class"}.count==1,"RPC128 did not retain selection callback")
@@ -191,6 +193,7 @@ class ClassOwner{
         try check(ui.weapons.weapons[31]==50 && ui.renderer!.spawns==before.spawns+1,"Forced spawn lost future weapons or duplicated")
         try check(client.health==100 && client.armour==0 && client.controllable,"Authorized spawn did not reset spawn state")
 
+        try check(client.gravity==0.004,"Class/normal/forced spawn reset per-player gravity")
         // A spectator-off authorized spawn also consumes the most recent data.
         let spectatePoint=SIMD3<Float>(400,500,40)
         try client.receive(NativeSAMPProtocol.rpc(68,spawn(version,skin:7,point:spectatePoint,angle:180,weapon:22)))
@@ -200,6 +203,7 @@ class ClassOwner{
         try check(!client.spectating && client.state == .spawned && ui.renderer!.spawns==count+1,"Spectator-off did not complete one cached spawn")
         try check(positions.last==spectatePoint-SIMD3(0,0,1) && ui.renderer!.skin==7,"Spectator-off used stale spawn transform/skin")
 
+        try check(client.gravity==0.004,"Spectator-off spawn reset per-player gravity")
         // Initial metadata alone cannot authorize/open a selection screen.
         client.disconnect();try initialize(client);let oldPresents=ui.presents
         try client.receive(NativeSAMPProtocol.rpc(68,spawn(version,skin:287)))

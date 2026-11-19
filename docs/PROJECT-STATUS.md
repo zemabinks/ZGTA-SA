@@ -30,6 +30,8 @@ A native original-navigation reader and explicit Game Files route checks now pro
 
 Core 143 separates world lighting from model shading and repairs a demonstrated native texture repeat-edge difference with bounded original-size Metal arrays. Authored GPU and resource-owner regressions pass; build and installed-game acceptance are tracked separately. This remains a scoped renderer repair, with retail fidelity and ambient AI still open. See the [rendering record](research/rendering/CORE_PED_RENDERING_119.md#material-ownership-and-native-pedestrian-samplers-143).
 
+Core 144 adds typed legacy-server gravity to native force owners and fixes a demonstrated low-gravity airborne-bike rest condition. Source, real host physics and frame-rate regressions pass. Two native protocol profiles also agree with an owned open.mp server through per-player/global gravity and physical-sync checks; installed-build acceptance remains distinct. [Gravity evidence and limits](research/movement/CORE_PHYSICS_AUDIT.md#legacy-server-gravity-144) describe the supported scope.
+
 ## Where we're going
 
 The project's priorities are **stable shared world state**, **accurate player and vehicle appearances**, **correct passengers/vehicle authority**, **complete original resources**, **authentic NPCs and traffic**, and **original free-roam gameplay fidelity**. Original campaign missions are explicitly not the target.

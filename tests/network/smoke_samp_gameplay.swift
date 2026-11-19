@@ -6,6 +6,9 @@ func hex(_ value:String)->Data{let a=Array(value);return Data(stride(from:0,to:a
 typealias C=NativeSAMPGameplayCommands.Command
 let golden:[(UInt8,String,Int,C)]=[
  (15,"00",8,.controllable(false)),(15,"01",8,.controllable(true)),
+ (146,"00000000",32,.gravity(0)),(146,"6f12833b",32,.gravity(0.004)),
+ (146,"6f12033c",32,.gravity(0.008)),(146,"6f12833c",32,.gravity(0.016)),
+ (146,"6f1203bc",32,.gravity(-0.008)),(146,"00004842",32,.gravity(50)),(146,"000048c2",32,.gravity(-50)),
  (157,"0000803f0000004000004040",96,.cameraPosition(SIMD3(1,2,3))),
  (158,"0000803f000000400000404002",104,.cameraLookAt(SIMD3(1,2,3),.cut)),
  (162,"",0,.cameraBehind),
@@ -24,6 +27,9 @@ for(id,bytes)in [(UInt8(15),"02"),(124,"01"),(124,"02000000"),(158,"0000803f0000
  let d=hex(bytes);check((try?NativeSAMPGameplayCommands.decode(.init(id:id,data:d,bits:d.count*8)))==nil,"Malformed typed command accepted")
 }
 check(try NativeSAMPGameplayCommands.decode(.init(id:250,data:Data(),bits:0))==nil,"Unrelated RPC swallowed")
+for data in ["0000807f","000080ff","0100c07f","00004c42","00004cc2"] {
+ check((try?NativeSAMPGameplayCommands.decode(.init(id:146,data:hex(data),bits:32)))==nil,"Invalid/unsupported gravity accepted or clamped")
+}
 let spectator=try NativeSAMPGameplayCommands.spectator(position:SIMD3(1,2,3),keys:0x1234,axes:SIMD2(-128,128))
 check(spectator==hex("d480ff800034120000803f0000004000004040"),"Spectator212 layout or physical point changed")
 check((try?NativeSAMPGameplayCommands.spectator(position:SIMD3(.nan,0,0)))==nil,"Nonfinite spectator position accepted")
@@ -41,6 +47,11 @@ check(authority.apply(event(5,0,.reset)) && !authority.inputBlocked,"New session
 check(!authority.apply(event(4,100,.spectating(true))) && !authority.inputBlocked,"Old generation retargeted camera/input")
 check(authority.apply(event(5,1,.controllable(false))) && !authority.apply(event(5,1,.controllable(true))) && authority.inputBlocked,"Duplicate callback changed authority")
 check(!authority.apply(event(5,0,.reset)) && authority.inputBlocked,"Duplicate reset released current freeze")
+check(authority.apply(event(5,2,.gravity(0.004))) && authority.gravity==0.004 && authority.inputBlocked,"Gravity changed input ownership or was lost")
+check(!authority.apply(event(5,100,.gravity(.nan))) && authority.sequence==2 && authority.gravity==0.004,"Invalid gravity advanced authority")
+check(!authority.apply(event(4,999,.gravity(0.016))) && authority.gravity==0.004,"Stale gravity crossed session")
+check(authority.apply(event(5,3,.gravity(0))) && authority.gravity==0,"Zero gravity lost")
+check(authority.apply(event(6,0,.reset)) && authority.gravity==nil,"Retired gravity leaked into replacement connection")
 
 // Actual Client→adapter→NMP callback and generation admission. No socket is
 // opened in this decoder test; the live owned-server gate is separate.
@@ -55,12 +66,45 @@ try receive(15,hex("00"));check(network.serverInputBlocked && network.originalIn
 try receive(157,hex("0000803f0000004000004040"));check(received.last?.command == .cameraPosition(SIMD3(1,2,3)),"Camera world point received a pedestrian offset")
 try receive(124,hex("01000000"));check(network.legacySpectating && network.serverInputBlocked,"Actual NMP spectator authority ignored124U32")
 try receive(15,hex("01"));check(network.serverInputBlocked,"Controllable true erased independent spectator gate")
+try receive(146,hex("6f12833b"));check(client.gravity==0.004 && received.last?.command == .gravity(0.004) && network.serverInputBlocked,"Actual Client/adapter/NMP dropped gravity or released spectator freeze")
+let beforeInvalidGravity=received.count
+do {try receive(146,hex("0100c07f"));preconditionFailure("Malformed gravity accepted by actual Client")}catch NativeSAMPProtocol.Error.invalid{}
+check(received.count==beforeInvalidGravity && client.gravity==0.004,"Malformed gravity mutated actual Client/adapter")
 let before=received.count
 adapter.onEvent?(["t":"sampGameplay","event":event(generation-1,1000,.cameraBehind)])
 check(received.count==before && network.legacySpectating,"NMP forwarded stale camera event")
 client.disconnect();check(!network.serverInputBlocked && !network.legacySpectating,"Reconnect retained old server input authority")
+check(client.gravity==nil,"Client disconnect retained server gravity")
 adapter.onEvent?(["t":"sampGameplay","event":event(generation,9999,.controllable(false))])
 check(!network.serverInputBlocked,"Delayed prior-session freeze crossed reset")
+// Minimal authored InitGame bits reach the real Client/adapter/NMP before
+// class/state/environment callbacks. This decoder fixture opens no socket.
+func introduction(_ gravity:Float)->NativeSAMPProtocol.Writer {
+ var w=NativeSAMPProtocol.Writer()
+ for _ in 0..<4{w.bit(false)};w.float(0);w.bit(false);w.float(0)
+ for _ in 0..<3{w.bit(false)};w.integer(2,size:4);w.integer(7,size:2);w.bit(false);w.integer(0,size:4)
+ w.integer(12,size:1);w.integer(10,size:1);w.float(gravity);return w
+}
+for version in [NativeSAMPProtocol.Version.v037,.dl] {
+ let c=NativeSAMPClient(address:"127.0.0.1:1",nickname:"Gravity_QA",version:version,installationID:"A")
+ let a=NativeSAMPWorldConnection(client:c)
+ let n=NativeMultiplayerClient(server:ServerAddress("http://127.0.0.1:1")!,automaticRecoveryTimer:false,legacy:a)
+ var log=[String](),last:NativeSAMPGameplayCommands.Event?
+ n.onLegacyEvent={if let e=$0["event"]as?NativeSAMPGameplayCommands.Event{last=e;log.append("command")}}
+ c.disconnect();log=[]
+ c.onPlayers={_ in check(c.gravity==0.016 && last?.command == .gravity(0.016),"Initial gravity arrived after a physical/class callback");log.append("players")}
+ c.onVehicles={_ in check(c.gravity==0.016,"Initial vehicle snapshot preceded gravity");log.append("vehicles")}
+ c.onEnvironment={_,_,_,_ in check(c.gravity==0.016,"Initial environment preceded gravity");log.append("environment")}
+ try c.receive(NativeSAMPProtocol.rpc(139,introduction(0.016)))
+ check(log.first=="command" && log.contains("environment") && c.gravity==0.016,"Actual InitGame dropped/reordered gravity")
+ c.onPlayers=nil;c.onVehicles=nil;c.onEnvironment=nil
+ var afterRetirement=0
+ c.onEnvironment={_,_,_,_ in afterRetirement+=1}
+ n.onLegacyEvent={if let e=$0["event"]as?NativeSAMPGameplayCommands.Event,case .gravity=e.command{c.disconnect()}}
+ let oldEpoch=c.gameplayGeneration
+ try c.receive(NativeSAMPProtocol.rpc(139,introduction(0.004)))
+ check(c.gameplayGeneration>oldEpoch && c.gravity==nil && c.localID==nil && afterRetirement==0,"Retired initial-gravity callback resumed stale InitGame work")
+}
 let independent=NativeMultiplayerClient(server:ServerAddress("http://127.0.0.1:1")!,automaticRecoveryTimer:false)
 check(!independent.serverInputBlocked && !independent.originalInputBlocked,"Legacy authority contaminated selfhost")
 print("PASS: \(checks) primary command goldens, truncations, spectator212 and actual NMP generation/input ownership checks")

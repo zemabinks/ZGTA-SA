@@ -5,6 +5,10 @@ PROJECT_ROOT="${PHYSICS_ROOT:h}"
 source "$PHYSICS_ROOT/toolchain_env.sh"
 export CARGO_TARGET_DIR="$PROJECT_ROOT/local-only/native-physics/target"
 PHYSICS_OUTPUT="$PROJECT_ROOT/local-only/native-physics"
+PHYSICS_BUILD_JOBS="${ZGTA_BUILD_JOBS:-2}"
+[[ "$PHYSICS_BUILD_JOBS" == <1-64> ]] || {
+  print -u2 'ZGTA_BUILD_JOBS must be an integer from 1 to 64.'; exit 2
+}
 if [[ ! -x "$CARGO_HOME/bin/cargo" ]]; then
   print -u2 "The project-local Rust toolchain is missing at $CARGO_HOME/bin/cargo"
   exit 1
@@ -12,7 +16,7 @@ fi
 build_target() {
   local physics_target="$1"
   local physics_directory="$2"
-  local -a physics_flags=(--locked --release --jobs 2)
+  local -a physics_flags=(--locked --release --jobs "$PHYSICS_BUILD_JOBS")
   [[ "${ZGTA_NATIVE_OFFLINE:-0}" != 1 ]] || physics_flags+=(--offline)
   cargo build "${physics_flags[@]}" --manifest-path "$PHYSICS_ROOT/Cargo.toml" --target "$physics_target"
   mkdir -p "$PHYSICS_OUTPUT/$physics_directory"

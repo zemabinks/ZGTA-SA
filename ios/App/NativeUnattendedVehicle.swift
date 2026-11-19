@@ -97,7 +97,8 @@ final class NativeUnattendedVehicle {
             guard let hit=world.raycast(origin:SIMD3<Float>(origin),direction:SIMD3<Float>(direction),distance:Float(distance),excludingBody:body) else{return nil}
             return .init(distance:Double(hit.distance),normal:V(hit.normal),surface:hit.coarseSurface,material:hit.coarseMaterial)
         }
-        let result=bike?.step(delta:delta,input:input,body:state,raycast:ray) ?? car!.step(delta:delta,input:input,body:state,raycast:ray)
+        let gravity=world.legacyGravity.map(Double.init)
+        let result=bike?.step(delta:delta,input:input,body:state,gravity:gravity,raycast:ray) ?? car!.step(delta:delta,input:input,body:state,gravity:gravity ?? 0.008,raycast:ray)
         output=result;world.setVelocities(body,linear:SIMD3<Float>(result.linearVelocity),angular:SIMD3<Float>(result.angularVelocity))
     }
     @discardableResult func shove(direction:SIMD2<Double>,point:V,speed:Double)->Double {
@@ -119,7 +120,8 @@ final class NativeUnattendedVehicle {
     func afterStep(delta:Double,reference:Pose) {
         guard let current=state else{return}
         let velocity=V(current.linearVelocity),spin=V(current.angularVelocity)
-        var difference=speedWas.map{velocity-$0} ?? V(0,-18*delta,0);difference.y += 18*delta
+        let gravity=world.legacyGravityAcceleration ?? 18
+        var difference=speedWas.map{velocity-$0} ?? V(0,-gravity*delta,0);difference.y += gravity*delta
         let length=simd_length(difference),intensity=definition.rigidMass*length/50
         let right=reference.rotation.act(V(1,0,0)),up=reference.rotation.act(V(0,1,0)),forward=reference.rotation.act(V(0,0,-1))
         if intensity>0,simd_length_squared(difference)>0.000001 {

@@ -33,6 +33,7 @@ final class NativeSAMPClient {
     private(set) var gameplayGeneration:UInt64=0
     private var gameplaySequence:UInt64=0
     private(set) var controllable=true,spectating=false
+    private(set) var gravity:Float?
     var onStatus:((String)->Void)?
     var onClass:((NativeSAMPProtocol.Spawn)->Void)?
     /// RPC68 changes the next spawn data; it does not authorize selection or
@@ -79,7 +80,7 @@ final class NativeSAMPClient {
         timer?.cancel();timer=nil;if handle != 0{zgtasa_samp_close(handle);handle=0}
         joined=false;spawnRequested=false;spawnInfo=nil;localID=nil
         players.removeAll();streamedPlayers.removeAll();roster.removeAll();vehicles.removeAll();receivedRPCs.removeAll()
-        health=100;armour=0;preciseHealth=100;preciseArmour=0;lastQueuedCar=nil;gameplayGeneration &+= 1;gameplaySequence=0;controllable=true;spectating=false
+        health=100;armour=0;preciseHealth=100;preciseArmour=0;lastQueuedCar=nil;gameplayGeneration &+= 1;gameplaySequence=0;controllable=true;spectating=false;gravity=nil
         let epoch=gameplayGeneration;setState(.stopped)
         guard gameplayGeneration==epoch else{return};onRoster?(nil)
         guard gameplayGeneration==epoch else{return};onGameplayCommand?(.init(generation:epoch,sequence:0,command:.reset))
@@ -186,6 +187,7 @@ final class NativeSAMPClient {
             let epoch=gameplayGeneration,wasSpectating=spectating
             switch command{case .controllable(let enabled):controllable=enabled
             case .spectating(let enabled):spectating=enabled
+            case .gravity(let value):gravity=value
             default:break}
             publishGameplay(command)
             guard gameplayGeneration==epoch else{return}
@@ -202,12 +204,21 @@ final class NativeSAMPClient {
         switch rpc.id{
         case 130:fail("SERVER REJECTED THE CLIENT (\(try r.integer(1)))")
         case 139:
-            let intro=try NativeSAMPProtocol.introduction(&r);localID=intro.id;classCount=intro.classes;classIndex=0
+            let intro=try NativeSAMPProtocol.introduction(&r)
+            guard NativeSAMPGameplayCommands.validGravity(intro.gravity)else{throw NativeSAMPProtocol.Error.invalid}
+            let epoch=gameplayGeneration
+            localID=intro.id;classCount=intro.classes;classIndex=0
             footMilliseconds=intro.footMilliseconds;carMilliseconds=intro.carMilliseconds;weaponMilliseconds=intro.weaponMilliseconds
             players.removeAll();streamedPlayers.removeAll();vehicles.removeAll();spawnInfo=nil;spawnRequested=false
-            publishedPlayers();publishedVehicles();setState(.selecting)
-            roster[intro.id]=nickname;onRoster?(roster)
-            onEnvironment?(intro.hour,0,intro.weather,false);requestClass(0)
+            // Initial gravity precedes outward class/state notifications.
+            // Any outward callback may retire the connection reentrantly.
+            gravity=intro.gravity;publishGameplay(.gravity(intro.gravity))
+            guard gameplayGeneration==epoch else{return};publishedPlayers()
+            guard gameplayGeneration==epoch else{return};publishedVehicles()
+            guard gameplayGeneration==epoch else{return};setState(.selecting)
+            guard gameplayGeneration==epoch else{return};roster[intro.id]=nickname;onRoster?(roster)
+            guard gameplayGeneration==epoch else{return};onEnvironment?(intro.hour,0,intro.weather,false)
+            guard gameplayGeneration==epoch else{return};requestClass(0)
         case 128:
             guard try r.integer(1) != 0 else{onStatus?("CLASS UNAVAILABLE");if let info=spawnInfo{onClass?(info)};return}
             let info=try NativeSAMPProtocol.spawn(&r,version:version);spawnInfo=info;spawnRequested=false;setState(.selecting);onClass?(info)

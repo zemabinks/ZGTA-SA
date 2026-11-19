@@ -14,7 +14,7 @@ struct NativeSAMPGameCamera {
         var maximumCoordinate: Float = 10_000_000
         var minimumLookDistance: Float = 0.001
     }
-    enum Failure: Error, Equatable { case configuration, nonFiniteTime, invalidVector, invalidDuration, missingNormalPose }
+    enum Failure: Error, Equatable { case configuration, nonFiniteTime, invalidVector, invalidDuration, invalidGravity, missingNormalPose }
     struct Pose: Equatable {
         var eye: SIMD3<Float>
         var target: SIMD3<Float>
@@ -127,6 +127,7 @@ struct NativeSAMPGameCamera {
         guard generation==event.generation,event.sequence>sequence else{return false}
         guard timestamp.isFinite else{throw Failure.nonFiniteTime}
         switch event.command {
+        case .gravity(let value):guard Commands.validGravity(value)else{throw Failure.invalidGravity}
         case .cameraPosition(let value),.cameraLookAt(let value,_):guard valid(value)else{throw Failure.invalidVector}
         case .cameraInterpolation(_,let from,let to,let duration,_):
             guard valid(from),valid(to)else{throw Failure.invalidVector};guard duration<=Int32.max else{throw Failure.invalidDuration}
@@ -137,7 +138,7 @@ struct NativeSAMPGameCamera {
         let now=try advance(timestamp);sequence=event.sequence;commandDiagnostics.removeAll()
         let blocked=spectating && spectator.map{$0.mode != .fixed} == true
         switch event.command {
-        case .reset,.controllable:break
+        case .reset,.controllable,.gravity:break
         case .cameraBehind:releaseView()
         case .spectating(let value):
             if value {try takeView(at:now,seed:seed)}else{
