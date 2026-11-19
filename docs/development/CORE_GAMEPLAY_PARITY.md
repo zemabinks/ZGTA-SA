@@ -1,5 +1,12 @@
 # Core GTA San Andreas gameplay parity
 
+## 2026-11-19 — Legacy gravity and airborne force ownership (144)
+
+Initial and updated legacy server gravity now reach the native force owners through typed, generation-fenced events. Context changes preserve pose, momentum, camera/input ownership and fixed clocks. Foot, driven and promoted vehicle forces use the normalized scalar once; remote poses remain authoritative. Spawn/spectator lifetimes retain the value and disconnects retire it. A demonstrated low-gravity airborne-bike rest clamp is corrected for this profile, preserving the nil browser baseline.
+
+Focused checks pass for actual native wire/lifetimes, real C/Rapier force owners and display rates from 15 to 144 FPS. The full selected Core144 chain passes with physics, audio, transport and required GPU gates. Two native profiles also pass owned-server gravity phases and physical sync; SDK and installed-game acceptance remain separate; special-task tuning, inverted contacts and retail fidelity remain open. See [gravity scope](../research/movement/CORE_PHYSICS_AUDIT.md#legacy-server-gravity-144).
+
+
 ## 2026-11-19 — World materials and native texture sampling (143)
 
 World tiles now have a dedicated additive-prelight material, preserving existing model shading. A pre-existing v2 atlas repeat-edge discrepancy is repaired with bounded original-size Metal texture arrays. Ordered material runs, body-part ranges, static/baked/skeletal bindings, source fences and failure recovery remain explicit. Focused actual-GPU evidence passes 6,157 checks over 7,155 authored renders, with separate pure-plan and literal owner tests. The original hardware-sampler comparison still uses its original edge inputs and tolerance.

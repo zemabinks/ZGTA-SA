@@ -491,7 +491,7 @@ final class NativeVehicleDynamics {
         updateBurnoutReserve()
     }
 
-    func step(delta: Double, input originalInput: Input, body: BodyState,
+    func step(delta: Double, input originalInput: Input, body: BodyState,gravity:Double=0.008,
               raycast: (Vector, Vector, Double) -> RayHit?) -> Output {
         var input=originalInput
         if let drive=originalInput.drive {
@@ -554,7 +554,7 @@ final class NativeVehicleDynamics {
         if flags & 64 != 0 {
             rearSteering = input.handbrake ? -steering + (rearSteering + steering) * pow(0.1, stepSize) : rearSteering * pow(0.9, stepSize)
         }
-        move.y -= 0.008 * stepSize
+        move.y -= gravity * stepSize
         let drag = fun & 2 != 0 ? 0 : (table.drag <= 0.01 ? table.drag : table.drag / 1000 / 2) * (flight?.drag ?? 1)
         move *= pow(1 - simd_length(move) * drag, stepSize)
         turn *= pow(0.99, stepSize)

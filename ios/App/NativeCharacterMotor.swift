@@ -58,6 +58,7 @@ final class NativeCharacterMotor {
     }
     private let world: any NativeCharacterQueries
     var otherColliders = Set<UInt64>()
+    var gravityAcceleration:Double=20
     private var ignoredBodies = Set<UInt64>()
     private var avoidedColliders = Set<UInt64>()
     private var carryingBody: UInt64?
@@ -81,8 +82,8 @@ final class NativeCharacterMotor {
         self.world = world
         world.setEnabled(world.walker, false)
     }
-    static func gravity(_ velocity: Double, _ delta: Double) -> Double {
-        let value = velocity - 20 * delta
+    static func gravity(_ velocity: Double, _ delta: Double,acceleration:Double=20) -> Double {
+        let value = velocity - acceleration * delta
         return value * pow(max(0,1-abs(value)/8750),50*delta)
     }
     func setActive(_ active: Bool) {
@@ -201,7 +202,7 @@ final class NativeCharacterMotor {
               held: Bool,verticalOverride: Double? = nil,carrying: UInt64? = nil) {
         guard dt > 0,dt.isFinite,position.x.isFinite,position.y.isFinite,position.z.isFinite,
               displacement.x.isFinite,displacement.y.isFinite,displacement.z.isFinite,
-              jump.isFinite,verticalOverride?.isFinite != false else {
+              jump.isFinite,gravityAcceleration.isFinite,verticalOverride?.isFinite != false else {
             clearContactEvents(); return
         }
         current = position-V(0,0.8,0)
@@ -210,8 +211,8 @@ final class NativeCharacterMotor {
         previousEasing = easing; easing *= exp(-12*dt)
         if abs(easing) < 1e-4 { easing = 0 }
         if let verticalOverride { rising = held && verticalOverride < 0 ? 0 : verticalOverride }
-        else if grounded && rising <= 0 { rising = jump > 0 ? jump : 0 }
-        else { rising = held ? 0 : Self.gravity(rising,dt) }
+        else if grounded && rising <= 0 && (gravityAcceleration>=0 || jump>0) { rising = jump > 0 ? jump : 0 }
+        else { rising = held ? 0 : Self.gravity(rising,dt,acceleration:gravityAcceleration) }
         let standing = !overridden && grounded && rising <= 0
         desired = V(displacement.x,standing ? 0 : rising*dt,displacement.z)
         delta = dt; contacts(at: current,carrying: carrying)
@@ -294,7 +295,7 @@ final class NativeCharacterMotor {
                     if let floor = ground(x: current.x,z: current.z,height: current.y-0.9,reach: max(0,-down)+0.02+0.001) {
                         lift(0.8-floor.distance+0.02)
                     }
-                    rising = max(-8,rising+20*dt*nextNormal.y*nextNormal.y); propped = !standing
+                    rising = max(-8,rising+gravityAcceleration*dt*nextNormal.y*nextNormal.y); propped = !standing
                 }
                 landed = standing && separation > 0.02
             } else if separation > 0 { lift(separation) }

@@ -8,6 +8,8 @@ typedef struct ZGTAPhysicsWorld ZGTAPhysicsWorld;
 uint32_t zgtaphys_bridge_version(void);
 ZGTAPhysicsWorld *zgtaphys_world_new(float gravity_x,float gravity_y,float gravity_z);
 void zgtaphys_world_free(ZGTAPhysicsWorld *world);
+/* Acceleration only; preserves body poses, momentum and fixed clocks. */
+uint32_t zgtaphys_world_set_gravity(ZGTAPhysicsWorld *world,float gravity_x,float gravity_y,float gravity_z);
 uint32_t zgtaphys_world_step(ZGTAPhysicsWorld *world); /* exactly 1/60 second */
 /* transform[7]: position xyz, quaternion xyzw. mass[7]: mass,COM xyz,inertia xyz. */
 uint64_t zgtaphys_body_new(ZGTAPhysicsWorld*,uint32_t kind,const float *transform,const float *mass,float gravity_scale);

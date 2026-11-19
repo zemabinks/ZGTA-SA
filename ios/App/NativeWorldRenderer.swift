@@ -1685,8 +1685,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         } else if driving && (vehicleKind == "boat" || activeVehicleModel == "539") {
             camera.z = surface.map { $0 + 0.4 } ?? waterHeight
-        } else if !driving && verticalSpeed != 0 {
-            verticalSpeed -= 9.8 * delta
+        } else if !driving && (verticalSpeed != 0 || (legacyGravity ?? 0)<0) {
+            verticalSpeed -= (legacyGravity.map{$0*2500} ?? 9.8) * delta
             camera.z += verticalSpeed * delta
             if let floor = collision?.height(x: camera.x, y: camera.y,
                                              near: camera.z, maxDrop: 8),
@@ -3460,12 +3460,20 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             heightAboveRoad: definition.origin,eye: eye)
     }
 
+    private var legacyGravity:Float?
     func receiveLegacyGameplay(_ event:NativeSAMPGameplayCommands.Event) {
         let now=ProcessInfo.processInfo.systemUptime
         let seed=legacyCameraSample?.pose ?? gameCameraFrame.map{NativeSAMPGameCamera.Pose(eye:$0.source,target:$0.target)}
         let revision=legacyGameCamera.followRevision
         do {
             guard try legacyGameCamera.apply(event,at:now,seed:seed) else{return}
+            switch event.command {
+            case .reset:legacyGravity=nil;_ = groundVehicle?.world.setLegacyGravity(nil)
+            case .gravity(let value):
+                if groundVehicle?.world.setLegacyGravity(value) != false{legacyGravity=value}
+                else{onStatus?("SERVER GRAVITY COULD NOT BE APPLIED")}
+            default:break
+            }
             if revision != legacyGameCamera.followRevision {
                 gameCamera.resetFoot(heading:actorHeading,pitch:cameraPitch)
                 gameCamera.beginVehicle();legacyCameraSubject=nil

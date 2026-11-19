@@ -24,7 +24,7 @@ python3 tests/hosting/smoke_public_source.py
 python3 tests/hosting/smoke_native_project.py
 python3 tests/hosting/smoke_host.py
 python3 tools/development/verify_repository_layout.py
-python3 tests/core/smoke_core_143.py
+python3 tests/core/smoke_core_144.py
 ```
 
 Some tests require Xcode, native dependencies or owner-provided local resources; inspect each runner's requirements. Passing authored fixtures does not establish retail accuracy, rendered gameplay or physical-device acceptance. Runtime receipts stay in ignored local storage.
@@ -32,3 +32,5 @@ Some tests require Xcode, native dependencies or owner-provided local resources;
 [Developer documentation](../docs/DEVELOPMENT.md)
 
 Core 143: add `--require-gpu` locally to require actual offscreen world/pedestrian Metal sampling. The default source chain includes bounded native texture-plan checks and records GPU availability separately. Original game assets are not required for these authored fixtures.
+
+Core 144: `--with-physics` also executes the actual C/Rapier gravity/force-owner regressions; `--with-transport` includes real Client/adapter/NMP wire ownership against the local host transport. The default chain includes authored spawn/lifetime and pure gravity/camera checks. SDKs, live server acceptance and retail comparison remain distinct.

@@ -10,6 +10,7 @@ enum NativeSAMPGameplayCommands {
     enum Command:Equatable {
         case reset
         case controllable(Bool)
+        case gravity(Float)
         case cameraPosition(SIMD3<Float>)
         case cameraLookAt(SIMD3<Float>,Cut)
         case cameraBehind
@@ -27,20 +28,26 @@ enum NativeSAMPGameplayCommands {
     struct Authority {
         private(set) var generation:UInt64?,sequence:UInt64=0
         private(set) var controllable=true,spectating=false
+        private(set) var gravity:Float?
         var inputBlocked:Bool{!controllable || spectating}
         @discardableResult mutating func apply(_ event:Event)->Bool {
             if event.command == .reset {
                 guard generation==nil || event.generation>generation!,event.sequence==0 else{return false}
-                generation=event.generation;sequence=0;controllable=true;spectating=false;return true
+                generation=event.generation;sequence=0;controllable=true;spectating=false;gravity=nil;return true
             }
             guard generation==event.generation,event.sequence>sequence else{return false}
+            if case .gravity(let value)=event.command,!NativeSAMPGameplayCommands.validGravity(value){return false}
             sequence=event.sequence
             switch event.command {case .controllable(let value):controllable=value
             case .spectating(let value):spectating=value
+            case .gravity(let value):gravity=value
             default:break}
             return true
         }
     }
+    /// Explicit simulation policy matching the documented signed open.mp range.
+    /// Reject unsupported values without silently clamping the server operand.
+    static func validGravity(_ value:Float)->Bool{value.isFinite && abs(value)<=50}
     static func decode(_ rpc:NativeSAMPProtocol.RPC)throws->Command? {
         var reader=try NativeSAMPProtocol.Reader(rpc.data,bits:rpc.bits)
         func boolean(_ bytes:Int)throws->Bool{let value=try reader.integer(bytes);guard value<=1 else{throw NativeSAMPProtocol.Error.invalid};return value==1}
@@ -50,6 +57,9 @@ enum NativeSAMPGameplayCommands {
         }
         let command:Command
         switch rpc.id {
+        case 146:
+            let value=try reader.float();guard validGravity(value)else{throw NativeSAMPProtocol.Error.invalid}
+            command = .gravity(value)
         case 15:command = .controllable(try boolean(1))
         case 157:command = .cameraPosition(try reader.vector())
         case 158:let point=try reader.vector();command = .cameraLookAt(point,try cut())

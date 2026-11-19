@@ -4,6 +4,64 @@ This audit covers the isolated native core baseline and its public-client
 integration. Passing the archived JavaScript/Rapier fixtures establishes that
 boundary only. It does not establish complete retail GTA SA behavior.
 
+## Legacy server gravity (144)
+
+The legacy initial-game header (RPC139) and ordered gravity update (RPC146)
+now reach the native renderer and shared physics owner through typed,
+generation-fenced events. The client retains the last accepted scalar through
+class selection, normal/forced spawns and spectator-off transactions. Retiring
+a connection restores the existing nonlegacy force profile. Reentrant initial
+callbacks cannot resume work for a retired connection.
+
+Gravity is a normalized GTA operand. For the reconstructed 50-step free-fall
+integration, conversion to world acceleration is `2500 * operand`; positive
+values accelerate along negative Rapier Y. Scalar acceleration receives no
+pedestrian/model-origin offset. This dimensional relationship is supporting
+community reconstruction evidence, not a complete SA-MP patch or retail-task
+oracle. The client explicitly admits finite values in the documented signed
+range and rejects unsupported values without clamping. See the official
+[per-player](https://open.mp/docs/scripting/functions/SetPlayerGravity) and
+[global](https://open.mp/docs/scripting/functions/SetGravity) contracts.
+
+The C/Swift setter retains poses, linear/angular momentum and fixed-step
+clocks. Character free fall and manually integrated driven/promoted car/bike
+owners consume the same current context. Their rigid bodies retain zero
+built-in gravity scale, preventing double application. Remote authoritative
+poses remain kinematic. Context changes do not reset camera tracks or input
+ownership. The no-Rapier airborne fallback consumes the scalar too; inverted
+force can start it from rest.
+
+A real driven-bike fixture exposed a second discrepancy: the old low-speed
+rest threshold erased every small airborne gravity increment. For an explicit
+legacy gravity context, rest now requires current suspension support and
+nonnegative gravity. The nil browser profile retains its existing stabilization
+law. Preserved failures distinguish this physical bug from an earlier compiler
+error in the new parameter forwarding.
+
+Focused evidence includes 873 actual Client/adapter/NMP codec and lifetime
+checks, 98 actual class/spawn-owner checks and 127 pure camera/codec checks.
+The actual C/Rapier/renderer/force-owner fixture passes 326 checks, including
+foot and driven-car/bike trajectories at 15/30/60/120/144 display FPS, promoted
+vehicles, task overrides, momentum preservation, raw API validation and literal
+fallback/renderer branches. The preserved older motor fails the same analytic
+force-units assertion; its force implementation is unchanged, with only an
+inert interface field in the isolated negative fixture. All seven platform
+archives have current bridge stamps and verified architectures. The complete
+selected Core144 physics/audio/transport/required-Metal chain passes.
+
+An actual owned open.mp loopback run also passes 32 native checks for simultaneous
+0.3.7 and DL protocol profiles. All twelve phase/profile server checks agree
+through initial, per-player, global, zero, inverted and restored values; each
+peer has twenty matched physical position/normalized-velocity server updates.
+The disposable server/image are removed afterward. A first fixture failed
+before creating any client because its authored installation-ID seed had the
+wrong size; that failure remains retained. Full SDK and normal installed
+Simulator acceptance remain separate. Jetpack thrust, parachute dive,
+swim-out tuning, lift/buoyancy/lean/door tuning, complete inverted contacts and
+original retail patch behavior still require distinct comparisons. These
+results establish the stated force and ownership contracts, not 1:1 retail
+or complete external-server compatibility. Original resources stay local.
+
 ## Corrected and exercised
 
 - An externally placed on-foot pose (`heldFeet`, used by climbing/attachments)

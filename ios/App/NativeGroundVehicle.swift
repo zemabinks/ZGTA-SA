@@ -820,8 +820,9 @@ final class NativeGroundVehicle {
                         steer:max(-1,min(1,controls.yaw+(aloft ? 0:controls.steer))),handbrake:controls.handbrake)
                 }
             }
-            if let bikeDynamics { result = bikeDynamics.step(delta: fixed, input: controls, body: state, raycast: cast) }
-            else { result = dynamics!.step(delta: fixed, input: controls, body: state, raycast: cast) }
+            let gravity=world.legacyGravity.map(Double.init)
+            if let bikeDynamics { result = bikeDynamics.step(delta: fixed, input: controls, body: state,gravity:gravity, raycast: cast) }
+            else { result = dynamics!.step(delta: fixed, input: controls, body: state,gravity:gravity ?? 0.008, raycast: cast) }
             output = result
             forwardSpeed = -state.rotation.conjugate.act(SIMD3<Double>(SIMD3<Float>(result.linearVelocity))).z
             if definitions[model]?.configuration.kind == "car" { for front in [true,false] {

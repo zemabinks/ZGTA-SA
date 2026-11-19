@@ -106,6 +106,11 @@ final class SwiftRapierWorld {
     }
     enum MeshError: Error { case invalidHeader, invalidCounts, truncated, invalidVertex, invalidIndex }
     private let handle: OpaquePointer
+    private let initialGravity:SIMD3<Float>
+    /// Nil preserves the existing browser/self-host force profile. A legacy
+    /// session supplies the normalized GTA gravity operand.
+    private(set) var legacyGravity:Float?
+    var legacyGravityAcceleration:Double?{legacyGravity.map{Double($0)*2500}}
     // Native bodies are created through this owner. Preserve exact type for
     // queries that distinguish fixed parents from kinematic vehicle parents;
     // ColliderInfo.dynamic alone cannot make that distinction.
@@ -115,9 +120,19 @@ final class SwiftRapierWorld {
     init?(gravity: SIMD3<Float> = SIMD3(0, -9.81, 0)) {
         guard zgtaphys_bridge_version() == 1,
               let handle = zgtaphys_world_new(gravity.x, gravity.y, gravity.z) else { return nil }
-        self.handle = handle
+        self.handle = handle;initialGravity=gravity
     }
     deinit { zgtaphys_world_free(handle) }
+
+    @discardableResult func setLegacyGravity(_ normalized:Float?)->Bool {
+        guard normalized.map({$0.isFinite && abs($0)<=50}) ?? true else{return false}
+        if normalized==legacyGravity{return true}
+        // 50 normalized velocity units/s times 50 normalized steps/s.
+        // Acceleration uses Rapier Y, without a character/model offset.
+        let acceleration=normalized.map{SIMD3<Float>(0,-2500*$0,0)} ?? initialGravity
+        guard zgtaphys_world_set_gravity(handle,acceleration.x,acceleration.y,acceleration.z) != 0 else{return false}
+        legacyGravity=normalized;return true
+    }
 
     /// Original fixed-step manager ordering: parked force updates precede
     /// the core, parked damage/pose updates precede the driven contact drain.

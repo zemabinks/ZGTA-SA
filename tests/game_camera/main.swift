@@ -126,5 +126,25 @@ rejects("non-finite vector"){_ = try guarded.apply(event(4,.cameraPosition(SIMD3
 rejects("oversized vector"){_ = try guarded.apply(event(4,.cameraPosition(SIMD3(20_000_000,0,0))),at:0)}
 rejects("invalid duration"){_ = try guarded.apply(event(4,.cameraInterpolation(position:true,from:.zero,to:.zero,milliseconds:.max,cut:.move)),at:0)}
 rejects("invalid normal"){_ = try guarded.sample(at:1,normal:Camera.Pose(eye:SIMD3(.nan,0,0),target:.zero))}
-let report:[String:Any]=["status":"PASS","checks":checks,"rates":[15,30,60,120],"scope":"pure camera command/state/absolute-time interpolation/provider tests; retail timings, untimed lookAt policy and spectator offset parity unverified"]
+// Gravity shares event ordering, without taking camera or input ownership.
+let gravityBytes=Data([0x6f,0x12,0x83,0x3b])
+check(try Commands.decode(.init(id:146,data:gravityBytes,bits:32)) == .gravity(0.004),"RPC146 float32 operand")
+for bits in 0..<32 {check((try?Commands.decode(.init(id:146,data:gravityBytes,bits:bits)))==nil,"Truncated gravity accepted")}
+check((try?Commands.decode(.init(id:146,data:gravityBytes+Data([0]),bits:33)))==nil,"Trailing gravity accepted")
+var gravityOwner=Commands.Authority()
+check(gravityOwner.apply(event(0,.reset)),"gravity reset")
+check(gravityOwner.apply(event(1,.gravity(0.004))) && gravityOwner.gravity==0.004 && !gravityOwner.inputBlocked,"gravity owns input or loses operand")
+check(!gravityOwner.apply(event(2,.gravity(.nan))) && gravityOwner.sequence==1 && gravityOwner.gravity==0.004,"malformed gravity advanced lifetime")
+check(gravityOwner.apply(event(0,.reset,2)) && gravityOwner.gravity==nil,"replacement connection retained gravity")
+var gravityCamera=camera()
+try gravityCamera.apply(event(1,.cameraInterpolation(position:true,from:normal.eye,to:normal.eye+SIMD3(20,0,0),milliseconds:2000,cut:.cut)),at:0,seed:normal)
+let revisionBeforeGravity=gravityCamera.followRevision
+try gravityCamera.apply(event(2,.gravity(0.004)),at:0.5)
+check(near(try gravityCamera.sample(at:0.5,normal:normal).pose.eye,normal.eye+SIMD3(5,0,0)),"gravity reset an in-progress camera track")
+check(gravityCamera.active && gravityCamera.followRevision==revisionBeforeGravity,"gravity took/released follow ownership")
+rejects("invalid gravity"){_ = try gravityCamera.apply(event(3,.gravity(.infinity)),at:0.75)}
+check(gravityCamera.sequence==2,"invalid gravity consumed camera sequence")
+try gravityCamera.apply(event(3,.gravity(0)),at:0.75)
+check(near(try gravityCamera.sample(at:0.75,normal:normal).pose.eye,normal.eye+SIMD3(7.5,0,0)),"zero gravity changed camera timing")
+let report:[String:Any]=["status":"PASS","checks":checks,"rates":[15,30,60,120],"scope":"pure camera command/state/interpolation/provider and gravity codec/lifetime tests; retail timings, untimed lookAt policy and spectator offset parity unverified"]
 print(String(decoding:try JSONSerialization.data(withJSONObject:report,options:[.sortedKeys]),as:UTF8.self))

@@ -148,6 +148,7 @@ final class NativeCharacterController {
                 queries.setTranslation(queries.walker, head - SIMD3(0,0.8,0))
             } else {
                 rootHeld = false
+                motor.gravityAcceleration=world.legacyGravityAcceleration ?? 20
                 let point = SwiftRapierWorld.gtaToRapier(input.displacement)
                 motor.step(position: &head, displacement: SIMD3<Double>(point)+supported.displacement, jump: input.jump, delta: Self.fixed,
                            held: input.held, verticalOverride: input.verticalOverride, carrying: carrying ?? supported.body)

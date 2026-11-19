@@ -145,7 +145,7 @@ final class NativeBikeDynamics {
         }
         return 0
     }
-    func step(delta: Double,input: Input,body: BodyState,raycast: (V,V,Double)->Hit?) -> Output {
+    func step(delta: Double,input: Input,body: BodyState,gravity:Double?=nil,raycast: (V,V,Double)->Hit?) -> Output {
         var drivenInput = input, hopImpulse = 0.0
         if configuration.pedalled {
             let step = 50*delta, throttle = input.throttle, pedalling = throttle>0.05
@@ -164,7 +164,7 @@ final class NativeBikeDynamics {
             bicycleLean += (sway-bicycleLean)*min(1,0.2*step)
             drivenInput.throttle = power>0 ? power : hopping ? 0 : throttle
         }
-        let base = stepCore(delta:delta,input:drivenInput,body:body,raycast:raycast)
+        let base = stepCore(delta:delta,input:drivenInput,body:body,gravity:gravity ?? 0.008,serverGravity:gravity != nil,raycast:raycast)
         guard hopImpulse != 0 && touching(0) && touching(2) else { return base }
         // The browser bicycle wrapper reads back f32 velocities from Rapier
         // before adding its hop, so preserve that rounding boundary here.
@@ -173,7 +173,7 @@ final class NativeBikeDynamics {
         return Output(linearVelocity:linear,angularVelocity:angular,steering:base.steering,rearSteering:0,
             gear:base.gear,gas:base.gas,brake:base.brake,burnout:base.burnout,wheelSpeed:base.wheelSpeed,wheels:base.wheels)
     }
-    private func stepCore(delta: Double,input: Input,body: BodyState,raycast: (V,V,Double)->Hit?) -> Output {
+    private func stepCore(delta: Double,input: Input,body: BodyState,gravity:Double,serverGravity:Bool,raycast: (V,V,Double)->Hit?) -> Output {
         stepSize = 50*delta; orientation = body.rotation
         right = orientation.act(V(1,0,0)); up = orientation.act(V(0,1,0)); forward = orientation.act(V(0,0,-1))
         let place = body.position+up*configuration.origin
@@ -226,7 +226,7 @@ final class NativeBikeDynamics {
         pitchDamping = pow(pitchDamping/(resistance*localPitch*localPitch+1),stepSize)
         let rollDamping = pow(0.9/(1000*localRoll*localRoll+1),stepSize)
         turn += right*(localPitch*(pitchDamping-1)); turn += forward*(localRoll*(rollDamping-1))
-        move.y -= 0.008*stepSize
+        move.y -= gravity*stepSize
         let drag = fun&2 != 0 ? 0 : table.drag<=0.01 ? table.drag : table.drag/1000/2
         move *= pow(1-simd_length(move)*drag,stepSize); turn *= pow(0.99,stepSize)
         var impulses = [Double](repeating:0,count:4), directions = [V](repeating:-up,count:4), oldPointSpeed = [V](repeating:.zero,count:4)
@@ -324,7 +324,12 @@ final class NativeBikeDynamics {
             let wanted = wheel.top.z-max(0,min(1,wheel.compression))*wheel.spring-hub.at.z
             drops[slot] += (wanted-drops[slot])*min(1,0.75*stepSize)
         }
-        if engine==0 && brakeForce==0 && abs(move.x)<0.005 && abs(move.y)<0.005 && abs(move.z)<0.005 {
+        // A small custom-gravity increment is not evidence of rest. Require
+        // actual supporting suspension and downward gravity in this profile;
+        // otherwise a stationary low-gravity bike never begins falling.
+        // Nil retains the existing browser profile's exact stabilization law.
+        let mayRest = !serverGravity || (gravity>=0 && wheels.contains{$0.compression<1})
+        if mayRest && engine==0 && brakeForce==0 && abs(move.x)<0.005 && abs(move.y)<0.005 && abs(move.z)<0.005 {
             move = .zero; turn -= up*simd_dot(turn,up)
         }
         if !input.riderless { torque(up,-0.07*Self.clamp(simd_dot(right,averageNormal),-1,1)*stepSize,right) }
