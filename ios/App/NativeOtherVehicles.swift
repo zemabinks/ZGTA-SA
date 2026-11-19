@@ -60,6 +60,7 @@ final class NativeOtherVehicles {
         var workingGeneration = -1,workingValue:Int?
         var workingBody:SwiftRapierWorld.BodyID?
         var rotor=0.0,gearUp=false
+        var frontSpin=0.0,rearSpin=0.0
         init(_ source:Pose,model:String,definition:NativeGroundVehicle.Definition,pose:Pose3){
             id=source.id;self.model=model;self.definition=definition;self.source=source;lastRaw=source
             self.pose=pose;target=pose;health=source.health;damage=source.damage;work=source.work
@@ -270,6 +271,7 @@ final class NativeOtherVehicles {
         if let body=entry.body{world.removeBody(body);entry.body=nil;entry.solids=[]}
         entry.rig=NativeUnattendedVehicle(world:world,definition:entry.definition,pose:entry.pose,health:Double(entry.health),damage:entry.damage,fallen:entry.fallen,rotor:entry.rotor,gearUp:entry.gearUp,
             waterLevel:{[weak self] in self?.waterLevel?($0)},waterWave:{[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:V(0,1,0))})
+        entry.rig?.restoreWheelSpin(front:entry.frontSpin,rear:entry.rearSpin)
         entry.rig?.random=random;entry.rest=0;entry.sentAt = -Double.infinity
         if let rig=entry.rig{entry.fallen=rig.fallen}else{makeKinematic(entry)}
         applyWorkingCollisionPose(entry)
@@ -281,6 +283,7 @@ final class NativeOtherVehicles {
         removeTrailerSupport(entry)
         if let state=rig.state{entry.pose = .init(position:V(state.position),rotation:NativeUnattendedVehicle.quaternion(state.rotation));entry.target=entry.pose}
         entry.rotor=rig.rotor;entry.gearUp=rig.gearUp
+        entry.frontSpin=rig.frontSpin;entry.rearSpin=rig.rearSpin
         rig.dispose();entry.rig=nil;entry.reference=nil;makeKinematic(entry)
     }
     func beforeStep(delta:Double){
@@ -389,7 +392,7 @@ final class NativeOtherVehicles {
         for wheel in output?.wheels ?? [] where offsets.indices.contains(wheel.index){offsets[wheel.index]=wheel.offset}
         return .init(physicalPose:entry.pose,position:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(entry.pose.position)),heading:Float(-e.heading),pitch:Float(e.pitch),roll:Float(-e.roll),
             transform:NativeGroundVehicle.transform(position:entry.pose.position,rotation:entry.pose.rotation,origin:entry.definition.configuration.origin),
-            health:entry.health,damage:entry.damage,work:entry.work,dynamic:entry.rig != nil,frontSpin:entry.rig?.frontSpin ?? 0,rearSpin:entry.rig?.rearSpin ?? 0,offsets:offsets,
+            health:entry.health,damage:entry.damage,work:entry.work,dynamic:entry.rig != nil,frontSpin:entry.rig?.frontSpin ?? entry.frontSpin,rearSpin:entry.rig?.rearSpin ?? entry.rearSpin,offsets:offsets,
             rotor:entry.rig?.rotor ?? entry.rotor,gearUp:entry.rig?.gearUp ?? entry.gearUp)
     }
     func movePacket(_ id:String)->[String:Any]? {

@@ -4537,7 +4537,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             var input=NativeRiderAnimation.Input(speed:Double(player.speed),steer:Double(player.steer),dead:player.life<=0)
             if source.astride,let samples=remoteBikeSamples[player.id] {
                 let bike=remoteBikeAnimations[player.id] ?? NativeRemoteBikeAnimation();remoteBikeAnimations[player.id]=bike
-                let frame=bike.update(model:model,maxLean:source.bike?["maxLean"],now:riderTime,delta:riderDelta,sample:samples.0,previous:samples.1)
+                let frame=bike.update(model:model,maxLean:source.bike?["maxLean"],now:riderTime,delta:riderDelta,sample:samples.0,previous:samples.1,
+                    owner:.init(appearance:player.code,vehicleID:player.vehicleID,asset:actorMeshes[name].map{ObjectIdentifier($0.vertices)}))
                 remoteBikeFrames[player.id]=frame
                 input.lean=frame.lean;input.tuck=frame.tuck;input.pedal=frame.pedal;input.crank=frame.crank;input.hop=frame.hop
             }
@@ -4916,6 +4917,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let rear=rig.document.joints.bike?.hubs["rear"]?.radius ?? 0.36
             spins -= SIMD2(speed*delta/front,speed*delta/rear);vehicleRigSpins[token]=spins
             input.frontSpin=spins.x;input.rearSpin=spins.y
+            if player != nil {
+                if rig.document.kind=="heli" {input.rotor=0.22}
+                else if rig.document.kind=="plane" {input.rotor=0.18}
+            }
             if let player,let bike=remoteBikeFrames[player.id] {input.lean=bike.lean;input.crank=bike.crank}
             if let kit=player?.kit {
                 if kit.indices.contains(5),rig.document.joints.working != nil {input.work=Double(kit[5])*1000}
@@ -4926,8 +4931,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let frame=context.parkedPhysical {
                 input.work=frame.work
                 input.rotor=frame.rotor;input.gearUp=frame.gearUp
+                input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin
+                vehicleRigSpins[token]=SIMD2(frame.frontSpin,frame.rearSpin)
                 if frame.dynamic {
-                    input.frontSpin=frame.frontSpin;input.rearSpin=frame.rearSpin;input.offsets=frame.offsets
+                    input.offsets=frame.offsets
                 }
             }
             let text=player?.vehicleDamage ?? parked?.damage ?? ""

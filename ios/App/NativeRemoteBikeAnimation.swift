@@ -4,6 +4,11 @@ import Foundation
 /// easing and crank correction. The seated animator consumes these values;
 /// they are distinct from the rigid body's roll and wheel spin.
 final class NativeRemoteBikeAnimation {
+    struct Owner:Equatable {
+        var appearance:String
+        var vehicleID:String?
+        var asset:ObjectIdentifier?
+    }
     struct Sample {
         var serial: Double
         var time: Double
@@ -20,15 +25,16 @@ final class NativeRemoteBikeAnimation {
         var hop: Double
     }
     private var model: String?
+    private var owner:Owner?
     private var lean: Double = 0
     private var crank: Double = 0
     private var owed: Double = 0
     private var step: Double?
 
     func update(model: String,maxLean: Double?,now: Double,delta: Double,
-                sample: Sample,previous: Sample?) -> Frame {
-        let changed = self.model != model
-        if changed { self.model = model }
+                sample: Sample,previous: Sample?,owner:Owner?=nil) -> Frame {
+        let changed = self.model != model || self.owner != owner
+        if changed { self.model = model;self.owner=owner }
         let kit = sample.kit.flatMap { !$0.isEmpty && $0[0].isFinite ? $0 : nil }
         let age = clamp(now-sample.time,0,0.5)
         let packetDelta = previous.map { sample.time-$0.time } ?? 0

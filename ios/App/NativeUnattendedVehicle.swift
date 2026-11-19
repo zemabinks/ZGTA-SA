@@ -64,6 +64,11 @@ final class NativeUnattendedVehicle {
         self.fallen=definition.configuration.kind=="bike" && (fallen || Self.toppled(pose.rotation) || (linear.map{simd_length($0)>1.5} ?? false))
     }
     func dispose(){world.removeBody(body);colliders.removeAll()}
+    /// Presentation counters survive a kinematic/dynamic owner handoff. They
+    /// do not change wheel forces, angular velocity or the chassis transform.
+    func restoreWheelSpin(front:Double,rear:Double) {
+        frontSpin=front.isFinite ? front:0;rearSpin=rear.isFinite ? rear:0
+    }
     static func toppled(_ q:simd_quatd)->Bool {abs(q.act(V(1,0,0)).y)>0.479425538604203 || q.act(V(0,1,0)).y<0}
     static func rotation(heading:Double,pitch:Double,roll:Double)->simd_quatd {
         let c1=cos(pitch/2),c2=cos(-heading/2),c3=cos(-roll/2),s1=sin(pitch/2),s2=sin(-heading/2),s3=sin(-roll/2)
