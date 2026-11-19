@@ -95,12 +95,12 @@ async function main() {
   fs.mkdirSync(path.join(local, 'selfhost'));
   fs.copyFileSync(path.join(__dirname, 'local-only', 'selfhost', 'client-catalog.json'),
     path.join(local, 'selfhost', 'client-catalog.json'));
-  for (const file of ['serve_local.js','browser_recovery_hook.js','browser_recovery.js', 'native_resource_server.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js','player_placement.js', 'local_gameplay.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
+  for (const file of ['serve_local.js','browser_recovery_hook.js','browser_task_policy.js','browser_recovery.js', 'native_resource_server.js', 'stock_native_assets.js', 'stock_img_assets.js', 'native_radio_server.js', 'radio_streams.js', 'prepare_native_radio_audio.py', 'selfhost_backend.js','player_placement.js', 'local_gameplay.js', 'optional_discord.js', 'weapon_inventory.js', 'world_collision.js', 'local_projectiles.js'])
     fs.copyFileSync(path.join(__dirname, file), path.join(temporary, file));
   const port = await freePort();
   let child, ws, otherWs, otherCookie;
   const start = () => spawn(process.execPath, ['serve_local.js'], {
-    cwd: temporary, env: {...process.env, ZGTA_SELFHOST: '1', PORT: String(port),
+    cwd: temporary, env: {...process.env,ZGTA_BROWSER_TASK_POLICY_PLAN:'', ZGTA_SELFHOST: '1', PORT: String(port),
       BIND_HOST: '127.0.0.1', ZGTA_JOIN_CODE: '', ZGTA_JOIN_CODE_FILE: '', ZGTA_ALLOWED_HOSTS: ''},
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -496,8 +496,9 @@ async function main() {
     const visit = await api('/api/local/action', 'POST', {action: 'home.visit', home: 'willowfield'});
     assert.equal(visit.status, 200, JSON.stringify(visit.body));
     const teleport = await ws.wait(message => message.t === 'tp');
+    // TP.h is the existing degree wire contract, including imported homes.
     assert.deepEqual([teleport.x, teleport.y, teleport.z, teleport.h],
-      [2483.4, -1999.18, 12.851, -Math.PI]);
+      [2483.4, -1999.18, 12.851, -180]);
     ws.send({t: 'me', walking: true, skin: 7, x: 2483.4, y: -1999.18, z: 12.851,
       say: '/home enter willowfield'});
     const inside = await ws.wait(message => message.t === 'tp' && message.z > 700);

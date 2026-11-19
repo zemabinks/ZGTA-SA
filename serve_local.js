@@ -28,6 +28,12 @@ const nativeRadio = SELFHOST ? require('./native_radio_server').create({
   python: process.env.ZGTA_PYTHON || 'python3',
   cache: process.env.ZGTA_RADIO_CACHE || path.join(LOCAL_ONLY, 'native-radio-cache')
 }) : null;
+const taskPolicyDefault = path.join(LOCAL_ONLY,'browser-task-policy.json');
+const browserTaskPolicy = SELFHOST ? require('./browser_task_policy').create({
+  siteRoot: ROOT,
+  configuration: process.env.ZGTA_BROWSER_TASK_POLICY_PLAN ||
+    (fs.existsSync(taskPolicyDefault) ? taskPolicyDefault : undefined)
+}) : null;
 const allowedHosts = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`,
   ...(process.env.ZGTA_ALLOWED_HOSTS || '').split(',').map(host => host.trim()).filter(Boolean)]);
 const UPSTREAM = 'play.samp.directory';
@@ -398,6 +404,20 @@ function serve(req, res) {
       res.setHeader('Content-Length', content.length);
       res.setHeader('Accept-Ranges', 'none');
       return res.end(req.method === 'HEAD' ? undefined : content);
+    }
+    if(SELFHOST&&browserTaskPolicy.matches(filename)){
+      if(!['GET','HEAD'].includes(req.method)){
+        res.writeHead(405,{Allow:'GET, HEAD'});return res.end();
+      }
+      try{
+        const content=browserTaskPolicy.read();
+        res.writeHead(200,{'Content-Type':type,'Content-Length':content.length,
+          'Accept-Ranges':'none','Cache-Control':'no-store'});
+        return res.end(req.method==='HEAD'?undefined:content);
+      }catch(error){
+        res.writeHead(503,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'});
+        return res.end('Local browser gameplay policy unavailable.');
+      }
     }
     if(SELFHOST&&/^9737\.[a-f0-9]+\.js$/.test(path.basename(filename))){
       try{

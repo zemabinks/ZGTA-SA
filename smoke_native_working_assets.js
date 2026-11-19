@@ -11,12 +11,12 @@ async function main(){
   const local=path.join(temporary,'local-only'),catalog=path.join(local,'selfhost/coupling-catalog.json');
   const archive=path.join(local,'site/game/native/models'),stage=path.join(local,'native-working/models');
   for(const directory of [path.dirname(catalog),archive,stage])fs.mkdirSync(directory,{recursive:true});
-  for(const file of ['serve_local.js','browser_recovery_hook.js','browser_recovery.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','player_placement.js','vehicle_coupling.js','optional_discord.js',
+  for(const file of ['serve_local.js','browser_recovery_hook.js','browser_task_policy.js','browser_recovery.js','native_resource_server.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','player_placement.js','vehicle_coupling.js','optional_discord.js',
     'weapon_inventory.js','world_collision.js','local_projectiles.js','native_radio_server.js','radio_streams.js'])
     fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
   for(const [name,value]of[['client-catalog.json',{vehicles:[],homes:[]}],['weapon-catalog.json',{items:[],shops:[]}]])
     fs.writeFileSync(path.join(local,'selfhost',name),JSON.stringify(value));
-  let output='';child=spawn(process.execPath,['serve_local.js'],{cwd:temporary,env:{...process.env,
+  let output='';child=spawn(process.execPath,['serve_local.js'],{cwd:temporary,env:{...process.env,ZGTA_BROWSER_TASK_POLICY_PLAN:'',
     PORT:String(port),BIND_HOST:'127.0.0.1',ZGTA_SELFHOST:'1',ZGTA_CONNECTED:'0',
     ZGTA_JOIN_CODE:'synthetic-test-access',ZGTA_JOIN_CODE_FILE:'',ZGTA_ALLOWED_HOSTS:''},stdio:['ignore','pipe','pipe']});
   child.stdout.on('data',d=>{output+=d});child.stderr.on('data',d=>{output+=d});

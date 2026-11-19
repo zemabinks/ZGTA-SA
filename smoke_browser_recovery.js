@@ -366,6 +366,7 @@ async function main(){
     const context={path,Buffer,URL,SELFHOST:true,ROOT:'/fixture/site',LOCAL_ONLY:'/fixture',__dirname:'/fixture',
       PUBLIC_ORIGIN:'http://localhost:1',allowedHosts:new Set(['localhost:1']),
       preparedResources:{matches:()=>false},stockNative:{matches:()=>false},nativeRadio:null,
+      browserTaskPolicy:{matches:()=>false},
       localGame:{requiresJoinCode:false,authorized:()=>false,ensurePlayer(){}},
       MIME:{'.html':'text/html','.js':'text/javascript'},SELFHOST_TIPS_SCRIPT:'',COMMUNITY_SCRIPT:'',GAMEPLAY_SCRIPT:'',
       process:{env:{}},console,fs:{readFileSync(file){check(files.has(file),'Only selected authored file is read');return files.get(file);},
@@ -427,7 +428,7 @@ async function main(){
     same(waiting.root.ZGTABrowserRecovery.captureActionGrant(),scope(),'Normal TP/foot may be admitted while paused');
     same(waiting.exits(),0,'Adapter never requests reactivation or synthetic input');
   });
-  fs.mkdirSync(OUT,{recursive:true});const names=['browser_recovery.js','browser_recovery_hook.js','player_placement.js','selfhost_backend.js','serve_local.js','local_gameplay.js','smoke_browser_recovery.js'];
+  fs.mkdirSync(OUT,{recursive:true});const names=['browser_recovery.js','browser_recovery_hook.js','browser_task_policy.js','player_placement.js','selfhost_backend.js','serve_local.js','local_gameplay.js','smoke_browser_recovery.js'];
   const report={passed:true,checks,scenarios,scope:'authored virtual transport/full backend; no live browser or sockets',
     hashes:Object.fromEntries(names.map(n=>[n,crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT,n))).digest('hex')]))};
   fs.writeFileSync(path.join(OUT,'report.json'),JSON.stringify(report,null,2)+'\n');

@@ -46,7 +46,7 @@ def main():
     assert module.authority('play.example.com') == 'play.example.com'
     with tempfile.TemporaryDirectory(prefix='zgta-host-') as temporary:
         root = Path(temporary)
-        for name in ('host.py', 'serve_local.js','browser_recovery_hook.js','browser_recovery.js', 'native_resource_server.js', 'selfhost_backend.js',
+        for name in ('host.py', 'serve_local.js','browser_recovery_hook.js','browser_task_policy.js','browser_recovery.js', 'native_resource_server.js', 'selfhost_backend.js',
                      'optional_discord.js', 'weapon_inventory.js', 'world_collision.js',
                      'local_projectiles.js', 'player_placement.js', 'local_gameplay.js', 'native_radio_server.js',
                      'radio_streams.js', 'prepare_native_radio_audio.py',
@@ -66,7 +66,7 @@ def main():
         state.mkdir()
         (state / 'client-catalog.json').write_text('{"vehicles":[],"homes":[]}')
         subprocess.run([sys.executable, str(root / 'host.py'), 'doctor'], check=True)
-        environment = dict(os.environ, ZGTA_CONNECTED='1', ZGTA_JOIN_CODE='stale-shell-code',
+        environment = dict(os.environ, ZGTA_BROWSER_TASK_POLICY_PLAN='', ZGTA_CONNECTED='1', ZGTA_JOIN_CODE='stale-shell-code',
                            ZGTA_SOURCE_URL='https://source.example/my-fork')
 
         def start(arguments):
