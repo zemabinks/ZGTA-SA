@@ -94,6 +94,28 @@ fragment half4 worldFragment(Raster in [[stage_in]],
 }
 
 // The per-model rectangle layout belongs to the fragment stage only.
+// V2 repeats each integer tap within its own original content rectangle.
+// Reduce finite UVs to [0,1) before multiplication/conversion: even extreme
+// finite interpolants cannot overflow the bounded native texel index.
+inline uint2 pedRepeatTexel(int2 position,uint2 size) {
+    int2 extent=int2(size);
+    return uint2((position%extent+extent)%extent);
+}
+inline half4 pedNativeBase(texture2d<half> atlas,float2 uv,float4 rect,float filter) {
+    float2 phase=fract(uv);
+    uint2 size=uint2(rect.zw),origin=uint2(rect.xy);
+    if (filter==1.0) {
+        int2 pixel=int2(floor(phase*rect.zw));
+        return atlas.read(origin+pedRepeatTexel(pixel,size));
+    }
+    float2 p=phase*rect.zw-0.5;
+    int2 base=int2(floor(p));float2 weight=p-float2(base);
+    float4 a=float4(atlas.read(origin+pedRepeatTexel(base,size)));
+    float4 b=float4(atlas.read(origin+pedRepeatTexel(base+int2(1,0),size)));
+    float4 c=float4(atlas.read(origin+pedRepeatTexel(base+int2(0,1),size)));
+    float4 d=float4(atlas.read(origin+pedRepeatTexel(base+int2(1,1),size)));
+    return half4(mix(mix(a,b,weight.x),mix(c,d,weight.x),weight.y));
+}
 fragment half4 ordinaryPedAtlasFragment(Raster in [[stage_in]],
     texture2d<half> atlas [[texture(0)]],
     constant Uniforms &uniforms [[buffer(1)]],
@@ -101,8 +123,15 @@ fragment half4 ordinaryPedAtlasFragment(Raster in [[stage_in]],
     constexpr sampler sampleAtlas(coord::normalized, address::clamp_to_edge,
                                   filter::linear, mip_filter::none);
     float slot=round(in.layer);
-    if (!isfinite(slot) || slot<0.0 || slot>=layout[0].z || layout[0].w!=1.0) {
+    if (!isfinite(slot) || slot<0.0 || slot>=layout[0].z || (layout[0].w!=1.0 && layout[0].w!=2.0)) {
         discard_fragment();return half4(0.0);
+    }
+    if (layout[0].w==2.0) {
+        float4 rect=layout[uint(slot)*2+1],sampling=layout[uint(slot)*2+2];
+        if (!all(isfinite(in.uv)) || (sampling.x!=1.0 && sampling.x!=2.0 && sampling.x!=6.0) || sampling.y!=1.0 || sampling.z!=1.0 || sampling.w!=0.0) {
+            discard_fragment();return half4(0.0);
+        }
+        return ordinaryActorShade(in,pedNativeBase(atlas,in.uv,rect,sampling.x),uniforms);
     }
     float4 rect=layout[uint(slot)+1];
     float2 atlasUV=(rect.xy+0.5+fract(in.uv)*(rect.zw-1.0))/layout[0].xy;

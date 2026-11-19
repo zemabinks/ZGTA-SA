@@ -3,12 +3,20 @@
 """Real loader queue/task ownership with authored independent resource graphs."""
 import hashlib,json,subprocess,tempfile
 from pathlib import Path
-from smoke_native_ped_atlas_support import family,write_family
+from smoke_native_ped_atlas_support import family,write_family,canonical,digest
 ROOT=Path(__file__).resolve().parent
 
 def main():
- out=ROOT/'local-only/research/ped-atlas-119/loader';out.mkdir(parents=True,exist_ok=True);work=Path(tempfile.mkdtemp(prefix='gate-',dir=out));files=work/'files';files.mkdir()
- (files/'fixtures.json').write_text(json.dumps([write_family(files,family(n,body=(128,256) if n.startswith('large') else (8,16))) for n in ['authored','largea','largeb']]))
+ out=ROOT/'local-only/research/ped-atlas-120/loader';out.mkdir(parents=True,exist_ok=True);work=Path(tempfile.mkdtemp(prefix='gate-',dir=out));files=work/'files';files.mkdir()
+ cases=[family(n,body=(128,256) if n.startswith('large') else (8,16)) for n in ['authored','largea','largeb']]
+ cases.append(family('authoredv2',mixed=True,version=2))
+ mismatch=family('crossnamespace',version=2);mismatch['path']=mismatch['path'].replace('ped-atlas-v2','ped-atlas-v1');cases.append(mismatch)
+ mismatch=family('crosslayout',version=2)
+ mismatch['layout'].update(schema=1,layout='ped-tight-native-v1',sampling='legacy-inset-fract-linear-no-mips')
+ raw=canonical(mismatch['layout'])+b'\n';mismatch['files']['layout']=raw
+ mismatch['manifest']['resources']['layout']={'path':'game/native/models/ped-atlas-v2/'+digest(raw)+'/crosslayout.atlas.json','bytes':len(raw),'sha256':digest(raw)}
+ mismatch['metadata']=canonical(mismatch['manifest'])+b'\n';mismatch['path']='game/native/models/ped-atlas-v2/'+digest(mismatch['metadata'])+'/crosslayout.json';cases.append(mismatch)
+ (files/'fixtures.json').write_text(json.dumps([write_family(files,v) for v in cases]))
  names=['WorldBinary','NativePedAtlasLayout','ServerAddress','NativePedAtlasLoader'];inputs={n:(ROOT/'ios/App'/f'{n}.swift').read_bytes() for n in names}
  tests=['smoke_native_ped_atlas_loader.py','smoke_native_ped_atlas_loader.swift','smoke_native_ped_atlas_support.py','smoke_native_ped_atlas_loader_server.js'];hashes={n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in tests}
  sources=[]

@@ -217,7 +217,102 @@ def geometry(data, chunk):
     return points, faces, materials(data, first(parts, 8)), prelit, uvs
 
 
-def tight_ped_atlas_layout(texture_images, texture_slots, maximum_rgba_bytes=512*1024):
+def white_ped_sampler():
+    return {'source': 'synthetic-white', 'packed': 0x1101, 'filter': 1,
+            'addressU': 1, 'addressV': 1, 'storedMipCount': 1,
+            'nativeFlags': 0, 'rasterFormat': 0, 'dffPacked': []}
+
+
+def validate_ped_sampler(profile, white=False):
+    """The explicit v2 base-only profile, not a generic RW sampler fallback."""
+    if not isinstance(profile, dict) or set(profile) != set(white_ped_sampler()):
+        raise ValueError('Incomplete pedestrian sampling provenance')
+    if white:
+        if profile != white_ped_sampler() or any(type(profile[key]) is not int for key in
+                ['packed', 'filter', 'addressU', 'addressV', 'storedMipCount', 'nativeFlags', 'rasterFormat']):
+            raise ValueError('Invalid explicit white sampling profile')
+        return
+    integer_fields = ['packed', 'filter', 'addressU', 'addressV', 'storedMipCount', 'nativeFlags', 'rasterFormat']
+    declarations = profile['dffPacked']
+    if (profile['source'] != 'found-native-txd' or any(type(profile[key]) is not int for key in integer_fields)
+            or profile['filter'] not in (1, 2, 6) or profile['addressU'] != 1 or profile['addressV'] != 1
+            or profile['packed'] != profile['filter'] | 0x1100 or profile['storedMipCount'] != 1
+            or profile['nativeFlags'] not in (0, 1, 8, 9)
+            or profile['rasterFormat'] not in (0x600, 0x500, 0x200, 0x300)
+            or not isinstance(declarations, list) or not 1 <= len(declarations) <= 64
+            or any(type(value) is not int or value not in (0x11101, 0x11102, 0x11106) for value in declarations)
+            or declarations != sorted(set(declarations))):
+        raise ValueError('Unsupported pedestrian sampling provenance')
+
+
+def ped_native_sampler_profiles(dff, txd):
+    """Resolve named own-TXD textures on the source-backed found-native path.
+
+    The independent pinned Texture::read adds a reference to dictionary hits;
+    streamRead applies DFF low16 only to a fresh refCount1 texture. Bit16 is a
+    temporary automatic-mip control, never unconditional sampler precedence.
+    DFF declarations remain diagnostics; this does not establish retail state.
+    """
+    if not 0 < len(dff) <= 4*1024*1024 or not 0 < len(txd) <= 4*1024*1024:
+        raise ValueError('Bounded selected original DFF/TXD required for v2')
+    root = first(list(chunks(txd, 0, len(txd))), 0x16)
+    if root is None:
+        raise ValueError('V2 requires a selected own TXD dictionary')
+    profiles, decoded_bytes = {}, 0
+    for native in children(txd, root):
+        if native[0] != 0x15:
+            continue
+        info = first(children(txd, native), 1)
+        if not info or info[2]-info[1] < 92:
+            raise ValueError('Incomplete v2 native texture header')
+        at = info[1]
+        platform, packed = struct.unpack_from('<II', txd, at)
+        name = txd[at+8:at+40].split(b'\0')[0].decode('ascii').lower()
+        raster, code, width, height, depth, mips, raster_type, flags = struct.unpack_from('<IIHH4B', txd, at+72)
+        size, = struct.unpack_from('<I', txd, at+88)
+        if (platform != 9 or not name or name in profiles or not 0 < width <= 1024 or not 0 < height <= 1024
+                or raster_type != 4 or mips != 1 or at+92+size != info[2] or packed & ~0xffff
+                or code not in (21, 22, struct.unpack('<I', b'DXT1')[0], struct.unpack('<I', b'DXT3')[0])):
+            raise ValueError('Unsupported v2 found-native texture header')
+        decoded_bytes += width*height*4
+        if decoded_bytes > 512*1024 or len(profiles) >= 32:
+            raise ValueError('V2 source texture budget exceeded')
+        profiles[name] = {'source': 'found-native-txd', 'packed': packed,
+                          'filter': packed & 255, 'addressU': packed >> 8 & 15,
+                          'addressV': packed >> 12 & 15, 'storedMipCount': mips,
+                          'nativeFlags': flags, 'rasterFormat': raster, 'dffPacked': []}
+    clump = first(list(chunks(dff, 0, len(dff))), 0x10)
+    geometry_list = first(children(dff, clump), 0x1a) if clump else None
+    if geometry_list is None:
+        raise ValueError('V2 requires selected DFF geometry')
+    for geometry in children(dff, geometry_list):
+        if geometry[0] != 0x0f:
+            continue
+        block = first(children(dff, geometry), 8)
+        if block is None:
+            raise ValueError('V2 requires material provenance')
+        for material in children(dff, block):
+            if material[0] != 7:
+                continue
+            texture = first(children(dff, material), 6)
+            if texture is None:
+                continue
+            parts = children(dff, texture)
+            info = first(parts, 1)
+            names = [item for item in parts if item[0] == 2]
+            if info is None or info[2]-info[1] != 4 or len(names) != 2:
+                raise ValueError('Invalid v2 DFF sampling declaration')
+            packed, = struct.unpack_from('<I', dff, info[1])
+            name = dff[names[0][1]:names[0][2]].split(b'\0')[0].decode('ascii').lower()
+            if name not in profiles:
+                raise ValueError('V2 material must resolve in the selected own TXD')
+            profiles[name]['dffPacked'].append(packed)
+    for profile in profiles.values():
+        profile['dffPacked'] = sorted(set(profile['dffPacked']))
+    return profiles
+
+
+def tight_ped_atlas_layout(texture_images, texture_slots, maximum_rgba_bytes=512*1024, *, sampler_profiles=None):
     """Explicit ped-only layout; requires the matching versioned consumer.
 
     Legacy output remains the default. Every image retains its native pixels;
@@ -240,15 +335,22 @@ def tight_ped_atlas_layout(texture_images, texture_slots, maximum_rgba_bytes=512
         records.append({'slot': slot, 'texture': name,
                         'rect': [(slot % columns) * cell_w, (slot // columns) * cell_h,
                                  image.width, image.height]})
-    return {'schema': 1, 'layout': 'ped-tight-native-v1',
+    result = {'schema': 1, 'layout': 'ped-tight-native-v1',
             'sampling': 'legacy-inset-fract-linear-no-mips', 'cell': [cell_w, cell_h],
             'columns': columns, 'atlas': [width, height], 'layers': records,
             'logicalRGBA8Bytes': width * height * 4,
             'maximumRGBA8Bytes': maximum_rgba_bytes}
+    if sampler_profiles is not None:
+        result.update(schema=2, layout='ped-tight-native-v2', sampling='rw-native-base-repeat-v2')
+        for row in records:
+            profile = white_ped_sampler() if row['slot'] == 0 else sampler_profiles.get(row['texture'])
+            validate_ped_sampler(profile, white=row['slot'] == 0)
+            row['sampler'] = profile
+    return result
 
 
 def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
-    if ped_atlas_layout not in ('legacy', 'tight-native'):
+    if ped_atlas_layout not in ('legacy', 'tight-native', 'tight-native-v2'):
         raise ValueError('Unknown pedestrian atlas layout')
     mode = ped_atlas_layout if pedestrian else 'legacy'
     if mode == 'legacy' and destination.with_suffix('.atlas.json').exists():
@@ -286,9 +388,11 @@ def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
                 atomics.append((frame_number, geometry_number))
     if not atomics:
         atomics = [(0, number) for number in range(len(geometries))]
-    texture_images = {} if mode == 'tight-native' else textures(GAME / 'vehicle.txd')
+    is_tight = mode in ('tight-native', 'tight-native-v2')
+    profiles = ped_native_sampler_profiles(data, source.with_suffix('.txd').read_bytes()) if mode == 'tight-native-v2' else None
+    texture_images = {} if is_tight else textures(GAME / 'vehicle.txd')
     texture_images.update(textures(source.with_suffix('.txd')))
-    if mode == 'tight-native' and any(name and name not in texture_images
+    if is_tight and any(name and name not in texture_images
                                      for _, _, palette, _, _ in geometries for _, name in palette):
         raise ValueError('Versioned pedestrian textures must resolve from the selected own TXD')
     texture_names = []
@@ -297,7 +401,7 @@ def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
             if name and name in texture_images and name not in texture_names:
                 texture_names.append(name)
     texture_slots = {name: number + 1 for number, name in enumerate(texture_names)}
-    tight_layout = tight_ped_atlas_layout(texture_images, texture_slots) if mode == 'tight-native' else None
+    tight_layout = tight_ped_atlas_layout(texture_images, texture_slots, sampler_profiles=profiles) if is_tight else None
     vertices = []
     indices = []
     draw_parts = []

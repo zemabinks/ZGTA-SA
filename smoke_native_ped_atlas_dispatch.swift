@@ -50,6 +50,7 @@ final class Owner {
     var pedAtlasPipeline:Int?=4,pedAtlasAnimatedPipeline:Int?=5,pedAtlasSkeletalPipeline:Int?=6
     let pipeline=1,animatedPipeline=2,skeletalPipeline:Int?=3
     var pedAtlasFamilies:[String:String]=[:],pedAtlasGPU:[String:PedAtlasGPU]=[:],pedAtlasSource:String?
+    var pedAtlasV2Names=Set<String>()
     var pedAtlasLoads:[String:PedAtlasLoad]=[:],pedAtlasAdmission:[String:UUID]=[:],pedAtlasErrors=Set<String>()
     var actorMeshes:[String:Mesh]=[:],skeletalActors:[String:NativeSkeletalActor]=[:],actorAnimations:[String:Frames]=[:]
     var actorParts:[String:[ActorPart]]=[:],actorAttachments:[String:NativeActorAttachment]=[:],actorRetryAfter:[String:Date]=[:]
@@ -80,14 +81,18 @@ let root=URL(fileURLWithPath:CommandLine.arguments[1]),catalog=try JSONSerializa
 func entry(_ label:String)->[String:Any]{catalog.first{$0["case"] as?String==label}!}
 func path(_ label:String)->String{entry(label)["path"] as!String}
 func load(_ owner:Owner,_ peer:Peer,_ label:String="valid") {
-    owner.bindPedAtlasFamilies(["authored":path(label)],source:owner.source);owner.loadPedAtlasActor("authored",family:path(label))
+    if label.hasSuffix("v2"){owner.bindPedAtlasFamilies(["authored":path("valid")],v2:["authored":path(label)],source:owner.source)}
+    else{owner.bindPedAtlasFamilies(["authored":path(label)],source:owner.source)}
+    owner.loadPedAtlasActor("authored",family:path(label))
 }
 func complete(_ owner:Owner,_ peer:Peer,_ success:Bool=true) {
     mainWait("actual owner completion"){peer.drain();return success ? owner.pedAtlasGPU["authored"] != nil:owner.pedAtlasLoads["authored"]==nil}
 }
-do {
-    let peer=Peer(root),owner=Owner(peer);load(owner,peer);complete(owner,peer)
+for version in ["valid","validv2"] {
+    let peer=Peer(root),owner=Owner(peer);load(owner,peer,version);complete(owner,peer)
     check(owner.actorMeshes.count==1 && owner.skeletalActors.count==1 && owner.pedAtlasGPU.count==1,"complete atomic publication")
+    let header=owner.pedAtlasGPU["authored"]!.layout.bytes.withUnsafeBytes{$0.loadUnaligned(as:SIMD4<Float>.self)}
+    check(header.w==(version=="validv2" ? 2:1),"draw consumes selected family layout version")
     let actor=owner.skeletalActors["authored"]!
     let pose=NativeSkeletalActor.Pose(palette:[matrix_identity_float4x4],hand:matrix_identity_float4x4,pelvis:matrix_identity_float4x4,
         localTurns:[],localPlaces:[],nativeGlobals:[],rootTurn:simd_quatf(angle:0,axis:SIMD3(0,0,1)),rootHeight:0)
@@ -112,6 +117,13 @@ do {
     check(owner.actorMeshes["authored"]==nil && owner.skeletalActors["authored"]==nil && owner.pedAtlasGPU["authored"]==nil,"source change releases complete family")
     check(owner.actorMeshes["legacy"] != nil && owner.pedAtlasFamilies["authored"] != nil,"source invalidation neither clears unrelated actor nor silently downgrades")
 }
+do {
+    let peer=Peer(root),owner=Owner(peer)
+    owner.bindPedAtlasFamilies(["authored":path("valid")],v2:["authored":path("valid")],source:"one")
+    owner.loadPedAtlasActor("authored",family:path("valid"))
+    check(owner.actorMeshes.isEmpty && owner.pedAtlasLoads.isEmpty && peer.all.isEmpty,"v2 advertisement with v1 URL fell back or fetched")
+    check(!owner.genericMayPublish("authored",actorSource:"one") && owner.statuses.contains{$0.contains("UNAVAILABLE")},"invalid v2 silently downgraded")
+}
 for label in ["badskin","badhand","badparts"] {
     let peer=Peer(root),owner=Owner(peer);load(owner,peer,label);complete(owner,peer,false)
     check(owner.actorMeshes.isEmpty && owner.skeletalActors.isEmpty && owner.pedAtlasGPU.isEmpty,"\(label) published a partial model")
@@ -126,7 +138,7 @@ do {
     mainWait("old metadata starts"){!peer.pending.isEmpty};peer.drain()
     mainWait("old member starts"){peer.pending.count>=2}
     let stale=peer.pending
-    owner.source="new";owner.invalidatePedAtlasSourceIfChanged();load(owner,peer)
+    owner.source="new";owner.invalidatePedAtlasSourceIfChanged();load(owner,peer,"validv2")
     let latest=owner.pedAtlasLoads["authored"]!.token
     for task in stale{peer.reply(task,late:true)}
     RunLoop.current.run(until:Date().addingTimeInterval(0.02))
@@ -149,6 +161,10 @@ do {
     check(owner.actorMeshes.isEmpty && owner.pedAtlasGPU.isEmpty,"new family retained previous atlas/layout")
     owner.loadPedAtlasActor("authored",family:path("variant"));complete(owner,peer)
     check(owner.pedAtlasGPU["authored"]!.family != first,"family replacement reused old binding")
+    load(owner,peer,"validv2");complete(owner,peer)
+    check(owner.pedAtlasGPU["authored"]!.family==path("validv2") && owner.pedAtlasV2Names.contains("authored"),"v2 did not supersede retained v1")
+    load(owner,peer);complete(owner,peer)
+    check(owner.pedAtlasGPU["authored"]!.family==path("valid") && owner.pedAtlasV2Names.isEmpty,"explicit v2 removal did not re-admit v1")
     owner.bindPedAtlasFamilies([:],source:"one")
     check(owner.actorMeshes.isEmpty && owner.pedAtlasGPU.isEmpty && owner.pedAtlasFamilies.isEmpty,"family removal retained upgraded shader data")
 }

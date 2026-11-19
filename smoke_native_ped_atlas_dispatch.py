@@ -11,10 +11,10 @@ def block(s,marker):
  while d:d+=(s[e]=='{')-(s[e]=='}');e+=1
  return s[a:e]
 def main():
- out=ROOT/'local-only/research/ped-atlas-119/dispatch';out.mkdir(parents=True,exist_ok=True);w=Path(tempfile.mkdtemp(prefix='gate-',dir=out));files=w/'files';files.mkdir()
+ out=ROOT/'local-only/research/ped-atlas-120/dispatch';out.mkdir(parents=True,exist_ok=True);w=Path(tempfile.mkdtemp(prefix='gate-',dir=out));files=w/'files';files.mkdir()
  rows=[]
- for label in ['valid','variant','badskin','badhand','badparts']:
-  v=family('authored',body=(16,8) if label=='variant' else (8,16))
+ for label in ['valid','variant','badskin','badhand','badparts','validv2','variantv2']:
+  v=family('authored',body=(16,8) if label.startswith('variant') else (8,16),version=2 if label.endswith('v2') else 1)
   if label.startswith('bad'):
    role={'badskin':'skeleton','badhand':'hand','badparts':'parts'}[label]
    raw=b'invalid authored carrier';suffix={'skeleton':'.skel.bin','hand':'.hand.bin','parts':'.parts.json'}[role]

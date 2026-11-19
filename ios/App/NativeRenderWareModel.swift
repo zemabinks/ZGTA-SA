@@ -170,7 +170,11 @@ enum NativeRenderWareModel {
                         } else { diagnostics.append(.missingTexture(geometry: atomic.geometry, material: materialIndex, name: name)) }
                     }
                     let texture = selected.map { textures[$0] }
-                    let sampler = try sampler(material.textureFilterAndAddressing ?? texture?.filterAddressing ?? 0x1102)
+                    // A selected native dictionary texture is already loaded.
+                    // librw Texture::read adds a reference on a dictionary hit;
+                    // streamRead applies the DFF request only at refCount == 1.
+                    // Preserve both raw fields; use the found texture's state.
+                    let sampler = try sampler(texture?.filterAddressing ?? material.textureFilterAndAddressing ?? 0x1102)
                     let prelitAlpha = buckets[materialIndex].contains { source.prelitColors.isEmpty ? false : source.prelitColors[Int($0)].w != 255 }
                     materials.append(Material(source: material, textureIndex: selected, sampler: sampler,
                                               usesBlending: material.color.w != 255 || prelitAlpha || (texture?.containsTransparentPixels ?? false)))

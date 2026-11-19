@@ -21,7 +21,7 @@ def skeleton():
  vertices=b''.join(struct.pack('<3f4B4f',*p,0,0,0,0,1,0,0,0) for p in [(-.8,-.8,.5),(.8,-.8,.5),(0,.8,.5)])
  return struct.pack('<4I',0x314e4b53,3,2,1)+identity+identity+frames+struct.pack('<I',1)+identity+vertices
 
-def family(model='authored',mixed=False,body=(8,16),txd=True):
+def family(model='authored',mixed=False,body=(8,16),txd=True,version=1,filters=(1,6,2)):
  cw,ch=body;rects=[[0,0,cw,ch],[cw,0,cw,ch]];columns=2
  if mixed:rects += [[0,ch,max(1,cw//2),max(1,ch//4)],[cw,ch,1,1]]
  if not txd:cw=ch=1;rects=[[0,0,1,1]];columns=1
@@ -36,12 +36,19 @@ def family(model='authored',mixed=False,body=(8,16),txd=True):
          'layers':[{'slot':i,'texture':None if i==0 else 'authored_'+str(i),'rect':r} for i,r in enumerate(rects)],
          'logicalRGBA8Bytes':aw*ah*4,'maximumRGBA8Bytes':512*1024,'meshSHA256':digest(binary),'atlasSHA256':digest(image),
          'sourceDFFSHA256':digest(b'independent authored geometry '+model.encode()),'sourceTXDSHA256':digest(b'independent authored pixels '+model.encode()) if txd else None}
+ if version==2:
+  layout.update(schema=2,layout='ped-tight-native-v2',sampling='rw-native-base-repeat-v2')
+  for i,row in enumerate(layout['layers']):
+   filt=filters[(i-1)%len(filters)] if i else 1
+   row['sampler']={'source':'found-native-txd' if i else 'synthetic-white','packed':0x1100|filt,'filter':filt,
+                   'addressU':1,'addressV':1,'storedMipCount':1,'nativeFlags':0,'rasterFormat':0x600 if i else 0,
+                   'dffPacked':[0x11106] if i else []}
  raw={'mesh':binary,'atlas':image,'layout':canonical(layout)+b'\n','skeleton':skeleton()}
  suffix={'mesh':'.bin','atlas':'.png','layout':'.atlas.json','skeleton':'.skel.bin'}
- resources={k:{'path':'game/native/models/ped-atlas-v1/'+digest(v)+'/'+model+suffix[k],'bytes':len(v),'sha256':digest(v)} for k,v in raw.items()}
+ resources={k:{'path':f'game/native/models/ped-atlas-v{version}/'+digest(v)+'/'+model+suffix[k],'bytes':len(v),'sha256':digest(v)} for k,v in raw.items()}
  identity=digest(canonical({'model':model,'sourceDFFSHA256':layout['sourceDFFSHA256'],'sourceTXDSHA256':layout['sourceTXDSHA256']}))
- manifest={'schema':1,'format':'zgta-ped-atlas-family-v1','model':model,'sourceIdentity':identity,'resources':resources}
- metadata=canonical(manifest)+b'\n';path='game/native/models/ped-atlas-v1/'+digest(metadata)+'/'+model+'.json'
+ manifest={'schema':version,'format':f'zgta-ped-atlas-family-v{version}','model':model,'sourceIdentity':identity,'resources':resources}
+ metadata=canonical(manifest)+b'\n';path=f'game/native/models/ped-atlas-v{version}/'+digest(metadata)+'/'+model+'.json'
  return {'model':model,'path':path,'manifest':manifest,'metadata':metadata,'layout':layout,'files':raw,'pixels':bytes(pixels),'size':(aw,ah)}
 
 def write_family(root:Path,value):

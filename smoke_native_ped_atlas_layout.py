@@ -7,9 +7,11 @@ from smoke_native_ped_atlas_support import family,write_family
 ROOT=Path(__file__).resolve().parent
 
 def main():
- out=ROOT/'local-only/research/ped-atlas-119/layout';out.mkdir(parents=True,exist_ok=True)
+ out=ROOT/'local-only/research/ped-atlas-120/layout';out.mkdir(parents=True,exist_ok=True)
  work=Path(tempfile.mkdtemp(prefix='gate-',dir=out));fixtures=work/'files';fixtures.mkdir()
  cases=[family('vertical'),family('horizontal',body=(16,8)),family('mixed',mixed=True),family('untextured',body=(1,1),txd=False)]
+ cases += [family('v2mixed',mixed=True,version=2),family('v2untextured',txd=False,version=2)]
+ cases += [family('v2size'+str(w)+'x'+str(h),body=(w,h),version=2,filters=(f,)) for w,h in [(64,64),(128,64),(64,128),(128,128),(128,256),(256,128)] for f in [1,2,6]]
  (fixtures/'fixtures.json').write_text(json.dumps([write_family(fixtures,x) for x in cases]))
  names=['WorldBinary','NativePedAtlasLayout','ServerAddress','NativePedAtlasLoader'];inputs={n:(ROOT/'ios/App'/f'{n}.swift').read_bytes() for n in names}
  test_names=['smoke_native_ped_atlas_layout.py','smoke_native_ped_atlas_layout.swift','smoke_native_ped_atlas_support.py']

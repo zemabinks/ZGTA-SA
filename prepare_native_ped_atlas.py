@@ -39,6 +39,15 @@ MAX_MODELS = 32
 MAX_BYTES = 32*1024*1024
 
 
+def version_config(version):
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError('Unsupported explicit pedestrian family version')
+    return {'prefix': 'game/native/models/ped-atlas-v'+str(version)+'/',
+            'family': 'zgta-ped-atlas-family-v'+str(version),
+            'overlay': 'zgta-ped-atlas-overlay-v'+str(version),
+            'index': 'pedAtlasV'+str(version)}
+
+
 def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode()
 
@@ -147,8 +156,12 @@ def preflight_txd(data):
 
 
 def validate_layout(layout, mesh, png):
-    if (not isinstance(layout, dict) or layout.get('schema') != 1 or layout.get('layout') != 'ped-tight-native-v1'
-            or layout.get('sampling') != 'legacy-inset-fract-linear-no-mips'):
+    if not isinstance(layout, dict):
+        raise ValueError('Unknown pedestrian layout object')
+    version = layout.get('schema')
+    version_config(version)
+    sampling = 'legacy-inset-fract-linear-no-mips' if version == 1 else 'rw-native-base-repeat-v2'
+    if (layout.get('layout') != 'ped-tight-native-v'+str(version) or layout.get('sampling') != sampling):
         raise ValueError('Unknown pedestrian layout')
     if digest(mesh) != layout.get('meshSHA256') or digest(png) != layout.get('atlasSHA256'):
         raise ValueError('Layout binary/atlas family mismatch')
@@ -183,6 +196,8 @@ def validate_layout(layout, mesh, png):
             raise ValueError('Layout texture slot name')
         else:
             texture_names.add(name)
+        if version == 2:
+            converter.validate_ped_sampler(row.get('sampler'), white=i == 0)
     if not isinstance(layout.get('sourceDFFSHA256'), str) or not SHA.fullmatch(layout['sourceDFFSHA256']):
         raise ValueError('Missing selected DFF identity')
     txd = layout.get('sourceTXDSHA256')
@@ -238,12 +253,13 @@ def validate_optional(values, mesh):
             raise ValueError('Trailing advertised hand bytes')
 
 
-def resource(model, role, data):
+def resource(model, role, data, version=1):
     sha = digest(data)
-    return {'path': PREFIX+sha+'/'+model+SUFFIX[role], 'bytes': len(data), 'sha256': sha}
+    return {'path': version_config(version)['prefix']+sha+'/'+model+SUFFIX[role], 'bytes': len(data), 'sha256': sha}
 
 
-def build(selection, output):
+def build(selection, output, version=1):
+    config = version_config(version)
     if (not isinstance(selection, dict) or selection.get('schema') != 1
             or not isinstance(selection.get('models'), list) or not 1 <= len(selection['models']) <= MAX_MODELS
             or not all(isinstance(row, dict) for row in selection['models'])):
@@ -270,7 +286,8 @@ def build(selection, output):
             source.write_bytes(data['dff'])
             source.with_suffix('.txd').write_bytes(data['txd'])
             destination = work/'converted.bin'
-            converter.convert(source, destination, pedestrian=True, ped_atlas_layout='tight-native')
+            converter.convert(source, destination, pedestrian=True,
+                              ped_atlas_layout='tight-native' if version == 1 else 'tight-native-v2')
             if destination.read_bytes() != data['mesh']:
                 raise ValueError('Selected existing mesh/SKN ordering differs from current export: '+model)
             if 'parts' in data and destination.with_suffix('.parts.json').read_bytes() != data['parts']:
@@ -284,14 +301,16 @@ def build(selection, output):
             generated['layout'] = destination.with_suffix('.atlas.json').read_bytes()
             layout = decode_json(generated['layout'])
             validate_layout(layout, generated['mesh'], generated['atlas'])
+            if layout['schema'] != version:
+                raise ValueError('Generated layout/family version mismatch')
             validate_optional(generated, generated['mesh'])
             if layout['sourceDFFSHA256'] != digest(data['dff']) or layout['sourceTXDSHA256'] != digest(data['txd']):
                 raise ValueError('Generated source identity mismatch')
-            resources = {role: resource(model, role, value) for role, value in generated.items()}
-            family = {'schema': 1, 'format': FORMAT, 'model': model,
+            resources = {role: resource(model, role, value, version) for role, value in generated.items()}
+            family = {'schema': version, 'format': config['family'], 'model': model,
                       'sourceIdentity': source_identity(model, layout), 'resources': resources}
             family_data = canonical(family)+b'\n'
-            family_record = {'path': PREFIX+digest(family_data)+'/'+model+'.json',
+            family_record = {'path': config['prefix']+digest(family_data)+'/'+model+'.json',
                              'bytes': len(family_data), 'sha256': digest(family_data)}
             for record, value in [(resources[role], value) for role, value in generated.items()]+[(family_record, family_data)]:
                 path = stage/'files'/record['path']
@@ -307,7 +326,7 @@ def build(selection, output):
                                'partsUnchanged': 'parts' in data, 'handUnchanged': 'hand' in data,
                                'atlasRGBA8Bytes': layout['logicalRGBA8Bytes']})
         shutil.rmtree(stage/'.work')
-        overlay = {'schema': 1, 'format': OVERLAY_FORMAT, 'models': model_urls,
+        overlay = {'schema': version, 'format': config['overlay'], 'models': model_urls,
                    'resources': [rows[name] for name in sorted(rows)]}
         (stage/'overlay.json').write_bytes(canonical(overlay)+b'\n')
         (stage/'provenance.json').write_bytes(canonical({'schema': 1, 'models': provenance})+b'\n')
@@ -325,8 +344,10 @@ def validate_overlay(directory):
     overlay = decode_json(regular_bytes(directory/'overlay.json', 256*1024))
     if not isinstance(overlay, dict):
         raise ValueError('Invalid pedestrian overlay object')
+    version = overlay.get('schema')
+    config = version_config(version)
     urls, records = overlay.get('models'), overlay.get('resources')
-    if (overlay.get('schema') != 1 or overlay.get('format') != OVERLAY_FORMAT
+    if (overlay.get('format') != config['overlay']
             or not isinstance(urls, dict) or not 1 <= len(urls) <= MAX_MODELS
             or not isinstance(records, list) or not 1 <= len(records) <= MAX_MODELS*7):
         raise ValueError('Invalid pedestrian overlay')
@@ -334,12 +355,12 @@ def validate_overlay(directory):
     total = 0
     for row in records:
         if (not isinstance(row, dict) or set(row) != {'path', 'bytes', 'sha256'}
-                or not isinstance(row['path'], str) or not row['path'].startswith(PREFIX)
+                or not isinstance(row['path'], str) or not row['path'].startswith(config['prefix'])
                 or not integer(row['bytes'], 1, 4*1024*1024)
                 or not isinstance(row['sha256'], str) or not SHA.fullmatch(row['sha256'])
                 or row['path'] in files):
             raise ValueError('Invalid overlay resource')
-        tail = row['path'][len(PREFIX):].split('/')
+        tail = row['path'][len(config['prefix']):].split('/')
         if len(tail) != 2 or tail[0] != row['sha256'] or not re.fullmatch(r'[a-z0-9_.]{1,96}', tail[1]):
             raise ValueError('Invalid immutable overlay path')
         path = directory/'files'/row['path']
@@ -358,8 +379,9 @@ def validate_overlay(directory):
         if len(content[url]) > 65536:
             raise ValueError('Oversized family descriptor')
         family = decode_json(content[url])
-        if (not isinstance(family, dict) or family.get('schema') != 1 or family.get('format') != FORMAT or family.get('model') != model
-                or url != PREFIX+digest(content[url])+'/'+model+'.json'):
+        if (not isinstance(family, dict) or type(family.get('schema')) is not int or family.get('schema') != version
+                or family.get('format') != config['family'] or family.get('model') != model
+                or url != config['prefix']+digest(content[url])+'/'+model+'.json'):
             raise ValueError('Invalid pinned family identity')
         resources = family.get('resources')
         if not isinstance(resources, dict) or not REQUIRED <= set(resources) or set(resources)-set(SUFFIX):
@@ -367,7 +389,7 @@ def validate_overlay(directory):
         values = {}
         for role, row in resources.items():
             if (not isinstance(row, dict) or row.get('path') not in content
-                    or row != resource(model, role, content[row['path']])):
+                    or row != resource(model, role, content[row['path']], version)):
                 raise ValueError('Invalid complete family dependency')
             values[role] = content[row['path']]
             if len(values[role]) > LIMIT[role]:
@@ -375,6 +397,8 @@ def validate_overlay(directory):
             used.add(row['path'])
         layout = decode_json(values['layout'])
         validate_layout(layout, values['mesh'], values['atlas'])
+        if layout['schema'] != version:
+            raise ValueError('Advertised family/layout version mismatch')
         validate_optional(values, values['mesh'])
         if family.get('sourceIdentity') != source_identity(model, layout):
             raise ValueError('Family source identity mismatch')
@@ -396,6 +420,7 @@ def extend(base_catalog, overlay_directory, local):
         raise ValueError('Invalid prepared base object')
     rows, files = validate_base(base)
     overlay, selected = validate_overlay(overlay_directory)
+    config = version_config(overlay['schema'])
     old_index = next(row for row in rows if row['path'] == INDEX)
     index_file = Path(files[old_index['sha256']]['path']).resolve(strict=True)
     index_bytes = regular_bytes(index_file, 1024*1024)
@@ -407,7 +432,7 @@ def extend(base_catalog, overlay_directory, local):
         raise ValueError('Preserve the existing all-string model index schema')
     if not set(overlay['models']) <= set(index.get('peds', {}).values()):
         raise ValueError('Selected family is not an existing ordinary pedestrian model')
-    index.setdefault('pedAtlasV1', {}).update(overlay['models'])
+    index.setdefault(config['index'], {}).update(overlay['models'])
     index_bytes = canonical(index)+b'\n'
     local = no_links(local)
     if 'local-only' not in local.parts or not local.is_dir():
@@ -417,7 +442,7 @@ def extend(base_catalog, overlay_directory, local):
         raise ValueError('Choose a fresh prepared destination; the existing catalogue is preserved')
     transaction = digest(canonical({'baseContentID': base['manifest']['contentID'],
                                     'overlaySHA256': digest(canonical(overlay)+b'\n')}))
-    output = fresh_private(local/'resources-v1/generated/ped-atlas-v1'/transaction)
+    output = fresh_private(local/('resources-v1/generated/ped-atlas-v'+str(overlay['schema']))/transaction)
     stage = Path(tempfile.mkdtemp(prefix='.ped-extension-', dir=output.parent))
     committed = False
     try:
@@ -461,6 +486,8 @@ def main():
     build_parser = commands.add_parser('build', help='Convert only explicit hash-pinned selected pedestrian inputs')
     build_parser.add_argument('--selection', type=Path, required=True)
     build_parser.add_argument('--output', type=Path, required=True)
+    build_parser.add_argument('--version', type=int, choices=(1, 2), default=1,
+                              help='Explicit family/sampling version; v1 remains the default')
     extend_parser = commands.add_parser('extend', help='Merge a validated family into a fresh normal prepared catalogue')
     extend_parser.add_argument('--base-catalog', type=Path, required=True)
     extend_parser.add_argument('--overlay', type=Path, required=True)
@@ -468,7 +495,7 @@ def main():
     args = parser.parse_args()
     try:
         if args.command == 'build':
-            result = build(decode_json(regular_bytes(args.selection, 256*1024)), args.output)
+            result = build(decode_json(regular_bytes(args.selection, 256*1024)), args.output, version=args.version)
         else:
             result = extend(args.base_catalog, args.overlay, args.local_only)
         print(json.dumps(result, indent=2))

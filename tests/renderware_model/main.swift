@@ -3,12 +3,16 @@ import Foundation
 import Metal
 import simd
 
+var checks = 0
+let cpuOnly = CommandLine.arguments.contains("--cpu-only")
+let testArguments = CommandLine.arguments.filter { $0 != "--cpu-only" }
 func require(_ condition: @autoclosure () -> Bool, _ label: String) {
+    checks += 1
     if !condition() { fatalError("static model regression: \(label)") }
 }
 func failure(_ label: String, _ body: () throws -> Void) {
     do { try body(); fatalError("expected bounded failure: \(label)") }
-    catch is NativeRenderWareModel.Failure { }
+    catch is NativeRenderWareModel.Failure { checks += 1 }
     catch { fatalError("unexpected error for \(label): \(error)") }
 }
 typealias DFF = NativeRenderWareDFF
@@ -102,12 +106,61 @@ let omitted = NativeRenderWareTXD.Texture(name: "tail",maskName: "",filterAddres
 let partial = try Model.prepare(dff: clump(geometry([material("tail")])),txd: .init(version: 0,deviceID: 2,textures: [omitted],decodedByteCount: 16))
 require(!partial.isComplete && partial.diagnostics == [.omittedMipTail(texture: "tail",firstMissingLevel: 1)], "missing mip never invented")
 
-var gpuResult = "unavailable"
+// Independently authored found-dictionary ownership cases. Both original raw
+// fields are retained; cached native state wins over a DFF stream request.
+func dictionary(_ filtering: UInt32, name: String = "CHECK") -> NativeRenderWareTXD.TextureDictionary {
+    let value = NativeRenderWareTXD.Texture(name: name,maskName: texture.maskName,filterAddressing: filtering,
+        rasterFormat: texture.rasterFormat,d3dFormat: texture.d3dFormat,depth: texture.depth,nativeFlags: texture.nativeFlags,mipLevels: texture.mipLevels)
+    return .init(version: 0,deviceID: 2,textures: [value],decodedByteCount: 20)
+}
+let found = try Model.prepare(dff: clump(geometry([material("check",filtering: 0x13306)])),txd: dictionary(0x1201))
+let foundMaterial = found.geometries[0].materials[0]
+require(foundMaterial.sampler.filter == 1 && foundMaterial.sampler.addressU == 2 && foundMaterial.sampler.addressV == 1,
+        "found native dictionary sampler wins over DFF request")
+require(foundMaterial.source.textureFilterAndAddressing == 0x13306 && found.textures[0].filterAddressing == 0x1201,
+        "sampler selection never rewrites either original field")
+require(found.textureByteCount == 20 && found.textures[0].mipLevels.count == 2 && found.textures[0].mipLevels[0].rgba8 == Data(colors),
+        "sampler selection preserves resident mips and original pixels")
+for nativeFilter in 1...6 {
+    let selected = try Model.prepare(dff: clump(geometry([material("CHECK",filtering: 0x3306)])),txd: dictionary(UInt32(0x1200 | nativeFilter)))
+    let actual = selected.geometries[0].materials[0].sampler
+    require(actual.filter == nativeFilter && actual.addressU == 2 && actual.addressV == 1,"all found native filter modes retain their own address state")
+}
+let ignoredRequest = try Model.prepare(dff: clump(geometry([material("CHECK",filtering: 0)])),txd: dictionary(0x1101))
+require(ignoredRequest.geometries[0].materials[0].sampler.filter == 1 && ignoredRequest.geometries[0].materials[0].source.textureFilterAndAddressing == 0,
+        "invalid unused DFF request cannot override valid found-native state")
+let absentRequest = try Model.prepare(dff: clump(geometry([material("CHECK",filtering: nil)])),txd: dictionary(0x2302))
+require(absentRequest.geometries[0].materials[0].sampler.filter == 2 && absentRequest.geometries[0].materials[0].sampler.addressU == 3,
+        "found native state also works without DFF request")
+for malformed in [UInt32(0x1100),0x1001,0x1501,0x5101,0x1107] {
+    failure("invalid found-native sampler remains unsupported") {
+        _ = try Model.prepare(dff: clump(geometry([material("CHECK",filtering: 0x1101)])),txd: dictionary(malformed))
+    }
+}
+let unresolvedRequest = try Model.prepare(dff: clump(geometry([material("absent",filtering: 0x2302)])),txd: dictionary(0x1101))
+require(unresolvedRequest.diagnostics == [.missingTexture(geometry: 0,material: 0,name: "absent")] && unresolvedRequest.textures.isEmpty,
+        "missing name does not gain a fabricated dictionary match")
+let unresolvedSampler = unresolvedRequest.geometries[0].materials[0].sampler
+require(unresolvedSampler.filter == 2 && unresolvedSampler.addressU == 3 && unresolvedSampler.addressV == 2,
+        "unresolved request metadata retains prior DFF sampler behavior")
+failure("invalid unresolved DFF sampler is not silently repaired") {
+    _ = try Model.prepare(dff: clump(geometry([material("absent",filtering: 0)])),txd: dictionary(0x1101))
+}
+let emptyName = try Model.prepare(dff: clump(geometry([material("",filtering: 0x3302)])),txd: dictionary(0x1101))
+require(emptyName.isComplete && emptyName.textures.isEmpty && emptyName.geometries[0].materials[0].sampler.filter == 2,
+        "empty-name material keeps its prior non-lookup behavior")
+let unrelatedBad = dictionary(0,name: "unused")
+let unrelated = try Model.prepare(dff: clump(geometry([material("CHECK",filtering: 0x3306)])),txd: .init(version: 0,deviceID: 2,
+    textures: unrelatedBad.textures + txd.textures,decodedByteCount: 40))
+require(unrelated.isComplete && unrelated.textures.count == 1 && unrelated.geometries[0].materials[0].sampler.filter == 1,
+        "unselected invalid native texture is not promoted into this model")
+
+var gpuResult = cpuOnly ? "disabled-by-cpu-only-test-option" : "unavailable"
 var gpuDevice: String?
-if let device = MTLCreateSystemDefaultDevice() {
+if !cpuOnly, let device = MTLCreateSystemDefaultDevice() {
     gpuDevice = device.name
-    guard CommandLine.arguments.count >= 2 else { fatalError("pass NativeRenderWareModel.metal path") }
-    let source = try String(contentsOfFile: CommandLine.arguments[1], encoding: .utf8)
+    guard testArguments.count >= 2 else { fatalError("pass NativeRenderWareModel.metal path") }
+    let source = try String(contentsOfFile: testArguments[1], encoding: .utf8)
     let library = try device.makeLibrary(source: source, options: nil)
     let pipelines = try Model.Pipelines(device: device,library: library,color: .rgba8Unorm)
     let gpu = try Model.Uploaded(plan: plan,device: device)
@@ -154,12 +207,12 @@ if let device = MTLCreateSystemDefaultDevice() {
 }
 var report: [String: Any] = ["cpu": "passed", "metal": gpuResult, "metalDevice": gpuDevice as Any? ?? NSNull(),
     "gpuReadback": "explicit texture-to-shared-buffer blit; discrete GPU texture CPU mapping may be stale",
-    "sharedGeometryInstances": 20, "samplerConfigurations": 96]
+    "sharedGeometryInstances": 20, "samplerConfigurations": 96,"checks":checks,"foundNativeSamplerCases":"passed"]
 var ownerFailures = false
-if CommandLine.arguments.count >= 3 {
-    let folder = URL(fileURLWithPath: CommandLine.arguments[2])
+if testArguments.count >= 3 {
+    let folder = URL(fileURLWithPath: testArguments[2])
     let paths = try FileManager.default.contentsOfDirectory(at: folder,includingPropertiesForKeys: nil).filter { $0.pathExtension.lowercased() == "dff" }.sorted { $0.path < $1.path }
-    let rejectedData = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[3]))
+    let rejectedData = try Data(contentsOf: URL(fileURLWithPath: testArguments[3]))
     let expectedRejected = Set(try JSONDecoder().decode([String].self,from: rejectedData))
     var prepared = 0, skins = 0, unsupported = 0, referenceRejected = 0, draws = 0, unresolved = 0, complete = 0
     var unexpected: [String] = []

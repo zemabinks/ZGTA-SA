@@ -138,6 +138,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let family:String,source:String,layout:MTLBuffer,textureBytes:Int
     }
     private var pedAtlasFamilies:[String:String]=[:]
+    private var pedAtlasV2Names=Set<String>()
     private var pedAtlasGPU:[String:PedAtlasGPU]=[:]
     private struct PedAtlasLoad {let token:UUID;var request:NativePedAtlasLoader.Request?}
     private var pedAtlasLoads:[String:PedAtlasLoad]=[:]
@@ -3030,7 +3031,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
                 self.weaponModels = index["weapons"] ?? [:]
-                self.bindPedAtlasFamilies(index["pedAtlasV1"] ?? [:],source:modelSource)
+                self.bindPedAtlasFamilies(index["pedAtlasV1"] ?? [:],v2:index["pedAtlasV2"] ?? [:],source:modelSource)
                 if self.fixedCJ?.isReady==true,self.pedModels["0"]==nil{self.pedModels["0"]="null"}
                 for key in self.legacyModelDefinitions.keys where (20001...30000).contains(key){self.pedModels[String(key)]="samp-dl-\(key)"}
                 self.resumeActorSelection()
@@ -3284,21 +3285,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // Keep the old advertised catalogue fenced. A source change cannot
         // silently downgrade these names to legacy PNGs before a real rebind.
     }
-    private func bindPedAtlasFamilies(_ families:[String:String],source:String) {
+    private func bindPedAtlasFamilies(_ v1:[String:String],v2:[String:String]=[:],source:String) {
+        let families=v1.merging(v2){_,new in new}
         let allowed=Set(pedModels.values).subtracting(["null"]).subtracting(vehicleModels.values).subtracting(weaponModels.values)
         let admitted=families.filter{allowed.contains($0.key) && !$0.key.hasPrefix("samp-dl-")}
         let changed=Set(pedAtlasFamilies.keys).union(admitted.keys).filter{
-            pedAtlasSource != source || pedAtlasFamilies[$0] != admitted[$0]
+            pedAtlasSource != source || pedAtlasFamilies[$0] != admitted[$0] || pedAtlasV2Names.contains($0) != (v2[$0] != nil)
         }
         for name in changed{clearPedAtlas(name)}
-        pedAtlasFamilies=admitted;pedAtlasSource=source
+        pedAtlasFamilies=admitted;pedAtlasV2Names=Set(v2.keys).intersection(admitted.keys);pedAtlasSource=source
         if admitted.count != families.count{onStatus?("PED ATLAS CATALOGUE HAS UNKNOWN MODEL ENTRIES")}
     }
     private func loadPedAtlasActor(_ name:String,family:String) {
         let source=fixedCJSourceIdentity()
         if let bound=pedAtlasGPU[name],bound.family==family,bound.source==source,
            actorMeshes[name] != nil,skeletalActors[name] != nil{return}
-        guard pedAtlasSource==source,NativePedAtlasFamily.digest(in:family,model:name) != nil,
+        guard pedAtlasSource==source,NativePedAtlasFamily.version(in:family,model:name)==(pedAtlasV2Names.contains(name) ? 2:1),
               pedAtlasPipeline != nil,pedAtlasAnimatedPipeline != nil,pedAtlasSkeletalPipeline != nil,
               let server else{
             pedAtlasError(name,"PED ATLAS FAMILY/SHADER IS UNAVAILABLE: \(name)");return

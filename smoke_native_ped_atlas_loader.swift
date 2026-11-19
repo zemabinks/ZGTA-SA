@@ -76,8 +76,8 @@ do {
     check(active.allSatisfy(\.cancelled),"underlying tasks not cancelled")
     for task in active{peer.reply(task,late:true)}
     Thread.sleep(forTimeInterval:0.02);check(sink.count==1,"late old tasks delivered a second result")
-    let fresh=Sink();_=loader.load(model:"authored",path:path("authored"),source:"new",server:server,completion:fresh.add)
-    finish(peer,fresh);check(fresh.payload().source=="new","new source was replaced by stale work");fresh.payload().close();idle(loader)
+    let fresh=Sink();_=loader.load(model:"authoredv2",path:path("authoredv2"),source:"new",server:server,completion:fresh.add)
+    finish(peer,fresh);check(fresh.payload().source=="new" && fresh.payload().manifest.version==2,"new v2 source was replaced by stale v1 work");fresh.payload().close();idle(loader)
 }
 do {
     let peer=Peer(root),loader=make(peer),sink=Sink()
@@ -123,6 +123,19 @@ do {
     wait("deinit task starts"){!peer.pending.isEmpty};let active=peer.pending;loader=nil
     wait("owner death cancels"){active.allSatisfy(\.cancelled)}
 }
+for name in ["authoredv2","crossnamespace","crosslayout"] {
+    let peer=Peer(root),loader=make(peer),sink=Sink()
+    _=loader.load(model:name,path:path(name),source:"version-test",server:server,completion:sink.add)
+    finish(peer,sink)
+    if name=="authoredv2" {
+        check(sink.payload().manifest.version==2 && sink.payload().layout.vectors[0].w==2,"complete v2 family version")
+        sink.payload().close()
+    }else{
+        if case .success=sink.at(0){check(false,"mixed family/layout/namespace versions admitted")}
+        check(sink.count==1,"mixed version failure replayed")
+    }
+    idle(loader)
+}
 print("PASS ped atlas loader: \(checks) actual ownership/bounds/cancellation checks; authored transfer spies")
 
 if CommandLine.arguments.count>2 {
@@ -152,6 +165,11 @@ if CommandLine.arguments.count>2 {
     _=first.payload().consume{_,files in check(files.count==4,"HTTP all pinned members")};idle(loader)
     let countAfterFirst=(control()["records"] as! [Any]).count
     check(countAfterFirst==5,"real HTTP fetched exactly manifest+four members")
+    let v2=Sink();_=loader.load(model:"authoredv2",path:path("authoredv2"),source:"real-v2",server:origin,completion:v2.add)
+    wait("actual HTTP v2 family"){v2.count==1}
+    check(v2.payload().manifest.version==2 && v2.payload().layout.vectors[0].w==2,"real HTTP selected v2 metadata/rectangles")
+    v2.payload().close();idle(loader)
+    check((control()["records"] as![Any]).count==10,"real HTTP v2 fetched complete immutable family")
     _=control("corrupt");let corrupt=Sink()
     _=loader.load(model:"authored",path:path("authored"),source:"real-bad",server:origin,completion:corrupt.add)
     wait("actual corrupt HTTP family"){corrupt.count==1};if case .success=corrupt.at(0){check(false,"real corrupt family admitted")};idle(loader)

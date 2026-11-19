@@ -156,6 +156,7 @@ final class NativePedAtlasLoader {
             guard data.count<=limits.manifestBytes,let expected=NativePedAtlasFamily.digest(in:state.path,model:state.model),
                   NativePedAtlasLayout.digest(data)==expected,
                   let manifest=try? JSONDecoder().decode(NativePedAtlasFamily.self,from:data),
+                  manifest.version==NativePedAtlasFamily.version(in:state.path,model:state.model),
                   (try? manifest.validate(expectedModel:state.model)) != nil else{fail(state,Failure.invalidFamily);return}
             reserved-=state.reserved;state.reserved=0;state.manifest=manifest;state.phase = .reserving
         }else{
