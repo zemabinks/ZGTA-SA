@@ -58,7 +58,7 @@ final class Renderer {
  var passengerSeat:Int?=1,passengerFrame:Int?=1,passengerAccumulator=0.25
  var driving=true,currentVehicleID:String?="old-car",drivingSpeed:Float=25,flightVerticalSpeed:Float=4
  var vehiclePitch:Float=0.2,vehicleFallbackRoll:Float=0.1,activeModelOrigin:Float=1
- var pendingVehicleBodyPose:Int?=1,activeVehicleModel="410",activeHandling:Int?=1,vehicleKind="car"
+ var pendingVehicleSnapshot:Int?=1,activeVehicleModel="410",activeHandling:Int?=1,vehicleKind="car"
  var pendingExitPlacement:(()->Void)?={},vehicleExitSerial:UInt64=0
  var pendingVehicleExit:(()->Void)?={},ownRiderPlayback:Int?=1,ownRiderPrevious:Int?=1,ownRiderCapture:Int?=1,ownRiderFeet:Int?=1
  var ownRiderAnimation:Int?=1,vehicleHorn=true,vehicleSiren=true,vehicleHop=true

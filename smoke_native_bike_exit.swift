@@ -22,7 +22,7 @@ final class BikeExitRenderer {
  var camera=SIMD3<Float>(10,20,2),heading:Float=0.7,actorHeading:Float=0.7,verticalSpeed:Float=0
  var currentVehicleID:String?="bike",activeVehicleModel="522",remoteVehicles=[ExitVehicle(id:"bike",code:"522.0.0.0.")]
  var driving=true,drivingSpeed:Float=25,flightVerticalSpeed:Float=1,vehiclePitch:Float=0,vehicleFallbackRoll:Float=0,activeModelOrigin:Float=1
- var activeVehicleDamage="",pendingVehicleBodyPose:Int?,activeHandling:Int?,vehicleKind="bike"
+ var activeVehicleDamage="",pendingVehicleSnapshot:Int?,activeHandling:Int?,vehicleKind="bike"
  var climb:Int?,climbPhase:Int?,pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0
  var ownRiderPrevious:Int?,ownRiderCapture:Int?,footAnimationFrame:Int?
  var footAirTime=0.0,footAirFall=0.0,footAirFell=false,footJumped=false,footJumpMinimum=0.0,footLaunchRemaining:Double?,footAirVelocity=SIMD2<Double>.zero

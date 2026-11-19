@@ -136,7 +136,9 @@ final class RendererCarrier {
     var ownRiderPlayback:NativeRiderPlayback?,ownRiderFeet:Int?,ownRiderSide = -1
     var ownRiderCapture:Int?,ownRiderPrevious:Int?,ownRiderAnimation:Int?
     var passengerAccumulator:Double=0,drivingSpeed:Float=0,flightVerticalSpeed:Float=0
-    var vehiclePitch:Float=0,vehicleFallbackRoll:Float=0,activeModelOrigin:Float=0,pendingVehicleBodyPose:Int?
+    var vehiclePitch:Float=0,vehicleFallbackRoll:Float=0,activeModelOrigin:Float=0,pendingVehicleSnapshot:Int?
+    // Opaque pre130 carrier for the optional historical control only.
+    var pendingVehicleBodyPose:Int?
     var activeHandling:Int?,vehicleKind="car",vehicleHorn=false,vehicleSiren=false,steeringInput:Float=0
     var vehicleWorkingControl:Float=0,vehicleHop=false,riderDoorHolds:[String:[Int:Double]]=[:]
     var vehicleCoupling:Coupling?=Coupling()
@@ -264,7 +266,9 @@ def main():
             os.killpg(process.pid,signal.SIGKILL);process.wait()
             (out/'compile-timeout.json').write_text(json.dumps(dict(timeoutSeconds=900,killedOwnProcessGroup=process.pid))+'\n')
             raise
-    if compile_exit:raise RuntimeError('Actual-source carrier compile failed; see '+str(out/'compile.log'))
+    if compile_exit:
+        print((out/'compile.log').read_text()[-6000:])
+        raise RuntimeError('Actual-source carrier compile failed; see '+str(out/'compile.log'))
     ran=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30)
     (out/'runtime.log').write_text(ran.stdout+ran.stderr)
     data=json.loads(ran.stdout)
