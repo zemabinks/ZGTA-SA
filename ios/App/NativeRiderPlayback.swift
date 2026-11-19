@@ -8,6 +8,14 @@ struct NativeRiderPoseClock {
     struct Interval {
         let start:Double,end:Double,rejection:Double?
         var canPrime:Bool{rejection == nil && start.isFinite && end.isFinite && end>=start && end-start<=0.5}
+        /// Presentation consumers without a timed command share the same
+        /// active/suspension boundary as boarding, without dropping slow frames.
+        var presentationDelta:Double {
+            switch admission(commandAt:start) {
+            case .elapsed(let delta):return delta
+            case .rejected:return 0
+            }
+        }
         func admission(commandAt:Double)->Admission {
             if let rejection{return .rejected(rejection)}
             guard canPrime,commandAt.isFinite else{return .rejected(.nan)}
@@ -30,6 +38,14 @@ struct NativeRiderPoseClock {
         guard time>=start else{return .init(start:start,end:time,rejection:time-start)}
         guard time-start<=0.5 else{return .init(start:start,end:time,rejection:time-start)}
         return .init(start:start,end:time,rejection:nil)
+    }
+}
+
+extension NativeRiderAnimation {
+    /// Keep the existing per-step response and direct-delta reference API.
+    /// Ordinary slow displays carry time in bounded slices; suspension holds.
+    func update(interval:NativeRiderPoseClock.Interval,configuration:Configuration,input:Input)->Frame {
+        update(presentation:(interval.start,interval.end,interval.canPrime),configuration:configuration,input:input)
     }
 }
 

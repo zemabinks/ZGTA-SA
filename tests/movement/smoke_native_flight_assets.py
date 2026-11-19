@@ -11,7 +11,7 @@ import subprocess,tempfile
 from tests.movement.smoke_native_foot_animation import SWIFT as FOOT_SWIFT
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
-const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(path.join(process.cwd(),'smoke_vehicle_dynamics'));
+const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics'));
 (async()=>{
  const load=archivedModules(),f=load.factories[49368],g=f.constructor('return globalThis')(),Bytes=f.constructor('return Uint8Array')();
  g.fetch=async url=>{const data=fs.readFileSync(path.join(process.cwd(),'local-only/site',String(url).split('?')[0]));return{ok:true,json:async()=>JSON.parse(data),arrayBuffer:async()=>{const a=new Bytes(data.length);a.set(data);return a.buffer}}};g.setTimeout=(fn,ms)=>{const t=setTimeout(fn,ms);t.unref();return t};

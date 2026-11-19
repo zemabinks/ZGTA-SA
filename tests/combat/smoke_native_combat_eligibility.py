@@ -14,7 +14,7 @@ FILES=['ios/App/NativeCombatEligibility.swift','ios/App/NativeGunAnimation.swift
 inputs={p:(ROOT/p).read_bytes() for p in FILES}
 JS=r'''
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
-const {archivedModules}=require(path.join(process.cwd(),'smoke_vehicle_dynamics'));
+const {archivedModules}=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics'));
 (async()=>{
  const load=archivedModules(),factory=load.factories[49368],g=factory.constructor('return globalThis')(),Bytes=factory.constructor('return Uint8Array')();
  g.fetch=async url=>{const p=path.join(process.cwd(),'local-only/site',String(url).split('?')[0]);if(!fs.existsSync(p))return{ok:false};const b=fs.readFileSync(p);return{ok:true,json:async()=>JSON.parse(b),arrayBuffer:async()=>{const a=new Bytes(b.length);a.set(b);return a.buffer}}};

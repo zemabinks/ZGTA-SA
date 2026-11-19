@@ -152,6 +152,14 @@ func rendererDispatch()throws {
     renderer.actorMeshes.removeValue(forKey:"authored-bike")
     try near(renderer.update(player:a,name:"authored-bike",model:"509",now:10.4,delta:0.001,samples:(sample(5,10.4,-0.8),nil)).lean,-0.8,"OWNER_CHANGE_SNAP literal optional asset removal")
     try check(a.vehicleID=="authored-two" && b.vehicleID==nil,"literal adapter preserves authored and absent registry IDs")
+    let fresh=RendererCarrier(),newPlayer=AuthoredPlayer(id:"new",code:"509.authored",vehicleID:"new-bike")
+    let packet=sample(90,20.2,0,mode:1,phase:0.2)
+    let admitted=fresh.update(player:newPlayer,name:"authored-bike",model:"509",now:20.2,delta:0.2,samples:(packet,nil))
+    try near(admitted.crank!,0.2,"literal new bike cannot borrow prior display interval")
+    let next=fresh.update(player:newPlayer,name:"authored-bike",model:"509",now:20.4,delta:0.2,samples:(packet,nil))
+    try near(next.crank!,0.42,"literal existing bike receives full hitch time")
+    let duplicate=fresh.update(player:newPlayer,name:"authored-bike",model:"509",now:20.4,delta:0.2,samples:(packet,nil))
+    try near(duplicate.crank!,next.crank!,"literal duplicate bike draw cannot replay time")
     withExtendedLifetime((first,second)) {}
 }
 

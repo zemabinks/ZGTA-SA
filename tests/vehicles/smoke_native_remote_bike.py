@@ -11,7 +11,7 @@ import subprocess,tempfile
 from tests.movement.smoke_native_foot_animation import SWIFT as FOOT_SWIFT
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
-const fs=require('node:fs'),path=require('node:path'),load=require(path.join(process.cwd(),'smoke_vehicle_dynamics')).archivedModules(),factory=load.factories[49368],source=fs.readFileSync('local-only/site/_next/static/chunks/9737.c81ad6ccfd85b371.js','utf8');
+const fs=require('node:fs'),path=require('node:path'),load=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics')).archivedModules(),factory=load.factories[49368],source=fs.readFileSync('local-only/site/_next/static/chunks/9737.c81ad6ccfd85b371.js','utf8');
 const start=source.indexOf('function(e,t,l,n,r,a){let{more:o,driven:i}=e,s=Array.isArray(l.kit)'),end=source.indexOf('}(null!=(k=A.bike)',start),moduleMatch=source.match(/\bfm=l\((\d+)\)/);
 if(start<0||end<0||!moduleMatch)throw Error('Original remote-bike wrapper unavailable');
 const original=factory.constructor('d','fm','fg','return('+source.slice(start,end+1)+')')(load(85339),load(Number(moduleMatch[1])),x=>((x%1)+1)%1),state={more:{lean:0},driven:{},built:null,step:null,crank:0,owed:0},models=[{bike:{maxLean:.7431448254773942},restDrop:.2},{bike:{maxLean:.8660254037844386},restDrop:.1}],rows=[];

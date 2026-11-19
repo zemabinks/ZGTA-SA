@@ -23,6 +23,10 @@ extension NativeRemoteBikeAnimation {
                 sample:Sample,previous:Sample?,owner:Owner?=nil)->Frame {
         update(model:model,maxLean:maxLean,now:now,delta:delta,sample:sample,previous:previous)
     }
+    func update(model:String,maxLean:Double?,now:Double,presentationDelta:Double,
+                sample:Sample,previous:Sample?,owner:Owner?=nil)->Frame {
+        update(model:model,maxLean:maxLean,now:now,delta:presentationDelta,sample:sample,previous:previous)
+    }
 }
 '''
 

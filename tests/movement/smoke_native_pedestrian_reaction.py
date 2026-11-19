@@ -11,7 +11,7 @@ import subprocess,tempfile
 from tests.movement.smoke_native_foot_animation import SWIFT as FOOT_SWIFT
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
-const fs=require('node:fs'),path=require('node:path'),load=require(path.join(process.cwd(),'smoke_vehicle_dynamics')).archivedModules(),reaction=load(49368).be,rows=[];
+const fs=require('node:fs'),path=require('node:path'),load=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics')).archivedModules(),reaction=load(49368).be,rows=[];
 for(let weapon=0;weapon<=54;weapon++)for(let side=0;side<4;side++)for(let piece=3;piece<=9;piece++)for(let bits=0;bits<8;bits++){
  const input={weapon,side,piece,still:!!(bits&1),crouched:!!(bits&2),stun:!!(bits&4),damage:bits%2?25:10,now:1000,until:bits===0?1100:-1000},output=reaction(input);
  rows.push({input,expected:{kind:output.kind??null,until:output.until,stun:output.stun??false}});

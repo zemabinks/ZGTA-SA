@@ -30,6 +30,26 @@ final class NativeRemoteBikeAnimation {
     private var crank: Double = 0
     private var owed: Double = 0
     private var step: Double?
+    private var presentationPreviousTime:Double?
+    private var presentationFrame:Frame?
+
+    /// The renderer admits elapsed time separately from the archived direct
+    /// delta API. A new or repeatedly drawn owner cannot borrow old time.
+    func update(model:String,maxLean:Double?,now:Double,presentationDelta:Double,
+                sample:Sample,previous:Sample?,owner:Owner?=nil)->Frame {
+        let before=presentationPreviousTime
+        presentationPreviousTime=now.isFinite ? now:nil
+        guard now.isFinite else {
+            return presentationFrame ?? Frame(lean:0,tuck:0,pedal:nil,crank:nil,hop:0)
+        }
+        let delta:Double
+        if let before,now.isFinite,now>=before,presentationDelta.isFinite,
+           presentationDelta>=0,presentationDelta<=0.5 {
+            delta=min(presentationDelta,now-before)
+        }else{delta=0}
+        let frame=update(model:model,maxLean:maxLean,now:now,delta:delta,sample:sample,previous:previous,owner:owner)
+        presentationFrame=frame;return frame
+    }
 
     func update(model: String,maxLean: Double?,now: Double,delta: Double,
                 sample: Sample,previous: Sample?,owner:Owner?=nil) -> Frame {

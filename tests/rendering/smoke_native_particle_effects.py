@@ -11,7 +11,7 @@ import subprocess
 from tests.movement.smoke_native_foot_animation import SWIFT as FOOT_SWIFT
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
-const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(path.join(process.cwd(),'smoke_vehicle_dynamics'));
+const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics'));
 const load=archivedModules(),factory=load.factories[49368],g=factory.constructor('return globalThis')(),T=load(85339),source=fs.readFileSync('local-only/site/_next/static/chunks/9737.c81ad6ccfd85b371.js','utf8'),data=JSON.parse(fs.readFileSync('local-only/site/game/world/fx.json'));
 const textures=load(88711).XC([load(52528).nk(fs.readFileSync('local-only/site/game/effectspc.txd'))]),pictures=new Map([...textures.keys()].map((name,index)=>[name,[0,index]]));
 const fD=source.slice(source.indexOf('function fD('),source.indexOf('let fB=',source.indexOf('function fD('))),fU=source.slice(source.indexOf('let fB='),source.indexOf(';var fW=',source.indexOf('let fB=')))+';',start=source.indexOf('for(let e of Object.values(l))e.emitters'),end=source.indexOf('}(t,e,{water:',start),core=source.slice(start,end),prefix='let a=Array.from({length:1024},()=>fU(false)),o=Array.from({length:96},()=>fU(true)),i=a.concat(o),s=0,c=new Uint8Array(i.length);';

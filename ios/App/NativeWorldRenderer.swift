@@ -4574,10 +4574,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pedAtlasDemand.removeAll(keepingCapacity:true)
         remoteSuspensionRayBudget = 64
         let riderTime = riderMonotonicNow()
-        let riderDelta = lastRiderDraw > 0 ? min(0.1,max(0,riderTime-lastRiderDraw)) : 0
         lastRiderDraw = riderTime
         let riderPoseInterval=riderPoseClock.interval(at:riderTime,
             active:UIApplication.shared.applicationState == .active && view.window != nil)
+        let riderDelta=riderPoseInterval.presentationDelta
         let riderIDs = Set(remotePlayers.filter { Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) || $0.ridingVehicleID != nil }.map(\.id))
         remoteRiderAnimations = remoteRiderAnimations.filter { riderIDs.contains($0.key) }
         remoteRiderPlayback=remoteRiderPlayback.filter{riderIDs.contains($0.key)}
@@ -4692,7 +4692,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                 pendingVehicleExit=nil;DispatchQueue.main.async(execute:ready)
                             }
                             originalDriver=true
-                        } else if let frame=ownRiderAnimation?.update(delta:riderDelta,configuration:definition.configuration(),input:input) {
+                        } else if let frame=ownRiderAnimation?.update(interval:riderPoseInterval,configuration:definition.configuration(),input:input) {
                             driverPose=actor.riderPose(frame:frame,library:library,figurePosition:place,figureTurn:Float(sourceSeat.turn ?? 0));originalDriver=true
                         }
                     }
@@ -4764,8 +4764,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         pose=actor.riderPose(frame:frame.sample.pose,library:library,figurePosition:SIMD3<Float>(frame.sample.anchor),figureTurn:Float(frame.turn),previous:frame.transitioning ? remoteRiderCapture[player.id]:nil,transition:frame.transition)
                         remoteRiderPrevious[player.id]=pose
                         if let part=frame.doorPart{riderDoorHolds[vehicleID,default:[:]][part]=frame.doorOpen}
-                    }else{pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat)}
-                }else{pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat,figureTurn:Float(definition.seats[player.ridingSeat].turn ?? 0))}
+                    }else{pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat)}
+                }else{pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat,figureTurn:Float(definition.seats[player.ridingSeat].turn ?? 0))}
                 appendPed(ped,shared.vehicle.position,shared.vehicle.heading,0,"",0,0,pose:pose,transform:shared.transform,original:true)
                 continue
             }
@@ -4824,7 +4824,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             var input=NativeRiderAnimation.Input(speed:Double(player.speed),steer:Double(player.steer),dead:player.life<=0)
             if source.astride,let samples=remoteBikeSamples[player.id] {
                 let bike=remoteBikeAnimations[player.id] ?? NativeRemoteBikeAnimation();remoteBikeAnimations[player.id]=bike
-                let frame=bike.update(model:model,maxLean:source.bike?["maxLean"],now:riderTime,delta:riderDelta,sample:samples.0,previous:samples.1,
+                let frame=bike.update(model:model,maxLean:source.bike?["maxLean"],now:riderTime,presentationDelta:riderDelta,sample:samples.0,previous:samples.1,
                     owner:.init(appearance:player.code,vehicleID:player.vehicleID,asset:actorMeshes[name].map{ObjectIdentifier($0.vertices)}))
                 remoteBikeFrames[player.id]=frame
                 input.lean=frame.lean;input.tuck=frame.tuck;input.pedal=frame.pedal;input.crank=frame.crank;input.hop=frame.hop
@@ -4857,8 +4857,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     pose=actor.riderPose(frame:frame.sample.pose,library:library,figurePosition:SIMD3<Float>(frame.sample.anchor),figureTurn:Float(frame.turn),previous:frame.transitioning ? remoteRiderCapture[player.id]:nil,transition:frame.transition)
                     remoteRiderPrevious[player.id]=pose
                     if let part=frame.doorPart,let vehicle=player.vehicleID {riderDoorHolds[vehicle,default:[:]][part]=frame.doorOpen}
-                } else {pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
-            } else {pose=actor.riderPose(frame:animator.update(delta:riderDelta,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
+                } else {pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
+            } else {pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:source.configuration(),input:input),library:library,figurePosition:place)}
             let car = player.vehicleID.flatMap{sharedVehicleFrame(id:$0)?.transform} ?? Self.translation(player.position) * Self.rotationZ(-player.heading) *
                 Self.rotationX(player.pitch) * Self.rotationY(player.roll) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
