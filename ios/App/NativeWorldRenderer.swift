@@ -337,6 +337,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let doors:[NativeVehicleDamage.Door]?
         let wheelOffsets:[Int:Double],wheelAngles:[Float]
         let speed:Float,steering:Double,rearSteering:Double,fallbackSteering:Float
+        var wheelPhaseOwned=false
     }
     private struct ParkedVehicleDrawSnapshot {
         let work:Double,rotor:Double,gearUp:Bool,dynamic:Bool
@@ -633,7 +634,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private var activeHandling: VehicleHandling?
     private var activeModelOrigin: Float = 0
-    private var pendingVehicleBodyPose:NativeUnattendedVehicle.Pose?
+    private var pendingVehicleSnapshot:NativeOtherVehicles.Snapshot?
     private var vehicleFallbackRoll: Float = 0
     private let groundVehicle = NativeGroundVehicle()
     private var couplingConnection:String?
@@ -753,7 +754,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var vehicleRoll: Float { groundVehicle?.active == true ? groundVehicle!.roll : vehicleFallbackRoll }
     func vehicleModelOrigin(_ code: String) -> Float { groundVehicle?.modelOrigin(String(code.split(separator: ".").first ?? "")) ?? 0 }
     var nativeVehicleWheels: [NativeVehicleDynamics.WheelSnapshot] { groundVehicle?.output?.wheels ?? [] }
-    var nativeVehicleWheelAngles: [Float] { groundVehicle?.wheelAngles ?? [] }
+    private var ownVehicleWheelClocks:[Double] {
+        if groundVehicle?.active == true{return groundVehicle?.wheelAnglesDouble ?? []}
+        if let snapshot=pendingVehicleSnapshot{return [snapshot.frontSpin,snapshot.rearSpin,snapshot.frontSpin,snapshot.rearSpin]}
+        return groundVehicle?.wheelAnglesDouble ?? []
+    }
+    var nativeVehicleWheelAngles: [Float] {ownVehicleWheelClocks.map(Float.init)}
     var nativeBikeLean: Float { groundVehicle?.bikeLean ?? 0 }
     var nativeBikeDrop: [Float] { groundVehicle?.bikeDrop ?? [] }
     var nativeBicyclePedal: Int { groundVehicle?.bicyclePedal ?? 0 }
@@ -1442,13 +1448,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let groundVehicle, !groundVehicle.active, groundVehicle.supports(activeVehicleModel),
                groundVehicle.isCellLoaded(activeDetail) {
                 let origin = groundVehicle.modelOrigin(activeVehicleModel) ?? 0
-                if let pose=pendingVehicleBodyPose {
+                if let pose=pendingVehicleSnapshot?.physicalPose {
                     let transform=NativeGroundVehicle.transform(position:pose.position,rotation:pose.rotation,origin:Double(origin))
                     camera=SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)
                 }else{camera += NativeGroundVehicle.modelOffset(origin:origin-activeModelOrigin,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll)}
                 activeModelOrigin = origin
-                if groundVehicle.enter(model:activeVehicleModel,modelPosition:camera,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll,bodyPose:pendingVehicleBodyPose){
-                    pendingVehicleBodyPose=nil
+                if groundVehicle.enter(model:activeVehicleModel,modelPosition:camera,heading:heading,pitch:vehiclePitch,roll:vehicleFallbackRoll,bodyPose:pendingVehicleSnapshot?.physicalPose){
+                    if let snapshot=pendingVehicleSnapshot{groundVehicle.restoreWheelSpin(front:snapshot.frontSpin,rear:snapshot.rearSpin)}
+                    pendingVehicleSnapshot=nil
                     groundVehicle.setWorkingValue(remoteVehicles.first{$0.id==currentVehicleID}?.work ?? 0)
                 }
                 groundVehicle.damageController?.state.load(health:Double(vehicleHealth),text:activeVehicleDamage)
@@ -2309,7 +2316,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         input.work=groundVehicle?.workingRenderValue ?? 0
         input.steering = -(groundVehicle?.output?.steering ?? 0)
         input.rearSteering = -(groundVehicle?.output?.rearSteering ?? 0)
-        let angles=groundVehicle?.wheelAnglesDouble ?? []
+        let angles=ownVehicleWheelClocks
         input.frontSpin=angles.first ?? 0
         input.rearSpin=angles.count>1 ? angles[1]:0
         input.offsets=[Double](repeating:0,count:4)
@@ -2329,7 +2336,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         input.braking=(groundVehicle?.output?.brake ?? 0)>0
         let own=OwnVehicleDrawSnapshot(input:input,doors:damage?.doors,wheelOffsets:wheelOffsets,wheelAngles:nativeVehicleWheelAngles,
             speed:drivingSpeed,steering:groundVehicle?.output?.steering ?? 0,rearSteering:groundVehicle?.output?.rearSteering ?? 0,
-            fallbackSteering:steeringInput)
+            fallbackSteering:steeringInput,wheelPhaseOwned:groundVehicle?.active == true || pendingVehicleSnapshot != nil)
         // The existing own fallback uses the base model matrix; the physical
         // transform, when available, already includes its roll and origin.
         let identity=Self.remoteDriverRenderKey(playerID:name,vehicleID:currentVehicleID)
@@ -2368,7 +2375,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let spin=own.wheelAngles.indices.contains(index) ? own.wheelAngles[index]:0
             return (Float(own.wheelOffsets[index] ?? 0),spin,Float(front ? own.steering:own.rearSteering))
         }
-        return (0,time*own.speed/0.35,front && own.speed != 0 ? own.fallbackSteering*0.45:0)
+        let spin=own.wheelPhaseOwned && own.wheelAngles.indices.contains(index) ? own.wheelAngles[index]:time*own.speed/0.35
+        return (0,spin,front && own.speed != 0 ? own.fallbackSteering*0.45:0)
     }
     /// The same frame is used by the shared vehicle and every attached rider.
     /// Passenger walking reports never become a second vehicle transform.
@@ -2409,6 +2417,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let model=String(source.code.split(separator:".").first ?? "")
         guard seat>0,let definition=riderDefinitions?.models[model],definition.seats.indices.contains(seat),definition.seats[seat].position != nil else{return false}
         guard !driving else{return false}
+        pendingVehicleSnapshot=nil
         ownCameraVisibility.reset();personalFlight.stop();swimController.stop();swimming=false;underwater=false
         climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         footAnimator?.rest(cut:true);footAnimationFrame=nil;footLaunchRemaining=nil
@@ -2431,7 +2440,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func enter(_ source: RemoteVehicle, kind: String) {
         passengerSeat=nil;passengerFrame=nil;passengerAccumulator=0
         let snapshot=groundVehicle?.takeOtherVehicle(source.id)
-        pendingVehicleBodyPose=snapshot?.physicalPose
+        pendingVehicleSnapshot=snapshot
         let vehicle=applying(snapshot,to:source)
         ownCameraVisibility.reset()
         climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
@@ -2596,7 +2605,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehiclePitch = 0
         vehicleFallbackRoll = 0
         activeModelOrigin = 0
-        pendingVehicleBodyPose=nil
+        pendingVehicleSnapshot=nil
         climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         activeVehicleModel = ""
         activeHandling = nil
@@ -2659,7 +2668,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         groundVehicle?.exit()
         passengerSeat=nil;passengerFrame=nil;passengerAccumulator=0
         driving=false;currentVehicleID=nil;drivingSpeed=0;flightVerticalSpeed=0
-        vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleBodyPose=nil
+        vehiclePitch=0;vehicleFallbackRoll=0;activeModelOrigin=0;pendingVehicleSnapshot=nil
         activeVehicleModel="";activeHandling=nil;vehicleKind="car"
         pendingVehicleExit=nil;pendingExitPlacement=nil;vehicleExitSerial &+= 1
         ownRiderPlayback=nil;ownRiderPrevious=nil;ownRiderCapture=nil;ownRiderFeet=nil
@@ -2712,7 +2721,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard x.isFinite,y.isFinite,z.isFinite,direction?.isFinite != false else{return}
         pendingFootHit=nil
         ownCameraVisibility.reset()
-        pendingVehicleBodyPose=nil
+        pendingVehicleSnapshot=nil
         climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
         swimController.stop();swimming = false;underwater = false;lastFootVelocity = .zero
         personalFlight.stop();pendingParachuteOpen=false;pendingDive=false;pendingSwimJump=false

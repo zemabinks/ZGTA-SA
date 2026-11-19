@@ -4,6 +4,30 @@ The native radio player can use the owner's San Andreas PC audio files. Recordin
 
 The owner directory must contain `audio/config/StrmPaks.dat`, `audio/config/TrakLkup.dat` and the corresponding `audio/streams` files. Discovery accepts different filename casing and a surrounding game folder. The station packs, emergency radio and adverts use the existing native station scheduler and PCM player. Custom user music remains a separate playlist.
 
+## Native iOS import through Files
+
+With a prepared native installation already available, open **GAME → GAME FILES →
+EXTRACT RAW RESOURCES FROM ISO** and choose your own compatible original PC ISO.
+The app reads the ISO directly, extracts supported original resource roots into
+its separate private raw store, checks their contents and retains the selected
+generation across normal app updates. Supported radio packs are then verified
+and read locally when the radio requests them. This path needs no exported WAV
+index or replacement MP3s.
+
+The app enables Apple's local document sharing. You can transfer the ISO using
+Finder's file-sharing interface, or place it in **On My iPhone → ZGTA:SA** using
+Files, then select it in the app's normal document picker. This exposes the
+user-document folder; installation metadata, raw generations and prepared
+caches remain in Application Support. See Apple's
+[local file-sharing documentation](https://developer.apple.com/documentation/fileprovider).
+
+Raw extraction leaves the chosen ISO unchanged. It does not convert the world,
+models or all other game systems, and does not activate a playable installation
+by itself. Keep the prepared native installation; its programme metadata and
+the separately verified raw recordings serve different purposes. Invalid local
+recordings report a repair error. An installed visual cache alone is not proof
+that original audio is installed or audible.
+
 ## Complete payloads and programme choices
 
 The supplied PC lookup contains two size conventions: some records include their 8068-byte header and others describe only the audio payload. `radio_streams.js` now normalizes a payload-only record when the next valid record or file boundary proves the additional header span. It rejects an advertised range that crosses the next track. The previous reader cut 8068 bytes from affected recordings.

@@ -53,4 +53,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python3 smoke_core_127.py
+      - run: python3 smoke_core_130.py

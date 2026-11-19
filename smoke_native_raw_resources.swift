@@ -11,7 +11,7 @@ private final class Counter {
     func increment(){lock.lock();count+=1;lock.unlock()}
     var value:Int{lock.lock();defer{lock.unlock()};return count}
 }
-private func fixtureExtractor(_ counter:Counter,fail:Bool=false,duplicate:Bool=false,slow:Bool=false)->NativeRawResourceStore.Extractor{
+private func fixtureExtractor(_ counter:Counter,fail:Bool=false,duplicate:Bool=false,slow:Bool=false,physicalCaseAliases:Bool=false)->NativeRawResourceStore.Extractor{
     .init(identity:"authored-raw-fixture-v1"){_,token in
         counter.increment()
         let paths=duplicate ? ["audio/STREAMS/AUTHORED","AUDIO/streams/authored"]:["anim/authored.ifp","data/authored.dat","audio/CONFIG/Authored.dat","AUDIO/STREAMS/AUTHORED"]
@@ -20,7 +20,7 @@ private func fixtureExtractor(_ counter:Counter,fail:Bool=false,duplicate:Bool=f
             try FileManager.default.createDirectory(at:stage,withIntermediateDirectories:false)
             for (index,item) in members.enumerated(){
                 if token.isCancelled{throw NativeISOExtraction.Failure.cancelled}
-                let target=stage.appendingPathComponent(item.path)
+                let target=stage.appendingPathComponent(physicalCaseAliases ? item.path.lowercased() : item.path)
                 try FileManager.default.createDirectory(at:target.deletingLastPathComponent(),withIntermediateDirectories:true)
                 try Data(item.path.utf8).write(to:target)
                 update(.init(path:item.path,completedBytes:UInt64(index+1),totalBytes:UInt64(members.count),completedFiles:UInt32(index+1),totalFiles:UInt32(members.count)))
@@ -123,6 +123,23 @@ private final class RawService:NativeGameFilesRawService{
         check(!FileManager.default.fileExists(atPath:original.1.path),"Retired damaged generation was not cleaned after commit")
         check(try Data(contentsOf:source)==Data("authored source identity, not an original game ISO".utf8),"Extraction changed the original source")
         let protectedCatalogue=try Data(contentsOf:root.appendingPathComponent("catalogue.json"))
+        // The extractor may merge Windows directory spellings on its target
+        // filesystem. Exercise the actual persisted receipt and strict lease,
+        // rather than accepting extraction alone as successful radio intake.
+        let aliasRoot=folder.appendingPathComponent("case-alias-store"),aliasFactory=fixtureExtractor(Counter(),physicalCaseAliases:true)
+        let aliases=NativeRawResourceStore(root:aliasRoot,extractor:aliasFactory)
+        let aliasSnapshot=try extract(aliases,source).get(),aliasReceipt=try active(aliasRoot)
+        check(aliasSnapshot.verified && aliasSnapshot.files==4,"Case-aliased extraction did not commit checked output")
+        check(Set(aliasReceipt.2.resources.map{$0.path.lowercased()})==Set(original.2.resources.map{$0.path.lowercased()}),"Physical spelling changed Windows resource identities")
+        let aliasRestart=NativeRawResourceStore(root:aliasRoot,extractor:aliasFactory)
+        check(aliasRestart.snapshot.files==4 && aliasRestart.snapshot.issues.isEmpty,"Strict retained lookup could not reopen aliased extraction")
+        var aliasVerified:Result<NativeRawResourceStore.Snapshot,Error>?
+        aliasRestart.verifyRaw(progress:{_ in}){aliasVerified=$0};wait{aliasVerified != nil}
+        check(try aliasVerified!.get().verified,"Strict explicit verification failed for saved case aliases")
+        var aliasLease:Result<NativeRawResourceLease,Error>?
+        aliasRestart.acquireLocalFile(path:"AUDIO/STREAMS/AUTHORED"){aliasLease=$0};wait{aliasLease != nil}
+        let heldAlias=try aliasLease!.get();defer{heldAlias.close()}
+        check(try heldAlias.read(atOffset:0,maximumBytes:1024)==Data("AUDIO/STREAMS/AUTHORED".utf8),"Strict descriptor lease could not read the saved physical resource")
         let defaultC=NativeRawResourceStore(root:root)
         if case .success=extract(defaultC,other){preconditionFailure("Malformed ISO reached a committed raw stage")};checks+=1
         check(try Data(contentsOf:root.appendingPathComponent("catalogue.json"))==protectedCatalogue,"Actual C metadata refusal changed existing raw data")

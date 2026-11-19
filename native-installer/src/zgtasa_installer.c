@@ -248,9 +248,35 @@ static int open_directory(const char *absolute){
     if(strcmp(canonical,absolute)){free(canonical);return -1;}
     int fd=open(canonical,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);free(canonical);return fd;
 }
-static int create_parent(int root,const char *path,char **leaf){
+/* A case-insensitive host may report EEXIST for a differently cased folder,
+ * while the Simulator's descriptor lookup rejects that spelling. Resolve only
+ * that observed combination, using one unambiguous real directory entry. The
+ * retry retains O_DIRECTORY/O_NOFOLLOW; it never follows a linked alias. */
+static int open_existing_child_directory(int parent,const char *name,int existed,uint32_t scan_limit){
+    const int flags=O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC;
+    int result=openat(parent,name,flags);
+    if(result>=0||errno!=ENOENT||!existed)return result;
+    int scan=openat(parent,".",flags);if(scan<0)return -1;
+    DIR *directory=fdopendir(scan);if(!directory){int saved=errno;close(scan);errno=saved;return -1;}
+    char actual[NAME_MAX+1]={0};uint32_t visited=0,matches=0;int failure=0;
+    while(1){
+        errno=0;struct dirent *entry=readdir(directory);
+        if(!entry){if(errno)failure=errno;break;}
+        if(++visited>scan_limit){failure=E2BIG;break;}
+        if(strcasecmp(entry->d_name,name))continue;
+        if(++matches>1){failure=EEXIST;break;}
+        size_t length=strnlen(entry->d_name,sizeof(actual));
+        if(length>=sizeof(actual)){failure=ENAMETOOLONG;break;}
+        memcpy(actual,entry->d_name,length+1);
+    }
+    closedir(directory);
+    if(failure){errno=failure;return -1;}
+    if(matches!=1||!strcmp(actual,name)){errno=ENOENT;return -1;}
+    return openat(parent,actual,flags);
+}
+static int create_parent(int root,const char *path,char **leaf,uint32_t scan_limit){
     char *parts=strdup(path),*cursor=parts,*item;if(!parts)return -1;int fd=dup(root);if(fd<0){free(parts);return -1;}
-    while((item=strsep(&cursor,"/"))){if(!cursor){*leaf=strdup(item);free(parts);if(!*leaf){close(fd);return -1;}return fd;}if(mkdirat(fd,item,0700)&&errno!=EEXIST){close(fd);free(parts);return -1;}int next=openat(fd,item,O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);close(fd);if(next<0){free(parts);return -1;}fd=next;}free(parts);close(fd);return -1;
+    while((item=strsep(&cursor,"/"))){if(!cursor){*leaf=strdup(item);free(parts);if(!*leaf){close(fd);return -1;}return fd;}int made=mkdirat(fd,item,0700),make_error=errno;if(made&&make_error!=EEXIST){close(fd);free(parts);errno=make_error;return -1;}int next=open_existing_child_directory(fd,item,made!=0,scan_limit),saved=errno;close(fd);if(next<0){free(parts);errno=saved;return -1;}fd=next;}free(parts);close(fd);return -1;
 }
 static void clear_directory(int fd){
     DIR *directory=fdopendir(dup(fd));if(!directory)return;struct dirent *item;
@@ -275,7 +301,7 @@ int zgta_installer_extract(zgta_installer *h,const uint32_t *indices,uint32_t co
     if(stage<0){fail(h,"Cannot open newly created stage");goto cleanup;}
     h->job_written=0;h->job_expected=total;h->job_done=0;h->job_count=count;h->progress=progress;h->progress_context=context;
     for(uint32_t i=0;i<count;i++){
-        if(stopped(h))goto cleanup;Entry *entry=&h->entries[indices[i]];char *file_leaf=NULL;int output_parent=create_parent(stage,entry->path,&file_leaf);if(output_parent<0){fail(h,"Cannot create safe staged member directory");goto cleanup;}
+        if(stopped(h))goto cleanup;Entry *entry=&h->entries[indices[i]];char *file_leaf=NULL;int output_parent=create_parent(stage,entry->path,&file_leaf,h->limits.max_entries+h->limits.max_directories+2);if(output_parent<0){int saved=errno;fail(h,"Cannot create safe staged member directory: %s (errno %d: %s)",entry->path,saved,strerror(saved));goto cleanup;}
         char temp[64];snprintf(temp,sizeof(temp),".zgta-part-%u",i);h->output_fd=openat(output_parent,temp,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);
         if(h->output_fd<0){free(file_leaf);close(output_parent);fail(h,"Cannot create new staged member");goto cleanup;}
         h->current_written=0;h->current_expected=entry->bytes;h->current_path=entry->path;int extracted=0;

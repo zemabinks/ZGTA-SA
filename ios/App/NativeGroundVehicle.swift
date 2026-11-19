@@ -235,9 +235,10 @@ final class NativeGroundVehicle {
         let position=SwiftRapierWorld.rapierToGTA(current.position)
         let pose=NativeUnattendedVehicle.Pose(position:SIMD3<Double>(current.position),rotation:NativeUnattendedVehicle.quaternion(current.rotation))
         let angle=NativeUnattendedVehicle.euler(pose.rotation),rotor=dynamics?.flight?.turning ?? 0,gear=landingGearUp
+        let spin=SIMD2(wheelClocks[0],wheelClocks[1])
         let source=NativeOtherVehicles.Pose(id:id,code:code,position:position,heading:Float(-angle.heading),pitch:Float(angle.pitch),roll:Float(-angle.roll),health:health,damage:damage,work:work)
         exit()
-        others.park(source,physicalPose:pose,linear:SIMD3<Double>(current.linearVelocity),angular:SIMD3<Double>(current.angularVelocity),rotor:rotor,gearUp:gear)
+        others.park(source,physicalPose:pose,linear:SIMD3<Double>(current.linearVelocity),angular:SIMD3<Double>(current.angularVelocity),rotor:rotor,gearUp:gear,wheelSpin:spin)
     }
     private var definitions: [String: Definition] = [:]
     private var couplingDefinitions:[String:CouplingDefinition] = [:]
@@ -348,6 +349,12 @@ final class NativeGroundVehicle {
     private var wheelClocks = [Double](repeating:0,count:4)
     var wheelAngles:[Float] {wheelClocks.map(Float.init)}
     var wheelAnglesDouble:[Double] {wheelClocks}
+    /// Visual axle counters only; body, momentum and solver contacts retain
+    /// their existing entry policy. Invalid external counters start at zero.
+    func restoreWheelSpin(front:Double,rear:Double) {
+        let front=front.isFinite ? front:0,rear=rear.isFinite ? rear:0
+        wheelClocks=[front,rear,front,rear]
+    }
     private(set) var modelPosition = SIMD3<Float>.zero
     private(set) var bodyPosition = SIMD3<Float>.zero
     private(set) var modelTransform = matrix_identity_float4x4

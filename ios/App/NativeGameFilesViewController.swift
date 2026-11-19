@@ -73,7 +73,7 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         configure(rawDetail);rawDetail.accessibilityIdentifier="gamefiles.rawStatus"
         configure(inspection);inspection.isHidden=true
         column.addArrangedSubview(panel("ORIGINAL GAME SOURCE",[
-            note("Select your own original San Andreas ISO. Extraction saves and checks original anim, data, models, text, audio and movies resources in app-owned storage. Windows components are excluded. The ISO is read directly and remains unchanged. RAW RESOURCES ARE NOT PLAYABLE: native conversion is a separate step and is not performed here."),extract,verifyRawButton,rawDetail,inspect,inspection]))
+            note("Select your own original San Andreas ISO in Files. You can transfer it to ZGTA:SA through Finder file sharing, or place it in On My iPhone > ZGTA:SA. Extraction saves and checks original game resources; it leaves the ISO unchanged and excludes Windows components. Supported original radio packs can be read locally alongside a prepared native installation. World, models and other raw resources still require native conversion; extraction alone does not enable gameplay."),extract,verifyRawButton,rawDetail,inspect,inspection]))
 
         progressPanel.axis = .vertical;progressPanel.spacing=8
         progressTitle.font=menuFont(size:23);progressTitle.textColor = .white;progressTitle.numberOfLines=0
@@ -87,7 +87,7 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         progressPanel.addArrangedSubview(heading);progressPanel.addArrangedSubview(progress)
         progressPanel.addArrangedSubview(progressDetail);progressPanel.addArrangedSubview(cancelButton)
         column.addArrangedSubview(progressPanel)
-        configure(result);result.accessibilityTraits.insert(.updatesFrequently);column.addArrangedSubview(result)
+        configure(result);result.accessibilityIdentifier="gamefiles.result";result.accessibilityTraits.insert(.updatesFrequently);column.addArrangedSubview(result)
         column.addArrangedSubview(note("You may leave this screen while an operation runs. Return here for progress. Resources, source files and multiplayer account settings are kept separate."))
     }
     override func viewWillAppear(_ animated:Bool){
@@ -123,7 +123,7 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         verifyButton.isEnabled = !state.busy && resources.installedContentID != nil
         verifyRawButton.isEnabled = !state.busy && state.raw.sourceID != nil
         if let source=state.raw.sourceID {
-            rawDetail.text="SAVED RAW RESOURCES · \(state.raw.files) files · \(bytes(state.raw.bytes))\n\(state.raw.sourceName ?? "Original ISO")\nSource identity: \(source)\n\(state.raw.verified ? "Raw file checks completed.":"Retained across restarts; verify to recheck raw file contents.") Native conversion is still required."
+            rawDetail.text="SAVED RAW RESOURCES · \(state.raw.files) files · \(bytes(state.raw.bytes))\n\(state.raw.sourceName ?? "Original ISO")\nSource identity: \(source)\n\(state.raw.verified ? "Raw file checks completed.":"Retained across restarts; verify to recheck raw file contents.") Supported radio packs are checked again when used. Other raw resources still require native conversion."
         }else{rawDetail.text="No saved raw resource set. Prepared native installations and raw ISO extraction are separate."}
         if !state.raw.issues.isEmpty{rawDetail.text=(rawDetail.text ?? "")+"\n"+state.raw.issues.prefix(6).joined(separator:"\n")}
         origin.isEnabled = !state.busy

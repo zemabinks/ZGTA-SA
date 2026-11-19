@@ -322,17 +322,20 @@ final class NativeOtherVehicles {
         }
         let result=snapshot(id);remove(id);return result
     }
-    func park(_ source:Pose,physicalPose:Pose3?=nil,linear:V = .zero,angular:V = .zero,rotor:Double=0,gearUp:Bool=false) {
+    func park(_ source:Pose,physicalPose:Pose3?=nil,linear:V = .zero,angular:V = .zero,rotor:Double=0,gearUp:Bool=false,wheelSpin:SIMD2<Double> = .zero) {
         remove(source.id)
         let model=String(source.code.split(separator:".").first ?? "")
         guard let definition=definitions[model] else{return}
         let entry=Entry(source,model:model,definition:definition,pose:physicalPose ?? Self.pose(source))
         entry.rotor=rotor;entry.gearUp=gearUp
+        entry.frontSpin=wheelSpin.x.isFinite ? wheelSpin.x:0
+        entry.rearSpin=wheelSpin.y.isFinite ? wheelSpin.y:0
         entry.floorAligned=true;entries[source.id]=entry;order.append(source.id)
         if definition.configuration.kind=="train"{makeKinematic(entry)}
         else {
             entry.rig=NativeUnattendedVehicle(world:world,definition:definition,pose:entry.pose,linear:linear,angular:angular,health:Double(source.health),damage:source.damage,rotor:rotor,gearUp:gearUp,
                 waterLevel:{[weak self] in self?.waterLevel?($0)},waterWave:{[weak self] in self?.waterWave?($0) ?? .init(height:0,normal:V(0,1,0))})
+            entry.rig?.restoreWheelSpin(front:entry.frontSpin,rear:entry.rearSpin)
             entry.rig?.random=random;entry.sentAt = -Double.infinity
             if let rig=entry.rig{entry.fallen=rig.fallen}else{makeKinematic(entry)}
             applyWorkingCollisionPose(entry)

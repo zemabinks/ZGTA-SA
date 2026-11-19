@@ -108,7 +108,7 @@ final class NativeRawResourceStore {
         guard info.isDirectory==true,info.isSymbolicLink != true else{throw Failure.invalid("Saved raw-resource stage is missing")}
         return path
     }
-    private func resourceURL(_ path:String,at stage:URL)throws->URL{
+    private func resourceURL(_ path:String,at stage:URL,extractedCaseAliases:Bool=false)throws->URL{
         guard Self.validPath(path),!path.contains(":"),!path.contains("\\") else{throw Failure.invalid("Invalid saved raw-resource path")}
         var result=stage.appendingPathComponent("files",isDirectory:true)
         let components=path.split(separator:"/",omittingEmptySubsequences:false)
@@ -116,11 +116,28 @@ final class NativeRawResourceStore {
             guard !component.isEmpty,component != ".",component != "..",component.utf8.count<=255 else{throw Failure.invalid("Unsafe saved raw-resource path")}
             let parent=try result.resourceValues(forKeys:[.isDirectoryKey,.isSymbolicLinkKey])
             guard parent.isDirectory==true,parent.isSymbolicLink != true else{throw Failure.invalid("Raw resource directory was replaced or linked")}
-            result.appendPathComponent(String(component))
-            if index==components.count-1{
-                let leaf=try result.resourceValues(forKeys:[.isRegularFileKey,.isSymbolicLinkKey])
-                guard leaf.isRegularFile==true,leaf.isSymbolicLink != true else{throw Failure.invalid("Raw resource is missing or linked: "+path)}
+            var child=result.appendingPathComponent(String(component))
+            let keys:Set<URLResourceKey>=[.isDirectoryKey,.isRegularFileKey,.isSymbolicLinkKey]
+            let info:URLResourceValues
+            do{info=try child.resourceValues(forKeys:keys)}
+            catch{
+                let failure=error as NSError
+                let missing=(failure.domain==NSPOSIXErrorDomain && failure.code==Int(ENOENT)) ||
+                    (failure.domain==NSCocoaErrorDomain && [NSFileNoSuchFileError,NSFileReadNoSuchFileError].contains(failure.code))
+                guard extractedCaseAliases && missing else{throw error}
+                // Only the new, locked extraction stage may resolve a Windows
+                // case alias. Persist its physical spelling so later leases
+                // retain strict descriptor traversal with no lookup fallback.
+                let names=try files.contentsOfDirectory(atPath:result.path)
+                guard names.count<=16_384 else{throw Failure.invalid("Raw resource directory exceeds its entry bound")}
+                let matches=names.filter{$0.lowercased()==component.lowercased()}
+                guard matches.count==1,let actual=matches.first,actual != String(component) else{throw error}
+                child=result.appendingPathComponent(actual)
+                info=try child.resourceValues(forKeys:keys)
             }
+            guard info.isSymbolicLink != true,
+                  index==components.count-1 ? info.isRegularFile==true : info.isDirectory==true else{throw Failure.invalid("Raw resource is missing, linked or has the wrong type: "+path)}
+            result=child
         }
         return result
     }
@@ -236,9 +253,13 @@ final class NativeRawResourceStore {
             }
             var resources:[Resource]=[],done:Int64=0
             for (index,item) in members.enumerated(){
-                try operation.check();let path=try self.resourceURL(item.path,at:stage),actual=try self.hash(path,operation:operation)
+                try operation.check();let path=try self.resourceURL(item.path,at:stage,extractedCaseAliases:true),actual=try self.hash(path,operation:operation)
                 guard actual.0==Int64(item.bytes) else{throw Failure.invalid("Raw resource size mismatch: "+item.path)}
-                resources.append(.init(path:item.path,bytes:actual.0,sha256:actual.1,group:item.group,source:Int(item.source.rawValue)))
+                let prefix=stage.appendingPathComponent("files",isDirectory:true).path+"/"
+                guard path.path.hasPrefix(prefix) else{throw Failure.invalid("Extracted raw resource escaped its stage")}
+                let storedPath=String(path.path.dropFirst(prefix.count))
+                guard storedPath.lowercased()==item.path.lowercased() else{throw Failure.invalid("Extracted raw resource changed its identity")}
+                resources.append(.init(path:storedPath,bytes:actual.0,sha256:actual.1,group:item.group,source:Int(item.source.rawValue)))
                 done+=actual.0;update(.init(phase:"Checking extracted raw resources",completedFiles:index+1,totalFiles:members.count,completedBytes:done,totalBytes:total,currentPath:item.path))
             }
             guard try self.sourceStamp(source)==before else{throw Failure.invalid("The original ISO changed during extraction; retry with an unchanged source")}

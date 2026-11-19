@@ -171,7 +171,7 @@ final class NativeGameFilesCoordinator {
         switch result {
         case .success(let snapshot):
             self.state.raw=snapshot;self.state.failed=false
-            self.state.message=(cancelling ? "The raw operation completed before cancellation took effect. ":"")+"Raw resources prepared and checked. Native conversion is still required; no playable installation was activated."
+            self.state.message=(cancelling ? "The raw operation completed before cancellation took effect. ":"")+"Raw resources prepared and checked. Supported original radio can be used with prepared native resources. Native conversion is still required for the remaining raw resources; no playable installation was activated."
         case .failure(let error):
             self.state.raw=self.rawService?.snapshot ?? .empty;self.state.failed = !cancelling
             self.state.message=cancelling ? "Raw operation cancelled. Previously saved raw and installed resources are preserved.":error.localizedDescription
