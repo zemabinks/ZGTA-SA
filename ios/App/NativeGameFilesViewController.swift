@@ -11,7 +11,7 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
     private let progress=UIProgressView(progressViewStyle:.default),spinner=UIActivityIndicatorView(style:.medium)
     private let origin=UITextField(),progressPanel=UIStackView()
     private var sourceButtons:[UIButton]=[],observer:UUID?
-    private var developmentButton:UIButton!,installedButton:UIButton!,verifyButton:UIButton!,cancelButton:UIButton!,verifyRawButton:UIButton!
+    private var developmentButton:UIButton!,installedButton:UIButton!,verifyButton:UIButton!,cancelButton:UIButton!,verifyRawButton:UIButton!,checkNavigationButton:UIButton!
     private var active=false,originInitialized=false,pickerKind:PickerKind?
     private enum PickerKind {case preparedFolder,iso,extractISO}
 
@@ -70,10 +70,12 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         extract.accessibilityIdentifier="gamefiles.extractRawISO";sourceButtons.append(extract)
         verifyRawButton=menuButton("VERIFY SAVED RAW RESOURCES"){[weak self] in self?.coordinator.verifyRawResources()}
         verifyRawButton.accessibilityIdentifier="gamefiles.verifyRaw";sourceButtons.append(verifyRawButton)
+        checkNavigationButton=menuButton("CHECK ORIGINAL NAVIGATION"){[weak self] in self?.coordinator.validateOriginalNavigation()}
+        checkNavigationButton.accessibilityIdentifier="gamefiles.checkNavigation";sourceButtons.append(checkNavigationButton)
         configure(rawDetail);rawDetail.accessibilityIdentifier="gamefiles.rawStatus"
         configure(inspection);inspection.isHidden=true
         column.addArrangedSubview(panel("ORIGINAL GAME SOURCE",[
-            note("Select your own original San Andreas ISO in Files. You can transfer it to ZGTA:SA through Finder file sharing, or place it in On My iPhone > ZGTA:SA. Extraction saves and checks original game resources; it leaves the ISO unchanged and excludes Windows components. Supported original radio packs can be read locally alongside a prepared native installation. World, models and other raw resources still require native conversion; extraction alone does not enable gameplay."),extract,verifyRawButton,rawDetail,inspect,inspection]))
+            note("Select your own original San Andreas ISO in Files. You can transfer it to ZGTA:SA through Finder file sharing, or place it in On My iPhone > ZGTA:SA. Extraction saves and checks original game resources; it leaves the ISO unchanged and excludes Windows components. Supported original radio packs can be read locally alongside a prepared native installation. World, models and other raw resources still require native conversion; extraction alone does not enable gameplay."),extract,verifyRawButton,checkNavigationButton,rawDetail,inspect,inspection]))
 
         progressPanel.axis = .vertical;progressPanel.spacing=8
         progressTitle.font=menuFont(size:23);progressTitle.textColor = .white;progressTitle.numberOfLines=0
@@ -122,6 +124,7 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         installedButton.isEnabled = !state.busy && resources.hasPlayableInstallation
         verifyButton.isEnabled = !state.busy && resources.installedContentID != nil
         verifyRawButton.isEnabled = !state.busy && state.raw.sourceID != nil
+        checkNavigationButton.isEnabled = !state.busy && state.raw.sourceID != nil
         if let source=state.raw.sourceID {
             rawDetail.text="SAVED RAW RESOURCES · \(state.raw.files) files · \(bytes(state.raw.bytes))\n\(state.raw.sourceName ?? "Original ISO")\nSource identity: \(source)\n\(state.raw.verified ? "Raw file checks completed.":"Retained across restarts; verify to recheck raw file contents.") Supported radio packs are checked again when used. Other raw resources still require native conversion."
         }else{rawDetail.text="No saved raw resource set. Prepared native installations and raw ISO extraction are separate."}

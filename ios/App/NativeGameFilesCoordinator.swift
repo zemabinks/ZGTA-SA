@@ -49,8 +49,8 @@ private final class NativeGameFilesRawStoreService:NativeGameFilesRawService {
 /// App-owned presentation state survives navigation away from Game Files.
 /// All public calls and callbacks use the main thread; installation work does not.
 final class NativeGameFilesCoordinator {
-    static let shared=NativeGameFilesCoordinator(service:NativeGameFilesStoreService(.shared),rawService:NativeGameFilesRawStoreService(.shared),originPreference:.userDefaults)
-    enum Kind:String {case importing="Importing prepared resources",verifying="Verifying installed resources",caching="Caching development resources",inspecting="Inspecting ISO source",extracting="Extracting original raw resources",verifyingRaw="Verifying saved raw resources"}
+    static let shared=NativeGameFilesCoordinator(service:NativeGameFilesStoreService(.shared),rawService:NativeGameFilesRawStoreService(.shared),originPreference:.userDefaults,navigationLoader:NativeOriginalNavigationLoader(source:NativeRawResourceStore.shared))
+    enum Kind:String {case importing="Importing prepared resources",verifying="Verifying installed resources",caching="Caching development resources",inspecting="Inspecting ISO source",extracting="Extracting original raw resources",verifyingRaw="Verifying saved raw resources",validatingNavigation="Checking original navigation"}
     struct Activity {let id:UUID;let kind:Kind;var progress:NativeResourceStore.Progress?;var cancelling=false}
     struct State {
         var resources:NativeResourceStore.Snapshot
@@ -77,6 +77,7 @@ final class NativeGameFilesCoordinator {
         }
     }
     private let service:NativeGameFilesService,scope:SecurityScope,rawService:NativeGameFilesRawService?,originPreference:OriginPreference?
+    private let navigationLoader:NativeOriginalNavigationLoader?
     private var serviceObserver:UUID?
     private var observers:[UUID:(State)->Void]=[:]
     // An injected coordinator also keeps its asynchronous job and provider
@@ -89,8 +90,8 @@ final class NativeGameFilesCoordinator {
     private(set) var state:State
 
     convenience init(store:NativeResourceStore,scope:SecurityScope=SecurityScope()){self.init(service:NativeGameFilesStoreService(store),scope:scope)}
-    init(service:NativeGameFilesService,scope:SecurityScope=SecurityScope(),rawService:NativeGameFilesRawService?=nil,originPreference:OriginPreference?=nil){
-        self.service=service;self.scope=scope;self.rawService=rawService;self.originPreference=originPreference;state=State(resources:service.snapshot)
+    init(service:NativeGameFilesService,scope:SecurityScope=SecurityScope(),rawService:NativeGameFilesRawService?=nil,originPreference:OriginPreference?=nil,navigationLoader:NativeOriginalNavigationLoader?=nil){
+        self.service=service;self.scope=scope;self.rawService=rawService;self.originPreference=originPreference;self.navigationLoader=navigationLoader;state=State(resources:service.snapshot)
         state.raw=rawService?.snapshot ?? .empty
         state.requestedOrigin=originPreference?.read().flatMap(Self.normalizedOrigin)?.absoluteString
         serviceObserver=service.observe{[weak self] snapshot in
@@ -176,6 +177,36 @@ final class NativeGameFilesCoordinator {
             self.state.raw=self.rawService?.snapshot ?? .empty;self.state.failed = !cancelling
             self.state.message=cancelling ? "Raw operation cancelled. Previously saved raw and installed resources are preserved.":error.localizedDescription
         }
+        self.publish()
+    }}
+    @discardableResult func validateOriginalNavigation()->Bool{
+        precondition(Thread.isMainThread)
+        guard let navigationLoader else{
+            guard !state.busy else{return false}
+            state.message="Original navigation checks are unavailable in this configuration.";state.failed=true;publish();return false
+        }
+        guard let id=start(.validatingNavigation)else{return false}
+        let operation=navigationLoader.validate(.exteriorDiagnostic,progress:{[weak self] value in
+            self?.progress(.init(phase:value.phase,completedFiles:value.completedAreas,totalFiles:value.totalAreas,
+                completedBytes:value.completedBytes,totalBytes:value.totalBytes,currentPath:value.currentPath),id:id)
+        },completion:{[weak self] result in self?.finishNavigation(result,id:id)})
+        attach({operation.cancel()},to:id);return true
+    }
+    private func finishNavigation(_ result:Result<NativeOriginalNavigationLoader.Snapshot,Error>,id:UUID){onMain{[weak self] in
+        guard let self,self.state.activity?.id==id else{return}
+        let cancelling=self.state.activity?.cancelling==true
+        self.cancellation=nil;self.releaseSource?();self.releaseSource=nil;self.state.activity=nil;self.activeLifetime=nil
+        self.state.raw=self.rawService?.snapshot ?? .empty
+        switch result {
+        case .success(let navigation):
+            self.state.failed=false
+            self.state.message="Original navigation checked: \(navigation.summary.areas) areas. Pedestrian and vehicle route queries passed."
+        case .failure(let error):
+            self.state.failed = !cancelling
+            self.state.message=cancelling ? "Original navigation check cancelled. Saved resources are preserved.":error.localizedDescription
+        }
+        // No graph/lease is retained by presentation state and no installed
+        // mode, playable admission, startup path or network entity is changed.
         self.publish()
     }}
     @discardableResult func cacheDevelopment(_ text:String)->Bool{

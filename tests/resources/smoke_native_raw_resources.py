@@ -11,7 +11,7 @@ import hashlib,json,subprocess,tempfile,os
 from tests.resources.native_raw_test_support import pinned_host_archive
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/research/raw-resource-compat'
-NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeOriginalPathQuery','NativeOriginalNavigationLoader','NativeGameFilesCoordinator']
 def main():
  OUT.mkdir(parents=True,exist_ok=True)
  library=pinned_host_archive(os.environ.get('ZGTA_RAW_TEST_ARCHIVE'))
@@ -21,7 +21,7 @@ def main():
   work=Path(folder);sources=[]
   for path in paths:
    if path.suffix=='.swift':copy=work/path.name;copy.write_bytes(path.read_bytes());sources.append(copy)
-  command=['xcrun','swiftc','-parse-as-library','-I',str(ROOT/'native-installer/include'),'-module-cache-path',str(OUT/'modules'),*map(str,sources),str(library),'-lz','-o',str(work/'raw')]
+  command=['xcrun','swiftc','-j','1','-num-threads','1','-parse-as-library','-I',str(ROOT/'native-installer/include'),'-module-cache-path',str(OUT/'modules'),*map(str,sources),str(library),'-lz','-o',str(work/'raw')]
   run=subprocess.run(command,capture_output=True,text=True);(OUT/'compile.log').write_text(run.stdout+run.stderr)
   if run.returncode:print(run.stdout+run.stderr);run.check_returncode()
   command=[str(work/'raw'),str(work)]

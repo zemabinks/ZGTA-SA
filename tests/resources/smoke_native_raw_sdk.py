@@ -10,7 +10,7 @@ from pathlib import Path
 import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/research/raw-resource-sdk'
-NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeOriginalPathQuery','NativeOriginalNavigationLoader','NativeGameFilesCoordinator']
 PANEL='''import UIKit
 class NativeDEPanelViewController:UIViewController {
  let contentView=UIView();var menuMotionReduced:Bool{false}
@@ -38,7 +38,7 @@ def main():
   for sdk,targets,archive in [('iphoneos',['arm64-apple-ios16.0'],'device'),('iphonesimulator',['arm64-apple-ios16.0-simulator','x86_64-apple-ios16.0-simulator'],'simulator')]:
    sdkpath=subprocess.check_output(['xcrun','--sdk',sdk,'--show-sdk-path'],text=True).strip()
    for target in targets:
-    base=['xcrun','--sdk',sdk,'swiftc','-sdk',sdkpath,'-target',target,'-I',str(ROOT/'native-installer/include'),'-module-cache-path',str(OUT/'modules')]
+    base=['xcrun','--sdk',sdk,'swiftc','-j','1','-num-threads','1','-sdk',sdkpath,'-target',target,'-I',str(ROOT/'native-installer/include'),'-module-cache-path',str(OUT/'modules')]
     command=base+['-parse-as-library',*map(str,sources),str(work/'LinkMain.swift'),str(ROOT/'local-only/native-installer'/archive/'libzgtasa_installer.a'),'-lz','-o',str(OUT/('raw-link-'+target))]
     run=subprocess.run(command,capture_output=True,text=True);(OUT/('link-'+target+'.log')).write_text(run.stdout+run.stderr)
     if run.returncode:print(run.stdout+run.stderr);run.check_returncode()

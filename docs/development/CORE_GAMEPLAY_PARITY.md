@@ -1,5 +1,11 @@
 # Core GTA San Andreas gameplay parity
 
+## 2026-11-19 — Original navigation foundation (142)
+
+An explicit Game Files action now decodes verified original pedestrian and vehicle navigation data and performs nearest-node and route queries. The native loader checks copied bytes and source/content/selection/generation identity, closes leases after each bounded read, supports cancellation and survives screen dismissal. The new source gate runs authored DAT fixtures through actual raw-store, lease and coordinator implementations; its lifecycle fixture passes 252 checks. Existing file-management and bounded ISO tests pass 67 and 23 checks.
+
+This establishes a resource/query foundation. It does not implement ambient pedestrians, traffic, original CPathFind route policy, dynamic road changes, lane following, signals, population ownership or police. No local actors are inserted into external multiplayer worlds. SDK and normal installed-menu acceptance are recorded separately in the navigation release PR; original-game behavior and retail parity remain unverified.
+
 ## 2026-11-19 — Self-host breathing lifetimes (140)
 
 Fresh independent-server connections now reinitialize the native oxygen pool once per accepted connection namespace. Disconnects and duplicate notifications do not grant air, and the operation preserves movement, facing, stamina, health and animation state. Legacy SA-MP/open.mp and the original browser-world adapter retain their own lifecycle semantics.
