@@ -119,8 +119,19 @@ function create({siteRoot, configuration}) {
   const plan = JSON.parse(fs.readFileSync(configuration,'utf8'));
   requireValue(plan?.enabled === true && typeof plan.source?.path === 'string', 'explicit enabled owner source');
   const root = fs.realpathSync(siteRoot), target = fs.realpathSync(plan.source.path);
-  const relative = path.relative(root,target);
-  requireValue(relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative), 'owner source is outside site root');
+  let relative;
+  if (Object.hasOwn(plan.source,'relativePath')) {
+    // An owner may retain archive bytes behind read-only directory/file
+    // aliases. This capability selects one explicit logical script route;
+    // requests never supply a filesystem target or an alias permission.
+    relative=plan.source.relativePath;
+    requireValue(typeof relative==='string' && relative.length<=1024 &&
+      /^[\x21-\x7e]+\.js$/.test(relative) && !relative.includes('\\') && !relative.includes(':') &&
+      relative.split('/').every(part=>part && part!=='.' && part!=='..'), 'invalid owner script route');
+  } else {
+    relative = path.relative(root,target);
+    requireValue(relative && relative !== '..' && !relative.startsWith('..' + path.sep) && !path.isAbsolute(relative), 'owner source is outside site root');
+  }
   const route = path.resolve(siteRoot,relative), declared = path.resolve(plan.source.path);
   function read() {
     requireValue(fs.realpathSync(siteRoot) === root && fs.realpathSync(route) === target, 'owner source path changed');

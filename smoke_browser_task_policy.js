@@ -111,6 +111,43 @@ try {
   fs.unlinkSync(target);fs.writeFileSync(target,source);
   const outside=clone(configured);outside.source.path=config;fs.writeFileSync(config,JSON.stringify(outside));
   checks++;assert.throws(()=>create({siteRoot:root,configuration:config}),/outside site root/);
+
+  // Real archive aliases: one explicitly selected logical route, with its
+  // original target and complete source identity pinned independently.
+  const bank=path.join(directory,'authored-bank'),otherBank=path.join(directory,'other-bank');
+  fs.mkdirSync(bank);fs.mkdirSync(otherBank);fs.mkdirSync(path.join(root,'_next'));
+  for(const folder of [bank,otherBank])fs.writeFileSync(path.join(folder,'authored.js'),source);
+  const link=path.join(root,'_next/chunks');fs.symlinkSync(bank,link);
+  const alias=path.join(link,'authored.js'),aliased=clone(plan);aliased.source.path=alias;
+  fs.writeFileSync(config,JSON.stringify(aliased));
+  checks++;assert.throws(()=>create({siteRoot:root,configuration:config}),/outside site root/,'legacy mode must remain strict');
+  aliased.source.relativePath='_next/chunks/authored.js';fs.writeFileSync(config,JSON.stringify(aliased));
+  const archiveProvider=create({siteRoot:root,configuration:config});
+  equal(archiveProvider.matches(alias),true,'explicit logical archive route');
+  equal(archiveProvider.read().equals(output),true,'nested read-only alias retains pinned transformation');
+  equal(archiveProvider.matches(path.join(bank,'other.js')),false,'one alias cannot expose an unrelated file');
+  equal(fs.readFileSync(path.join(bank,'authored.js')).equals(source),true,'provider never rewrites archived source');
+  for(const relativePath of ['../bank/authored.js','/authored.js','_next//authored.js','_next/./authored.js',
+    '_next/../authored.js','C:/authored.js','_next\\authored.js','_next/authored.css','_next/a .js']) {
+    const invalid=clone(aliased);invalid.source.relativePath=relativePath;fs.writeFileSync(config,JSON.stringify(invalid));
+    checks++;assert.throws(()=>create({siteRoot:root,configuration:config}),/invalid owner script route/);
+  }
+  const wrong=clone(aliased);wrong.source.path=target;fs.writeFileSync(config,JSON.stringify(wrong));
+  checks++;assert.throws(()=>create({siteRoot:root,configuration:config}),/source path changed/,'same bytes at another target do not authorize the route');
+  fs.writeFileSync(config,JSON.stringify(aliased));
+  fs.unlinkSync(link);fs.symlinkSync(otherBank,link);
+  checks++;assert.throws(()=>archiveProvider.read(),/source path changed/,'alias retargeting fails even with identical file bytes');
+  fs.unlinkSync(link);fs.symlinkSync(bank,link);
+  equal(archiveProvider.read().equals(output),true,'restored pinned target');
+  fs.appendFileSync(path.join(bank,'authored.js'),' ');
+  checks++;assert.throws(()=>archiveProvider.read(),/source identity/,'aliased source drift cannot fall through');
+  equal(archiveProvider.matches(alias),true,'drift retains route ownership');
+  fs.writeFileSync(path.join(bank,'authored.js'),source);
+  const logicalRoot=path.join(directory,'logical-site');fs.symlinkSync(root,logicalRoot);
+  const rootProvider=create({siteRoot:logicalRoot,configuration:config});
+  equal(rootProvider.read().equals(output),true,'root and nested aliases may coexist');
+  fs.unlinkSync(logicalRoot);fs.symlinkSync(otherBank,logicalRoot);
+  checks++;assert.throws(()=>rootProvider.read(),/source path changed/,'root identity remains fixed');
 } finally {fs.rmSync(directory,{recursive:true,force:true});}
 console.log(`PASS browser task policy: ${checks} authored selection/owner/pin/route checks; original assets stay separate`);
 module.exports={source,plan,output};

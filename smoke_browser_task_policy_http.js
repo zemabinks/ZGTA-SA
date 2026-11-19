@@ -18,9 +18,15 @@ async function main(){
  fs.writeFileSync(path.join(site,'game/world/collision.json'),'{"cells":[]}');
  const state=path.join(temporary,'local-only/selfhost');fs.mkdirSync(state,{recursive:true});
  fs.writeFileSync(path.join(state,'client-catalog.json'),'{"vehicles":[],"homes":[]}');
- const target=path.join(site,'_next/static/chunks/policy-fixture.js');fs.writeFileSync(target,fixture.source);
+ const target=path.join(site,'_next/static/chunks/policy-fixture.js');
+ const aliasMode=process.argv.includes('--archive-alias');
+ if(aliasMode){
+  const bank=path.join(temporary,'authored-archive');fs.mkdirSync(bank);
+  const physical=path.join(bank,'policy-fixture.js');fs.writeFileSync(physical,fixture.source);fs.symlinkSync(physical,target);
+ }else{fs.writeFileSync(target,fixture.source);}
  fs.writeFileSync(path.join(site,'_next/static/chunks/unrelated.js'),'// independently authored unrelated file');
  const plan=JSON.parse(JSON.stringify(fixture.plan));plan.source.path=target;
+ if(aliasMode)plan.source.relativePath='_next/static/chunks/policy-fixture.js';
  fs.writeFileSync(path.join(temporary,'local-only/browser-task-policy.json'),JSON.stringify(plan));
  const port=await freePort(),origin=`http://127.0.0.1:${port}`;
  child=spawn(process.execPath,['serve_local.js'],{cwd:temporary,env:{...process.env,ZGTA_SELFHOST:'1',ZGTA_CONNECTED:'0',

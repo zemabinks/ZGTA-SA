@@ -20,6 +20,15 @@ checks do not establish its semantic correctness. Validate it against the
 actual owned controller before enabling it. Unrecognized revisions need a new
 local audit and pin plan; there is no best-effort replacement.
 
+For an archive kept behind directory or file aliases, the private plan may
+explicitly set `source.relativePath` to its single logical `.js` route inside
+the served archive. This is a relative path with no empty, dot, parent, drive
+or backslash components. The route must resolve to the exact declared source
+target, and the root, target and full byte identities are checked again on
+each read. Retargeting an alias fails closed even if its replacement has the
+same bytes. Plans without this field retain the physical-root restriction.
+This option does not grant request-driven filesystem access.
+
 Only self-hosted mode uses this adapter. The existing Host, Origin and join-code
 checks run first. The selected script is returned as a complete, no-store
 response; GET and HEAD are supported, and byte-range requests cannot expose
@@ -28,6 +37,7 @@ their existing paths. Serving never rewrites the owner's archived script.
 
 ```sh
 node smoke_browser_task_policy_http.js
+node smoke_browser_task_policy_http.js --archive-alias
 ```
 
 This runs authored controller/plan fixtures and the real isolated HTTP server.
