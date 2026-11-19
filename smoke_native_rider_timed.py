@@ -81,8 +81,11 @@ def carrier(renderer, historical=None):
     passenger_reset = next(line for line in passenger_enter.splitlines() if 'vehicleExitSerial &+= 1' in line)
     # Fail closed on a moved/extra consumer or changed fallback ownership.
     assert draw.count('.update(interval:riderPoseInterval,') == 4
-    assert draw.count('.update(delta:riderDelta,') == 6
-    assert draw.count('delta:riderDelta,') == 7
+    foot_clocked = 'animator.update(at:riderTime,' in draw
+    assert draw.count('.update(delta:riderDelta,') == 6-int(foot_clocked)
+    assert draw.count('delta:riderDelta,') == 7-int(foot_clocked)
+    if foot_clocked:
+        assert draw.count('animator.update(at:riderTime,') == 1
     assert draw.count('playback.enter(') == 4 and draw.count('playback.leave(') == 2
     assert 'guard let drawable = view.currentDrawable' not in draw
     drawable = renderer.index('view.currentDrawable')
@@ -102,6 +105,7 @@ final class DispatchQueue {
     func flush(){let all=queued;queued=[];all.forEach{$0()}}
 }
 struct RenderClock {var resets=0;mutating func reset(){resets+=1}}
+final class RemoteFootClockSpy {var resets=0;func resetDisplayClock(){resets+=1}}
 final class Actor {}
 struct Player {
     var id="remote",vehicleID:String?="car",ridingSeat=1,action=1,life=100
@@ -141,6 +145,7 @@ final class RendererCarrier {
     var passengerFrame:Shared?,groundVehicle:Ground?=Ground()
     var remoteRiderPlayback:[String:(String,NativeRiderPlayback)]=[:],remoteRiderActions:[String:Int]=[:]
     var remoteRiderCapture:[String:Int]=[:],remoteRiderPrevious:[String:Int]=[:]
+    var remoteFootAnimations:[String:(String,RemoteFootClockSpy)]=[:]
     init(){riderMonotonicNow = {[unowned self] in self.now}}
     static func sharedDoorOpen(_ part:Int?,damage:String)->Bool{false}
 ''' + block(renderer, '    func resetDisplayClock()') + '\n' + block(renderer, '    @discardableResult func beginVehicleExit(') + '\n' + old_begin + '\n' + block(renderer,'    private func discardOwnedVehicle()') + '\n' + revoke + r'''

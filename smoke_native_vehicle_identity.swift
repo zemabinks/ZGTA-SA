@@ -6,7 +6,7 @@ import simd
 
 // Sentinel records test queue/selection ownership only, not skeletal math.
 private enum NativeSkeletalActor {struct Pose:Equatable{let sentinel:Int}}
-private enum NativeFlightAnimation {struct Frame{let sentinel:Int}}
+private enum NativeFlightAnimation {struct Frame{let sentinel:Int};struct Canopy{let sentinel:Int}}
 
 /// Inert source boundaries. No physics engine, original catalogue or body is
 /// loaded. The actual renderer context/rig methods and rig pose math run below.

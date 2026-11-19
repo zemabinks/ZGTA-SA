@@ -296,7 +296,10 @@ import Darwin
         let dead=try F.playback(deadFixture);dead.sit(at:0)
         try check(dead.update(interval:interval(0,0.2),input:.init(dead:true))!.sample.pose.base=="invented/deadleft","latest dead input kept across slices")
         // Foreground rebase through the literal Renderer lifecycle method.
+        let footA=RemoteFootClockSpy(),footB=RemoteFootClockSpy()
+        local.remoteFootAnimations=["a":("same-model",footA),"b":("same-model",footB)]
         local.now=10;local.resetDisplayClock();local.now=10.02
+        try check(footA.resets==1 && footB.resets==1,"literal lifecycle rebases each remote foot owner")
         try near(delta(local.successfulDraw().2),0.02,"literal resume floor")
         try check(local.renderClock.resets==1,"existing render clock still resets")
         UIApplication.shared.applicationState = .inactive;local.now=10.1
