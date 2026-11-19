@@ -37,6 +37,8 @@ jobs:
       - run: node smoke_vehicle_coupling_server.js
       - run: node smoke_radio_import_bounds.js
       - run: node smoke_radio_development.js
+      - run: node smoke_browser_radio.js
+      - run: node smoke_browser_radio_http.js
       - run: node smoke_selfhost_tp_units.js
       - run: node smoke_selfhost_position_resume.js
       - run: node smoke_selfhost_mission_persistence.js
@@ -53,4 +55,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python3 smoke_core_131.py
+      - run: python3 smoke_core_134.py

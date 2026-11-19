@@ -49,7 +49,7 @@ def main():
         for name in ('host.py', 'serve_local.js','browser_recovery_hook.js','browser_task_policy.js','browser_recovery.js', 'native_resource_server.js', 'selfhost_backend.js',
                      'optional_discord.js', 'weapon_inventory.js', 'world_collision.js',
                      'local_projectiles.js', 'player_placement.js', 'local_gameplay.js', 'native_radio_server.js',
-                     'radio_streams.js', 'prepare_native_radio_audio.py',
+                     'radio_streams.js', 'radio_metadata.js', 'prepare_native_radio_audio.py',
                      'stock_native_assets.js', 'stock_img_assets.js'):
             shutil.copy2(ROOT / name, root / name)
         result = subprocess.run([sys.executable, str(root / 'host.py'), 'doctor'],

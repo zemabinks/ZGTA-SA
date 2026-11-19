@@ -9,7 +9,7 @@ async function freePort(){const server=net.createServer();await new Promise(reso
 async function main(){
  for(const file of ['serve_local.js','browser_recovery_hook.js','browser_recovery.js','browser_task_policy.js',
   'native_resource_server.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','player_placement.js',
-  'local_gameplay.js','native_radio_server.js','radio_streams.js','optional_discord.js','weapon_inventory.js',
+  'local_gameplay.js','native_radio_server.js','radio_streams.js', 'radio_metadata.js','optional_discord.js','weapon_inventory.js',
   'world_collision.js','local_projectiles.js'])fs.copyFileSync(path.join(__dirname,file),path.join(temporary,file));
  const site=path.join(temporary,'local-only/site');fs.mkdirSync(path.join(site,'_next/static/chunks'),{recursive:true});
  fs.mkdirSync(path.join(site,'game/world'),{recursive:true});

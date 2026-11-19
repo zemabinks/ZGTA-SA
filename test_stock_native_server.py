@@ -20,7 +20,7 @@ ROOT=Path(__file__).resolve().parent
 OUT=ROOT/'local-only/research/stock-native-server';OUT.mkdir(parents=True,exist_ok=True)
 DEPENDENCIES=['serve_local.js','browser_recovery_hook.js','browser_task_policy.js','browser_recovery.js','stock_native_assets.js','stock_img_assets.js','selfhost_backend.js','native_resource_server.js',
               'optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js',
-              'local_gameplay.js','native_radio_server.js','radio_streams.js','prepare_native_radio_audio.py']
+              'local_gameplay.js','native_radio_server.js','radio_streams.js', 'radio_metadata.js','prepare_native_radio_audio.py']
 events=[];checks=0
 def check(value,label):
     global checks

@@ -287,7 +287,7 @@ function serve(req, res) {
   if (stockNative.matches(pathname, req.url)) {
     void stockNative.handle(req, res, pathname); return;
   }
-  if (nativeRadio && (pathname === '/game/radio/native/index' || /^\/game\/radio\/native\/track\/\d+\.wav$/.test(pathname))) {
+  if (nativeRadio && nativeRadio.matches(pathname)) {
     void nativeRadio.handle(req,res,pathname);return;
   }
   if (['/game/native/original-weapons.json','/game/native/samp-skins.json'].includes(pathname)) {
