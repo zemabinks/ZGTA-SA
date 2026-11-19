@@ -1,5 +1,15 @@
 # Core GTA San Andreas gameplay parity
 
+## 2026-11-19 — Self-host breathing lifetimes (140)
+
+Fresh independent-server connections now reinitialize the native oxygen pool once per accepted connection namespace. Disconnects and duplicate notifications do not grant air, and the operation preserves movement, facing, stamina, health and animation state. Legacy SA-MP/open.mp and the original browser-world adapter retain their own lifecycle semantics.
+
+The native local swim forecast owns the breath display during gameplay. Older HTTP world snapshots still update the radar but no longer overwrite current breath or surfaced recovery. Accepted acknowledged respawns now start a new server oxygen clock, preventing time spent dead from consuming the new life's pool.
+
+Focused authored evidence passes 88 literal native-method checks and 175 actual-backend/Peer checks. Actual emitted server health ACKs traverse the native consumer with pending fall and impact predictions; drowning preserves armour and does not consume their sequences. Executed historical callback/HUD variants fail at the intended assertions, and the old server reproduces the dead-time charge. Early harness errors remain retained locally.
+
+These results establish the stated source/virtual-transport behavior. Full current regression and SDK results are tracked separately. Real-time network loss, rendered breath/drowning acceptance, physical iPhone behavior, classic retail lung/stat curves and matched original-game timing remain unverified. The server's existing 0.5-second catch-up cap and arrival-state sampling policy remain explicit limitations.
+
 Priority override, 2026-11-15: complete and validate the core game before
 advanced roleplay, character creation, voice, ZPhone, gangs or territory work.
 The roleplay foundation remains on its separate worktree. This checklist is a

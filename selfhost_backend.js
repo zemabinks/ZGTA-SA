@@ -1135,7 +1135,8 @@ class LocalGame {
       this.terminalVehicleReports.delete(peer);
       peer.player.health=100;peer.player.armour=0;
       peer.lastRespawnSequence=message.s;
-      peer.nativeOxygen=1150;peer.nativeDrownFraction=0;peer.nativeOxygenTime=0;changed=true;
+      peer.nativeOxygen=1150;peer.nativeDrownFraction=0;peer.nativeOxygenTime=0;
+      peer.nativeOxygenAt=Date.now();changed=true;
       if(peer.positionAckEnabled)this.sendTeleport(peer,{t:'tp',x:1480,y:-1738,z:13,h:0,g:1},
         {source:'respawn'});
     }

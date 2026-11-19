@@ -7,6 +7,8 @@ final class Radio {var stops=0;func stop(){stops+=1}}
 final class ReloadAudio {var cancels=0;func cancelReload(){cancels+=1}}
 final class Gameplay {var inventoryConnection:String?}
 final class Network {
+ var legacy:Int?
+ var usesOriginalWorldProtocol=false
  var legacySpectating=false
  var passengerPublications:[SIMD3<Float>]=[]
  func sendPassengerPosition(_ position:SIMD3<Float>,heading:Float,action:Int,velocity:SIMD3<Float>,paused:Bool){order.append("passenger");passengerPublications.append(position)}
@@ -36,6 +38,8 @@ final class Network {
  }
 }
 final class Renderer {
+ var breathConnections:[String?]=[]
+ func setSelfhostBreathConnection(_ nonce:String?){breathConnections.append(nonce)}
  var isPassenger=false
  var passengerWirePosition=SIMD3<Float>(77,88,99),passengerVelocity=SIMD3<Float>(1,2,0)
  var legacySpectatorPosition:SIMD3<Float>?=SIMD3(123.375,-245.625,31.875)
