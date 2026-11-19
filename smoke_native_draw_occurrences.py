@@ -92,7 +92,10 @@ private struct SIMD3<Scalar: BinaryFloatingPoint>: Equatable, CustomStringConver
     }
 }
 private enum NativeSkeletalActor { struct Pose: Equatable { let marker: Int } }
-private enum NativeFlightAnimation { struct Frame: Equatable { let marker: Int } }
+private enum NativeFlightAnimation {
+    struct Frame: Equatable { let marker: Int }
+    struct Canopy: Equatable { let marker: Int }
+}
 private struct simd_float4x4: Equatable { let marker: Int }
 private struct VehicleDrawContext: Equatable { let marker: Int }
 private struct TransparentVehicleDraw {}
@@ -116,7 +119,7 @@ INVOCATIONS = r'''
             pose:.init(marker:100+frame),transform:.init(marker:200+frame),original:true,
             flight:.init(marker:300+frame),identity:"own",ownFoot:true)
         appendPed("shared-skin",point,5,6,"remote-clip",7.25,8,
-            pose:.init(marker:400+frame),identity:"remote",ownFoot:false)
+            pose:.init(marker:400+frame),identity:"remote",ownFoot:false__CANOPY_ARGUMENT__)
         appendPed("shared-skin",point,9,10,"rider-clip",11.25,12,
             pose:.init(marker:500+frame),transform:.init(marker:600+frame),original:true,
             flight:.init(marker:700+frame),identity:"passenger",ownFoot:false)
@@ -168,6 +171,7 @@ CHECKS = r'''
                     if index < pedCount {
                         try check(row.queued != nil,"ped has its own occurrence payload")
                         let q=row.queued!
+                        // CANOPY_CHECKS
                         switch index {
                         case 0:
                             try check(row.name == "shared-skin" && row.angle == 1 && row.pitch == 2 && row.clip == "own-clip" && row.elapsed == 3.25 && row.weapon == 4,"owned first eight draw values")
@@ -231,12 +235,20 @@ CHECKS = r'''
 
 def carrier(parts):
     invocation = INVOCATIONS
+    canopy = 'var canopySamples:' in parts['override']
+    invocation = invocation.replace('__CANOPY_ARGUMENT__',
+        ',canopySamples:[.init(marker:10000+frame),nil,.init(marker:20000+frame)]' if canopy else '')
+    canopy_checks = '''if index == 1 {
+                            try check(q.canopySamples.count == 3,"remote ordered canopy payload count")
+                            try check(q.canopySamples[0]?.marker == 10000+frame && q.canopySamples[1] == nil && q.canopySamples[2]?.marker == 20000+frame,"remote ordered canopy targets/nil retained")
+                        } else {try check(q.canopySamples.isEmpty,"co-located actor cannot acquire another canopy sequence")}
+                        ''' if canopy else ''
     for name, text in parts['roles'].items():
         invocation = invocation.replace('__'+name.upper()+'__', text)
     return (PRELUDE + '\n' + parts['override'] + '\nprivate func productionFrame(_ frame:Int) -> [Observation] {\n' +
             parts['queue'] + invocation + '\n    var observations:[Observation]=[]\n' + parts['consume'] +
             '\n            observations.append(.init(name:name,position:position,angle:angle,pitch:pitch,clip:clip,elapsed:elapsed,weapon:weapon,vehicleContext:vehicleContext,queued:queued))\n' +
-            '        }\n    return observations\n}\n' + CHECKS)
+            '        }\n    return observations\n}\n' + CHECKS.replace('// CANOPY_CHECKS',canopy_checks))
 
 def private_output(value):
     output = Path(os.path.abspath(value))
