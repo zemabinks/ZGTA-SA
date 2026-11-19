@@ -129,8 +129,13 @@ unchanged. Native-project, host and repository-layout checks also pass. A
 separate owner-local native audit passes 1,113 checks over all 311 detailed
 cells and 186 exact RGBA GPU image readbacks for the central exterior. Its
 observed texture/map allocation is 73,928,704 bytes on Intel UHD 630. Original
-archive files and served resources remain unchanged. SDK and normal installed
-acceptance remain separate pending checks.
+archive files and served resources remain unchanged. Both full SDK products
+subsequently pass (universal Simulator Debug and unsigned arm64 iPhone Release),
+with all 225 app/build inputs and 39 copied dependencies retained. A normal
+Simulator update preserves prepared/raw resources and passes an ordinary join,
+HD response completion, walking, pause/camera and three jump/landing checks,
+then a second installed-base join and resource-mode restoration. This bounded
+scene check is distinct from hardware or matched retail acceptance.
 
 The owner archive declares 302 nonzero HD families across 311 detailed cells;
 250 source files are present and 52 interior HD files are unavailable. This
@@ -141,3 +146,51 @@ purple surfaces, complete transparent sorting/depth behavior, full lighting,
 reflections, ambient AI and matched classic-retail comparisons remain open.
 Full-chain, SDK, installed-scene and physical-device evidence are tracked
 separately from these focused source tests.
+
+## World surface phases and mixed vehicle transparency (147)
+
+The archived detailed-cell loader divides indexed triangles into a solid prefix
+and a clear suffix. The native renderer previously drew the complete cell with
+one blended, depth-writing material. It now admits the split only when the
+current source, layer count, triangle count and actual geometry agree. Solid
+surfaces use cutout opacity and write depth; the clear suffix keeps source alpha
+and does not write depth. Optional HD images and base fallback use the same
+phase policy. Missing or invalid metadata retains the compatibility path.
+
+Clear world cells and vehicle parts now share stable far-to-near ordering after
+the existing opaque actor/object work. This also exposed a shader-binding hazard:
+a world phase occupies four bytes at fragment slot 3, while native vehicle paint
+requires a complete float4 there. Every applicable vehicle packet now binds its
+own paint data. The old production encoder fails the new authored negative
+regression. Existing standalone actor-encoder behavior remains available.
+
+The actual archived material factory reports double-sided, forceSinglePass=true
+for the clear material. Its original range expression also agrees with the
+native partition on empty, full and central-cell cases. An initially proposed
+two-pass interpretation was rejected by that evidence; production keeps one
+pass. The isolated factory boundary supplies unrelated clock/shader inputs; it
+is not a running WebGL scene. Bounded REA parsing succeeded for the loader chunk
+and exhausted its worker heap on the larger material bundle; the latter is not
+claimed as a complete static analysis.
+
+Focused authored gates pass 1,144 partition/metadata/frame-owner checks, 27 actual
+Metal checks over ten renders, 37 vehicle transparency-owner checks and the
+existing 89 material/batch checks over 39 pixels. The new GPU gate executes the
+production encoders, pipeline/depth construction and shaders against authored
+geometry. It covers opacity, cutoff, depth-write policy, HD/base fallback,
+mixed world/vehicle order, source retirement and the slot-3 ABI transition.
+A separate owner-local audit passes 1,555 native checks over all 311 cells:
+288 contain clear indices, with 28,281,663 solid and 2,490,351 clear indices.
+Original archive and served files remain unchanged. The complete selected
+Core147 chain passes with required Metal, physics, audio and transport gates
+(808.3 seconds), as do native-project, host and repository-layout checks. All
+226 frozen app/build inputs remain unchanged. SDK, normal installed-scene and
+physical-device acceptance are separate gates; their completed results belong
+in the release PR rather than being inferred from these source checks.
+
+This is scoped archived-client compatibility, not classic-retail visual or
+free-roam gameplay parity. World-cell center sorting cannot correctly resolve
+every intersecting polygon. Water, particles, legacy-object transparency, far
+LOD material policy, purple surfaces, complete original resources, ambient AI,
+traffic and police remain open. Physical-device and matched original-PC
+comparisons remain separate requirements.

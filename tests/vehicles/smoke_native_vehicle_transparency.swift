@@ -54,6 +54,11 @@ private final class RendererCarrier {
   check(native.events.map{$0[0]}==[102,100],"Failed native image binding cannot draw a stale atlas")
   check(native.events.map{$0[1]}==[302,777],"Sorted native image closure retains its instance; legacy atlas remains independent")
   check(native.pipeline==99 && native.depth==9,"Mixed native/legacy transparency restores the production states")
+  let nativeUnpainted=TransparentVehicleDraw(mesh:packets[0].mesh,part:packets[0].part,uniforms:packets[0].uniforms,pipeline:packets[0].pipeline,painted:false,depth:0.2,bindTextures:{_ in true})
+  let afterWorld=EncoderSpy();afterWorld.paint=SIMD4(repeating:-99)
+  encodeTransparentVehicles([nativeUnpainted],encoder:afterWorld)
+  check(afterWorld.paints==[nativeUnpainted.part.paint],"Native image packet replaces world-phase slot3 even without a dynamic-paint flag")
+
  }
 }
 @main private enum Test {

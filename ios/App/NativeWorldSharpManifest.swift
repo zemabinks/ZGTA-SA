@@ -5,9 +5,9 @@ import Foundation
 /// or absent files do not change the required base world/collision contract.
 struct NativeWorldSharpManifest {
     enum Invalid:Error {case data,profile,cell}
-    struct Entry:Equatable {let name:String,layers:Int,sharpLayers:Int}
+    struct Entry:Equatable {let name:String,layers:Int,sharpLayers:Int;let triangles:Int?,blend:Int?}
     private struct Document:Decodable {
-        struct Cell:Decodable {let cell:Int,layers:Int,sharp:Int}
+        struct Cell:Decodable {let cell:Int,layers:Int,sharp:Int;let triangles:Int?,blend:Int?}
         struct Detail:Decodable {let cell:Int,columns:Int,sharp:Int,sharpColumns:Int,cells:[Cell]}
         struct Inside:Decodable {let cells:[Cell]}
         let detail:Detail,inside:Inside?
@@ -25,7 +25,11 @@ struct NativeWorldSharpManifest {
                 guard (0..<256).contains(row.cell),(1...4096).contains(row.layers),
                       (0...NativeWorldSharpLayout.maximumLayers).contains(row.sharp),row.sharp<=row.layers,
                       entries[name]==nil else{throw Invalid.cell}
-                entries[name]=Entry(name:name,layers:row.layers,sharpLayers:row.sharp)
+                if row.triangles != nil || row.blend != nil {
+                    guard let triangles=row.triangles,let blend=row.blend,triangles>0,triangles<1_000_000,
+                          blend>=0,blend<=triangles*3,blend%3==0 else{throw Invalid.cell}
+                }
+                entries[name]=Entry(name:name,layers:row.layers,sharpLayers:row.sharp,triangles:row.triangles,blend:row.blend)
             }
         }
         self.entries=entries

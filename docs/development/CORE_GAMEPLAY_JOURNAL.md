@@ -1,5 +1,24 @@
 # Core gameplay audit journal
 
+## 2026-11-19 — World surface ownership and mixed transparency (147)
+
+Detailed world cells now validate and use their solid/clear index split, with
+opaque cutout depth writes and separately deferred clear surfaces. World clear
+cells and vehicle parts share a stable back-to-front phase. Each native vehicle
+packet binds its complete paint ABI after a world phase changes fragment slot 3.
+Focused authored Metal/owner gates and all 311 owner-local cell partitions pass;
+the old vehicle encoder fails the new binding regression. The full selected
+Core147 Metal/physics/audio/transport chain and host/project/layout gates pass
+with all 226 app/build inputs held. SDK and normal installed-scene acceptance
+remain distinct; completed results are recorded in the release PR.
+
+The actual archived material factory confirms double-sided single-pass clear
+surfaces. This closes a demonstrated browser/native difference, not retail 1:1.
+Water/particle/legacy-object ordering, intersecting surfaces, purple materials,
+ambient pedestrians, traffic and police remain open. See the
+[implementation and evidence scope](../research/rendering/CORE_PED_RENDERING_119.md#world-surface-phases-and-mixed-vehicle-transparency-147).
+
+
 ## 2026-11-19 — Detailed-world high-resolution resources (146)
 
 The native parser and renderer now consume the archived world's plus-one HD

@@ -155,6 +155,8 @@ private final class SharpBind {
 private func productionBatch(_ encoder: BatchEncoder, meshes: [String: BatchMesh], activeDetails: Set<String>,
     worldSharpName:String?=nil,worldSharpSource:String?=nil,worldSharpGPU:SharpBind?=nil,worldSharpPipeline:String?="sharp") {
     let queue=0
+    var deferredWorldSurfaces:[Int]=[]
+    func stageWorldSurface(name:String,mesh:BatchMesh,matrix:simd_float4x4,encoder:BatchEncoder)->Bool{false}
     func fixedCJSourceIdentity()->String{"current"}
     let worldPipeline = "world", pipeline = "ordinary", matrix = matrix_identity_float4x4
     func draw(mesh: BatchMesh, cellSize: Float, matrix: simd_float4x4, encoder: BatchEncoder) {

@@ -213,3 +213,35 @@ fragment half4 worldSharpFragment(Raster in [[stage_in]],
     color = mix(color,half3(uniforms.fogColor.rgb),half(fog));
     return half4(color,textureColor.a * half(in.tint.a * uniforms.tintColor.a));
 }
+
+
+// The indexed solid prefix is cut out but opaque. The clear suffix retains
+// source alpha and belongs to the later, non-depth-writing surface phase.
+static half4 worldSurfaceShade(Raster in,half4 texel,constant Uniforms &uniforms,uint clear) {
+    half opacity=texel.a*half(in.tint.a);
+    if (clear!=0 ? opacity<0.03h : opacity<0.1h) discard_fragment();
+    half3 day=min(half3(in.tint.rgb)+half3(0.30h),half3(1.0h));
+    half3 night=min(half3(in.dusk.rgb)+half3(0.10h,0.10h,0.15h),half3(1.0h));
+    half3 light=mix(day,night,half(clamp(uniforms.settings.z,0.0,1.0)));
+    half3 color=texel.rgb*light*half3(uniforms.tintColor.rgb);
+    float fog=uniforms.fogSettings.z*clamp((in.depth-uniforms.fogSettings.x)/
+        max(1.0,uniforms.fogSettings.y-uniforms.fogSettings.x),0.0,1.0);
+    color=mix(color,half3(uniforms.fogColor.rgb),half(fog));
+    return half4(color,(clear!=0 ? opacity:1.0h)*half(uniforms.tintColor.a));
+}
+fragment half4 worldSurfaceFragment(Raster in [[stage_in]],texture2d<half> atlas [[texture(0)]],
+    constant Uniforms &uniforms [[buffer(1)]],constant uint &clear [[buffer(3)]]) {
+    return worldSurfaceShade(in,nativeAtlasColor(in,atlas,uniforms),uniforms,clear);
+}
+fragment half4 worldSharpSurfaceFragment(Raster in [[stage_in]],
+    texture2d<half> atlas [[texture(0)]],texture2d_array<half> images [[texture(1)]],
+    sampler originalSampler [[sampler(0)]],constant Uniforms &uniforms [[buffer(1)]],
+    constant uint *map [[buffer(2)]],constant uint &clear [[buffer(3)]]) {
+    float layer=round(in.layer);uint selected=0;
+    if(isfinite(layer) && layer>=0.0 && layer<float(map[0])) selected=map[4+uint(layer)];
+    half4 texel;
+    if(selected>0 && selected<=map[1] && selected<=images.get_array_size())
+        texel=images.sample(originalSampler,in.uv,selected-1);
+    else texel=nativeAtlasColor(in,atlas,uniforms);
+    return worldSurfaceShade(in,texel,uniforms,clear);
+}
