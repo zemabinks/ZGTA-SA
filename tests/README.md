@@ -24,7 +24,7 @@ python3 tests/hosting/smoke_public_source.py
 python3 tests/hosting/smoke_native_project.py
 python3 tests/hosting/smoke_host.py
 python3 tools/development/verify_repository_layout.py
-python3 tests/core/smoke_core_140.py
+python3 tests/core/smoke_core_142.py
 ```
 
 Some tests require Xcode, native dependencies or owner-provided local resources; inspect each runner's requirements. Passing authored fixtures does not establish retail accuracy, rendered gameplay or physical-device acceptance. Runtime receipts stay in ignored local storage.

@@ -116,3 +116,46 @@ verification. There is no extraction-to-playable shortcut or second engine.
 No original game assets, ISO/CAB payloads, owner receipts or captures belong in
 the public repository. Native conversion, standalone scene acceptance, device
 throughput/thermal measurements and full-game parity remain open.
+
+
+## Original navigation reader (142)
+
+The native resource path now includes an independently written exterior
+`NODES0.DAT`–`NODES63.DAT` reader and immutable pedestrian/vehicle graph queries.
+An explicit **Check Original Navigation** action in Game Files reads the saved
+raw set through its existing verified lease API, checks linked nodes and runs
+pedestrian and vehicle nearest-node/route queries. It does not run at startup,
+change installed mode, spawn actors, or send entities to a multiplayer server.
+
+The loader binds source, content, selection and generation, closes each lease
+after a bounded copy, hashes the copied bytes and repeats the source fence
+before delivering the graph. Reads and decoding run on a serial utility queue;
+progress, cancellation and completion use the existing app-owned coordinator.
+A same-content repair still invalidates the old generation. Missing areas,
+malformed sections, invalid references, changed files and resource/query limits
+produce explicit failures. Cancellation and leaving the screen preserve saved
+resources and do not leave file leases pinned.
+
+The parser covers node positions, widths, flags and adjacency; vehicle navi
+records, lane counts and signal metadata; and crossing/intersection flags. The
+queries use independent geometric A*. This is a data/query foundation: original
+CPathFind choices, dynamic node switches, population scheduling, lane following,
+signals, obstacle avoidance, police and traffic behavior remain unimplemented.
+It does not make a raw installation playable or establish retail parity.
+
+Format declarations were cross-checked against the licensed
+[Plugin-SDK node declarations](https://github.com/DK22Pac/plugin-sdk/blob/master/plugin_sa/game_sa/CPathNode.h)
+and [rwfury path reader](https://github.com/Hancapo/rwfury/blob/master/rwfury/paths.py).
+The decoder was authored independently. No third-party implementation or
+original game bytes are embedded in these sources. Reserved link slots and
+length/intersection padding are checked as distinct sections rather than
+silently discarding crossing flags.
+
+Run `python3 tests/resources/smoke_native_original_navigation.py` for authored
+DAT/query cases and actual raw-store/lease/coordinator lifecycle tests. This
+includes missing, oversized and unsupported files, wrong selection, invalid and
+unloaded references, query limits, same-content generation repair, source swap,
+post-verification mutation, symlink/FIFO refusal, busy admission, cancellation,
+menu completion and dismissal. Existing resource tests compile the actual new
+dependencies. Full SDK and normal installed-menu acceptance are separate checks.
+Owner-data comparisons and screenshots remain ignored and local.

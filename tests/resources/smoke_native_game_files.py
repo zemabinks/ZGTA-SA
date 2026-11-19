@@ -10,7 +10,7 @@ from pathlib import Path
 import argparse,hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/research/game-files-107'
-SOURCES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeGameFilesCoordinator']
+SOURCES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeOriginalPathQuery','NativeOriginalNavigationLoader','NativeGameFilesCoordinator']
 WRAPPERS=['NativeISOExtraction','NativeRawResourceSelection']
 def both32(n):return n.to_bytes(4,'little')+n.to_bytes(4,'big')
 def both16(n):return n.to_bytes(2,'little')+n.to_bytes(2,'big')
@@ -57,7 +57,7 @@ def main():
   for path,data in captured.items():(work/Path(path).name).write_bytes(data)
   def compile_test(test,names,output):
    bridge=['-I',str(ROOT/'native-installer/include'),str(ROOT/'local-only/native-installer/host/libzgtasa_installer.a'),'-lz'] if 'NativeRawResourceStore' in names else []
-   result=subprocess.run(['xcrun','swiftc','-parse-as-library','-module-cache-path',str(OUT/'modules'),*[str(work/(name+'.swift')) for name in names],str(work/test),*bridge,'-o',str(work/output)],capture_output=True,text=True)
+   result=subprocess.run(['xcrun','swiftc','-j','1','-num-threads','1','-parse-as-library','-module-cache-path',str(OUT/'modules'),*[str(work/(name+'.swift')) for name in names],str(work/Path(test).name),*bridge,'-o',str(work/output)],capture_output=True,text=True)
    (OUT/(output+'-compile.log')).write_text(result.stdout+result.stderr)
    if result.returncode:print(result.stdout+result.stderr);result.check_returncode()
   compile_test('tests/resources/smoke_native_game_files.swift',SOURCES+WRAPPERS,'coordinator')
