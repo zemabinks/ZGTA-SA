@@ -6,7 +6,7 @@ import Foundation
 final class NativeResourceDataTask:NativeResourceTask {
     private let lock=NSLock()
     private var started=false,finished=false,cancelled=false
-    private var remote:URLSessionTask?
+    private var remote:NativeResourceTask?
     private let body:(NativeResourceDataTask)->Void
     private let completion:(Data?,URLResponse?,Error?)->Void
     fileprivate init(body:@escaping(NativeResourceDataTask)->Void,
@@ -20,7 +20,7 @@ final class NativeResourceDataTask:NativeResourceTask {
         DispatchQueue.global(qos:.utility).async{self.finish(nil,nil,URLError(.cancelled))}
     }
     fileprivate var isCancelled:Bool{lock.lock();defer{lock.unlock()};return cancelled}
-    fileprivate func attach(_ task:URLSessionTask){lock.lock();remote=task;let stop=cancelled;lock.unlock();if stop{task.cancel()}}
+    fileprivate func attach(_ task:NativeResourceTask){lock.lock();let stop=cancelled || finished;if !stop{remote=task};lock.unlock();if stop{task.cancel()}}
     fileprivate func finish(_ data:Data?,_ response:URLResponse?,_ error:Error?){
         lock.lock();guard !finished else{lock.unlock();return};finished=true;remote=nil;let stop=cancelled;lock.unlock()
         completion(stop ? nil:data,stop ? nil:response,stop ? URLError(.cancelled):error)
@@ -39,40 +39,58 @@ final class NativeResourceSession {
             // native format verifier is unavailable. Development can continue.
             NSLog("Native resource verifier unavailable: %@",error.localizedDescription)
         }
-        NativeResourceTransport.install({request,completion in shared.dataTask(with:request,completionHandler:completion)},localFile:{try shared.store.installedURL(for:$0)})
+        NativeResourceTransport.install({request,completion in shared.dataTask(with:request,completionHandler:completion)},localFile:{try shared.store.installedURL(for:$0)},bounded:{request,maximum,completion in shared.boundedDataTask(with:request,maximumBytes:maximum,completionHandler:completion)})
         NativeStockAssetAccess.installPreparedReader{url,maximum in try shared.store.localResource(for:url,maximumBytes:Int64(maximum))?.0}
     }
     func dataTask(with url:URL,completionHandler:@escaping(Data?,URLResponse?,Error?)->Void)->NativeResourceDataTask {
         dataTask(with:URLRequest(url:url),completionHandler:completionHandler)
     }
     func dataTask(with request:URLRequest,completionHandler:@escaping(Data?,URLResponse?,Error?)->Void)->NativeResourceDataTask {
+        makeTask(with:request,maximumBytes:nil,completionHandler:completionHandler)
+    }
+    func boundedDataTask(with url:URL,maximumBytes:Int,completionHandler:@escaping NativeResourceTransport.Completion)->NativeResourceDataTask {
+        boundedDataTask(with:URLRequest(url:url),maximumBytes:maximumBytes,completionHandler:completionHandler)
+    }
+    func boundedDataTask(with request:URLRequest,maximumBytes:Int,completionHandler:@escaping NativeResourceTransport.Completion)->NativeResourceDataTask {
+        makeTask(with:request,maximumBytes:maximumBytes,completionHandler:completionHandler)
+    }
+    private func makeTask(with request:URLRequest,maximumBytes:Int?,completionHandler:@escaping NativeResourceTransport.Completion)->NativeResourceDataTask {
         NativeResourceDataTask(body:{[store,network] task in
             guard !task.isCancelled else{return}
+            if let maximumBytes,!NativeBoundedResourceTask.validMaximum(maximumBytes){task.finish(nil,nil,NativeBoundedResourceTask.Failure.invalidMaximum);return}
             guard let url=request.url else{task.finish(nil,nil,URLError(.badURL));return}
+            func sendNetwork(){
+                let remote:NativeResourceTask
+                if let maximumBytes{
+                    remote=NativeBoundedResourceTask(request:request,maximumBytes:maximumBytes,configuration:network.configuration,completion:{task.finish($0,$1,$2)})
+                }else{remote=network.dataTask(with:request){task.finish($0,$1,$2)}}
+                task.attach(remote);remote.resume()
+            }
             let path=url.path.trimmingCharacters(in:CharacterSet(charactersIn:"/"))
             let resource=NativeResourceManifest.isResourceNamespace(path)
             let method=request.httpMethod ?? "GET"
             guard ["GET","HEAD"].contains(method),resource else{
-                let remote=network.dataTask(with:request){task.finish($0,$1,$2)};task.attach(remote);remote.resume();return
+                sendNetwork();return
             }
             do {
                 if method=="HEAD",let file=try store.installedURL(for:url){
                     let size=(try file.resourceValues(forKeys:[.fileSizeKey])).fileSize ?? 0
+                    if let maximumBytes,size>maximumBytes{throw NativeBoundedResourceTask.Failure.limit}
                     let response=HTTPURLResponse(url:url,statusCode:200,httpVersion:"HTTP/1.1",headerFields:["Content-Length":String(size),"Content-Type":Self.contentType(path),"X-ZGTA-Resource-Source":"installed"])
                     task.finish(nil,response,nil);return
                 }
                 if method=="HEAD" {
                     if store.snapshot.mode == .installed{throw NativeResourceStore.Failure.missing(path)}
-                    let remote=network.dataTask(with:request){task.finish($0,$1,$2)};task.attach(remote);remote.resume();return
+                    sendNetwork();return
                 }
-                if let (bytes,item)=try store.localResource(for:url){
+                if let (bytes,item)=try store.localResource(for:url,maximumBytes:Int64(maximumBytes ?? 128*1_024*1_024)){
                     let response=HTTPURLResponse(url:url,statusCode:200,httpVersion:"HTTP/1.1",headerFields:[
                         "Content-Length":String(item.bytes),"X-ZGTA-Resource-SHA256":item.sha256,
                         "Content-Type":Self.contentType(item.path),"X-ZGTA-Resource-Source":"installed"])
                     task.finish(bytes,response,nil);return
                 }
                 if store.snapshot.mode == .installed{throw NativeResourceStore.Failure.missing(path)}
-                let remote=network.dataTask(with:request){task.finish($0,$1,$2)};task.attach(remote);remote.resume()
+                sendNetwork()
             }catch{task.finish(nil,nil,error)}
         },completion:completionHandler)
     }

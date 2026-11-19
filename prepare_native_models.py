@@ -7,6 +7,7 @@ transforms, material colors, and supported TXD textures. Animation remains
 separate work.
 """
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -216,7 +217,42 @@ def geometry(data, chunk):
     return points, faces, materials(data, first(parts, 8)), prelit, uvs
 
 
-def convert(source, destination, pedestrian=False):
+def tight_ped_atlas_layout(texture_images, texture_slots, maximum_rgba_bytes=512*1024):
+    """Explicit ped-only layout; requires the matching versioned consumer.
+
+    Legacy output remains the default. Every image retains its native pixels;
+    smaller images use content rectangles inside uniform rectangular cells.
+    """
+    images = [texture_images[name] for name in texture_slots]
+    cell_w = max((image.width for image in images), default=1)
+    cell_h = max((image.height for image in images), default=1)
+    layers = len(texture_slots) + 1
+    columns = 1
+    while columns * columns < layers:
+        columns *= 2
+    columns = min(8, columns)
+    width, height = columns * cell_w, math.ceil(layers / columns) * cell_h
+    if max(width, height) > 4096 or width * height * 4 > maximum_rgba_bytes:
+        raise ValueError('Tight pedestrian atlas exceeds the explicit budget')
+    records = [{'slot': 0, 'texture': None, 'rect': [0, 0, cell_w, cell_h]}]
+    for name, slot in texture_slots.items():
+        image = texture_images[name]
+        records.append({'slot': slot, 'texture': name,
+                        'rect': [(slot % columns) * cell_w, (slot // columns) * cell_h,
+                                 image.width, image.height]})
+    return {'schema': 1, 'layout': 'ped-tight-native-v1',
+            'sampling': 'legacy-inset-fract-linear-no-mips', 'cell': [cell_w, cell_h],
+            'columns': columns, 'atlas': [width, height], 'layers': records,
+            'logicalRGBA8Bytes': width * height * 4,
+            'maximumRGBA8Bytes': maximum_rgba_bytes}
+
+
+def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
+    if ped_atlas_layout not in ('legacy', 'tight-native'):
+        raise ValueError('Unknown pedestrian atlas layout')
+    mode = ped_atlas_layout if pedestrian else 'legacy'
+    if mode == 'legacy' and destination.with_suffix('.atlas.json').exists():
+        raise ValueError('Legacy output cannot replace a versioned atlas family')
     data = source.read_bytes()
     root = list(chunks(data, 0, len(data)))
     clump = first(root, 0x10)
@@ -250,14 +286,18 @@ def convert(source, destination, pedestrian=False):
                 atomics.append((frame_number, geometry_number))
     if not atomics:
         atomics = [(0, number) for number in range(len(geometries))]
-    texture_images = textures(GAME / 'vehicle.txd')
+    texture_images = {} if mode == 'tight-native' else textures(GAME / 'vehicle.txd')
     texture_images.update(textures(source.with_suffix('.txd')))
+    if mode == 'tight-native' and any(name and name not in texture_images
+                                     for _, _, palette, _, _ in geometries for _, name in palette):
+        raise ValueError('Versioned pedestrian textures must resolve from the selected own TXD')
     texture_names = []
     for _, _, palette, _, _ in geometries:
         for _, name in palette:
             if name and name in texture_images and name not in texture_names:
                 texture_names.append(name)
     texture_slots = {name: number + 1 for number, name in enumerate(texture_names)}
+    tight_layout = tight_ped_atlas_layout(texture_images, texture_slots) if mode == 'tight-native' else None
     vertices = []
     indices = []
     draw_parts = []
@@ -338,13 +378,26 @@ def convert(source, destination, pedestrian=False):
     if not pedestrian and 'door_lf_dummy' in names:
         metadata['driverDoor'] = transform((0,0,0), frames, names.index('door_lf_dummy'))
     destination.with_suffix('.parts.json').write_text(json.dumps(metadata, separators=(',', ':')))
-    columns = 8
-    cell = 128
-    atlas = Image.new('RGBA', (columns * cell, math.ceil((len(texture_names) + 1) / columns) * cell), (255, 255, 255, 255))
-    for name, slot in texture_slots.items():
-        image = texture_images[name].resize((cell, cell), Image.Resampling.LANCZOS)
-        atlas.paste(image, ((slot % columns) * cell, (slot // columns) * cell))
+    if tight_layout is None:
+        columns = 8
+        cell = 128
+        atlas = Image.new('RGBA', (columns * cell, math.ceil((len(texture_names) + 1) / columns) * cell), (255, 255, 255, 255))
+        for name, slot in texture_slots.items():
+            image = texture_images[name].resize((cell, cell), Image.Resampling.LANCZOS)
+            atlas.paste(image, ((slot % columns) * cell, (slot // columns) * cell))
+    else:
+        atlas = Image.new('RGBA', tuple(tight_layout['atlas']), (255, 255, 255, 255))
+        for row in tight_layout['layers'][1:]:
+            atlas.paste(texture_images[row['texture']], tuple(row['rect'][:2]))
     atlas.save(destination.with_suffix('.png'))
+    if tight_layout is not None:
+        digest = lambda value: hashlib.sha256(value).hexdigest()
+        txd = source.with_suffix('.txd')
+        tight_layout.update(meshSHA256=digest(result),
+                            atlasSHA256=digest(destination.with_suffix('.png').read_bytes()),
+                            sourceDFFSHA256=digest(data),
+                            sourceTXDSHA256=digest(txd.read_bytes()) if txd.is_file() else None)
+        destination.with_suffix('.atlas.json').write_text(json.dumps(tight_layout, separators=(',', ':')) + '\n')
     return len(vertices), len(indices) // 3
 
 

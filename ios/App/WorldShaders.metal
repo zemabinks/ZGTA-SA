@@ -67,6 +67,17 @@ vertex Raster animatedActorVertex(uint id [[vertex_id]],
     return out;
 }
 
+static half4 ordinaryActorShade(Raster in,half4 textureColor,constant Uniforms &uniforms) {
+    if (textureColor.a * in.tint.a < 0.1) discard_fragment();
+    half3 tint = half3(mix(in.tint.rgb, in.dusk.rgb, uniforms.settings.z));
+    half3 color = min(half3(1.0), textureColor.rgb * max(tint * 1.8h, half3(0.20)));
+    color *= half3(uniforms.tintColor.rgb);
+    float fog = uniforms.fogSettings.z * clamp((in.depth - uniforms.fogSettings.x) /
+        max(1.0, uniforms.fogSettings.y - uniforms.fogSettings.x), 0.0, 1.0);
+    color = mix(color, half3(uniforms.fogColor.rgb), half(fog));
+    return half4(color, textureColor.a * half(in.tint.a * uniforms.tintColor.a));
+}
+
 fragment half4 worldFragment(Raster in [[stage_in]],
                              texture2d<half> atlas [[texture(0)]],
                              constant Uniforms &uniforms [[buffer(1)]]) {
@@ -79,12 +90,23 @@ fragment half4 worldFragment(Raster in [[stage_in]],
     float2 tiledUV = fract(in.uv);
     float2 atlasUV = (cell * cellSize + 0.5 + tiledUV * (cellSize - 1.0)) / uniforms.settings.xy;
     half4 textureColor = atlas.sample(sampleAtlas, atlasUV);
-    if (textureColor.a * in.tint.a < 0.1) discard_fragment();
-    half3 tint = half3(mix(in.tint.rgb, in.dusk.rgb, uniforms.settings.z));
-    half3 color = min(half3(1.0), textureColor.rgb * max(tint * 1.8h, half3(0.20)));
-    color *= half3(uniforms.tintColor.rgb);
-    float fog = uniforms.fogSettings.z * clamp((in.depth - uniforms.fogSettings.x) /
-        max(1.0, uniforms.fogSettings.y - uniforms.fogSettings.x), 0.0, 1.0);
-    color = mix(color, half3(uniforms.fogColor.rgb), half(fog));
-    return half4(color, textureColor.a * half(in.tint.a * uniforms.tintColor.a));
+    return ordinaryActorShade(in,textureColor,uniforms);
 }
+
+// The per-model rectangle layout belongs to the fragment stage only.
+fragment half4 ordinaryPedAtlasFragment(Raster in [[stage_in]],
+    texture2d<half> atlas [[texture(0)]],
+    constant Uniforms &uniforms [[buffer(1)]],
+    constant float4 *layout [[buffer(2)]]) {
+    constexpr sampler sampleAtlas(coord::normalized, address::clamp_to_edge,
+                                  filter::linear, mip_filter::none);
+    float slot=round(in.layer);
+    if (!isfinite(slot) || slot<0.0 || slot>=layout[0].z || layout[0].w!=1.0) {
+        discard_fragment();return half4(0.0);
+    }
+    float4 rect=layout[uint(slot)+1];
+    float2 atlasUV=(rect.xy+0.5+fract(in.uv)*(rect.zw-1.0))/layout[0].xy;
+    half4 textureColor=atlas.sample(sampleAtlas,atlasUV);
+    return ordinaryActorShade(in,textureColor,uniforms);
+}
+
