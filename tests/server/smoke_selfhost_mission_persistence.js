@@ -12,10 +12,10 @@ const before=args.length?path.resolve(args[1]):null,backendFile=before||path.joi
 const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
 const fixtureFile=path.join(ROOT,'tests/network/smoke_selfhost_position_resume.js'),fixture=fs.readFileSync(fixtureFile,'utf8');
 const end=fixture.indexOf('async function main(){');assert(end>0,'Authored fixture extraction marker changed');
-const sourceFS={...fs,readFileSync(file,...rest){return fs.readFileSync(path.resolve(String(file))===path.join(ROOT,'selfhost_backend.js')?backendFile:file,...rest);}};
+const sourceFS={...fs,readFileSync(file,...rest){const requested=path.resolve(String(file));assert(path.dirname(requested)===ROOT,'Authored backend escaped its source checkout');return fs.readFileSync(requested===path.join(ROOT,'selfhost_backend.js')?backendFile:requested,...rest);}};
 const {backend,storage,foot}=vm.runInNewContext(fixture.slice(0,end)+'\n;({backend,storage,foot});',{
  require:id=>id==='node:fs'?sourceFS:require(id),process:{argv:process.argv.slice(0,2)},
- __dirname:ROOT,__filename:fixtureFile,Buffer,URL,URLSearchParams,TextEncoder,TextDecoder,console,structuredClone},{filename:'authored-resume-fixture',timeout:5000});
+ __dirname:path.dirname(fixtureFile),__filename:fixtureFile,Buffer,URL,URLSearchParams,TextEncoder,TextDecoder,console,structuredClone},{filename:'authored-resume-fixture',timeout:5000});
 let checks=0;const cases=[];
 function check(value,label){checks++;assert(value,label);}
 function same(value,wanted,label){checks++;assert.deepEqual(JSON.parse(JSON.stringify(value)),JSON.parse(JSON.stringify(wanted)),label);}

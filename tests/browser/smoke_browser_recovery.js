@@ -29,9 +29,10 @@ function client(){let active=true,now=1000;const sent=[],notes=[];
     apply(packet=tp()){c.receive(packet,()=>{check(c.didApplyTeleport({x:packet.x,y:packet.y,z:packet.z,
       heading:packet.h,ground:packet.g===1}),'Matching normal callback completion');});}};}
 function fixture(){
-  const source=fs.readFileSync(path.join(ROOT,'tests/network/smoke_selfhost_position_resume.js'),'utf8');
+  const fixtureFile=path.join(ROOT,'tests/network/smoke_selfhost_position_resume.js');
+  const source=fs.readFileSync(fixtureFile,'utf8');
   const prefix=source.slice(0,source.indexOf('\nasync function main(){'));
-  const sandbox={require,module:{exports:{}},__dirname:ROOT,process:{argv:[]},console,Buffer,URL,URLSearchParams,
+  const sandbox={require,module:{exports:{}},__dirname:path.dirname(fixtureFile),process:{argv:[]},console,Buffer,URL,URLSearchParams,
     TextEncoder,TextDecoder,structuredClone};
   vm.runInNewContext(prefix+'\nglobalThis.fixture={backend,foot,storage,floor};',sandbox,{filename:'authored-backend-fixture.js'});
   return sandbox.fixture;
