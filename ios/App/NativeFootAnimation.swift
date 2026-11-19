@@ -150,6 +150,7 @@ final class NativeFootAnimation {
     private var baseStyle: NativeFootAnimationStyle
     private(set) var style: NativeFootAnimationStyle
     private var phase: Double
+    private var gaitAssociationWeights = SIMD3<Float>.zero
     private var idleTime: Double
     private var crouchPhase: Double = 0
     private var sprint: Double = 0
@@ -431,7 +432,19 @@ final class NativeFootAnimation {
         action = Action(kind: kind, clip: clip, weight: action?.weight ?? 0)
         return duration(clip)
     }
-    @discardableResult func launch() -> Double { min(0.5, start(phase < 0.5 ? "launch" : "launchR")) }
+    @discardableResult func launch() -> Double {
+        // Use the last evaluated gait associations. Idle/random initialization
+        // alone is not an active association and cannot select the launch foot.
+        var weight = gaitAssociationWeights.z
+        if weight < 0.3 { weight = gaitAssociationWeights.y }
+        if weight < 0.3 { weight = gaitAssociationWeights.x }
+        var launchPhase:Float = 0
+        if weight > 0.3 {
+            launchPhase = Float(phase) + 0.367
+            if launchPhase > 1 { launchPhase -= 1 }
+        }
+        return min(0.5, start(launchPhase >= 0.5 ? "launchR" : "launch"))
+    }
     func cancelQueuedLaunch() {
         if action?.kind=="launch" || action?.kind=="launchR" {action=nil}
     }
@@ -547,7 +560,9 @@ final class NativeFootAnimation {
         let weights = [idleWeight, nonStrafe * nonSprint * (ratio <= 1 ? ratio : 2 - ratio), nonStrafe * nonSprint * max(0, ratio - 1), nonStrafe * sprint]
         let clips = [style.idle, style.walk, style.run, style.sprint]
         var rate: Double = 0, movingWeight: Double = 0
+        gaitAssociationWeights = .zero
         for index in 1..<4 where weights[index] > 0 && duration(clips[index]) > 0 {
+            gaitAssociationWeights[index - 1] = Float(weights[index])
             // R6 compares prepared clip identity: armed styles can share the
             // very same run/sprint clip, so index-based multipliers are wrong.
             let multiplier: Double = clips[index] == style.sprint ? input.pace : clips[index] == style.run ? 1.12 : 1
