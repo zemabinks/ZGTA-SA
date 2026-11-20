@@ -8,10 +8,20 @@ var checks=0
 func require(_ value:@autoclosure()->Bool,_ reason:String){checks+=1;if !value(){fatalError(reason)}}
 struct View {let colorPixelFormat:MTLPixelFormat = .rgba8Unorm,depthStencilPixelFormat:MTLPixelFormat = .depth32Float}
 final class Ground {let world=SwiftRapierWorld()!}
+final class HeldDictionaryTask:NativeResourceTask {
+    let request:URLRequest,completion:NativeResourceTransport.Completion
+    var resumed=false,cancelled=false
+    init(_ request:URLRequest,_ completion:@escaping NativeResourceTransport.Completion){self.request=request;self.completion=completion}
+    func resume(){resumed=true}
+    func cancel(){cancelled=true}
+    func reply(_ data:Data){completion(data,HTTPURLResponse(url:request.url!,statusCode:200,httpVersion:"HTTP/1.1",headerFields:nil),nil)}
+}
 final class Carrier {
     let device:MTLDevice,view=View(),groundVehicle:Ground?=Ground()
     let pipeline:MTLRenderPipelineState,depth:MTLDepthStencilState
     var server:ServerAddress?,gameHour=12.0
+    var resourceGeneration=0
+    func fixedCJSourceIdentity()->String { (server?.display ?? "none")+"|generation:\(resourceGeneration)" }
     var statuses:[String]=[]
     var onStatus:((String)->Void)?
     // ACTUAL_PROPERTIES
@@ -33,13 +43,15 @@ final class Carrier {
 // ACTUAL_METADATA_TRANSFER
 
 final class Tests {
-    let base:URL,out:URL,device:MTLDevice,library:MTLLibrary,carrier:Carrier
+    let base:URL,otherBase:URL,out:URL,device:MTLDevice,library:MTLLibrary,carrier:Carrier
     var gatedCarrier:Carrier?,testCookies:[HTTPCookie]=[],gatedComplete=false
     var metadataIndex=0,metadataTransfer:LegacyStockMetadataTransfer?,maximumWholeLoads=0,maximumLoaderActive=0
+    var heldDictionaries:[HeldDictionaryTask]=[],sourcePhases:[String]=[]
     var objects:[UInt16:NativeSAMPObjects.Instance]=[:],gpuRows:[[String:Any]]=[]
     let metadataCases:[(String,String)]=[("valid","ok"),("length","limit"),("chunked","limit"),("encoding","encoding"),("redirect","redirect"),("http","http"),("slow","cancelled")]
     init(device:MTLDevice,library:MTLLibrary)throws {
         base=URL(string:CommandLine.arguments[1])!;out=URL(fileURLWithPath:CommandLine.arguments[3]);self.device=device;self.library=library
+        otherBase=URL(string:CommandLine.arguments[4])!
         carrier=try Carrier(device:device,library:library,server:ServerAddress(base.absoluteString)!)
     }
     func wait(_ label:String,timeout:Double=30,condition:@escaping()->Bool,then:@escaping()->Void) {
@@ -212,10 +224,123 @@ final class Tests {
                 require(self.carrier.legacyModels[1004]==nil && self.carrier.legacyStockLoads[1004]==nil,"unreferenced cancelled model published old resources")
                 for value in 0..<100 {try!self.add(UInt16(100+value),Int32(18000+value),Float(1000+value))}
                 require((18000..<18100).allSatisfy{self.carrier.legacyStockRetries[Int32($0)] != nil},"unknown model names were guessed or recursively blocked queue progress")
-                self.wait("baseline load cleanup",condition:{self.carrier.legacyStockLoads.isEmpty},then:self.beginGate)
+                self.wait("baseline load cleanup",condition:{self.carrier.legacyStockLoads.isEmpty},then:self.beginSourceTransitions)
             }
         }
     }catch{fatalError("cancel: \(error)")}}
+    func beginSourceTransitions(){
+        guard // SOURCE_TRANSITION_ENABLED
+        else{beginGate();return}
+        do {
+            let gpu=carrier.legacyModels[980]!,bytes=carrier.legacyModelCosts[980]!
+            carrier.legacyModels[20001]=gpu;carrier.legacyModelCosts[20001]=bytes;carrier.legacyModelBytes+=bytes
+            // ARTWORK_BINDING_WITNESS
+            let nativeIDs=carrier.legacyCollisionHandles.values.flatMap{$0}.flatMap{carrier.legacyCollisionWorld!.colliderIDs(for:$0)!}
+            require(!nativeIDs.isEmpty,"source switch must exercise registered physical objects")
+            let oldObjectCount=try carrier.legacyObjects.sampledInstances(at:ProcessInfo.processInfo.systemUptime).count
+            let second=ServerAddress(otherBase.absoluteString)!
+            carrier.server=second;carrier.refreshLegacyStockReferences()
+            require(carrier.legacyStockModels.isEmpty && carrier.legacyModels[980]==nil,"source change retained old stock GPU registration")
+            require(carrier.legacyModels[20001] === gpu && carrier.legacyModelCosts[20001]==bytes,"stock source retirement erased independent artwork")
+            // ARTWORK_BINDING_RETAINED
+            require(nativeIDs.allSatisfy{carrier.groundVehicle!.world.colliderInfo($0)==nil},"source change retained old physical stock collision")
+            let retainedObjectCount=try carrier.legacyObjects.sampledInstances(at:ProcessInfo.processInfo.systemUptime).count
+            require(retainedObjectCount==oldObjectCount,"asset source retirement erased authoritative object state")
+            wait("actual second-origin metadata and model load",condition:{
+                self.carrier.legacyStockModels.contains(980) && self.carrier.legacyStockLoads.isEmpty && self.carrier.legacyStockMetadataPending==0
+            },then:{
+                require(self.carrier.legacyStockLoader != nil,"new source did not create its own loader")
+                self.carrier.synchronizeLegacyObjectPhysics(at:ProcessInfo.processInfo.systemUptime)
+                require(self.carrier.groundVehicle!.world.step(),"new source physical step")
+                require(self.carrier.legacyStockObjectReady(self.objects[2]!),"new source model did not regain authored collision readiness")
+                self.sourcePhases.append("origin-change-with-registered-physics")
+                self.beginResourceRepair()
+            })
+        }catch{fatalError("source changes: \(error)")}
+    }
+    func beginResourceRepair(){
+        let loader=carrier.legacyStockLoader,gpu=carrier.legacyModels[980]!
+        let digest=carrier.legacyStockManifestSHA256
+        carrier.synchronizeLegacyStockSource()
+        require(carrier.legacyStockLoader === loader && carrier.legacyModels[980] === gpu,"same source unnecessarily retired ready resources")
+        carrier.legacyStockMetadataRetryAfter=ProcessInfo.processInfo.systemUptime+300
+        carrier.resourceGeneration+=1;carrier.refreshLegacyStockReferences()
+        require(carrier.legacyStockModels.isEmpty && carrier.legacyStockModels.count==0,"same-URL resource repair retained old stock generation")
+        require(carrier.legacyStockMetadataRetryAfter==0,"new resource generation inherited old retry suppression")
+        wait("same URL new resource generation",condition:{
+            self.carrier.legacyStockModels.contains(980) && self.carrier.legacyStockLoads.isEmpty && self.carrier.legacyStockMetadataPending==0
+        },then:{
+            require(self.carrier.legacyStockLoader !== loader && self.carrier.legacyModels[980] !== gpu,"repair reused obsolete loader/GPU owner")
+            require(self.carrier.legacyStockManifestSHA256==digest,"same-content repair fixture unexpectedly changed metadata")
+            require(self.carrier.legacyModels[20001] != nil,"same-content repair erased independent custom resource")
+            self.sourcePhases.append("same-URL-same-content-new-resource-generation")
+            self.beginPendingSourceMetadata()
+        })
+    }
+    func beginPendingSourceMetadata(){
+        carrier.legacyImportQueue.suspend()
+        carrier.resourceGeneration+=1;carrier.refreshLegacyStockReferences()
+        wait("first bootstrap received but CPU parsing held",condition:{
+            self.carrier.legacyStockMetadataTasks.isEmpty && self.carrier.legacyStockMetadataPending==2
+        },then:{
+            let oldEpoch=self.carrier.legacyStockMetadataEpoch
+            self.carrier.resourceGeneration+=1;self.carrier.refreshLegacyStockReferences()
+            require(self.carrier.legacyStockMetadataEpoch != oldEpoch && self.carrier.legacyStockMetadataPending==2,"new bootstrap did not replace the pending owner")
+            self.carrier.legacyImportQueue.resume()
+            self.wait("old bootstrap callbacks ignored and new bootstrap completed",condition:{
+                require((0...2).contains(self.carrier.legacyStockMetadataPending),"retired metadata decremented the new pending count")
+                return self.carrier.legacyStockMetadataPending==0 && self.carrier.legacyStockModels.contains(980) && self.carrier.legacyStockLoads.isEmpty
+            },then:{self.sourcePhases.append("retired-bootstrap-CPU-completion");self.beginReentrantSource()})
+        })
+    }
+    func beginReentrantSource(){
+        let originalStatus=carrier.onStatus
+        var fired=false
+        carrier.onStatus={message in
+            originalStatus?(message)
+            if !fired && message.hasPrefix("STOCK OBJECT 1 UNAVAILABLE:") {
+                fired=true;self.carrier.server=ServerAddress(self.base.absoluteString)!
+                self.carrier.synchronizeLegacyStockSource()
+            }
+        }
+        carrier.legacyStockReferences=[1,1006];carrier.pumpLegacyStockObjects()
+        require(fired,"reentrant source witness did not execute")
+        require(carrier.legacyStockLoads.isEmpty,"reentrant source change queued a model from captured old catalogue")
+        carrier.onStatus=originalStatus;carrier.refreshLegacyStockReferences()
+        wait("post-reentrant source bootstrap",condition:{
+            self.carrier.legacyStockModels.contains(980) && self.carrier.legacyStockLoads.isEmpty
+        },then:{self.sourcePhases.append("reentrant-status-source-switch");self.beginLateDictionary()})
+    }
+    func beginLateDictionary(){
+        NativeResourceTransport.install({request,completion in
+            let task=HeldDictionaryTask(request,completion);self.heldDictionaries.append(task);return task
+        },bounded:{request,maximum,completion in
+            require(maximum==64*1024*1024,"raw dictionary transfer lost its pre-append byte cap")
+            let task=HeldDictionaryTask(request,completion);self.heldDictionaries.append(task);return task
+        })
+        let key=NativeSAMPObjectMaterials.TextureRequest(model:19000,dictionary:"source_check",texture:"session_texture")
+        carrier.loadLegacyDictionary(key)
+        require(heldDictionaries.count==1 && heldDictionaries[0].resumed,"old dictionary request not admitted")
+        carrier.resourceGeneration+=1;carrier.synchronizeLegacyStockSource()
+        require(heldDictionaries[0].cancelled,"source change did not cancel its raw dictionary transfer")
+        carrier.loadLegacyDictionary(key)
+        require(heldDictionaries.count==2 && heldDictionaries[1].resumed && carrier.legacyTextureLoads.contains(key),"new dictionary request did not replace cancelled work")
+        let payload=try!Data(contentsOf:out.appendingPathComponent("source-check.txd"))
+        DispatchQueue.global(qos:.utility).async {
+            self.heldDictionaries[0].reply(payload)
+            DispatchQueue.main.asyncAfter(deadline:.now()+0.08){
+                require(self.carrier.legacyExactTextures[key]==nil && self.carrier.legacyTextureLoads.contains(key),"old dictionary callback published or erased a new load")
+                self.heldDictionaries[1].reply(payload)
+                self.wait("new dictionary verified decoder and actual Metal upload",condition:{!self.carrier.legacyTextureLoads.contains(key)},then:{
+                    require(self.carrier.legacyExactTextures[key]?.image.width==2,"current dictionary did not decode/upload its authored texture")
+                    require(self.carrier.legacyTextureRetries[key]==nil,"old callback poisoned the new retry policy")
+                    NativeResourceTransport.install({URLSession.shared.dataTask(with:$0,completionHandler:$1)},bounded:{NativeBoundedResourceTask(request:$0,maximumBytes:$1,completion:$2)})
+                    self.sourcePhases.append("cancelled-raw-dictionary-cannot-publish-or-retire-new-request")
+                    self.beginGate()
+                })
+            }
+        }
+    }
     func beginGate(){
         var request=URLRequest(url:base.appendingPathComponent("control/gate"));request.httpShouldHandleCookies=false
         URLSession.shared.dataTask(with:request){_,response,error in
@@ -262,6 +387,7 @@ final class Tests {
     }catch{fatalError("authorized carrier: \(error)")}}
     func finish(){do {
         let report:[String:Any]=["passed":true,"checks":checks,"metalDevice":device.name,"gpuReadbacks":gpuRows,
+            "sourceTransitions":sourcePhases,
             "gatedRBootstrapAndFourRetailModels":gatedComplete,
             "readback":"explicit texture-to-shared-buffer GPU blit, 256-byte-aligned rows",
             "maximumWholeModelLoads":maximumWholeLoads,"maximumVerifiedLoaderActive":maximumLoaderActive,
