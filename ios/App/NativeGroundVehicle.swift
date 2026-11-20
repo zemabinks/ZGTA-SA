@@ -315,7 +315,7 @@ final class NativeGroundVehicle {
     private var cells: [String: [SwiftRapierWorld.ColliderID]] = [:]
     private var cellData: [String: Data] = [:]
     private var materialClasses: [Int] = []
-    private struct CollisionPart: Equatable { let indexStart:Int;let indexCount:Int }
+    fileprivate struct CollisionPart: Equatable { let indexStart:Int;let indexCount:Int }
     private var collisionFallbackParts: [String:[CollisionPart]] = [:]
     private var loadedCells: Set<String> = []
     private var rigid: SwiftRapierWorld.BodyID?
@@ -565,29 +565,43 @@ final class NativeGroundVehicle {
         audioTopCache[model]=value;return value
     }
     func isCellLoaded(_ name: String) -> Bool { loadedCells.contains(name) }
-    func installCell(_ name: String, data: Data) {
-        cellData[name] = data
-        guard !loadedCells.contains(name), materialClasses.count == 256,
-              let mesh = try? SwiftRapierWorld.decodeSCL2(data) else { return }
-        if mesh.indices.isEmpty { loadedCells.insert(name); return }
-        // Original39943 groups each cell by normalized traction surface and
-        // representative sound material, preserving first-use Map order. The
-        // raw face material remains available for original `each` queries.
+    /// Immutable material/fallback snapshot. CPU preparation may use this on
+    /// a serial worker; it never reads or mutates this physics-world owner.
+    struct CellConfiguration: Equatable {
+        fileprivate let materialClasses:[Int],parts:[CollisionPart]?
+        var ready:Bool{materialClasses.count==256}
+    }
+    struct PreparedCell {
+        fileprivate struct Part {let mesh:SwiftRapierWorld.TriangleMesh;let surface:Int,material:Int}
+        fileprivate let configuration:CellConfiguration,parts:[Part]
+    }
+    enum CellPreparationError:Error {case configuration,invalidParts}
+    func cellConfiguration(_ name:String)->CellConfiguration {
+        .init(materialClasses:materialClasses,parts:collisionFallbackParts[name])
+    }
+    static func prepareCell(_ data:Data,configuration:CellConfiguration)throws->PreparedCell {
+        guard configuration.ready else{throw CellPreparationError.configuration}
+        let mesh=try SwiftRapierWorld.decodeSCL2(data)
+        // Preserve the existing first-use surface/sound grouping and raw
+        // per-face materials; only the CPU execution owner changes.
         struct Group { let surface:Int;let material:Int;var faces:[Int] }
         var groups:[Group] = [], lookup:[Int:Int] = [:]
         for face in 0..<(mesh.indices.count/3) {
             let raw = mesh.materials.indices.contains(face) ? Int(mesh.materials[face]) : -1
-            let sound = raw == 17 || raw == 18 ? raw : materialClasses.indices.contains(raw) ? materialClasses[raw] : -1
+            let sound = raw == 17 || raw == 18 ? raw : configuration.materialClasses.indices.contains(raw) ? configuration.materialClasses[raw] : -1
             let rawSurface = mesh.surfaces.indices.contains(face) ? Int(mesh.surfaces[face]) : 2
             let surface = rawSurface <= 5 ? rawSurface : 2, key = 256 * surface + sound
             if let index = lookup[key] { groups[index].faces.append(face) }
             else { lookup[key] = groups.count; groups.append(Group(surface:surface,material:sound,faces:[face])) }
         }
-        if let parts=collisionFallbackParts[name] {
-            guard parts.allSatisfy({ $0.indexStart+$0.indexCount<=mesh.indices.count }) else { return }
+        if let parts=configuration.parts {
+            guard parts.allSatisfy({ part in
+                let end=part.indexStart.addingReportingOverflow(part.indexCount)
+                return !end.overflow && end.partialValue<=mesh.indices.count
+            }) else { throw CellPreparationError.invalidParts }
             groups=parts.map { Group(surface:2,material:-1,faces:Array(($0.indexStart/3)..<(($0.indexStart+$0.indexCount)/3))) }
         }
-        var installed:[SwiftRapierWorld.ColliderID] = []
+        var prepared:[PreparedCell.Part]=[]
         for group in groups {
             var vertices:[SIMD3<Float>] = groups.count == 1 ? mesh.vertices : [],indices:[UInt32] = [],surfaces:[Int32] = [],materials:[Int32] = []
             var remap:[UInt32:UInt32] = [:]
@@ -603,14 +617,33 @@ final class NativeGroundVehicle {
                 surfaces.append(Int32(group.surface));materials.append(mesh.materials.indices.contains(face) ? mesh.materials[face] : -1)
             }
             if indices.isEmpty { continue }
-            guard let collider = world.addTriangleMesh(.init(vertices:vertices,indices:indices,surfaces:surfaces,materials:materials)) else {
-                for id in installed { world.removeCollider(id) };return
+            prepared.append(.init(mesh:.init(vertices:vertices,indices:indices,surfaces:surfaces,materials:materials),surface:group.surface,material:group.material))
+        }
+
+        return .init(configuration:configuration,parts:prepared)
+    }
+    /// Keep the old synchronous entry point for existing explicit callers and
+    /// deferred metadata rebuilds. Streamed renderer cells use prepared data.
+    func installCell(_ name:String,data:Data) {
+        cellData[name]=data
+        guard !loadedCells.contains(name),let prepared=try? Self.prepareCell(data,configuration:cellConfiguration(name))else{return}
+        _=installCell(name,data:data,prepared:prepared)
+    }
+    func deferCellData(_ name:String,data:Data){cellData[name]=data}
+    @discardableResult func installCell(_ name:String,data:Data,prepared:PreparedCell)->Bool {
+        guard prepared.configuration==cellConfiguration(name),prepared.configuration.ready else{return false}
+        cellData[name]=data
+        if loadedCells.contains(name){return true}
+        var installed:[SwiftRapierWorld.ColliderID]=[]
+        for part in prepared.parts {
+            guard let collider=world.addTriangleMesh(part.mesh)else {
+                for id in installed{world.removeCollider(id)};return false
             }
-            world.setColliderGroups(collider, collision:131071,solver:0xffffffff)
-            world.setColliderQueryMetadata(collider,surface:Int32(group.surface),material:Int32(group.material))
+            world.setColliderGroups(collider,collision:131071,solver:0xffffffff)
+            world.setColliderQueryMetadata(collider,surface:Int32(part.surface),material:Int32(part.material))
             installed.append(collider)
         }
-        cells[name] = installed;loadedCells.insert(name)
+        cells[name]=installed;loadedCells.insert(name);return true
     }
     func retainCells(_ names: Set<String>) {
         for (name, colliders) in cells where !names.contains(name) { for collider in colliders { world.removeCollider(collider) } }

@@ -100,3 +100,85 @@ source artwork. The color alone is not a demonstrated rendering defect. It does
 not verify full texture equivalence, original lighting, every purple surface or
 a pristine retail runtime. Original bytes, decoded samples and captures remain
 local; this note includes only independently written findings.
+
+
+## Bounded city collision preparation (154)
+
+The previous renderer performed the CPU spatial-grid build, physical SCL2
+parse, grouping and native collider registration in its main-queue completion.
+A bounded owner now admits one active transfer/preparation and at most32 small
+pending descriptors. Each response is capped at16MiB with identity encoding;
+all currently available archived city/interior cell files fit that cap. A
+cancelled decoder keeps its serial slot until it exits, and resetting the
+source releases queued descriptors without retaining their old payloads.
+
+The utility worker uses the actual immutable WorldCollision parser and the
+extracted physical-cell preparation operation. Material classes and fallback
+parts are captured by value. The renderer checks the current source, request,
+retained-cell intent and material snapshot before publication. Physical
+registration stays on the existing world owner, rolls back partial failures
+and preserves unrelated bodies. The old synchronous entry point remains for
+explicit callers and deferred metadata rebuilds; those paths are not claimed
+as asynchronous. No movement, handling, camera or multiplayer policy changes.
+
+Executed focused gates pass49 worker/physics checks,41 renderer/source/floor
+checks and32 composed-owner checks. They use authored bytes and controlled
+transport/serial scheduling, with actual CPU preparation and native Rapier
+queries. They cover bounded admission, main-queue responsiveness while a
+worker is deliberately held, cancellation, reset, completion reentry,
+malformed/oversized/HTTP/wrong-URL replies, physical floor/material queries,
+empty cells, changed material snapshots, fallback bounds and deferred metadata.
+They do not measure real HTTP latency or original-game frame timing. The
+historical renderer still fails its intended obsolete-loading runtime oracle.
+
+A matched Debug host comparison runs both actual153 and154 ground/parser
+sources on three unchanged owner-local cells for three iterations each.
+All225 deterministic CPU height and native floor-distance/surface/material
+samples match exactly. The measured main-thread-equivalent path falls from
+235–404ms to26–55ms; worker preparation measures207–363ms. These are desktop
+host measurements, not Simulator frame traces or physical-iPhone results.
+Native collider registration still has a measurable synchronous cost.
+
+The initial authored fixture compared momentum across a legitimate physics
+step and failed; its corrected comparison brackets installation itself. The
+initial diagnostic benchmark rejected an ambiguous Float conversion before
+execution. Both failures remain retained separately, with product source
+unchanged by their fixture-only corrections. The accepted follow-up is distinct.
+
+The complete selected Metal/physics/audio/transport regression passes
+(1015.34s), with all230 App/build and17 captured test inputs held. The separate
+four-original-rig and stock HTTP/Metal/Rapier gates pass, followed by project,
+host and layout checks. Both SDK products subsequently pass: universal Simulator Debug490.6s and
+arm64 iPhone Release510.3s. All230 product inputs,39 dependency files and14
+private menu files remain held; product verification confirms self-contained
+menu resources and the intended architectures/version. These unsigned builds
+are not physical-device acceptance. A normal retained-data Simulator case
+subsequently passes (512.352s, one executed test, zero failures). It performs
+three development-source joins for7/2/0, original Taxi entry, a normal camera
+gesture, exit/jump/landing/walk, then installed CJ0 walk/camera/jump and menu
+restoration. Twelve complete captures are manually reviewed. The paired car
+view changes from rear to front/three-quarter with ordinary right-stick input;
+this establishes response, not original orbit curves or continuous smoothness.
+The driver head/upper torso is visible, while lower limbs remain obscured.
+
+The13 existing installed CJ files match their declarations and owner-local
+sources. During the installed join, neither CJ nor city collision files fall
+back to the Mac HTTP proxy. Installed CJ retains skin, white vest, denim and
+shoes in the reviewed captures. Its base world appearance is less sharp than
+the development source's optional HD overlay; world/lighting equivalence is
+not claimed. This is installed-resource multiplayer, not offline gameplay or a
+complete on-device original-ISO conversion.
+
+The owned server records1153 updates, four distinct native joins with movement
+in each and198 Taxi model420 reports with driver entry/exit. The installed
+CJ join moves9.326m horizontally from its first reported on-foot point. This
+is one actual native client and its owned server, not a second rendered
+browser client. Prepared/raw metadata, original files and native preferences
+are retained, and the app, Simulator and owned test services stop afterward.
+
+Publication rejects a completed cell that has left the retained set. Pending
+work is not currently reprioritized or retired early merely because visibility
+changes. Rapid-teleport/cold-load latency and the residual synchronous work
+still need rendered and hardware measurement. Original assets,
+measurements, screenshots and private histories stay local. Original-retail,
+hardware, ambient population and complete gameplay parity remain open.

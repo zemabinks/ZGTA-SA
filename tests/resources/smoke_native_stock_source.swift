@@ -4,6 +4,7 @@ var checks=0
 func require(_ condition:@autoclosure()->Bool,_ message:String){checks+=1;if !condition(){fatalError(message)}}
 final class Resource {}
 final class Task {var cancellations=0;var onCancel:(()->Void)?;func cancel(){cancellations+=1;onCancel?()}}
+final class CityLoader {var tasks:[Task]=[];func reset(){let retired=tasks;tasks.removeAll();for task in retired{task.cancel()}}}
 final class Loader {var resets=0;@discardableResult func reset()->Int{resets+=1;return resets}}
 final class GroundCells {
     var cells=Set<String>(),retentions=0
@@ -26,6 +27,7 @@ final class Carrier {
     func ensureFixedCJ(){fatalError("unrequested CJ load")}
     // Explicit cell/resource spies. Real parser/ground/Rapier behavior is
     // exercised separately by smoke_native_collision_source.
+    let collisionCellLoader=CityLoader()
     var collisions:[String:Resource]=[:],collisionRequests=Loader()
     let groundVehicle:GroundCells?=GroundCells()
     var collisionLoading=Set<String>(),collisionRetryAfter:[String:Date]=[:]
