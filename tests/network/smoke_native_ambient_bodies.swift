@@ -7,8 +7,8 @@ private func check(_ condition:Bool,_ message:String){precondition(condition,mes
     static func main(){
         let world=SwiftRapierWorld(gravity:.zero)!
         var owner:NativeAmbientPedestrianBodies?=NativeAmbientPedestrianBodies(world:world)
-        func actor(_ x:Double=1,seed:UInt8=1,flags:UInt8=0)->NativeAmbientPedestrians.Frame {
-            .init(id:1,skin:14,seed:seed,flags:flags,position:SIMD3(x,2,13),velocity:.zero,heading:0,state:nil)
+        func actor(_ x:Double=1,seed:UInt8=1,flags:UInt8=0,generation:UInt64=0)->NativeAmbientPedestrians.Frame {
+            .init(id:1,skin:14,seed:seed,flags:flags,position:SIMD3(x,2,13),velocity:.zero,heading:0,state:nil,generation:generation)
         }
         owner!.synchronize([actor()],near:SIMD3(1,2,13),enabled:true);check(world.step(),"Actual Rapier step")
         check(owner!.colliders.count==1,"NPC body missing")
@@ -25,6 +25,13 @@ private func check(_ condition:Bool,_ message:String){precondition(condition,mes
         world.removeCollider(walker)
         owner!.synchronize([actor(2,seed:2)],near:SIMD3(1,2,13),enabled:true);check(world.step(),"Identity replacement step")
         check(world.colliderInfo(first)==nil && owner!.colliders.count==1,"Identity replacement retained old contact body")
+        let replaced=owner!.colliders.first!
+        owner!.synchronize([actor(2,seed:2,generation:1)],near:SIMD3(1,2,13),enabled:true)
+        check(world.step(),"New lifetime Rapier step")
+        check(world.colliderInfo(replaced)==nil && owner!.colliders.count==1,"Same ID/skin/seed respawn retained previous physical body")
+        let lifetimeBody=owner!.colliders.first!
+        owner!.synchronize([actor(3,seed:2,generation:1)],near:SIMD3(1,2,13),enabled:true)
+        check(owner!.colliders==[lifetimeBody],"Same lifetime movement recreated body")
         let second=owner!.colliders.first!
         owner!.synchronize([actor(2,seed:2,flags:9)],near:SIMD3(1,2,13),enabled:true)
         check(owner!.colliders.isEmpty && world.colliderInfo(second)==nil,"Dead NPC retained standing collider")

@@ -17,7 +17,7 @@ final class NativeAmbientPedestrianBodies {
         let ids=Set(wanted.map(\.id))
         for(id,value)in bodies where !ids.contains(id){world.removeBody(value.body);bodies[id]=nil}
         for frame in wanted {
-            let identity="\(frame.skin):\(frame.seed)"
+            let identity="\(frame.skin):\(frame.seed):\(frame.generation)"
             if let value=bodies[frame.id],value.identity != identity{world.removeBody(value.body);bodies[frame.id]=nil}
             let center=SwiftRapierWorld.gtaToRapier(SIMD3<Float>(frame.position)+SIMD3(0,0,0.9))
             if bodies[frame.id]==nil {

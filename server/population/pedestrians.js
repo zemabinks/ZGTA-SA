@@ -112,7 +112,7 @@ class Pedestrians {
    // the task's desired speed for obstacle recovery, but publish a stopped
    // goal while geometry prevents movement.
    packets.push(wire.free(visible.map(actor=>({...actor,desiredSpeed:actor.flags&2?0:actor.desiredSpeed})),Math.floor(now)),wire.more(visible.map(actor=>({
-    ...actor,weapon:0,burning:false,phone:false,crouching:false,cpr:false,foe:65535,thrown:0
+    ...actor,weapon:0,burning:false,phone:false,crouching:false,cpr:false,foe:0,thrown:0
    }))));
   }
   return packets;

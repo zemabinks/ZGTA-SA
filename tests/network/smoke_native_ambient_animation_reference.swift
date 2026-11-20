@@ -4,8 +4,8 @@ import simd
 
 // Explicit controller seam for comparing policy calls with an offline archived
 // replay. This does not execute animation, rendering, voice or world physics.
-final class NativeSkeletalAnimationLibrary {}
-struct NativeFootAnimationStyle {}
+final class NativeSkeletalAnimationLibrary {func duration(of:String)->Double?{nil}}
+struct NativeFootAnimationStyle {var walk="ped/walk_player"}
 struct NativeFootWeaponAnimation {}
 final class NPCFootSpy {
     struct GunAim {var pitch=0.0}
@@ -19,7 +19,7 @@ final class NPCFootSpy {
     func rest(cut:Bool=false){calls.append(["method":"rest","cut":cut])}
     func die(_ kind:String,fallen:Bool=false){calls.append(["method":"die","kind":kind,"fallen":fallen])}
     func revive(){calls.append(["method":"revive"])}
-    @discardableResult func act(_ clip:String,cut:Bool=false,once:Bool=false)->Bool {
+    @discardableResult func act(_ clip:String,loop:Bool=false,rooted:Bool=false,cut:Bool=false,once:Bool=false)->Bool {
         calls.append(["method":"act","kind":clip.replacingOccurrences(of:"ped/",with:""),"cut":cut,"once":once]);return true
     }
     func arm(_ weapon:NativeFootWeaponAnimation?){}

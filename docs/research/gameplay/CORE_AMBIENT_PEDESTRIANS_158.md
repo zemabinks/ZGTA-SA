@@ -94,3 +94,34 @@ Social activities, phone, attention, speech, complete special events, runover
 and original population/traffic/police AI remain unfinished in this version.
 Two rendered clients, hardware behavior and complete NPC visual fidelity still
 need appropriate acceptance. No1:1 parity is claimed.
+
+
+## NPC activities, waiting and local lifetimes
+
+NPC task poses now use a separate owner of the existing original-animation
+controller. Activity entry/loop/exit policy, retained down/hit state and model
+turn rates are applied without sharing the local player's animation clock.
+Optional activity traits are bound to exact model and resource-source identity;
+older catalogs remain readable. The source converter derives those traits from
+original metadata instead of guessing from a model's name.
+
+Waiting uses the next edge's kind and style-specific crossing or delayed idle
+clips. A local generation separates a newly admitted actor from an earlier
+actor with the same wire ID, model and seed. Animation, ground smoothing and
+nearby physical bodies use that lifetime while preserving server target IDs.
+An independent-server wait publishes zero desired speed so prediction stops.
+
+Focused authored gates, separate owner-local controller/resource comparisons,
+both SDK builds and the complete selected optional source chain pass. A normal
+retained-data Simulator case passes through four joins, character movement,
+Taxi entry/exit, camera input and menu restoration. A separate server-owned
+population case passes in development and installed modes. Reviewed activity
+stills isolate original male/female resources and distinct task stances;
+resources/settings are retained and owned QA processes stop afterward.
+
+The stills are not exact blend/timing or retail acceptance. The activity case
+uses explicit server inputs on existing NPCs; benches and autonomous social AI
+are not implemented by this change. Waiting/crossing/respawn visual coverage
+also remains separate. An earlier intermittent missing NPC draw is retained as
+an unresolved failure despite the later passing run. Full NPC events, original
+population policy, traffic, police and complete gameplay parity remain open.

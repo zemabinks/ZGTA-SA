@@ -16,6 +16,8 @@ check(actor.skin===7&&actor.node===1,'Model/graph selection');
 p.tick(200,[[0,0,13]]);check(Math.hypot(...actor.position.map((v,i)=>v-origin[i]))>0.01,'NPC did not traverse graph');
 const near=actor.position.slice();check(p.packets('one',near,200).some(packet=>packet[0]===10),'Separate free-goal channel missing');
 check(p.packets('two',near,200).length===2,'Second observer did not share actual actor');
+const more=p.packets('two',near,200).find(packet=>packet[0]===11);
+check(more.readUInt16BE((more[1]&128?3:2)+8)===0,'Calm actor invented a foe identity');
 const gone=p.packets('one',[1000,1000,13],201);check(gone.length===1&&gone[0][0]===8,'Interest streamout missing');
 check(p.packets('two',near,201).every(packet=>packet[0]!==8),'One observer removed another observer actor');
 p.forget('one');check(!p.interest.has('one'),'Disconnected interest retained');
