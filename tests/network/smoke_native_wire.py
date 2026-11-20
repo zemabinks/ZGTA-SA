@@ -92,7 +92,7 @@ def main():
         folder=Path(directory);(folder/'peer.cjs').write_text(JS)
         actor=(ROOT/'ios/App/NativeActorAnimation.swift').read_text()
         actor=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]
-        source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeOriginalWorldEffects','NativeSAMPLocalVitals'])+'\n'+actor+'\n'+(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
+        source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeOriginalWorldEffects','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol'])+'\n'+actor+'\n'+(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
         (folder/'main.swift').write_text(source+'\n'+SWIFT)
         subprocess.run(['swiftc','-module-cache-path','/private/tmp/zgtasa-wire-module-cache',str(folder/'main.swift'),'-o',str(folder/'client')],check=True)
         subprocess.run(['node',str(folder/'peer.cjs'),str(folder/'client')],check=True)

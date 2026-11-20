@@ -375,6 +375,9 @@ final class NativeMultiplayerClient {
     var onAuthenticationRequired: (()->Void)?
     var onOriginalShot: (([String:Any])->Void)?
     var onOriginalRecord: ((UInt8,Data)->Void)?
+    var onAmbientPedestrianConfiguration:((Double,String?)->Void)?
+    var onAmbientPedestrianEvent:((NativeAmbientPedestrianProtocol.Event,Double,Double)->Void)?
+    private var ambientBinaryEnabled=false
     var onOriginalCommand: (([String:Any])->Void)?
     var onOriginalVehicleHit: (([String:Any])->Void)?
     var onOriginalHit: ((NativeOriginalWorldVitals.Hit)->Void)?
@@ -596,7 +599,7 @@ final class NativeMultiplayerClient {
             }
             parts.scheme=server.url.scheme=="https" ? "wss":"ws"
             guard let value=parts.url else { failTransport(generation:generation,reason:"INVALID MULTIPLAYER ADDRESS");return }
-            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1]
+            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1,"npcProtocol":38]
         case .originalWorld(let build,let deviceID):
             do {
                 let originalURL=try NativeOriginalWorldProtocol.liveURL(deviceID:deviceID)
@@ -625,6 +628,7 @@ final class NativeMultiplayerClient {
         placementSession.reset()
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         originalStream.clear();originalHeard=nil;originalDeathSent=false;originalRespawnRequested=nil;originalLatestPosition=nil
+        ambientBinaryEnabled=false;onAmbientPedestrianConfiguration?(0,nil)
         originalVitals.cancelPendingFatal();originalFrozen=false;originalRespawnWasDead=false
         healthPrediction.disconnect()
         deliveredRespawnSequence=0
@@ -1212,7 +1216,12 @@ final class NativeMultiplayerClient {
             case .shot(let shot):
                 if let weapon=shot["w"] as? Int {onWeaponSound?(weapon)}
                 onOriginalShot?(shot)
-            case .extensionRecord(let tag,let payload):onOriginalRecord?(tag,payload)
+            case .extensionRecord(let tag,let payload):
+                let now=Date().timeIntervalSince1970*1000+serverTimeOffsetMilliseconds
+                if let event=try? NativeAmbientPedestrianProtocol.decode(tag:tag,payload:payload,nowServerMilliseconds:now) {
+                    onAmbientPedestrianEvent?(event,now,clock())
+                }
+                onOriginalRecord?(tag,payload)
             }
         }
         recovery.received(generation:generation,now:clock());originalWho()
@@ -1233,6 +1242,8 @@ final class NativeMultiplayerClient {
                 serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000
                 originalStream.clock(serverMilliseconds:time,localMilliseconds:clock()*1000)
             }
+            ambientBinaryEnabled=true
+            onAmbientPedestrianConfiguration?((message["peds"]as?NSNumber)?.doubleValue ?? 0,message["paths"]as?String)
             originalFrozen=false
             if let life=message["life"] as? [Any],life.count==2,
                let hp=NativeOriginalWorldCommands.number(life[0]),let ap=NativeOriginalWorldCommands.number(life[1]) {
@@ -1371,6 +1382,15 @@ final class NativeMultiplayerClient {
                     }
                     if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] { self.handle(object, generation: generation) }
                     else if self.usesOriginalWorldProtocol {self.receiveOriginalBinary(data,generation:generation)}
+                    else if self.ambientBinaryEnabled {
+                        let now=Date().timeIntervalSince1970*1000+self.serverTimeOffsetMilliseconds
+                        if let events=try? NativeAmbientPedestrianProtocol.decodeMessage(data,nowServerMilliseconds:now) {
+                            for event in events {
+                                guard self.socket === task,self.transportGeneration==generation else{break}
+                                self.onAmbientPedestrianEvent?(event,now,self.clock())
+                            }
+                        }
+                    }
                     guard self.socket === task, self.transportGeneration == generation else { return }
                     self.receive()
                 }
@@ -1382,6 +1402,10 @@ final class NativeMultiplayerClient {
         guard transportGeneration==generation,socket != nil else{return}
         if usesOriginalWorldProtocol,handleOriginal(message,generation:generation) {return}
         switch message["t"] as? String {
+        case "peds":
+            if ambientBinaryEnabled,let level=message["level"]as?NSNumber {
+                onAmbientPedestrianConfiguration?(level.doubleValue,message["paths"]as?String)
+            }
         case "pong":
             if let echoed = (message["c"] as? NSNumber)?.doubleValue, echoed.isFinite,
                let time = (message["s"] as? NSNumber)?.doubleValue, time.isFinite {
@@ -1427,6 +1451,10 @@ final class NativeMultiplayerClient {
             }
             guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
             if let time=(message["time"]as?NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
+            ambientBinaryEnabled=NativePlacementSession.integer(message["npcProtocol"])==38
+            if ambientBinaryEnabled {
+                onAmbientPedestrianConfiguration?((message["peds"]as?NSNumber)?.doubleValue ?? 0,message["paths"]as?String)
+            }
             if case .place(let transaction)=placement {
                 guard applyPlacement(transaction,generation:generation,task:task)else{return}
             }else if freshHello,let spot=message["spot"]as?[NSNumber],spot.count>=3 {

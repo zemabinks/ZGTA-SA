@@ -18,6 +18,7 @@ def main():
     names=['NativeMultiplayerClient','NativeWorldRenderer','NativeGameViewController','NativeActorAnimation','NativeMelee','NativeRemoteFootMotion','NativeShotTargeting','NativeSAMPClient','NativeSAMPWorldConnection']
     paths=[ROOT/'ios/App'/(n+'.swift')for n in names]
     paths += [Path(__file__).resolve(),Path(__file__).with_suffix('.swift')]
+    paths += [ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientPedestrians']]
     if args.owned_reference:paths.append(args.owned_reference.resolve())
     frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths}
     network,renderer,controller,actor,melee=[p.read_text()for p in paths[:5]]
@@ -56,7 +57,8 @@ def main():
         (out.parent/'latest.json').write_text(json.dumps(dict(path=str(out),**report),indent=2)+'\n')
     save()
     try:
-        command=['xcrun','swiftc','-parse-as-library','-j','1','-whole-module-optimization','-num-threads','1','-Onone','-module-cache-path',str(out/'modules'),str(paths[5]),str(paths[6]),str(generated),'-o',str(out/'gate')]
+        npc=[ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientPedestrians']]
+        command=['xcrun','swiftc','-parse-as-library','-j','1','-whole-module-optimization','-num-threads','1','-Onone','-module-cache-path',str(out/'modules'),str(paths[5]),str(paths[6]),*map(str,npc),str(generated),'-o',str(out/'gate')]
         with(out/'compile.log').open('x')as log:r=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=180)
         report['compileExit']=r.returncode
         if r.returncode:report['status']='COMPILE_FAIL';save();raise RuntimeError((out/'compile.log').read_text()[-6500:])

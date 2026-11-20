@@ -896,6 +896,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var aiming = false
     var driving = false
     var remoteServerTimeOffsetMilliseconds: Double?
+    private let ambientPedestrians=NativeAmbientPedestrians()
+    private var ambientPathTask:NativeResourceTask?
+    private var ambientPathToken=UUID()
+    private var ambientPathSource:String?
+    private var ambientAnimations:[UInt16:(identity:String,animation:NativeAmbientPedestrianAnimation)]=[:]
+    private var ambientGround:[UInt16:(identity:String,z:Double,time:Double)]=[:]
+    private var ambientBodies:NativeAmbientPedestrianBodies?
+    private(set) var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
     var remotePlayers: [RemotePlayer] = [] { didSet {
         recordRemoteAnimationPackets()
         recordRemoteFootPackets()
@@ -1055,6 +1063,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let self else{return}
             self.synchronizeLegacyStockSource()
             self.invalidatePedAtlasSourceIfChanged()
+            self.reloadAmbientPedestrianSourceIfChanged()
             self.loadNearby()
             _ = self.actorSelection.invalidateSource(self.fixedCJSourceIdentity())
             if self.fixedCJ?.invalidateIfSourceChanged()==true,self.needsFixedCJ{self.ensureFixedCJ()}
@@ -1064,7 +1073,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         groundVehicle?.onCouplingStep = {[weak self] _ in self?.updateVehicleCoupling()}
         groundVehicle?.onOtherCollidersChanged = {[weak self] in
             guard let self else{return}
-            self.character?.otherColliders=self.groundVehicle?.otherColliders ?? []
+            self.character?.otherColliders=(self.groundVehicle?.otherColliders ?? []).union(self.ambientBodies?.colliders ?? [])
         }
         character?.onPress = {[weak self] presses in
             for press in presses {
@@ -1807,7 +1816,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         groundVehicle.synchronizeOtherVehicles(order.compactMap{poses[$0]},excluding:isPassenger ? nil:currentVehicleID,near:camera,
             promoteNear:driving && groundVehicle.active ? vehicleWirePosition:nil,delta:delta,wetness:Double(roadWetness))
-        character?.otherColliders = groundVehicle.otherColliders
+        character?.otherColliders = groundVehicle.otherColliders.union(ambientBodies?.colliders ?? [])
     }
 
     private func synchronizeMovingSupport() {
@@ -2329,6 +2338,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func hasClearShot(from start: SIMD3<Float>, to finish: SIMD3<Float>) -> Bool {
         guard let vehicle=groundVehicle else { return false }
         var excluded=driving ? vehicle.chassisColliders:Set<UInt64>()
+        // Candidate geometry owns actor hits; this query checks intervening
+        // world/vehicle cover. An NPC must not occlude its own torso endpoint.
+        excluded.formUnion(ambientBodies?.colliders ?? [])
         if let queries=character?.queries { excluded.formUnion([queries.walker,queries.probe]) }
         let offset=finish-start,distance=simd_length(offset)
         guard distance.isFinite,distance>0.0001 else{return false}
@@ -3060,10 +3072,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var server: ServerAddress? {didSet{
-        if oldValue != server {synchronizeCollisionResourceSource();synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+        if oldValue != server {synchronizeCollisionResourceSource();synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();reloadAmbientPedestrianSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
-    deinit {for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    deinit {ambientPathTask?.cancel();for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
     private var needsFixedCJ:Bool {
         localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
     }
@@ -3071,6 +3083,68 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let binding=NativeResourceStore.shared.runtimeBinding
         return [server?.display ?? "",binding.generation.uuidString,binding.mode.rawValue,
             binding.contentID ?? "",binding.developmentOrigin ?? "",binding.playable ? "ready":"unverified"].joined(separator:"|")
+    }
+    private func reloadAmbientPedestrianSourceIfChanged() {
+        guard ambientPathSource != nil,ambientPathSource != fixedCJSourceIdentity()else{return}
+        let level=ambientPedestrians.level,hash=ambientPedestrians.pathsHash
+        ambientPedestrians.reset();configureAmbientPedestrians(level:level,paths:hash)
+    }
+    func configureAmbientPedestrians(level:Double,paths:String?) {
+        let needed=ambientPedestrians.configure(level:level,paths:paths)
+        guard ambientPedestrians.level>0,let hash=ambientPedestrians.pathsHash else {
+            ambientPathToken=UUID();ambientPathTask?.cancel();ambientPathTask=nil;ambientPathSource=nil
+            presentedAmbientPedestrians=[];ambientAnimations.removeAll();ambientGround.removeAll();ambientBodies?.removeAll();return
+        }
+        let source=fixedCJSourceIdentity()
+        guard needed || source != ambientPathSource else{return}
+        // Repeated hello does not replace a live load for the same resource.
+        if ambientPathTask != nil,ambientPathSource==source,paths==nil{return}
+        ambientPathToken=UUID();let token=ambientPathToken
+        ambientPathTask?.cancel();ambientPathTask=nil;ambientPathSource=source
+        presentedAmbientPedestrians=[];ambientAnimations.removeAll();ambientGround.removeAll()
+        ambientBodies?.removeAll()
+        guard let server else{return}
+        var pathURL=URLComponents(url:server.path("game/world/paths.bin"),resolvingAgainstBaseURL:false)
+        pathURL?.queryItems=[URLQueryItem(name:"v",value:hash)]
+        guard let url=pathURL?.url else{return}
+        let request=NativeResourceTransport.boundedDataTask(with:url,maximumBytes:NativeAmbientPedestrianPaths.maximumBytes){[weak self]data,response,error in
+            let graph:NativeAmbientPedestrianPaths?
+            if error==nil,(response as? HTTPURLResponse)?.statusCode==200,let data {
+                graph=try? NativeAmbientPedestrianPaths(data:data,expectedCRC:hash)
+            }else{graph=nil}
+            DispatchQueue.main.async{[weak self]in
+                guard let self,self.ambientPathToken==token,self.fixedCJSourceIdentity()==source,
+                      self.ambientPedestrians.pathsHash==hash else{return}
+                self.ambientPathTask=nil
+                if let graph{_ = self.ambientPedestrians.install(graph)}
+                else{self.onStatus?("PEDESTRIAN PATHS UNAVAILABLE OR DIFFERENT FROM SERVER")}
+            }
+        }
+        ambientPathTask=request;request.resume()
+    }
+    func receiveAmbientPedestrians(_ event:NativeAmbientPedestrianProtocol.Event,serverNow:Double,received:Double) {
+        ambientPedestrians.receive(event,serverNow:serverNow,received:received)
+    }
+    func advanceAmbientPedestrians(at time:Double,active:Bool) {
+        let frames=ambientPedestrians.frames(at:time,near:SIMD3<Double>(camera),active:active)
+        let live=Set(frames.map(\.id))
+        ambientAnimations=ambientAnimations.filter{live.contains($0.key)}
+        ambientGround=ambientGround.filter{live.contains($0.key)}
+        presentedAmbientPedestrians=frames.map{frame in
+            let identity="\(frame.skin):\(frame.seed)",point=frame.position
+            var z=point.z
+            if let floor=collision?.height(x:Float(point.x),y:Float(point.y),near:Float(point.z+2),maxDrop:5) {
+                if let before=ambientGround[frame.id],before.identity==identity,time>=before.time,time-before.time<=0.5 {
+                    z=before.z+(Double(floor)-before.z)*(1-exp(-12*(time-before.time)))
+                }else{z=Double(floor)}
+            }
+            ambientGround[frame.id]=(identity,z,time)
+            return .init(id:frame.id,skin:frame.skin,seed:frame.seed,flags:frame.flags,position:SIMD3(point.x,point.y,z),
+                velocity:frame.velocity,heading:frame.heading,state:frame.state)
+        }
+        if ambientBodies==nil,let world=groundVehicle?.world{ambientBodies=NativeAmbientPedestrianBodies(world:world)}
+        ambientBodies?.synchronize(presentedAmbientPedestrians,near:camera,enabled:active && !driving)
+        character?.otherColliders=(groundVehicle?.otherColliders ?? []).union(ambientBodies?.colliders ?? [])
     }
     private func ensureFixedCJ(force:Bool=false) {
         guard let server else{return}
@@ -3827,6 +3901,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if let own=pedModels[String(localSkin)]{names.insert(own)}
         for player in remotePlayers where simd_distance(player.position,camera)<140 {
             if let name=pedModels[String(player.skin)]{names.insert(name)}
+        }
+        for actor in presentedAmbientPedestrians {
+            if let name=pedModels[String(actor.skin)]{names.insert(name)}
         }
         let ids=Set(names.compactMap{stockPedIDs[$0]})
         stockPedRuntime?.setDemand(ids)
@@ -5142,6 +5219,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 Self.rotationX(player.pitch) * Self.rotationY(player.roll) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
             appendPed(ped,player.position,player.heading,0,"",0,0,pose:pose,transform:car,original:true)
+        }
+        for npc in presentedAmbientPedestrians {
+            guard let name=pedModels[String(npc.skin)]else{continue}
+            loadActor(name)
+            guard let actor=skeletalActors[name],let library=skeletalLibrary,let definitions=footDefinitions else{continue}
+            let identity="\(name):\(npc.seed)",animator:NativeAmbientPedestrianAnimation
+            if let current=ambientAnimations[npc.id],current.identity==identity{animator=current.animation}
+            else{
+                animator=NativeAmbientPedestrianAnimation(library:library,style:definitions.style(model:legacyPedStyles[name] ?? name,library:library),weapons:footWeaponDefinitions)
+                ambientAnimations[npc.id]=(identity,animator)
+            }
+            let snapshot=NativeAmbientPedestrianAnimation.Snapshot(position:npc.position,heading:npc.heading,
+                speed:hypot(npc.velocity.x,npc.velocity.y),flags:npc.flags,state:npc.state)
+            guard let frame=animator.update(at:riderTime,active:UIApplication.shared.applicationState == .active && view.window != nil,snapshot:snapshot)else{continue}
+            let pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,
+                figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)
+            appendPed(name,SIMD3<Float>(npc.position),Float(npc.heading),0,"",0,frame.handWeaponVisible && !npc.down ? Int(npc.state?.weapon ?? 0):0,
+                pose:pose,original:true,identity:npc.targetID)
         }
         for (id,cached) in remoteFootAnimations where !sampledRemoteFootIDs.contains(id) {
             cached.1.resetDisplayClock()

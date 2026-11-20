@@ -10,7 +10,7 @@ from pathlib import Path
 import argparse,hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/research/coupling-wire';OUT.mkdir(parents=True,exist_ok=True)
-NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeMultiplayerClient']
+NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeMultiplayerClient']
 FILES=[f'ios/App/{n}.swift' for n in NAMES]+['ios/App/NativeActorAnimation.swift','tests/network/smoke_native_coupling_wire.py','tests/network/smoke_native_coupling_wire.js','tests/network/smoke_native_coupling_wire.swift']
 def main():
  parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--negative-no-callback-guard',action='store_true');args=parser.parse_args()

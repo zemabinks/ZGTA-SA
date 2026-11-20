@@ -186,7 +186,7 @@ def main():
         folder=Path(directory);(folder/'peer.cjs').write_text(JS)
         actor=(ROOT/'ios/App/NativeActorAnimation.swift').read_text()
         actor=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]
-        sources=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery','NativeGameplayClient','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeMultiplayerClient']
+        sources=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery','NativeGameplayClient','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeMultiplayerClient']
         source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in sources)+'\n'+actor+'\n'+SWIFT
         (folder/'main.swift').write_text(source)
         subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(output/'modules'),str(folder/'main.swift'),'-o',str(folder/'client')],check=True)

@@ -18,6 +18,19 @@
 
 ## Latest verified implementation
 
+
+Core158–159 add opt-in server-owned ambient pedestrians on converted original
+paths, typed native interest/motion, original pedestrian rendering and nearby
+Rapier contact bodies. NPC pose ownership retains down/hit state separately
+from human recovery; server route integration carries time through corners.
+Both SDKs, the complete optional source chain and retained-data Simulator cases
+pass. Actual owned-server logs verify walking and Taxi entry/exit; separate NPC
+cases verify moving actors and original draw encoding. Installed resources and
+preferences hold. Reviewed stills do not establish complete NPC animation
+quality. Original population AI, traffic, police and retail1:1 remain unfinished.
+See the [ambient implementation and limits](research/gameplay/CORE_AMBIENT_PEDESTRIANS_158.md).
+
+
 Build 136 includes persisted resource-import corrections, owned/parked wheel-phase continuity, browser radio delivery and swimming-exit input/turn ownership fixes. Its source regressions, unsigned Simulator/device builds and selected normal Simulator import/join/walk/camera checks passed. Audio output, full hardware behavior and exhaustive original-retail parity remain unverified.
 
 Repository cleanup is merged in [PR #3](https://github.com/zemabinks/ZGTA-SA/pull/3): 671 public files moved and the root reduced from 711 to 40 files. The full optional core chain, both SDK builds, source/history audit and corrected GitHub CI passed. Existing prepared resources were retained. The public launch commands remain available. See the [cleanup record](development/REPOSITORY-CLEANUP.md) for scope and validation.

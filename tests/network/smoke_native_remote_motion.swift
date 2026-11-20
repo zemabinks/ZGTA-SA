@@ -19,6 +19,7 @@ private final class PacketOwner {
     // ACTUAL_PACKET
 }
 private final class SceneOwner {
+    var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
     var remoteServerTimeOffsetMilliseconds:Double?
     var support:[String:SIMD3<Float>]=[:]
     func remoteSupportPosition(_ player:RemotePlayer)->SIMD3<Float>?{support[player.id]}
