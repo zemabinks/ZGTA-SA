@@ -229,3 +229,47 @@ movement on all four joins and207 Taxi reports with driver entry/exit.
 Resources/settings remain held and owned services stop afterward. Original resources, full captures and raw measurements stay
 local. Full ambient simulation, complete game fidelity and hardware evidence
 remain open.
+
+
+## Current-source and latest metadata admission (156)
+
+The existing model-index loader captured a source identity but several typed
+metadata callbacks did not use it. Completed old seating data could replace the
+current animation table, and old physics data could replace materials and reset
+coupling/support owners. Older requests at the same source could also overwrite
+a newer successful response or defeat its failed-reload fallback.
+
+Fourteen main-queue publications now check both the current resource identity
+and their parent invocation token. Grouped effects and renderer camera/water
+completion effects use that admission too. Coupling and tread metadata have
+independent child tickets. A new parent invocation revokes both child tickets
+before its physics response can schedule replacement children. Existing typed
+decoders remain the data boundary; failed latest reloads retain accepted tables.
+
+All four old155 seating modes fail their intended runtime assertions. The
+corrected physical-owner fixture also rejects155 for both stale-source and
+same-source material/coupling/support mutations; the child fixture rejects its
+old-source side effects. The current seating modes pass16/12/3/7 checks, child
+admission passes38 and the actual ground/Rapier modes pass11/4. They cover
+parent/child separation, queued and late callbacks, request reentry, fallback
+preservation and an unrelated body's pose/momentum. All captured Swift/test
+inputs stay held. These are literal-source/authored-transport tests; a normal
+production UI trigger for overlapping metadata reloads is not established.
+
+The first physical fixture is retained as a compiler rejection because it tried
+to read a fileprivate field. The follow-up compares public Equatable cell
+snapshots; product visibility and parser assertions were not relaxed. The complete selected Metal/physics/audio/transport source chain passes
+(962.43s), with231 App/build and25 test inputs held. Four original rigs,
+stock HTTP/Metal/Rapier, project, hosting and layout checks also pass.
+Universal Simulator Debug and arm64 iPhone Release SDK products and payload
+checks pass;39 dependency files and14 private menu files remain held.
+A normal retained-data Simulator case passes (494.485s, one executed test,
+zero failures): development skins7/2/0, Taxi/camera/exit/jump and installed CJ0
+movement/camera/jump/menu. Twelve captures are reviewed. Actual owned-server
+logs confirm all four joins move and driver entry/exit. Installed world,
+collision and CJ need no HTTP fallback; original files, resources and settings
+remain held. Owned app, Simulator and test services stop afterward. This is admission
+rather than an atomic multi-table transaction or automatic accepted-table
+retirement. Sub-loader weather/waves internals and flight/particle asset owners
+remain outside this change; original-game behavior and complete parity remain
+unverified.

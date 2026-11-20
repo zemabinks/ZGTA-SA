@@ -1623,7 +1623,7 @@ final class NativeGameViewController: UIViewController {
     }
 
     private var meleeCandidates:[NativeMeleeTargeting.Candidate] {
-        network.orderedPlayers.filter {$0.code.hasPrefix("s") && $0.ridingVehicleID == nil}.map {
+        (renderer?.presentedRemotePlayers ?? network.orderedPlayers).filter {$0.code.hasPrefix("s") && $0.ridingVehicleID == nil}.map {
             .init(id:$0.id,feet:$0.position,heading:$0.heading,crouching:$0.crouching,
                 down:$0.down != 0,dead:$0.life <= 0)
         }
@@ -1712,7 +1712,7 @@ final class NativeGameViewController: UIViewController {
         }
         audio.shot(weapon: weapon)
         if NativeStreamShotTargets.weapons.contains(weapon) {
-            let candidates=network.orderedPlayers.map {
+            let candidates=renderer.presentedRemotePlayers.map {
                 NativeShotTargeting.Candidate(id:$0.id,point:$0.position+SIMD3(0,0,0.9))
             }
             let targets=NativeStreamShotTargets.players(ray:ray,candidates:candidates,
@@ -1720,7 +1720,7 @@ final class NativeGameViewController: UIViewController {
             network.sendWeaponShot(weapon:weapon,from:ray.origin,to:ray.end,player:nil,ticket:ticket,streamPlayers:targets)
             return
         }
-        let candidates=network.orderedPlayers.map {
+        let candidates=renderer.presentedRemotePlayers.map {
             NativeShotTargeting.Candidate(id:$0.id,point:NativeShotTargeting.torso(feet:$0.position))
         }
         let target=NativeShotTargeting.select(ray:ray,aiming:aiming,candidates:candidates,
@@ -1944,6 +1944,7 @@ final class NativeGameViewController: UIViewController {
     @objc private func tick(_ link: CADisplayLink) {
         network.tickConnection(now:ProcessInfo.processInfo.systemUptime)
         let active = applicationActive && view.window != nil
+        renderer?.advanceRemoteFootPresentation(at:ProcessInfo.processInfo.systemUptime,active:active)
         let timing = frameClock.advance(timestamp: link.timestamp, active: active)
         if timing.discontinuity { resetControls();renderer?.rebaseLegacyObjectClock() }
         let delta = Float(timing.delta)
@@ -2167,7 +2168,7 @@ final class NativeGameViewController: UIViewController {
             status.expireIfNeeded()
             gameHUD.radar.position = SIMD2(renderer.position.x, renderer.position.y)
             gameHUD.radar.heading = renderer.direction
-            gameHUD.radar.players = network.players.values.map { SIMD2($0.position.x, $0.position.y) }
+            gameHUD.radar.players = renderer.presentedRemotePlayers.map { SIMD2($0.position.x, $0.position.y) }
             gameHUD.radar.vehicles = network.vehicles.values.map { SIMD2($0.position.x, $0.position.y) }
             gameHUD.updateVehicle(name: currentVehicle.map(vehicleModelName), speed: renderer.drivingSpeed)
             gameHUD.updateClock(hour: renderer.gameHour)

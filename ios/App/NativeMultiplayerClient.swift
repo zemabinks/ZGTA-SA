@@ -77,9 +77,9 @@ struct NativeVehicleSeatSession {
 struct RemotePlayer {
     let id: String
     let name: String
-    let position: SIMD3<Float>
+    var position: SIMD3<Float>
     let code: String
-    let heading: Float
+    var heading: Float
     let pitch: Float
     let roll: Float
     let speed: Float

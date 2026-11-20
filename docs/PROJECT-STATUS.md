@@ -53,6 +53,15 @@ Core 153 fences stale camera publications and city collision requests, including
 
 Core 154 moves streamed city collision spatial-index construction, SCL2 decoding and physical mesh grouping to a bounded serial worker, retaining main-thread physics registration and source/material-snapshot admission. Focused worker/renderer/owner gates pass49/41/32 checks, and225 matched original-cell CPU/physical query samples remain exact. Host Debug measurements show a substantial reduction in main-thread work, with residual physical registration cost; hardware frame times are unmeasured. The full selected Metal/physics/audio/transport chain passes (1015.34s), with230 App/build and17 captured test inputs held; project, host and layout gates also pass. Both SDK products subsequently pass (universal Simulator490.6s; arm64 iPhone Release510.3s), with230 product inputs and39 dependency files held. A normal retained-data Simulator case also passes through three streamed characters, Taxi/camera/exit/jump and installed CJ movement, with no installed CJ/collision HTTP fallback. Twelve reviewed captures and four actual owned-server joins establish scoped integration. Resources/settings are preserved and owned test services stop afterward; retail/hardware acceptance remains open. See the [streaming record](research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md#bounded-city-collision-preparation-154).
 
+Core156 fences obsolete typed scene metadata and parent/child publications.
+Focused historical/current source and actual ground/Rapier checks pass, followed
+by the complete selected source chain, both SDK builds and one normal retained-
+data Simulator case. Twelve reviewed captures and owned-server logs cover
+streamed7/2/0 and installed CJ0 movement, Taxi/camera/exit/jump/menu. Resources
+and settings hold, installed base data require no HTTP fallback, and owned test
+processes stop afterward. This remains request admission, not an atomic metadata
+transaction or verified retail parity. See [scene ownership](research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md#current-source-and-latest-metadata-admission-156).
+
 ## Where we're going
 
 The project's priorities are **stable shared world state**, **accurate player and vehicle appearances**, **correct passengers/vehicle authority**, **complete original resources**, **authentic NPCs and traffic**, and **original free-roam gameplay fidelity**. Original campaign missions are explicitly not the target.
@@ -89,3 +98,12 @@ reviewed. Installed world/collision/CJ require no HTTP fallback, resources and
 settings hold, and owned test services are stopped. Hardware, original-PC and
 complete gameplay parity remain open. See
 [visual streaming scope](research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md#bounded-visual-world-preparation-155).
+
+Core156 metadata admission and Core157 remote foot playback have completed
+their selected source, both SDK and retained-data Simulator gates.157 also
+passes a separate real open.mp session with one rendered native app and an
+authored headless legacy peer: remote walking, pause/resume, local input and
+disconnect. Original resources/settings remain held and owned services stop.
+This is scoped multiplayer evidence, not a two-rendered-client/browser or
+original-retail1:1 claim. See the
+[remote motion record](research/gameplay/CORE_REMOTE_MOTION_157.md).

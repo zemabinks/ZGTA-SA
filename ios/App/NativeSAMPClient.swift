@@ -7,7 +7,7 @@ import ZGTASAMPTransport
 final class NativeSAMPClient {
     enum State: String { case stopped, connecting, accepted, selecting, spawning, spawned, wasted, failed }
     struct Vehicle {let id:UInt16,model:Int;var position:SIMD3<Float>;var heading:Float;var health:Float;let colors:[Int];var pitch:Float=0,roll:Float=0}
-    struct Player {let id:UInt16;var name:String;var skin:Int=7;var customSkin:Int?;var position=SIMD3<Float>.zero;var heading:Float=0,pitch:Float=0,roll:Float=0;var health:Int=100,armour:Int=0,weapon:Int=0;var velocity=SIMD3<Float>.zero;var vehicle:UInt16?;var action:Int=0}
+    struct Player {let id:UInt16;var name:String;var skin:Int=7;var customSkin:Int?;var position=SIMD3<Float>.zero;var heading:Float=0,pitch:Float=0,roll:Float=0;var health:Int=100,armour:Int=0,weapon:Int=0;var velocity=SIMD3<Float>.zero;var vehicle:UInt16?;var action:Int=0;var receivedAt:Double=0}
     let address:String,nickname:String,version:NativeSAMPProtocol.Version,installationID:String
     private let password:String
     private var handle:UInt64=0
@@ -261,7 +261,7 @@ final class NativeSAMPClient {
         case 32:
             let id=UInt16(try r.integer(2));_=try r.integer(1);let skin=Int(try r.integer(4));let custom=version == .dl ? Int(Int32(bitPattern:try r.integer(4))):nil
             let point=try r.vector(),angle=try r.float();_=try r.integer(4)
-            var player=players[id] ?? Player(id:id,name:roster[id] ?? "Player \(id)");player.skin=skin;player.customSkin=custom.flatMap{(20001...30000).contains($0) ? $0:nil};player.position=point;player.heading = -angle * .pi/180;streamedPlayers.insert(id);players[id]=player;publishedPlayers()
+            var player=players[id] ?? Player(id:id,name:roster[id] ?? "Player \(id)");player.skin=skin;player.customSkin=custom.flatMap{(20001...30000).contains($0) ? $0:nil};player.position=point;player.heading = -angle * .pi/180;player.receivedAt=ProcessInfo.processInfo.systemUptime;streamedPlayers.insert(id);players[id]=player;publishedPlayers()
         case 163:
             let id=UInt16(try r.integer(2));streamedPlayers.remove(id);players.removeValue(forKey:id);publishedPlayers()
         case 153:
@@ -289,7 +289,7 @@ final class NativeSAMPClient {
         let angles=NativeSAMPProtocol.nativeAngles(q);player.heading=angles.heading;player.pitch=angles.pitch;player.roll=angles.roll
         func life(_ n:UInt32)->Int{n==15 ? 100:Int(n)*7}
         player.health=life(hp>>4);player.armour=life(hp&15);player.weapon=weapon;player.action=action;player.velocity=velocity*50;player.vehicle=nil
-        players[id]=player;publishedPlayers()
+        player.receivedAt=ProcessInfo.processInfo.systemUptime;players[id]=player;publishedPlayers()
     }
     private func remoteCar(_ data:Data)throws{
         var r=try NativeSAMPProtocol.Reader(data);_=try r.integer(1);let playerID=UInt16(try r.integer(2)),vehicleID=UInt16(try r.integer(2))
@@ -300,7 +300,7 @@ final class NativeSAMPClient {
         var player=players[playerID] ?? Player(id:playerID,name:"Player \(playerID)")
         player.position=point;player.heading=heading;player.pitch=angles.pitch;player.roll=angles.roll;player.vehicle=vehicleID;player.velocity=velocity*50;player.weapon=weapon
         player.health=life>>4==15 ? 100:Int(life>>4)*7;player.armour=life&15==15 ? 100:Int(life&15)*7
-        players[playerID]=player
+        player.receivedAt=ProcessInfo.processInfo.systemUptime;players[playerID]=player
         if var vehicle=vehicles[vehicleID]{vehicle.position=point;vehicle.heading=heading;vehicle.pitch=angles.pitch;vehicle.roll=angles.roll;vehicle.health=Float(hp);vehicles[vehicleID]=vehicle}
         publishedPlayers();publishedVehicles()
     }

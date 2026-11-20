@@ -300,6 +300,7 @@ import Darwin
         local.remoteFootAnimations=["a":("same-model",footA),"b":("same-model",footB)]
         local.now=10;local.resetDisplayClock();local.now=10.02
         try check(footA.resets==1 && footB.resets==1,"literal lifecycle rebases each remote foot owner")
+        try check(local.remoteRootClockResets==1,"literal lifecycle retires the remote world-presentation owner")
         try near(delta(local.successfulDraw().2),0.02,"literal resume floor")
         try check(local.renderClock.resets==1,"existing render clock still resets")
         UIApplication.shared.applicationState = .inactive;local.now=10.1
