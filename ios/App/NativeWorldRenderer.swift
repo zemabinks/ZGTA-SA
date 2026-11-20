@@ -561,7 +561,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func cancelActorSelection() { actorSelection.cancel() }
     private var sampSkinCatalog: NativeSAMPSkinCatalog?
     @discardableResult func loadLegacySkinCatalog(_ data: Data) -> Bool {
-        guard let catalog = try? NativeSAMPSkinCatalog(data: data) else { return false }
+        guard let catalog = try? NativeSAMPSkinCatalog(data: data,sourceIdentity:fixedCJSourceIdentity()) else { return false }
         sampSkinCatalog = catalog
         resumeActorSelection()
         return true
@@ -3126,12 +3126,19 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ambientPedestrians.receive(event,serverNow:serverNow,received:received)
     }
     func advanceAmbientPedestrians(at time:Double,active:Bool) {
-        let frames=ambientPedestrians.frames(at:time,near:SIMD3<Double>(camera),active:active)
+        var rates:[UInt16:Double]=[:]
+        let frames=ambientPedestrians.frames(at:time,near:SIMD3<Double>(camera),active:active,turningRate:{skin in
+            if let value=rates[skin]{return value}
+            guard let name=self.pedModels[String(skin)],let library=self.skeletalLibrary,
+                  let definitions=self.footDefinitions else{return 6.5}
+            let value=definitions.style(model:self.legacyPedStyles[name] ?? name,library:library).turn
+            rates[skin]=value;return value
+        })
         let live=Set(frames.map(\.id))
         ambientAnimations=ambientAnimations.filter{live.contains($0.key)}
         ambientGround=ambientGround.filter{live.contains($0.key)}
         presentedAmbientPedestrians=frames.map{frame in
-            let identity="\(frame.skin):\(frame.seed)",point=frame.position
+            let identity="\(frame.skin):\(frame.seed):\(frame.generation)",point=frame.position
             var z=point.z
             if let floor=collision?.height(x:Float(point.x),y:Float(point.y),near:Float(point.z+2),maxDrop:5) {
                 if let before=ambientGround[frame.id],before.identity==identity,time>=before.time,time-before.time<=0.5 {
@@ -3140,7 +3147,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             ambientGround[frame.id]=(identity,z,time)
             return .init(id:frame.id,skin:frame.skin,seed:frame.seed,flags:frame.flags,position:SIMD3(point.x,point.y,z),
-                velocity:frame.velocity,heading:frame.heading,state:frame.state)
+                velocity:frame.velocity,heading:frame.heading,state:frame.state,
+                generation:frame.generation,waitingLinkKind:frame.waitingLinkKind)
         }
         if ambientBodies==nil,let world=groundVehicle?.world{ambientBodies=NativeAmbientPedestrianBodies(world:world)}
         ambientBodies?.synchronize(presentedAmbientPedestrians,near:camera,enabled:active && !driving)
@@ -5224,14 +5232,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             guard let name=pedModels[String(npc.skin)]else{continue}
             loadActor(name)
             guard let actor=skeletalActors[name],let library=skeletalLibrary,let definitions=footDefinitions else{continue}
-            let identity="\(name):\(npc.seed)",animator:NativeAmbientPedestrianAnimation
+            let identity="\(name):\(npc.seed):\(npc.generation)",animator:NativeAmbientPedestrianAnimation
             if let current=ambientAnimations[npc.id],current.identity==identity{animator=current.animation}
             else{
                 animator=NativeAmbientPedestrianAnimation(library:library,style:definitions.style(model:legacyPedStyles[name] ?? name,library:library),weapons:footWeaponDefinitions)
                 ambientAnimations[npc.id]=(identity,animator)
             }
             let snapshot=NativeAmbientPedestrianAnimation.Snapshot(position:npc.position,heading:npc.heading,
-                speed:hypot(npc.velocity.x,npc.velocity.y),flags:npc.flags,state:npc.state)
+                speed:hypot(npc.velocity.x,npc.velocity.y),flags:npc.flags,state:npc.state,
+                id:npc.id,seed:npc.seed,femaleActivity:sampSkinCatalog?.femaleActivity(forModel:legacyPedStyles[name] ?? name,sourceIdentity:fixedCJSourceIdentity()) ?? false,
+                waitingLinkKind:npc.waitingLinkKind)
             guard let frame=animator.update(at:riderTime,active:UIApplication.shared.applicationState == .active && view.window != nil,snapshot:snapshot)else{continue}
             let pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,
                 figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)

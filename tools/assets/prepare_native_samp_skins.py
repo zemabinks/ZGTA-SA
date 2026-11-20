@@ -28,11 +28,21 @@ def prepare(peds,index,output):
         if line.lower()=='peds':inside=True;continue
         if line.lower()=='end':inside=False;continue
         if not inside:continue
-        parts=[part.strip()for part in line.split(',')]
+        # The original loader accepts whitespace as well as commas. One
+        # retail row omits a comma immediately before its voice-bank family.
+        parts=re.split(r'[\s,]+',line)
         if len(parts)<3:raise ValueError('Malformed retail pedestrian row')
         identifier=int(parts[0]);model=parts[1].lower()
         if not 0<=identifier<=311 or identifier in seen or not re.fullmatch(r'[a-z0-9_]{1,40}',model):raise ValueError('Invalid/duplicate retail skin ID')
-        seen.add(identifier);rows.append({'legacyID':identifier,'model':model,'nativeID':models.get(model)})
+        seen.add(identifier)
+        row={'legacyID':identifier,'model':model,'nativeID':models.get(model)}
+        # The archived NPC activity selector uses its voice category rather
+        # than a model-name guess. Original generic civilian voice banks give
+        # the same category; specialized/missing banks keep the default.
+        # Older minimal IDE fixtures may lack voice fields; omit metadata.
+        if len(parts)>=14:
+            row['femaleActivity']=parts[3].upper() in ('CIVFEMALE','PROSTITUTE') and parts[11].upper()=='PED_TYPE_GEN'
+        rows.append(row)
     if not rows:raise ValueError('Retail peds section is empty')
     result={'schema':1,'sourceHashes':{'pedsIDE':hashlib.sha256(data).hexdigest(),'nativeModelIndex':hashlib.sha256(raw).hexdigest()},'skins':sorted(rows,key=lambda row:row['legacyID'])}
     output.parent.mkdir(parents=True,exist_ok=True);temporary=output.with_suffix('.tmp');temporary.write_text(json.dumps(result,indent=2)+'\n');temporary.chmod(0o600);temporary.replace(output)

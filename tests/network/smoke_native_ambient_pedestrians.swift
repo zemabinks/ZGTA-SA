@@ -97,6 +97,32 @@ private struct Reference:Decodable {
             let value=NativeAmbientPedestrians();value.configure(level:1,paths:graph.crc32);_ = value.install(graph)
             value.receive(.free(atServerMilliseconds:100000,[walk]),serverNow:100000,received:100);return value
         }
+        // A remove and re-admission can both arrive between rendered frames.
+        // Ordinary updates keep the lifetime; removal/replacement never does.
+        let lifetime=owner(),firstLife=lifetime.frames(at:100,near:.zero)[0].generation
+        try check(firstLife != 0,"NPC missing local admission lifetime")
+        lifetime.receive(.free(atServerMilliseconds:100001,[walk]),serverNow:100001,received:100.001)
+        try check(lifetime.frames(at:100.001,near:.zero)[0].generation==firstLife,"Ordinary update replaced lifetime")
+        lifetime.receive(.gone([1]),serverNow:100002,received:100.002)
+        lifetime.receive(.free(atServerMilliseconds:100003,[walk]),serverNow:100003,received:100.003)
+        let secondLife=lifetime.frames(at:100.003,near:.zero)[0].generation
+        try check(secondLife != firstLife,"Same ID/skin/seed inherited removed NPC lifetime")
+        lifetime.receive(.free(atServerMilliseconds:100002,[walk]),serverNow:100003,received:100.003)
+        try check(lifetime.frames(at:100.003,near:.zero)[0].generation==secondLife,"Stale packet changed lifetime")
+        let replaced=P.Free(identity:.init(id:1,skin:14,flags:0,seed:119),feet:walk.feet,goal:walk.goal,speed:0,desiredSpeed:2)
+        lifetime.receive(.free(atServerMilliseconds:100004,[replaced]),serverNow:100004,received:100.004)
+        try check(lifetime.frames(at:100.004,near:.zero)[0].generation != secondLife,"Skin replacement retained pose lifetime")
+        lifetime.reset();lifetime.configure(level:1,paths:graph.crc32);_ = lifetime.install(graph)
+        lifetime.receive(.free(atServerMilliseconds:100000,[walk]),serverNow:100000,received:100)
+        try check(lifetime.frames(at:100,near:.zero)[0].generation>secondLife,"Connection reset reused local lifetime")
+        let waitingRoute=NativeAmbientPedestrians();waitingRoute.configure(level:1,paths:graph.crc32);_=waitingRoute.install(graph)
+        let route=P.Path(identity:walk.identity,from:0,to:1,next:0,progress:0.25,speed:1,desiredSpeed:1,side:0,desiredSide:0)
+        waitingRoute.receive(.path(atServerMilliseconds:100000,[route]),serverNow:100000,received:100)
+        try check(waitingRoute.frames(at:100,near:.zero)[0].waitingLinkKind==1,"Waiting context lost actual next-edge kind")
+        let consumed=P.Path(identity:walk.identity,from:0,to:1,next:0,progress:1,speed:1,desiredSpeed:1,side:0,desiredSide:0)
+        waitingRoute.receive(.path(atServerMilliseconds:100001,[consumed]),serverNow:100001,received:100.001)
+        try check(waitingRoute.frames(at:100.001,near:.zero)[0].waitingLinkKind==nil,"Consumed next edge retained old waiting kind")
+        try check(owner().frames(at:100,near:.zero)[0].waitingLinkKind==nil,"Free motion invented a next edge")
         var schedules:[Int:[SIMD3<Double>]]=[:]
         for hz in [20,30,60,120] {
             let value=owner();var points:[SIMD3<Double>]=[]
@@ -110,6 +136,34 @@ private struct Reference:Decodable {
         }
         for points in schedules.values{for(index,point)in points.enumerated(){try check(simd_distance(point,schedules[60]![index])<1e-10,"NPC prediction depends on display cadence")}}
         let value=owner()
+        // Real authoritative motion/state records reproduce a fallen body
+        // turning toward a later face update in the pre-correction store.
+        // No animation or renderer state is substituted in this witness.
+        for hz in [20,30,60,120] {
+            let turning=owner()
+            let initial=turning.frames(at:100,near:.zero)[0].heading
+            let down=P.Free(identity:.init(id:1,skin:7,flags:1,seed:119),feet:walk.feet,goal:SIMD2(walk.feet.x,walk.feet.y),speed:0,desiredSpeed:0)
+            turning.receive(.free(atServerMilliseconds:100001,[down]),serverNow:100001,received:100.001)
+            turning.receive(.state([.init(id:1,mood:9,burning:false,phone:false,crouching:false,cpr:false,weapon:0,hitWeapon:0,
+                hitCounter:0,hitPiece:0,hitFromWire:0,faceWire:.pi/2,foe:0,thrown:0)]),serverNow:100000,received:100)
+            for tick in 1...hz {
+                let frame=turning.frames(at:100+Double(tick)/Double(hz),near:.zero,turningRate:{_ in 1})[0]
+                try check(frame.down,"Authored down record was not admitted")
+                try check(abs(frame.heading-initial)<1e-12,"Fallen NPC rotated with live face task")
+            }
+            let upright=P.Free(identity:walk.identity,feet:walk.feet,goal:SIMD2(0,10),speed:1,desiredSpeed:1)
+            turning.receive(.free(atServerMilliseconds:101001,[upright]),serverNow:101001,received:101.001)
+            let resumed=turning.frames(at:101+1/Double(hz),near:.zero,turningRate:{_ in 1})[0]
+            try check(abs(resumed.heading-(initial-1/Double(hz)))<1e-10,"Recovery inherited a whole fallen second of turning")
+        }
+        for rate in [1.0,3.0,Double.nan,Double.infinity,-1] {
+            let turning=owner();_=turning.frames(at:100,near:.zero)
+            let turned=P.Free(identity:walk.identity,feet:walk.feet,goal:SIMD2(0,10),speed:1,desiredSpeed:1)
+            turning.receive(.free(atServerMilliseconds:100001,[turned]),serverNow:100001,received:100.001)
+            let frame=turning.frames(at:100.1,near:.zero,turningRate:{_ in rate})[0]
+            let expected=rate.isFinite && rate>0 ? rate:6.5
+            try check(abs(frame.heading-(Double.pi/2-0.1*expected))<1e-10,"Model turning rate or finite fallback lost")
+        }
         try check(abs(value.frames(at:100.25,near:.zero)[0].position.x-0.125)<1e-10,"NPC acceleration trapezoid")
         try check(abs(value.frames(at:100.5,near:.zero)[0].position.x-0.5)<1e-10,"NPC acceleration boundary")
         try check(abs(value.frames(at:102,near:.zero)[0].position.x-3.5)<1e-10,"NPC constant-speed tail")
