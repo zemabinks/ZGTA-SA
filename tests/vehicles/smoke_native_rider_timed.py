@@ -86,10 +86,12 @@ def carrier(renderer, historical=None):
     passenger_enter = block(renderer, '    @discardableResult func enterPassenger(')
     passenger_reset = next(line for line in passenger_enter.splitlines() if 'vehicleExitSerial &+= 1' in line)
     # Fail closed on a moved/extra consumer or changed fallback ownership.
-    assert draw.count('.update(interval:riderPoseInterval,') == 4
+    assert draw.count('.update(interval:riderPoseInterval,') == 9
     foot_clocked = 'animator.update(at:riderTime,' in draw
-    assert draw.count('.update(delta:riderDelta,') == 6-int(foot_clocked)
-    assert draw.count('delta:riderDelta,') == 7-int(foot_clocked)
+    assert foot_clocked,'Remote foot retains its independently owned timestamp adapter'
+    assert draw.count('.update(delta:riderDelta,') == 0
+    assert draw.count('delta:riderDelta,') == 0
+    assert draw.count('presentationDelta:riderDelta,') == 1 # actual remote-bike presentation owner
     if foot_clocked:
         assert draw.count('animator.update(at:riderTime,') == 1
     assert draw.count('playback.enter(') == 4 and draw.count('playback.leave(') == 2
@@ -248,8 +250,10 @@ def main():
         historical=(old/'ios/App/NativeRiderPlayback.swift').read_text()
         consumer=block(current,'    func update(delta dt:Double,')
         assert consumer==block(historical,'    func update(delta dt:Double,'),'Direct delta consumer changed.'
-        for name in ['NativeRiderAnimation.swift','NativeBoardingAnimation.swift']:
-            assert (ROOT/'ios/App'/name).read_bytes()==(old/'ios/App'/name).read_bytes(),'Legacy equations changed.'
+        name='NativeRiderAnimation.swift'
+        assert block((ROOT/'ios/App'/name).read_text(),'    func update(delta dt:Double,')==block((old/'ios/App'/name).read_text(),'    func update(delta dt:Double,'),'Legacy rider equations changed.'
+        name='NativeBoardingAnimation.swift'
+        assert (ROOT/'ios/App'/name).read_bytes()==(old/'ios/App'/name).read_bytes(),'Legacy boarding equations changed.'
     library=paths[0].read_text().split('struct NativeSkeletalLayer {',1)[0].replace('import Metal\n','')
     fixture=paths[5].read_text().replace('@main enum RiderClockSmoke {','enum RiderClockSmoke {')
     snapshots={'ActualClipLibrary.swift':library,'RiderAnimation.swift':paths[1].read_text(),
@@ -278,17 +282,17 @@ def main():
     ran=subprocess.run([str(binary)],capture_output=True,text=True,timeout=30)
     (out/'runtime.log').write_text(ran.stdout+ran.stderr)
     data=json.loads(ran.stdout)
-    assert data['historicalExecuted']==(old is not None),'Historical control reporting mismatch.'
     after={p:sha(Path(p)) for p in before}
     assert before==after,'Source or fixture changed during test.'
     report=dict(status='PASS' if ran.returncode==0 else 'FAIL',compileExit=compile_exit,runExit=ran.returncode,
         seconds=time.monotonic()-start,sourceHashes=before,sourceUnchanged=True,
-        historicalExecuted=old is not None,directDeltaConsumerUnchanged=True if old else None,
+        historicalExecuted=data.get('historicalExecuted',False),historicalRequested=old is not None,directDeltaConsumerUnchanged=True if old else None,
         literalRendererClockAndCommandBlocks=True,historicalClassRenameOnly=True if old else None,result=data,
         scope='Actual CLP1 reader/planner/playback, actual clock and extracted literal renderer admission/cache/completion blocks; invented tracks and adapters. No UIKit/Metal/device/server/retail acceptance.')
     (out/'report.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
     print(json.dumps(report,indent=2,sort_keys=True))
     if ran.returncode:raise SystemExit(ran.returncode)
+    assert data['historicalExecuted']==(old is not None),'Historical control reporting mismatch.'
 
 
 if __name__=='__main__':main()

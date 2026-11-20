@@ -12,7 +12,7 @@ from tests.movement.smoke_native_foot_animation import SWIFT as FOOT_SWIFT
 import tools.assets.prepare_native_animations as archive
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
-const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(path.join(process.cwd(),'smoke_vehicle_dynamics'));
+const fs=require('node:fs'),path=require('node:path'),{archivedModules}=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics'));
 (async()=>{
  const load=archivedModules(),factory=load.factories[49368],g=factory.constructor('return globalThis')(),Bytes=factory.constructor('return Uint8Array')();g.fetch=async url=>{const b=fs.readFileSync(path.join(process.cwd(),'local-only/site',url.split('?')[0]));return{ok:true,json:async()=>JSON.parse(b),arrayBuffer:async()=>{const a=new Bytes(b.length);a.set(b);return a.buffer}}};g.setTimeout=(fn,ms)=>{const t=setTimeout(fn,ms);t.unref();return t};
  const T=load(85339),api=load(49368),pedData=await api.av(),models=JSON.parse(fs.readFileSync('local-only/site/game/native/riders.json')).models,physics=JSON.parse(fs.readFileSync('local-only/site/game/native/vehicles.physics.json')).models;

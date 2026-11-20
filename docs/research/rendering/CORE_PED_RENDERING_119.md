@@ -184,9 +184,25 @@ A separate owner-local audit passes 1,555 native checks over all 311 cells:
 Original archive and served files remain unchanged. The complete selected
 Core147 chain passes with required Metal, physics, audio and transport gates
 (808.3 seconds), as do native-project, host and repository-layout checks. All
-226 frozen app/build inputs remain unchanged. SDK, normal installed-scene and
-physical-device acceptance are separate gates; their completed results belong
-in the release PR rather than being inferred from these source checks.
+226 frozen app/build inputs remain unchanged. Universal Simulator Debug and
+unsigned arm64 iPhone Release builds subsequently pass (670.6/506.8 seconds).
+Normal installation caught a nested link in the private menu resource bundle;
+its first failed attempt remains retained. Repointing the private resource link
+to its real directory and incremental rebuilds (15.1/5.4 seconds) produce
+self-contained, exact copies of all 14 menu files without changing source or
+original resources. Product and pre-install gates now check that packaging.
+
+The ordinary Simulator scene subsequently passes one test with zero failures
+(348.8 seconds), after one separate zero-test Apple runner preflight rejection.
+The test reaches the owned 0.3.7 server, normally requests/completes the HD image,
+walks, pauses/resumes, enters a Taxi, selects a visible third-person camera and
+restores its original preference, exits, performs three jump/landing transitions,
+and rejoins using installed base resources before restoring the main menu.
+All prepared/raw metadata and settings are retained, including the failed-install
+baseline. The app, dedicated Simulator, temporary proxy and owned QA server are
+stopped afterwards. Captures show the expected scene and still show purple
+world surfaces; they do not establish matched retail rendering or hardware
+performance. Original captures and resources stay local.
 
 This is scoped archived-client compatibility, not classic-retail visual or
 free-roam gameplay parity. World-cell center sorting cannot correctly resolve

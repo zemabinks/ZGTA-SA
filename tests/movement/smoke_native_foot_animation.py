@@ -21,7 +21,7 @@ import tools.assets.prepare_native_animations as archive
 ROOT = Path(__file__).resolve().parents[2]
 JS = r'''
 const fs=require('node:fs'),path=require('node:path');
-const {archivedModules}=require(path.join(process.cwd(),'smoke_vehicle_dynamics'));
+const {archivedModules}=require(path.join(process.cwd(),'tests/vehicles/smoke_vehicle_dynamics'));
 (async()=>{
  const load=archivedModules(),global=load.factories[49368].constructor('return globalThis')();
  const Bytes=load.factories[49368].constructor('return Uint8Array')();

@@ -1,5 +1,31 @@
 # Core GTA San Andreas gameplay parity
 
+## 2026-11-20 — Rider presentation time and admission (148)
+
+Five seated fallback paths and the remote-bike presentation owner now consume
+valid active presentation time without the old shared 100 ms truncation.
+Per-instance timestamps prevent precreation credit, repeated-draw credit and
+offscreen catch-up debt. Rejected intervals hold time; nonfinite bike clocks
+hold the last valid pose. The existing direct-delta algorithm bodies remain
+unchanged, and physics/input/wire ownership stays separate.
+
+Focused authored gates pass 3,081 checks, with actual old renderer/dispatch
+failures at the intended elapsed-time and fresh-bike assertions. Current and
+frozen-historical boarding gates pass 1,420/1,435 checks. The earlier full run
+fails at its explicit old-cap requirement; its result is retained, the current
+assertion now checks exact admitted time, and the historical capped witness
+remains. The full selected Metal/physics/audio/transport chain subsequently
+passes (745.7 seconds), with 226 app/build inputs held. Both SDK products,
+archived direct-delta replays and normal installed Taxi/BMX scene checks remain
+separate gates; completed results are recorded in the release PR.
+
+Thirteen original-reference replay imports now resolve the relocated offline
+helper. No original script bytes, fixtures or resources are published. Original
+retail easing curves, physical-device hitch behavior, ambient simulation and
+full gameplay parity remain open. See the
+[rider presentation record](../research/vehicles/CORE_VEHICLE_PRESENTATION_122.md#rider-presentation-intervals-148).
+
+
 ## 2026-11-19 — World surface ownership and mixed transparency (147)
 
 Detailed world cells now validate and use their solid/clear index split, with

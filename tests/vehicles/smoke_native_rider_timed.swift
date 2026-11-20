@@ -229,7 +229,7 @@ import Darwin
 #if HISTORICAL_CONTROLS
                 historical=old.update(delta:oldClock.successfulDraw(at:clock.now),input:.init())!
 #endif
-                try check(step.1<=0.1,"shared fallback clock still capped")
+                try near(step.1,1/Double(rate),"shared presentation clock retains admitted elapsed")
             }
             try near(final.sample.pose.time,1,"admitted finite phase elapsed at \(rate)Hz")
 #if HISTORICAL_CONTROLS

@@ -49,8 +49,30 @@ final class NativeRiderAnimation {
     struct Sample { var clip: String;var time: Double;var weight: Double }
     struct Frame { var base: String?;var time: Double = 0;var mixes: [Sample] = [] }
     private let duration:(String)->Double?
+    private var presentationPreviousEnd:Double?
     private var still:Double=1,lean:Double=0,tuck:Double=0,steer:Double=0,pedal:Double=0,sprint:Double=0,hop:Double=0,crank:Double=0,hopTime:Double=0
     init(duration:@escaping(String)->Double?){self.duration=duration}
+    /// A newly admitted pose owns no earlier display time. Missing draws do
+    /// not accumulate debt, and duplicate intervals cannot advance it twice.
+    /// The tuple keeps this CPU planner independent of the renderer clock type.
+    func update(presentation interval:(start:Double,end:Double,valid:Bool),configuration:Configuration,input:Input)->Frame {
+        let previous=presentationPreviousEnd
+        presentationPreviousEnd=interval.end.isFinite ? interval.end:nil
+        guard interval.valid,interval.start.isFinite,interval.end.isFinite,
+              interval.end>=interval.start,interval.end-interval.start<=0.5,
+              let previous,interval.end>=previous else {
+            return update(delta:0,configuration:configuration,input:input)
+        }
+        let delta=interval.end-max(interval.start,previous)
+        if delta<=0.1{return update(delta:delta,configuration:configuration,input:input)}
+        let count=min(5,max(1,Int(ceil(delta/0.1))))
+        var final:Frame?
+        for index in 0..<count {
+            let step=min(0.1,max(0,delta-Double(index)*0.1))
+            if step>0{final=update(delta:step,configuration:configuration,input:input)}
+        }
+        return final ?? update(delta:0,configuration:configuration,input:input)
+    }
     func update(delta dt:Double,configuration c:Configuration,input t:Input)->Frame {
         func clip(_ role:String)->String?{guard let name=c.clips[role],let length=duration(name),length>0 else{return nil};return name}
         func clamp(_ value:Double)->Double{min(1,max(-1,value))}
