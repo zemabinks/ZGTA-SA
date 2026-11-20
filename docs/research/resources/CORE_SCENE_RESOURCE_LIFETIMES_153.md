@@ -182,3 +182,50 @@ changes. Rapid-teleport/cold-load latency and the residual synchronous work
 still need rendered and hardware measurement. Original assets,
 measurements, screenshots and private histories stay local. Original-retail,
 hardware, ambient population and complete gameplay parity remain open.
+
+
+## Bounded visual world preparation (155)
+
+Visual WRL2 parsing, base PNG decode, Metal buffer allocation and cell bounds
+previously ran in the scene's main-thread publication block. A utility worker
+now prepares immutable GPU products. The scene still owns mesh admission and
+optional HD scheduling. One active bin/PNG pair and preparation uses bounded
+identity transfers (64MiB per file), up to32 queued descriptors and a192MiB
+prepared-resource budget. Parser scratch/input data are additional memory;
+these limits are not a whole-process RAM guarantee. All327 available archived
+base cells pass a read-only header/size bound audit without downscaling.
+
+The current detail takes precedence over neighbors and far cells. Each scene
+refresh updates queued priorities and revokes no-longer-wanted visual and
+collision intents before acquiring new cells. A cancelled active CPU operation
+keeps its serial slot until it actually exits. Source/request fences prevent a
+retired result from installing meshes, clearing a newer slot or imposing its
+retry delay. Existing geometry, materials, movement and physics algorithms are
+preserved.
+
+Focused source tests pass74 actual Metal/scheduling/scene-admission checks and
+50 collision/physical-owner checks. Unchanged154 fails the new rapid-teleport
+oracle because obsolete collision intents block the retained cell. A first
+fixture compiler rejection is retained; the correction only spaces a Swift
+comparison operator. The later receipts are separate executed tests.
+
+Three unchanged original owner-local cells retain identical complete GPU vertex
+and index bytes, decoded base-level texture pixels, bounds, layer maps and
+texture interpretation. Desktop Debug baseline preparation measures390–981ms;
+new worker preparation measures400–1237ms while the main run loop continues.
+This establishes work placement and output preservation, not a faster total
+load, rendered frame-time improvement, physical-device or retail acceptance.
+The complete selected source chain passes (1117.96s), with231 App/build and
+20 test inputs held; original-rig, stock HTTP/Metal/Rapier, project, host and
+layout gates also pass. Both SDK products and payload checks pass with the
+source,39 dependencies and14 private owner-menu files held. Normal retained-data Simulator acceptance passes (495.511s, one executed case,
+zero failures): development skins7/2/0, Taxi/camera/exit/jump, then installed
+CJ0 movement/camera/jump/menu restoration. All12 full captures are reviewed.
+The paired car views show rear-to-front input response and a textured driver
+head/upper torso, with lower limbs occluded.36 visual and8 collision HTTP
+replies use bounded identity transfers; the installed join has no world,
+collision or CJ HTTP fallback. Actual owned-server logs record1161 updates,
+movement on all four joins and207 Taxi reports with driver entry/exit.
+Resources/settings remain held and owned services stop afterward. Original resources, full captures and raw measurements stay
+local. Full ambient simulation, complete game fidelity and hardware evidence
+remain open.

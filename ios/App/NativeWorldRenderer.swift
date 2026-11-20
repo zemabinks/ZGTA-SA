@@ -637,6 +637,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var activeDetails: Set<String> = ["c59"]
     private var collisionRequests=NativeCollisionRequests()
     private var desiredPhysicsCells=Set<String>()
+    private let worldCellLoader=NativeWorldCellLoader()
+    private var worldCellTokens:[String:UUID]=[:],worldCellTaskIDs:[String:UUID]=[:]
     private var collisionLoading=Set<String>()
     private var collisionRetryAfter:[String:Date]=[:]
     private var collisionResourceSource:String?
@@ -2884,6 +2886,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         worldSharpBase=worldSharpBase.filter{detailNames.contains($0.key)}
         collisions = collisions.filter { desiredPhysicsCells.contains($0.key) }
         groundVehicle?.retainCells(desiredPhysicsCells)
+        retireUnretainedCollisionLoads();synchronizeWorldCellIntents()
         for name in far { load(name: name) }
         for name in detailNames { load(name: name) }
         for name in desiredPhysicsCells {loadCollision(name:name)}
@@ -2933,78 +2936,51 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         collisionLoadTasks[name]=task
     }
 
-    private func load(name: String) {
-        guard meshes[name] == nil, !loading.contains(name),
-              Date() >= (retryAfter[name] ?? .distantPast), let server else { return }
-        let source=fixedCJSourceIdentity()
-        loading.insert(name)
+    private func retireWorldCellRequests() {
+        worldCellTokens.removeAll();worldCellTaskIDs.removeAll();loading.removeAll();retryAfter.removeAll()
+        worldCellLoader.reset()
+    }
+    private func synchronizeWorldCellIntents() {
+        var wanted=Dictionary(uniqueKeysWithValues:activeFar.map{($0,0)})
+        for name in activeDetails{wanted[name]=name==activeDetail ? 2:1}
+        for name in Array(worldCellTokens.keys)where wanted[name]==nil {
+            worldCellTokens.removeValue(forKey:name);worldCellTaskIDs.removeValue(forKey:name);loading.remove(name)
+        }
+        worldCellLoader.updateWanted(wanted)
+    }
+    private func retireUnretainedCollisionLoads() {
+        var retired:[UUID]=[]
+        for name in Array(collisionLoadTasks.keys)where !desiredPhysicsCells.contains(name) {
+            collisionLoadTokens.removeValue(forKey:name);collisionLoading.remove(name)
+            if let id=collisionLoadTasks.removeValue(forKey:name){retired.append(id)}
+        }
+        for id in retired{collisionCellLoader.cancel(id)}
+    }
+    private func load(name:String) {
+        guard meshes[name]==nil,!loading.contains(name),Date()>=(retryAfter[name] ?? .distantPast),let server else{return}
+        let source=fixedCJSourceIdentity(),token=UUID()
+        guard worldSharpSource==source else{return}
+        loading.insert(name);worldCellTokens[name]=token
         onStatus?("LOADING CITY: \(name.uppercased())")
-        let binURL = server.path("game/world/\(name).bin")
-        let imageURL = server.path("game/world/\(name).png")
-        let group = DispatchGroup()
-        var bin: Data?
-        var png: Data?
-        var fetchError: Error?
-        let lock = NSLock()
-        group.enter()
-        NativeResourceTransport.dataTask(with: binURL) { data, response, error in
-            lock.lock()
-            if let response = response as? HTTPURLResponse, response.statusCode == 200 { bin = data }
-            else { fetchError = error ?? NSError(domain: "World", code: (response as? HTTPURLResponse)?.statusCode ?? -1) }
-            lock.unlock()
-            group.leave()
-        }.resume()
-        group.enter()
-        NativeResourceTransport.dataTask(with: imageURL) { data, response, error in
-            lock.lock()
-            if let response = response as? HTTPURLResponse, response.statusCode == 200 { png = data }
-            else { fetchError = error ?? NSError(domain: "World", code: (response as? HTTPURLResponse)?.statusCode ?? -1) }
-            lock.unlock()
-            group.leave()
-        }.resume()
-        group.notify(queue: .main) { [weak self] in
-            guard let self,self.fixedCJSourceIdentity()==source else { return }
-            self.loading.remove(name)
-            if name.hasPrefix("c") || name.hasPrefix("i"), !self.activeDetails.contains(name) { return }
-            if name.hasPrefix("t"), !self.activeFar.contains(name) { return }
-            guard let bin, let png else {
-                self.retryAfter[name] = Date().addingTimeInterval(5)
-                self.onStatus?("CITY FILE UNAVAILABLE: \(name.uppercased()) \(fetchError?.localizedDescription ?? "")")
-                return
-            }
+        let id=worldCellLoader.load(name:name,bin:server.path("game/world/\(name).bin"),png:server.path("game/world/\(name).png"),
+            cellSize:name.hasPrefix("t") ? 64:128,device:device,priority:name==activeDetail ? 2:name.hasPrefix("t") ? 0:1){[weak self]result in
+            guard let self,self.fixedCJSourceIdentity()==source,self.worldSharpSource==source,self.worldCellTokens[name]==token else{return}
+            self.worldCellTokens.removeValue(forKey:name);self.worldCellTaskIDs.removeValue(forKey:name);self.loading.remove(name)
+            guard name.hasPrefix("t") ? self.activeFar.contains(name):self.activeDetails.contains(name)else{return}
             do {
-                let world = try WorldBinary(data: bin)
-                let atlas = try self.textureLoader.newTexture(data: png, options: [.SRGB: false])
-                let cellSize = name.hasPrefix("t") ? 64 : 128
-                let columns = atlas.width / cellSize
-                guard atlas.width == 2048,
-                      atlas.height >= ((world.layers + columns - 1) / columns) * cellSize,
-                      let vertices = self.device.makeBuffer(bytes: world.vertices,
-                                                            length: world.vertices.count * MemoryLayout<NativeVertex>.stride),
-                      let indices = self.device.makeBuffer(bytes: world.indices,
-                                                           length: world.indices.count * MemoryLayout<UInt32>.stride) else {
-                    self.retryAfter[name] = Date().addingTimeInterval(5)
-                    self.onStatus?("INVALID CITY TEXTURE: \(name.uppercased())")
-                    return
-                }
-                self.meshes[name] = Mesh(vertices: vertices, indices: indices,
-                                         indexCount: world.indices.count, atlas: atlas)
-                if !name.hasPrefix("t") {
-                    var low=SIMD3<Float>(repeating:.greatestFiniteMagnitude),high = -low
-                    for vertex in world.vertices {
-                        let p=SIMD3(vertex.position.x,vertex.position.y,vertex.position.z)
-                        low=simd_min(low,p);high=simd_max(high,p)
-                    }
-                    self.worldSharpBase[name]=WorldSharpBase(layers:world.layers,mapping:world.sharpLayers,source:source,
-                        indices:world.indices.count,center:low*0.5+high*0.5)
+                let value=try result.get()
+                self.meshes[name]=Mesh(vertices:value.vertices,indices:value.indices,indexCount:value.indexCount,atlas:value.atlas)
+                if let center=value.center {
+                    self.worldSharpBase[name]=WorldSharpBase(layers:value.layers,mapping:value.sharpLayers,source:source,indices:value.indexCount,center:center)
                     self.loadWorldSharpIfNeeded()
                 }
                 self.onStatus?("CITY READY: \(name.uppercased())")
-            } catch {
-                self.retryAfter[name] = Date().addingTimeInterval(5)
+            }catch {
+                self.retryAfter[name]=Date().addingTimeInterval(5)
                 self.onStatus?("CITY DATA ERROR: \(error.localizedDescription)")
             }
         }
+        worldCellTaskIDs[name]=id
     }
 
     /// All state here belongs to the renderer's main-thread scene. Only the
@@ -3013,11 +2989,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         synchronizeCollisionResourceSource()
         let source=fixedCJSourceIdentity()
         if worldSharpSource != source {
+            retireWorldCellRequests()
             worldSharpIndexTask?.cancel();worldSharpIndexTask=nil
             worldSharpTicket?.cancel();worldSharpTicket=nil;worldSharpGPU=nil;worldSharpName=nil
             worldSharpManifest=nil;worldSharpBase.removeAll();worldSharpRetry.removeAll()
             worldSharpIndexReady=false;worldSharpIndexRetry = .distantPast
-            if worldSharpSource != nil{meshes.removeAll();loading.removeAll();retryAfter.removeAll()}
+            if worldSharpSource != nil{meshes.removeAll()}
             worldSharpSource=source
         }
         guard !worldSharpIndexReady,worldSharpIndexTask==nil,Date()>=worldSharpIndexRetry,let server else{return}
@@ -5487,6 +5464,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard let coverage=NativeWorldRay.coverage(from:origin,to:origin+direction*distance,interior:isInterior,loaded:{_ in true})else{return .unavailable}
         collisionRequests.request(coverage.cells,now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
         desiredPhysicsCells=collisionRequests.retained(now:ProcessInfo.processInfo.systemUptime,visible:activeDetails)
+        retireUnretainedCollisionLoads()
         for name in desiredPhysicsCells {loadCollision(name:name)}
         var excluded=vehicle.otherColliders.union(vehicle.chassisColliders)
         if let queries=character?.queries{excluded.formUnion([queries.walker,queries.probe])}

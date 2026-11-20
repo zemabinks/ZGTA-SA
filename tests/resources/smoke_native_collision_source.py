@@ -49,6 +49,8 @@ def main():
     # Only the historical interface adapter is empty. Its actual old loader,
     # parser, ground-cell owner and physics engine remain unchanged.
     methods = helper + '\n' + function(text, '    private func loadCollision(name:String)')
+    retirement = '    private func retireUnretainedCollisionLoads()'
+    methods += '\n' + (function(text, retirement) if retirement in text else 'func retireUnretainedCollisionLoads() {}')
     harness = out / 'Gate.swift'
     carrier = fixture.read_text().replace('// ACTUAL_RENDERER_METHODS', methods)
     carrier = carrier.replace('COLLISION_TASK_TYPE', 'UUID' if asynchronous else 'NativeResourceTask')
