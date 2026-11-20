@@ -3,8 +3,12 @@ import Foundation
 var checks=0
 func require(_ condition:@autoclosure()->Bool,_ message:String){checks+=1;if !condition(){fatalError(message)}}
 final class Resource {}
-final class Task {var cancellations=0;func cancel(){cancellations+=1}}
+final class Task {var cancellations=0;var onCancel:(()->Void)?;func cancel(){cancellations+=1;onCancel?()}}
 final class Loader {var resets=0;@discardableResult func reset()->Int{resets+=1;return resets}}
+final class GroundCells {
+    var cells=Set<String>(),retentions=0
+    func retainCells(_ names:Set<String>){cells.formIntersection(names);retentions+=1}
+}
 final class MaterialOwner {var resets=0;func reset(){resets+=1}}
 final class Selection {var cancellations=0;func cancel(){cancellations+=1}}
 final class CJ {var resets=0;func reset(){resets+=1}}
@@ -20,6 +24,12 @@ final class Carrier {
     let actorSelection=Selection();var fixedCJ:CJ?=CJ(),needsFixedCJ=false,atlasInvalidations=0
     func invalidatePedAtlasSourceIfChanged(){atlasInvalidations+=1}
     func ensureFixedCJ(){fatalError("unrequested CJ load")}
+    // Explicit cell/resource spies. Real parser/ground/Rapier behavior is
+    // exercised separately by smoke_native_collision_source.
+    var collisions:[String:Resource]=[:],collisionRequests=Loader()
+    let groundVehicle:GroundCells?=GroundCells()
+    var collisionLoading=Set<String>(),collisionRetryAfter:[String:Date]=[:]
+    var collisionResourceSource:String?,collisionLoadTokens:[String:UUID]=[:],collisionLoadTasks:[String:Task]=[:]
     var legacyStockSource:String?,legacyStockMetadataEpoch:UInt64=0
     var stockPedRuntime:Loader?,stockPedIDs:[String:Int32]=[:],stockPedCatalogueSHA:String?,stockPedErrors=Set<Int32>(),stockPedDrawn=Set<Int32>()
     var legacyStockMetadataTasks:[UUID:Task]=[:],legacyStockMetadataPending=0,legacyStockMetadataRetryAfter:Double=0

@@ -639,6 +639,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var desiredPhysicsCells=Set<String>()
     private var collisionLoading=Set<String>()
     private var collisionRetryAfter:[String:Date]=[:]
+    private var collisionResourceSource:String?
+    private var collisionLoadTokens:[String:UUID]=[:]
+    private var collisionLoadTasks:[String:NativeResourceTask]=[:]
     private var collisionScene:Bool?
     private var insideCells: Set<Int> = []
     private var activeFar: Set<String> = []
@@ -2885,13 +2888,33 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for name in desiredPhysicsCells {loadCollision(name:name)}
     }
 
+    private func synchronizeCollisionResourceSource() {
+        let source=fixedCJSourceIdentity()
+        guard collisionResourceSource != source else{return}
+        let retired=collisionResourceSource != nil,tasks=Array(collisionLoadTasks.values)
+        collisionResourceSource=source
+        collisionLoadTokens.removeAll();collisionLoadTasks.removeAll()
+        collisionLoading.removeAll();collisionRetryAfter.removeAll()
+        if retired {
+            collisions.removeAll();groundVehicle?.retainCells([])
+            collisionRequests.reset()
+        }
+        // Revoke tickets before cancel(), which may immediately complete a
+        // transport. Body/vehicle/object ownership stays with its own owner.
+        for task in tasks{task.cancel()}
+    }
     private func loadCollision(name:String) {
+        synchronizeCollisionResourceSource()
         guard collisions[name]==nil,!collisionLoading.contains(name),
               Date()>=(collisionRetryAfter[name] ?? .distantPast),let server else{return}
-        collisionLoading.insert(name)
-        NativeResourceTransport.dataTask(with:server.path("game/world/\(name).col.bin")) { [weak self] data,response,_ in
+        let source=fixedCJSourceIdentity(),token=UUID()
+        collisionLoading.insert(name);collisionLoadTokens[name]=token
+        let task=NativeResourceTransport.dataTask(with:server.path("game/world/\(name).col.bin")) { [weak self] data,response,_ in
             DispatchQueue.main.async {
-                guard let self else{return};self.collisionLoading.remove(name)
+                guard let self,self.fixedCJSourceIdentity()==source,self.collisionResourceSource==source,
+                      self.collisionLoadTokens[name]==token else{return}
+                self.collisionLoadTokens.removeValue(forKey:name);self.collisionLoadTasks.removeValue(forKey:name)
+                self.collisionLoading.remove(name)
                 guard self.desiredPhysicsCells.contains(name) else{return}
                 guard (response as? HTTPURLResponse)?.statusCode==200,let data,
                       let collision=try? WorldCollision(data:data) else {
@@ -2899,7 +2922,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
                 self.collisions[name]=collision;self.groundVehicle?.installCell(name,data:data)
             }
-        }.resume()
+        }
+        collisionLoadTasks[name]=task;task.resume()
     }
 
     private func load(name: String) {
@@ -2979,6 +3003,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// All state here belongs to the renderer's main-thread scene. Only the
     /// bounded decoder and GPU upload run off-main; no stale result may publish.
     private func refreshWorldSharpSource() {
+        synchronizeCollisionResourceSource()
         let source=fixedCJSourceIdentity()
         if worldSharpSource != source {
             worldSharpIndexTask?.cancel();worldSharpIndexTask=nil
@@ -3035,10 +3060,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var server: ServerAddress? {didSet{
-        if oldValue != server {synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+        if oldValue != server {synchronizeCollisionResourceSource();synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
-    deinit {for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    deinit {for task in collisionLoadTasks.values{task.cancel()};for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
     private var needsFixedCJ:Bool {
         localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
     }
