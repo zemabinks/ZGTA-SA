@@ -83,3 +83,29 @@ captures show a white CJ silhouette while the surrounding original world and
 objects are textured. Resource metadata and native preferences remain retained;
 no install/reset was used for this baseline. The current SDK products and
 identical normal150 case remain pending.
+
+## Completed SDK and normal installed-game acceptance
+
+The earlier pending gates subsequently pass: universal Simulator Debug501.3
+seconds and iPhone arm64 Release501.2 seconds. Both products hold all227
+App/build inputs,39 independent library dependency records and14 self-contained
+owner-menu files. No original resources are included in the public source.
+
+The identical normal150 UI case executes one test with zero failures in152.3
+seconds of runner time. Its first launch was rejected by Apple before any test
+ran (zero tests, exit65,67.2 seconds); that separate result is retained. The
+unchanged retry joins and spawns CJ, walks/orbits/pauses, performs two
+jump/land/walk transitions and returns through the normal installed-resource
+menu. All13 original CJ files are requested, their hashes remain held, the exact
+five installed app payloads match the compiled product, and prepared/raw
+metadata and native preferences remain retained. A normal update can move the
+app's data-container directory; equality was checked by retained content, not
+by assuming an unchanged container path.
+
+Reviewed before/after captures show the original skin, vest, denim and shoes
+replacing the white baseline silhouette, including after the jump/land/walk
+case. This verifies this visible material repair, not original movement timing
+or exhaustive character/retail fidelity. The app, dedicated Simulator, owned
+loopback resource proxy and capped QA server are stopped after acceptance.
+Physical-device performance, scene fog/timecycle, ordinary raw-family game
+registration, canonical gaps and all other unmeasured gameplay remain open.
