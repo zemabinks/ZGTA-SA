@@ -93,6 +93,7 @@ final class NativeGameCamera {
     private let persistViews: Bool
     private var table: Document?
     private var request: NativeResourceTask?
+    private var requestToken = UUID()
     var trace: ((SIMD3<Float>,SIMD3<Float>,Float) -> Float?)?
     /// Streaming boundaries are not solid surfaces. They may be closer than
     /// the original solid-wall minimum and must never be crossed by that clamp.
@@ -143,10 +144,18 @@ final class NativeGameCamera {
     convenience init(data: Data) throws { self.init(persistViews: false);try install(data) }
     deinit { request?.cancel() }
     func load(server: ServerAddress,completion: (() -> Void)? = nil) {
+        let token = UUID(); requestToken = token
         request?.cancel()
         request = NativeResourceTransport.dataTask(with: server.path("game/native/camera.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
-            DispatchQueue.main.async { guard let self,(try? self.install(data)) != nil else { return };completion?() }
+            // A completed transport callback can already have queued this
+            // block when cancel() runs. Only the latest invocation may publish,
+            // including retries at the same origin. Clear before notification
+            // so a reentrant completion can retain its own newer request.
+            DispatchQueue.main.async {
+                guard let self,self.requestToken == token,(try? self.install(data)) != nil else { return }
+                self.request = nil;completion?()
+            }
         };request?.resume()
     }
     private func install(_ data: Data) throws {

@@ -27,12 +27,18 @@ def main():
         else:raise AssertionError('Missing actual owner: '+marker)
     if 'private func invalidateStockPedResources(' in renderer:
         parts.append(block(renderer,'private func invalidateStockPedResources('))
+    if 'private func synchronizeCollisionResourceSource(' in renderer:
+        parts.append(block(renderer,'private func synchronizeCollisionResourceSource('))
     if not args.renderer:
         observer=block(renderer,'fixedCJObserver=NativeResourceStore.shared.observe')
         assert 'self.synchronizeLegacyStockSource()' in observer
         for marker in ['private func refreshLegacyStockReferences(', 'private func loadLegacyStockCatalogs(',
                        'private func loadLegacyDictionary(', 'private func synchronizeLegacyObjectPhysics(']:
             assert 'synchronizeLegacyStockSource()' in block(renderer,marker),marker
+        if 'private func synchronizeCollisionResourceSource(' in renderer:
+            assert 'self.loadNearby()' in observer
+            for marker in ['private func refreshWorldSharpSource(', 'private func loadCollision(']:
+                assert 'synchronizeCollisionResourceSource()' in block(renderer,marker),marker
     source=carrier.replace('// ACTUAL_OWNERS','\n'.join(parts))
     if 'private func invalidateStockPedResources(' in renderer:
         source+='''
@@ -44,6 +50,30 @@ c.generation+=1;c.synchronizeLegacyStockSource()
 require(pedOwner.resets==1 && c.stockPedRuntime==nil,"source replacement did not retire pedestrian CPU/resident owner")
 require(c.stockPedIDs.isEmpty && c.stockPedCatalogueSHA==nil && c.stockPedErrors.isEmpty,"source replacement retained old pedestrian registration/suppression")
 print("PASS pedestrian retirement composition with the actual stock source owner")
+'''
+    if 'private func synchronizeCollisionResourceSource(' in renderer:
+        source+='''
+let city=Carrier();city.server=ServerAddress(value:"A")
+let cityTask=Task(),oldCityCell=Resource(),cityReset=city.collisionRequests.resets
+city.collisions=["c0":oldCityCell];city.groundVehicle!.cells=["c0"]
+city.collisionLoadTasks=["c1":cityTask];city.collisionLoadTokens=["c1":UUID()]
+city.collisionLoading=["c1"];city.collisionRetryAfter=["c1":Date().addingTimeInterval(999)]
+var cityRevokedBeforeCancel=false
+cityTask.onCancel={cityRevokedBeforeCancel=city.collisionLoadTokens.isEmpty && city.collisionLoadTasks.isEmpty && city.collisionLoading.isEmpty && city.collisionResourceSource==city.fixedCJSourceIdentity()}
+city.server=ServerAddress(value:"B")
+require(cityTask.cancellations==1 && cityRevokedBeforeCancel,"server setter did not revoke city request ownership before cancellation")
+require(city.collisions.isEmpty && city.groundVehicle!.cells.isEmpty && city.groundVehicle!.retentions==1,"server setter retained CPU/native city-cell owner")
+require(city.collisionRetryAfter.isEmpty && city.collisionRequests.resets==cityReset+1,"new city source retained retry/coverage ownership")
+let cityCurrent=Task(),currentCityCell=Resource()
+city.collisions=["c0":currentCityCell];city.groundVehicle!.cells=["c0"]
+city.collisionLoadTasks=["c1":cityCurrent];city.collisionLoadTokens=["c1":UUID()];city.collisionLoading=["c1"]
+let heldCityReset=city.collisionRequests.resets
+city.synchronizeCollisionResourceSource()
+require(city.collisions["c0"] === currentCityCell && cityCurrent.cancellations==0 && city.collisionLoading==["c1"],"same city source unnecessarily retired accepted/pending owners")
+require(city.groundVehicle!.retentions==1 && city.collisionRequests.resets==heldCityReset,"same city source changed physical/coverage owner")
+city.generation+=1;city.synchronizeCollisionResourceSource()
+require(cityCurrent.cancellations==1 && city.collisions.isEmpty && city.groundVehicle!.cells.isEmpty && city.collisionRequests.resets==heldCityReset+1,"installation-generation repair retained old city owner")
+print("PASS \\(checks) total actual stock/pedestrian/city-source composition checks; cell and transfer boundaries are explicit spies")
 '''
     out=ROOT/'local-only/research/stock-source-149/owners'/str(time.time_ns());out.mkdir(parents=True)
     (out/'main.swift').write_text(source)

@@ -1,5 +1,28 @@
 # Core GTA San Andreas gameplay parity
 
+## Core153 camera and physical cell lifetimes — scoped source and app acceptance
+
+Per-invocation camera tokens reject queued obsolete publications and preserve
+reentrant request ownership. Source- and request-bound city collision loads
+reject old geometry/retry/loading side effects and retire only their own CPU
+and physical cells. The old sources fail their intended request-ownership
+oracles; current camera and actual SCL2/ground/Rapier gates pass 26 and 37
+authored checks. The initial fixture naming compile rejection remains retained.
+The corrected combined Metal/physics/audio/transport follow-up passes
+(976.53s), with all 229 App/build inputs and 14 test inputs held; project,
+hosting and layout gates also pass. The initial combined carrier compile
+failure remains retained. Both SDK products subsequently pass (Simulator
+502.1s; arm64 iPhone539.7s), with the source/dependencies/owner menu held.
+A normal retained-data Simulator case subsequently passes (433.56s, one
+executed test, zero failures), covering three skins, Taxi entry, camera input,
+exit, jump/landing/walk and menu restoration. Nine reviewed captures retain
+original textures; the front car view shows the driver head/upper torso, with
+lower limbs obscured. Actual owned-server logs confirm all three skins move
+and on-foot/Taxi-driver/on-foot transitions. Settings/resources remain held and
+owned processes are stopped. Camera trajectory, physical-device and retail
+accuracy remain unverified. See [scene source ownership](../research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md).
+
+
 ## Core152 original pedestrian admission — scoped source and app acceptance
 
 Original stock families now enter the native resource owner by exact identity,
