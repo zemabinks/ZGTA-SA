@@ -25,6 +25,8 @@ def main():
         elif args.renderer and marker.startswith('private func retire'):parts.append('func retireLegacyStockTextures(_ models:Set<Int32>,includeExternal:Bool=false) {}')
         elif args.renderer and marker.startswith('private func restore'):parts.append('func restoreLegacyArtworkTextures(_ keys:Set<NativeSAMPObjectMaterials.TextureRequest>) {}')
         else:raise AssertionError('Missing actual owner: '+marker)
+    if 'private func invalidateStockPedResources(' in renderer:
+        parts.append(block(renderer,'private func invalidateStockPedResources('))
     if not args.renderer:
         observer=block(renderer,'fixedCJObserver=NativeResourceStore.shared.observe')
         assert 'self.synchronizeLegacyStockSource()' in observer
@@ -32,6 +34,17 @@ def main():
                        'private func loadLegacyDictionary(', 'private func synchronizeLegacyObjectPhysics(']:
             assert 'synchronizeLegacyStockSource()' in block(renderer,marker),marker
     source=carrier.replace('// ACTUAL_OWNERS','\n'.join(parts))
+    if 'private func invalidateStockPedResources(' in renderer:
+        source+='''
+let pedOwner=Loader()
+c.stockPedRuntime=pedOwner;c.stockPedIDs=["a":100];c.stockPedCatalogueSHA="old";c.stockPedErrors=[100]
+c.synchronizeLegacyStockSource()
+require(pedOwner.resets==0 && c.stockPedRuntime === pedOwner,"same source retired pedestrian resources")
+c.generation+=1;c.synchronizeLegacyStockSource()
+require(pedOwner.resets==1 && c.stockPedRuntime==nil,"source replacement did not retire pedestrian CPU/resident owner")
+require(c.stockPedIDs.isEmpty && c.stockPedCatalogueSHA==nil && c.stockPedErrors.isEmpty,"source replacement retained old pedestrian registration/suppression")
+print("PASS pedestrian retirement composition with the actual stock source owner")
+'''
     out=ROOT/'local-only/research/stock-source-149/owners'/str(time.time_ns());out.mkdir(parents=True)
     (out/'main.swift').write_text(source)
     command=['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-Onone',

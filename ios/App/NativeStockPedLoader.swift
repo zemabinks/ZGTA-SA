@@ -14,7 +14,7 @@ final class NativeStockPedLoader {
         let requestID:UUID,generation:UInt64,sourceIdentity:String
         let model:NativeSAMPStockModels.Model
         let plan:NativeRenderWarePedModel.Plan
-        var resourceBytes:Int {plan.model.meshByteCount+plan.model.textureByteCount+plan.skeleton.encodedSKN1().count}
+        var resourceBytes:Int {plan.model.meshByteCount+plan.model.textureByteCount+plan.skeleton.encodedByteCount}
     }
     typealias Completion=(Result<Prepared,Error>)->Void
     private struct Pending {
@@ -174,7 +174,7 @@ private final class StockPedJob {
             if case .omittedMipTail=diagnostic{continue}
             throw Loader.Failure.diagnostic(String(describing:diagnostic))
         }
-        let mesh=plan.model.meshByteCount,texture=plan.model.textureByteCount,skin=plan.skeleton.encodedSKN1().count
+        let mesh=plan.model.meshByteCount,texture=plan.model.textureByteCount,skin=plan.skeleton.encodedByteCount
         guard mesh<=limits.preparedBytes,texture<=limits.preparedBytes-mesh,skin<=limits.preparedBytes-mesh-texture else{throw Loader.Failure.preparedLimit}
         return plan
     }

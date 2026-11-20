@@ -1,5 +1,28 @@
 # Core GTA San Andreas gameplay parity
 
+## Core152 original pedestrian admission — scoped source and app acceptance
+
+Original stock families now enter the native resource owner by exact identity,
+with source/request fences, conservative standalone GPU reservation and actual
+resident charge. Full rig/skin equivalence gates preserve existing pose and hand
+relationships; compatible same-source arrival preserves animation captures.
+Focused resource, original-pair and stock HTTP/Metal/Rapier checks pass in their
+stated scopes. The full selected Metal/physics/audio/transport chain passes
+(945.95s), with229 App/build inputs and nine changed test inputs held;
+project/hosting/layout gates also pass. Both SDK products pass (Simulator
+508.6s; iPhone511.1s), followed by one normal retained-data three-skin
+join/walk/camera/Taxi/exit/jump/menu case (423.37s; a separate zero-test Apple
+runner rejection remains retained). An actual original male01 encode and six
+reviewed captures establish the scoped original/fallback/CJ integration; the
+rear car view does not establish unobscured seating pose quality. All metadata,
+original files and native preferences hold; owned QA processes are stopped. Maccer retains the existing converted fallback because this stock
+catalogue lacks its original IDE row;45 unresolved native skins remain open.
+The raw material path preserves original inputs and differs from the older
+converted prelight approximation; retail/timecycle parity is not claimed. See
+[resource admission and limits](../research/resources/CORE_STOCK_PEDESTRIAN_RUNTIME_152.md).
+
+
+
 ## Core151 imported-character scene fog — scoped source and app acceptance
 
 The native CJ/custom-pedestrian path now receives the environment already

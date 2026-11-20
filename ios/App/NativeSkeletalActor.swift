@@ -348,6 +348,30 @@ final class NativeSkeletalActor {
         } catch { return nil }
     }
 
+    /// Matching palette length alone cannot justify reusing existing poses or
+    /// hand/part relationships. Compare the full immutable rig and skin order
+    /// before another resource takes over this actor's animated model family.
+    func matchesRig(_ other:NativeSkeletalActor,tolerance:Float=0.0001)->Bool {
+        guard tolerance.isFinite,tolerance>=0,tolerance<=0.001,
+              vertexCount==other.vertexCount,frames.count==other.frames.count,
+              bones.count==other.bones.count,vertices.count==other.vertices.count,byBone==other.byBone else{return false}
+        func close(_ a:Float,_ b:Float)->Bool{a.isFinite && b.isFinite && abs(a-b)<=tolerance}
+        func matrix(_ a:simd_float4x4,_ b:simd_float4x4)->Bool {
+            (0..<4).allSatisfy{c in (0..<4).allSatisfy{r in close(a[c][r],b[c][r])}}
+        }
+        guard matrix(correction,other.correction),matrix(axis,other.axis)else{return false}
+        for (a,b)in zip(frames,other.frames) {
+            guard a.parent==b.parent,a.bone==b.bone,matrix(a.rest,b.rest)else{return false}
+        }
+        for (a,b)in zip(bones,other.bones) {
+            guard a.frame==b.frame,matrix(a.inverseBind,b.inverseBind)else{return false}
+        }
+        for (a,b)in zip(vertices,other.vertices) {
+            guard a.bones==b.bones,(0..<4).allSatisfy({close(a.point[$0],b.point[$0]) && close(a.weights[$0],b.weights[$0])})else{return false}
+        }
+        return true
+    }
+
     /// With a locomotion base, the action's upper-body tracks leave the root,
     /// pelvis and legs running their own cycle. This is the browser's bone mask.
     func pose(clip name: String, elapsed: Double, library: NativeSkeletalAnimationLibrary,

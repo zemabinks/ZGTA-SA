@@ -21,6 +21,7 @@ final class Carrier {
     func invalidatePedAtlasSourceIfChanged(){atlasInvalidations+=1}
     func ensureFixedCJ(){fatalError("unrequested CJ load")}
     var legacyStockSource:String?,legacyStockMetadataEpoch:UInt64=0
+    var stockPedRuntime:Loader?,stockPedIDs:[String:Int32]=[:],stockPedCatalogueSHA:String?,stockPedErrors=Set<Int32>(),stockPedDrawn=Set<Int32>()
     var legacyStockMetadataTasks:[UUID:Task]=[:],legacyStockMetadataPending=0,legacyStockMetadataRetryAfter:Double=0
     var legacyStockCatalog:Int?,legacyStockCollisionCatalog:Int?,legacyStockManifestSHA256:String?
     var legacyStockLoader:Loader?,legacyStockLoads:[Int32:Int]=[:],legacyStockRetries:[Int32:Double]=[:]

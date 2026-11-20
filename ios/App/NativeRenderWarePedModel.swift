@@ -112,11 +112,13 @@ enum NativeRenderWarePedModel {
         let plan: Plan
         let actor: NativeSkeletalActor
         let resources: NativeRenderWareModel.Uploaded
-        init(plan: Plan, device: MTLDevice) throws {
+        init(plan: Plan, device: MTLDevice,validateActor:((NativeSkeletalActor)throws->Void)?=nil) throws {
             guard let actor = NativeSkeletalActor(data: plan.skeleton.encodedSKN1(),
                 vertexCount: plan.skeleton.vertices.count, device: device) else {
                 throw Failure.incompatible("NativeSkeletalActor rejected SKN1")
             }
+            // Reject a foreign rig before allocating the material mesh/images.
+            try validateActor?(actor)
             self.plan = plan; self.actor = actor
             resources = try NativeRenderWareModel.Uploaded(plan: plan.model, device: device)
         }

@@ -34,6 +34,7 @@ ROOT=Path(__file__).resolve().parents[2]
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--renderer',type=Path,help='Optional historical renderer for an explicit negative reproduction')
 parser.add_argument('--source-transitions',action='store_true',help='Also exercise asset-source changes and resource-generation repair')
+parser.add_argument('--models-only',action='store_true',help='Verify model-file acquisition without a collision catalogue, while static publication stays blocked')
 parser.add_argument('--out',type=Path)
 args=parser.parse_args()
 OUT=args.out or ROOT/'local-only/research/stock-runtime';OUT.mkdir(parents=True,exist_ok=True)
@@ -102,6 +103,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         global gate_enabled
         original_path=self.path
+        models_only=getattr(self.server,'models_only',False)
         for prefix in ['/source-b','/source-c']:
             if self.path.startswith(prefix+'/'):self.path=self.path[len(prefix):];break
         cookie=self.headers.get('Cookie')
@@ -113,6 +115,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             gate_enabled=True;self.send_response(200);self.send_header('Content-Length','0');self.end_headers();return
         if gate_enabled and self.path.startswith('/game/native/') and cookie!='zgta_access='+ACCESS_TOKEN:
             event['denied']=True;self.send_error(401);return
+        if models_only and self.path=='/game/native/stock-collision/catalog.json':self.send_error(404);return
         if self.path in slow_paths:time.sleep(.35)
         if self.path=='/metadata/redirect':
             self.send_response(302);self.send_header('Location','/metadata/must-not-follow');self.send_header('Content-Length','0');self.end_headers();return
@@ -141,7 +144,7 @@ markers=['private enum LegacyStockMetadata','func receiveLegacyObject(','private
          'private func removeLegacyObjectCollision(','private func synchronizeLegacyObjectPhysics(','func invalidateLegacyImports(',
          'private func resolvedLegacyMaterial(','private func loadLegacyDictionary(','private func drawLegacyObjects(']
 methods='\n'.join(function(renderer,m).replace('private ','')for m in markers)
-for marker in ['private func synchronizeLegacyStockSource(', 'private func retireLegacyStockTextures(', 'private func restoreLegacyArtworkTextures(']:
+for marker in ['private func synchronizeLegacyStockSource(', 'private func retireLegacyStockTextures(', 'private func restoreLegacyArtworkTextures(', 'private func invalidateStockPedResources(']:
     if marker in renderer:methods+='\n'+function(renderer,marker).replace('private ','')
 if args.renderer and 'private func synchronizeLegacyStockSource(' not in renderer:
     methods+='\nfunc synchronizeLegacyStockSource() {}\n'
@@ -156,6 +159,12 @@ properties='\n'.join(line.strip().replace('private ','')for line in renderer.spl
 transfer=function(renderer,'private final class LegacyStockMetadataTransfer:').replace('private final class','final class')
 carrier=(ROOT/'tests/stock_runtime/main.swift').read_text().replace('// ACTUAL_PROPERTIES',properties).replace('// ACTUAL_METHODS',methods).replace('// ACTUAL_METADATA_TRANSFER',transfer)
 carrier=carrier.replace('// SOURCE_TRANSITION_ENABLED',str(args.source_transitions).lower())
+carrier=carrier.replace('// MODELS_ONLY_ENABLED',str(args.models_only).lower())
+if 'private func invalidateStockPedResources(' in renderer:
+    carrier=carrier.replace('// STOCK_PED_RETIREMENT_WITNESS','''let pedWitness=StockPedResetWitness()
+        carrier.stockPedRuntime=pedWitness;carrier.stockPedIDs=["authored":100];carrier.stockPedCatalogueSHA="old";carrier.stockPedErrors=[100]''')
+    carrier=carrier.replace('// STOCK_PED_RETIREMENT_RETIRED','''require(pedWitness.resets==1 && carrier.stockPedRuntime==nil,"actual source change retained pedestrian resource owner")
+        require(carrier.stockPedIDs.isEmpty && carrier.stockPedCatalogueSHA==nil && carrier.stockPedErrors.isEmpty,"actual source change retained pedestrian registration/suppression")''')
 if 'private var legacyArtworkTextureBindings:' in renderer:
     carrier=carrier.replace('// ARTWORK_BINDING_WITNESS','''let bindingKey=carrier.legacyExactTextures.keys.first{$0.model==980}!
             let binding=carrier.legacyExactTextures[bindingKey]!,crc=carrier.legacyTextureSources[bindingKey]!
@@ -185,8 +194,12 @@ if not(binary.exists()and cached.get('fingerprint')==fingerprint and cached.get(
     build_info.write_text(json.dumps({'fingerprint':fingerprint,'binarySHA256':hashlib.sha256(binary.read_bytes()).hexdigest()},indent=2)+'\n')
 server=Server(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
 second_server=Server(('127.0.0.1',0),Handler);threading.Thread(target=second_server.serve_forever,daemon=True).start()
+models_server=None
+if args.models_only:
+    models_server=Server(('127.0.0.1',0),Handler);models_server.models_only=True
+    threading.Thread(target=models_server.serve_forever,daemon=True).start()
 try:
-    run=subprocess.run([str(binary),f'http://127.0.0.1:{server.server_port}',str(ROOT/'ios/App/NativeRenderWareModel.metal'),str(OUT),f'http://127.0.0.1:{second_server.server_port}'],capture_output=True,text=True,timeout=180)
+    run=subprocess.run([str(binary),f'http://127.0.0.1:{server.server_port}',str(ROOT/'ios/App/NativeRenderWareModel.metal'),str(OUT),f'http://127.0.0.1:{second_server.server_port}',f'http://127.0.0.1:{models_server.server_port if models_server else server.server_port}'],capture_output=True,text=True,timeout=180)
     (OUT/'stdout.log').write_text(run.stdout);(OUT/'stderr.log').write_text(run.stderr)
     assert run.returncode==0,(run.returncode,run.stdout,run.stderr)
     report=json.loads((OUT/'report.json').read_text())
@@ -208,3 +221,4 @@ try:
 finally:
     (OUT/'requests-last-attempt.json').write_text(json.dumps(events,indent=2)+'\n')
     server.shutdown();server.server_close();second_server.shutdown();second_server.server_close()
+    if models_server:models_server.shutdown();models_server.server_close()
