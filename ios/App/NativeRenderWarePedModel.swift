@@ -137,11 +137,19 @@ enum NativeRenderWarePedModel {
             let normal = simd_transpose(simd_inverse(model))
             guard NativeRenderWarePedModel.finite(normal) else { throw Failure.malformed("normal transform overflow") }
             let color = material.source.color
+            // Keep the common material ABI in sync with the static encoder.
+            // Binding a texture is insufficient: settings.w admits sampling.
+            let sourceColor = material.modulatesMaterial
+                ? SIMD4(Float(color.x), Float(color.y), Float(color.z), Float(color.w)) / 255
+                : SIMD4<Float>(repeating: 1)
+            let materialColor = overrides.materialColorOverride ?? sourceColor
+            guard (0..<4).allSatisfy({materialColor[$0].isFinite})else{throw Failure.malformed("material color")}
+            let boundTexture = overrides.textureOverride ?? material.textureIndex.map{resources.textures[$0]}
             var uniforms = NativeRenderWareModel.Uniforms(viewProjection: viewProjection, model: model, normalMatrix: normal,
-                color: SIMD4(Float(color.x), Float(color.y), Float(color.z), Float(color.w)) / 255 * overrides.tint,
+                color: materialColor * overrides.tint,
                 lightDirectionAmbient: SIMD4(overrides.lightDirection, overrides.ambient),
-                settings: SIMD4(overrides.diffuse, max(0, min(1, overrides.alphaCutoff)), 0, 0))
-            let blend = material.usesBlending || overrides.tint.w < 1
+                settings: SIMD4(overrides.diffuse, max(0, min(1, overrides.alphaCutoff)), overrides.ignoreVertexColor ? 1:0, boundTexture == nil ? 0:1))
+            let blend = overrides.blendOverride ?? (material.usesBlending || materialColor.w < 1 || overrides.tint.w < 1)
             encoder.setRenderPipelineState(blend ? pipelines.blended : pipelines.opaque)
             encoder.setDepthStencilState(blend ? pipelines.blendedDepth : pipelines.opaqueDepth)
             encoder.setCullMode(.none)
@@ -149,8 +157,8 @@ enum NativeRenderWarePedModel {
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<NativeRenderWareModel.Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<NativeRenderWareModel.Uniforms>.stride, index: 1)
             actor.bind(pose: pose, encoder: encoder)
-            encoder.setFragmentTexture(material.textureIndex.map { resources.textures[$0] } ?? resources.whiteTexture, index: 0)
-            encoder.setFragmentSamplerState(resources.samplers[material.sampler], index: 0)
+            encoder.setFragmentTexture(boundTexture ?? resources.whiteTexture, index: 0)
+            encoder.setFragmentSamplerState(overrides.samplerOverride ?? resources.samplers[material.sampler], index: 0)
             encoder.drawIndexedPrimitives(type: .triangle, indexCount: part.indexCount, indexType: .uint32,
                 indexBuffer: resources.geometries[0].indices, indexBufferOffset: part.indexStart * 4)
         }
