@@ -1,5 +1,27 @@
 # Core gameplay audit journal
 
+## Core156/157 — current metadata and coherent remote feet
+
+Core156 admits scene metadata only for the current resource source and latest
+request, including independent child-load ownership. Full selected source,
+both SDK products and retained-data four-join Simulator acceptance pass. It
+does not establish a normal-UI overlapping-reload trigger or atomic multi-table
+resource replacement.
+
+Core157 replaces packet-stepped pedestrian roots with bounded receipt-clock
+presentation shared by drawing, poses, targeting and radar.1454 portable checks
+and24 actual archived interpolation-kernel cases pass. Full selected source and
+both SDK products pass with232 app/build inputs held. Normal retained-data
+four-join gameplay passes, followed by a separate real open.mp session with one
+rendered native app and an authored headless peer. Remote walk, pause/resume,
+local input and disconnect are verified; all18 selected captures are reviewed.
+Resources/preferences remain held and owned test services stop.
+
+The retained carrier compile failure and rejected initial peer installation ID
+remain explicit. This does not establish two rendered clients, browser/native
+vehicle/combat parity, hardware performance or original retail1:1 accuracy.
+See the [remote motion record](../research/gameplay/CORE_REMOTE_MOTION_157.md).
+
 ## Core155 — bounded visual world streaming
 
 Visual WRL2 decode, base PNG decode, Metal allocation and bounds preparation now

@@ -898,8 +898,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var remoteServerTimeOffsetMilliseconds: Double?
     var remotePlayers: [RemotePlayer] = [] { didSet {
         recordRemoteAnimationPackets()
+        recordRemoteFootPackets()
         if remotePlayers.contains(where:{$0.skin==0}){ensureFixedCJ()}
     } }
+    private var remoteFootMotions: [String:(identity:String,serial:Double,motion:NativeRemoteFootMotion<RemotePlayer>)] = [:]
+    private var remoteFootPresentation: [String:RemotePlayer] = [:]
+    private var remoteFootPresentationTime: Double?
+    /// One presentation snapshot supplies drawing, targeting and effects.
+    /// Authoritative network rows and vehicle physics remain independent.
+    var presentedRemotePlayers: [RemotePlayer] {
+        remotePlayers.map { player in
+            guard Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) else{return player}
+            if let support=remoteSupportPosition(player) {
+                var attached=player;attached.position=support;return attached
+            }
+            return remoteFootPresentation[player.id] ?? player
+        }
+    }
     var remoteVehicles: [RemoteVehicle] = []
     var currentVehicleID: String?
     var objective: SIMD2<Float>?
@@ -1341,6 +1356,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func resetDisplayClock() {
         renderClock.reset();riderPoseClock.reset(at:riderMonotonicNow())
         for (_,cached) in remoteFootAnimations { cached.1.resetDisplayClock() }
+        resetRemoteFootPresentation()
     }
     var hasNativeFootWeaponTiming:Bool {
         guard footAnimator != nil,let definition=footWeaponDefinitions[equippedWeapon],
@@ -1770,7 +1786,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         } else { swimAnimation = "";swimAnimationElapsed = 0 }
         loadNearby()
         weaponEffects.advance(delta: Double(delta),
-            people: remotePlayers.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) },
+            people: presentedRemotePlayers.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) },
             vehicles: remoteVehicles.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) })
     }
 
@@ -3112,58 +3128,85 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         _=fixedCJ?.ensure(force:force)
     }
 
+    // Requests at the same origin can finish out of order. These tickets are
+    // independent of connection identity and fence scene-owned metadata only.
+    private var modelIndexToken=UUID()
+    private var vehicleCouplingMetadataToken=UUID()
+    private var vehicleTreadsMetadataToken=UUID()
     func loadModelIndex() {
         loadFlightAssets();loadParticleEffects()
         guard let server else { return }
         let modelSource=fixedCJSourceIdentity()
+        let modelToken=UUID();modelIndexToken=modelToken
+        // Supersede child publications before this generation's physics reply
+        // can schedule replacement coupling/support metadata.
+        vehicleCouplingMetadataToken=UUID();vehicleTreadsMetadataToken=UUID()
         loadLegacyStockCatalogs()
         NativeResourceTransport.dataTask(with:server.path("game/native/weapons.json")) { [weak self] data,response,_ in
             guard (response as? HTTPURLResponse)?.statusCode==200,let data,
                   let catalog=try? NativeWeaponMuzzle.Catalog(data:data) else{return}
-            DispatchQueue.main.async {self?.weaponMuzzleCatalog=catalog}
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.weaponMuzzleCatalog=catalog
+            }
         }.resume()
         NativeResourceTransport.dataTask(with:server.path("game/native/riders.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let definitions = try? JSONDecoder().decode(NativeRiderDefinitions.self,from:data) else { return }
-            DispatchQueue.main.async { self?.riderDefinitions = definitions }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.riderDefinitions = definitions
+            }
         }.resume()
         NativeResourceTransport.dataTask(with:server.path("game/world/peds.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let definitions = try? NativeFootAnimationDefinitions(data:data) else { return }
-            DispatchQueue.main.async { self?.footDefinitions = definitions;self?.prepareFootAnimation() }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.footDefinitions = definitions;self.prepareFootAnimation()
+            }
         }.resume()
         NativeResourceTransport.dataTask(with:server.path("game/native/foot-animation.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let definitions = try? NativeFootWeaponAnimation.load(data:data) else { return }
-            DispatchQueue.main.async { self?.footWeaponDefinitions = definitions }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.footWeaponDefinitions = definitions
+            }
         }.resume()
         NativeResourceTransport.dataTask(with:server.path("game/native/melee.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200,
                   let definitions=try? NativeMeleeDefinitions(data:data) else{return}
-            DispatchQueue.main.async {self?.meleeDefinitions=definitions}
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.meleeDefinitions=definitions
+            }
         }.resume()
         NativeResourceTransport.dataTask(with: server.path("game/native/seating.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200,
                   let seating = try? JSONDecoder().decode(NativeVehicleSeating.self,from:data) else { return }
-            DispatchQueue.main.async { self?.seating = seating }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.seating = seating
+            }
         }.resume()
         environment = NativeWorldEnvironment()
         environment?.load(server: server)
         gameCamera.load(server: server) { [weak self] in
-            guard let self else { return };self.gameCamera.setDirection(heading: self.heading,pitch: self.cameraPitch)
+            guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else { return };self.gameCamera.setDirection(heading: self.heading,pitch: self.cameraPitch)
         }
         legacyFollowCamera.load(server:server)
         atmosphere.load(server: server)
         regionalWeather.load(server: server)
         weatherParticles.load(server: server)
         waterWaves.load(server: server) { [weak self] in
-            guard let self,let water = self.worldWater else { return }
+            guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken,let water = self.worldWater else { return }
             self.waterMesh = self.makeWater(water); self.nearWaterOrigin = nil
         }
         NativeResourceTransport.dataTask(with: server.path("game/native/effects/waterclear256.png")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode == 200 else { return }
-            DispatchQueue.main.async {
-                guard let self else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
                 self.waterTexture = try? self.textureLoader.newTexture(data: data,options: [.SRGB:false,.generateMipmaps:true])
             }
         }.resume()
@@ -3180,7 +3223,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }.resume()
         }
         effectsGroup.notify(queue:.main) { [weak self] in
-            guard let self, let spriteImage, let spriteData,
+            guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken, let spriteImage, let spriteData,
                   let document = try? JSONSerialization.jsonObject(with:spriteData) as? [String:Any] else { return }
             self.effectSprites = document["sprites"] as? [String:Int] ?? [:]
             self.effectAtlas = try? self.textureLoader.newTexture(data:spriteImage,options:[.SRGB:false])
@@ -3188,19 +3231,25 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         NativeResourceTransport.dataTask(with: server.path("game/native/models/animations.clips.bin")) { [weak self] data, response, _ in
             guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
             let library = NativeSkeletalAnimationLibrary(data: data)
-            DispatchQueue.main.async { self?.skeletalLibrary = library;self?.prepareFootAnimation() }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.skeletalLibrary = library;self.prepareFootAnimation()
+            }
         }.resume()
         NativeResourceTransport.dataTask(with: server.path("game/native/models/pedestrians.json")) { [weak self] data, _, _ in
             guard let data, let document = try? JSONSerialization.jsonObject(with: data) as? [String: [String: Any]] else { return }
             let anchors = document.mapValues { $0.compactMapValues { ($0 as? [NSNumber])?.map(\.floatValue) } }
-            DispatchQueue.main.async { self?.pedestrianAnchors = anchors }
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.pedestrianAnchors = anchors
+            }
         }.resume()
         refreshWorldSharpSource()
         NativeResourceTransport.dataTask(with: server.path("game/native/models/index.json")) { [weak self] data, _, _ in
             guard let self, let data,
                   let index = try? JSONSerialization.jsonObject(with: data) as? [String: [String: String]] else { return }
-            DispatchQueue.main.async {
-                guard self.fixedCJSourceIdentity()==modelSource else{return}
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
                 self.vehicleModels = index["vehicles"] ?? [:]
                 self.pedModels = index["peds"] ?? [:]
                 self.weaponModels = index["weapons"] ?? [:]
@@ -3214,8 +3263,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }.resume()
         NativeResourceTransport.dataTask(with: server.path("game/native/samp-skins.json")) { [weak self] data, response, _ in
             guard (response as? HTTPURLResponse)?.statusCode == 200, let data else { return }
-            DispatchQueue.main.async {
-                guard let self,self.fixedCJSourceIdentity()==modelSource else{return}
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
                 _=self.loadLegacySkinCatalog(data)
             }
         }.resume()
@@ -3225,7 +3274,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                   let rows = document["rows"] as? [String: [Any]] else { return }
             let handling = rows.compactMapValues { VehicleHandling(row: $0) }
             let info = document["vehicles"] as? [String: [String: String]] ?? [:]
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
                 self.vehicleHandling = handling
                 self.vehicleInfo = info
                 self.activeHandling = handling[self.activeVehicleModel]
@@ -3239,8 +3289,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if suspensionRows.count<=1024 {for(key,row)in suspensionRows {
                 if let value=NativeRemoteSuspension.Configuration(row),String(value.model)==key{suspension[value.model]=value}
             }}
-            DispatchQueue.main.async {
-                guard let self else{return}
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
                 self.vehicleCoupling?.reset(connection:self.couplingConnection)
                 self.groundVehicle?.loadDefinitions(data);self.cameraVehicleDefinitions = cameraDefinitions
                 self.remoteSuspensionConfigurations = suspension
@@ -3252,16 +3302,20 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }.resume()
         NativeResourceTransport.dataTask(with:server.path("game/native/trains.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
-            DispatchQueue.main.async {self?.groundVehicle?.loadTracks(data)}
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.fixedCJSourceIdentity()==modelSource,self.modelIndexToken==modelToken else{return}
+                self.groundVehicle?.loadTracks(data)
+            }
         }.resume()
     }
 
     private func loadVehicleCouplingDefinitions() {
         guard let server else{return}
+        let source=fixedCJSourceIdentity(),token=UUID();vehicleCouplingMetadataToken=token
         NativeResourceTransport.dataTask(with:server.path("game/native/vehicle-coupling.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
             DispatchQueue.main.async {
-                guard let self else{return}
+                guard let self,self.fixedCJSourceIdentity()==source,self.vehicleCouplingMetadataToken==token else{return}
                 self.groundVehicle?.loadCouplingDefinitions(data)
                 self.supportScene?.invalidatePoses()
                 if self.driving {self.groundVehicle?.setWorkingValue(self.remoteVehicles.first{$0.id==self.currentVehicleID}?.work ?? 0)}
@@ -3271,9 +3325,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func loadVehicleTreads() {
         guard let server else{return}
+        let source=fixedCJSourceIdentity(),token=UUID();vehicleTreadsMetadataToken=token
         NativeResourceTransport.dataTask(with:server.path("game/native/vehicle-treads.json")) { [weak self] data,response,_ in
             guard let data,(response as? HTTPURLResponse)?.statusCode==200 else{return}
-            DispatchQueue.main.async { _ = self?.supportScene?.load(data) }
+            DispatchQueue.main.async {
+                guard let self,self.fixedCJSourceIdentity()==source,self.vehicleTreadsMetadataToken==token else{return}
+                _ = self.supportScene?.load(data)
+            }
         }.resume()
     }
 
@@ -4666,6 +4724,55 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if let vehicleID{return "vehicle:\(vehicleID.utf8.count):\(vehicleID)"}
         return "player:\(playerID.utf8.count):\(playerID)"
     }
+    private func resetRemoteFootPresentation() {
+        remoteFootMotions.removeAll();remoteFootPresentation.removeAll();remoteFootPresentationTime=nil
+    }
+    private func recordRemoteFootPackets() {
+        let now=ProcessInfo.processInfo.systemUptime
+        let feet=remotePlayers.filter {
+            Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && $0.supportVehicleID==nil
+        }
+        let live=Set(feet.map(\.id))
+        remoteFootMotions=remoteFootMotions.filter{live.contains($0.key)}
+        remoteFootPresentation=remoteFootPresentation.filter{live.contains($0.key)}
+        for player in feet {
+            let identity="\(player.code):\(player.skin):\(player.paused):\(player.life<=0)"
+            let received=player.packetReceivedAt>0 ? player.packetReceivedAt:now
+            // A sender clock is a duplicate identity only. Own-server clocks
+            // are client wall times and cannot select a local timeline epoch.
+            let serial=player.packetClockMilliseconds>0 ? player.packetClockMilliseconds:received
+            let motion:NativeRemoteFootMotion<RemotePlayer>
+            if let old=remoteFootMotions[player.id],old.identity==identity {
+                if old.serial==serial {continue}
+                motion=old.motion
+            }else {
+                remoteFootMotions[player.id]=nil
+                motion=NativeRemoteFootMotion<RemotePlayer>();remoteFootPresentation[player.id]=nil
+            }
+            let action=player.action&63
+            let ordinary=player.swimState==0 && !(50...62).contains(action)
+            let velocity=player.paused || player.life<=0 ? .zero:player.velocity
+            if motion.record(.init(at:received,position:SIMD3<Double>(player.position),
+                heading:Double(player.heading),velocity:SIMD3<Double>(velocity),ordinary:ordinary,state:player)) {
+                remoteFootMotions[player.id]=(identity,serial,motion)
+            }
+        }
+    }
+    func advanceRemoteFootPresentation(at time:Double,active:Bool) {
+        guard active,time.isFinite else{resetRemoteFootPresentation();return}
+        if let previous=remoteFootPresentationTime,time<previous || time-previous>0.5 {resetRemoteFootPresentation()}
+        if remoteFootMotions.isEmpty {recordRemoteFootPackets()}
+        remoteFootPresentationTime=time
+        remoteFootPresentation.removeAll(keepingCapacity:true)
+        for (id,owner) in remoteFootMotions {
+            guard let sample=owner.motion.sample(at:time) else{continue}
+            var player=sample.state
+            player.position=SIMD3<Float>(sample.position);player.heading=Float(sample.heading)
+            player.velocity=SIMD3<Float>(sample.velocity)
+            if let newest=owner.motion.snapshots.last,time-newest.at>0.5 {player.movementRatio=0}
+            remoteFootPresentation[id]=player
+        }
+    }
     private func recordRemoteAnimationPackets() {
         let now = ProcessInfo.processInfo.systemUptime
         let wallOffset = Date().timeIntervalSince1970-now
@@ -4895,7 +5002,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let handWeapon = climb != nil || footAnimationFrame?.handWeaponVisible == false ? 0:effectiveWireWeapon
             appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own",ownFoot:true)
         }
-        for player in remotePlayers {
+        for player in presentedRemotePlayers {
             // A passenger's public carText is still a pedestrian; draw its
             // source seat inside the referenced car instead of a second walker.
             if let vehicleID = player.ridingVehicleID {
@@ -4961,7 +5068,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         position:SIMD3<Double>(player.position),heading:Double(player.heading),
                         own:.init(id:"own",position:SIMD3<Double>(camera),walking:!driving,
                             down:footAnimator?.floored == true,life:Double(health)),
-                        people:remotePlayers.map{.init(id:$0.id,position:SIMD3<Double>($0.position),
+                        people:presentedRemotePlayers.map{.init(id:$0.id,position:SIMD3<Double>($0.position),
                             walking:Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID),
                             down:$0.down != 0,life:Double($0.life))})
                     let state=NativeRemoteFootAnimation.Snapshot(position:SIMD3<Double>(footPosition),heading:Double(player.heading),

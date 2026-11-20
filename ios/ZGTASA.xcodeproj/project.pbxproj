@@ -25,6 +25,7 @@
 		137016E17C62C80999302BE1 /* NativeSAMPArtworkSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1EB5F343B80023C85974617 /* NativeSAMPArtworkSession.swift */; };
 		139582CD2104144B469702C8 /* NativeWorldSharpLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0454CF23463878B4B50FC7F /* NativeWorldSharpLoader.swift */; };
 		148722B8565D51FD49DB61F6 /* NativeFlightAssets.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB20BE9496B4863AC86ABF67 /* NativeFlightAssets.swift */; };
+		160E7EE7B47938AA722EA1CA /* NativeRemoteFootMotion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CB0877EE9A8F308BEB3BBCA /* NativeRemoteFootMotion.swift */; };
 		1925C9F28562038C60371B86 /* NativeVehicleBuoyancy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88619053F1E69339BD0A9A81 /* NativeVehicleBuoyancy.swift */; };
 		197BBD56CF0341025994067F /* NativeSAMPStockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E5D941AB35334878B224B7 /* NativeSAMPStockModels.swift */; };
 		1A0F166303AE38FDE592B6F9 /* NativeParticleShaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 06A86C8384D82A769D39DD92 /* NativeParticleShaders.metal */; };
@@ -302,6 +303,7 @@
 		588600E4AD8BC77A427475CA /* NativeSAMPObjectScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPObjectScene.swift; sourceTree = "<group>"; };
 		59E67662C9B99A8DFB528F6E /* NativeGroundVehicle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeGroundVehicle.swift; sourceTree = "<group>"; };
 		5C0D2F338F30D10E920AD6A4 /* NativeSAMPTextDrawOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPTextDrawOverlay.swift; sourceTree = "<group>"; };
+		5CB0877EE9A8F308BEB3BBCA /* NativeRemoteFootMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRemoteFootMotion.swift; sourceTree = "<group>"; };
 		5D3DF9DB4B50E82163A58A83 /* NativeCharacterMotor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCharacterMotor.swift; sourceTree = "<group>"; };
 		5F2D316F818E648A15FE98A3 /* NativeRenderWareTXD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderWareTXD.swift; sourceTree = "<group>"; };
 		5F843A0215C9BCC3206B8D59 /* CoreFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreFoundation.framework; path = System/Library/Frameworks/CoreFoundation.framework; sourceTree = SDKROOT; };
@@ -551,6 +553,7 @@
 				426DBCAFCD69B30D0BB99ED4 /* NativeRegionalWeather.swift */,
 				29EB71C0D443CDF945B17999 /* NativeRemoteBikeAnimation.swift */,
 				A7E7E13224CBBD1BD7177C79 /* NativeRemoteFootAnimation.swift */,
+				5CB0877EE9A8F308BEB3BBCA /* NativeRemoteFootMotion.swift */,
 				1BF84EEC926D9870EC20D6FB /* NativeRemoteMeleeContext.swift */,
 				448985FE3A747FC2FA95E5FE /* NativeRemoteSuspension.swift */,
 				31AC14CE95B647949BA39489 /* NativeRenderWareCollision.swift */,
@@ -857,6 +860,7 @@
 				B9B2B17A8626B6CC38E3B050 /* NativeRegionalWeather.swift in Sources */,
 				B1E81D7524D8265BE8CE84EE /* NativeRemoteBikeAnimation.swift in Sources */,
 				BF4E3599F51A612170DDECAB /* NativeRemoteFootAnimation.swift in Sources */,
+				160E7EE7B47938AA722EA1CA /* NativeRemoteFootMotion.swift in Sources */,
 				D039497D742CA7F0D2F08DE6 /* NativeRemoteMeleeContext.swift in Sources */,
 				B33FB4C873FDD190E86D78CE /* NativeRemoteSuspension.swift in Sources */,
 				6897348A9C09CE4C90346A6D /* NativeRenderWareCollision.swift in Sources */,

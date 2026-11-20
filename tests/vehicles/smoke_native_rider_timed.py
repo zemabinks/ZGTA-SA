@@ -56,7 +56,13 @@ def carrier(renderer, historical=None):
     draw = block(renderer, '    private func drawActors(')
     begin = draw.index('        let riderTime = ')
     clock = draw[begin:draw.index('        let riderIDs = ', begin)]
-    remote = draw[draw.index('        for player in remotePlayers {'):]
+    # Select the actual passenger/foot presentation loop, rather than an
+    # earlier vehicle-physics loop. Newer renderers share presented roots with
+    # targeting; the rider cache/action assertions below remain unchanged.
+    loops = ['        for player in presentedRemotePlayers {',
+             '        for player in remotePlayers {']
+    marker = next(value for value in loops if value+'\n            // A passenger' in draw)
+    remote = draw[draw.index(marker):]
     start = remote.index('                let input=NativeRiderAnimation.Input(dead:player.life<=0),playbackKey=')
     passenger_cache = remote[start:remote.index('                let pose:NativeSkeletalActor.Pose', start)]
     passenger_action = block(remote, '                    if remoteRiderActions[player.id] != action {')
@@ -156,6 +162,10 @@ final class RendererCarrier {
     var remoteRiderPlayback:[String:(String,NativeRiderPlayback)]=[:],remoteRiderActions:[String:Int]=[:]
     var remoteRiderCapture:[String:Int]=[:],remoteRiderPrevious:[String:Int]=[:]
     var remoteFootAnimations:[String:(String,RemoteFootClockSpy)]=[:]
+    // Explicit presentation-owner boundary; world-root playback is exercised
+    // with its actual implementation by smoke_native_remote_motion.py.
+    var remoteRootClockResets=0
+    func resetRemoteFootPresentation(){remoteRootClockResets+=1}
     init(){riderMonotonicNow = {[unowned self] in self.now}}
     static func sharedDoorOpen(_ part:Int?,damage:String)->Bool{false}
 ''' + block(renderer, '    func resetDisplayClock()') + '\n' + block(renderer, '    @discardableResult func beginVehicleExit(') + '\n' + old_begin + '\n' + block(renderer,'    private func discardOwnedVehicle()') + '\n' + revoke + r'''
