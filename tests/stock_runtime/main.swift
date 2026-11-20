@@ -8,6 +8,9 @@ var checks=0
 func require(_ value:@autoclosure()->Bool,_ reason:String){checks+=1;if !value(){fatalError(reason)}}
 struct View {let colorPixelFormat:MTLPixelFormat = .rgba8Unorm,depthStencilPixelFormat:MTLPixelFormat = .depth32Float}
 final class Ground {let world=SwiftRapierWorld()!}
+// Only the additional reset boundary is a spy here. The separately compiled
+// stock-pedestrian runtime test executes the real resource owner and upload.
+final class StockPedResetWitness {var resets=0;func reset(){resets+=1}}
 final class HeldDictionaryTask:NativeResourceTask {
     let request:URLRequest,completion:NativeResourceTransport.Completion
     var resumed=false,cancelled=false
@@ -21,6 +24,7 @@ final class Carrier {
     let pipeline:MTLRenderPipelineState,depth:MTLDepthStencilState
     var server:ServerAddress?,gameHour=12.0
     var resourceGeneration=0
+    var stockPedRuntime:StockPedResetWitness?,stockPedIDs:[String:Int32]=[:],stockPedCatalogueSHA:String?,stockPedErrors=Set<Int32>(),stockPedDrawn=Set<Int32>()
     func fixedCJSourceIdentity()->String { (server?.display ?? "none")+"|generation:\(resourceGeneration)" }
     var statuses:[String]=[]
     var onStatus:((String)->Void)?
@@ -43,8 +47,8 @@ final class Carrier {
 // ACTUAL_METADATA_TRANSFER
 
 final class Tests {
-    let base:URL,otherBase:URL,out:URL,device:MTLDevice,library:MTLLibrary,carrier:Carrier
-    var gatedCarrier:Carrier?,testCookies:[HTTPCookie]=[],gatedComplete=false
+    let base:URL,otherBase:URL,modelsBase:URL,out:URL,device:MTLDevice,library:MTLLibrary,carrier:Carrier
+    var gatedCarrier:Carrier?,testCookies:[HTTPCookie]=[],gatedComplete=false,modelsOnlyComplete=false
     var metadataIndex=0,metadataTransfer:LegacyStockMetadataTransfer?,maximumWholeLoads=0,maximumLoaderActive=0
     var heldDictionaries:[HeldDictionaryTask]=[],sourcePhases:[String]=[]
     var objects:[UInt16:NativeSAMPObjects.Instance]=[:],gpuRows:[[String:Any]]=[]
@@ -52,6 +56,7 @@ final class Tests {
     init(device:MTLDevice,library:MTLLibrary)throws {
         base=URL(string:CommandLine.arguments[1])!;out=URL(fileURLWithPath:CommandLine.arguments[3]);self.device=device;self.library=library
         otherBase=URL(string:CommandLine.arguments[4])!
+        modelsBase=URL(string:CommandLine.arguments[5])!
         carrier=try Carrier(device:device,library:library,server:ServerAddress(base.absoluteString)!)
     }
     func wait(_ label:String,timeout:Double=30,condition:@escaping()->Bool,then:@escaping()->Void) {
@@ -230,7 +235,7 @@ final class Tests {
     }catch{fatalError("cancel: \(error)")}}
     func beginSourceTransitions(){
         guard // SOURCE_TRANSITION_ENABLED
-        else{beginGate();return}
+        else{afterSourcePhases();return}
         do {
             let gpu=carrier.legacyModels[980]!,bytes=carrier.legacyModelCosts[980]!
             carrier.legacyModels[20001]=gpu;carrier.legacyModelCosts[20001]=bytes;carrier.legacyModelBytes+=bytes
@@ -321,7 +326,9 @@ final class Tests {
         let key=NativeSAMPObjectMaterials.TextureRequest(model:19000,dictionary:"source_check",texture:"session_texture")
         carrier.loadLegacyDictionary(key)
         require(heldDictionaries.count==1 && heldDictionaries[0].resumed,"old dictionary request not admitted")
+        // STOCK_PED_RETIREMENT_WITNESS
         carrier.resourceGeneration+=1;carrier.synchronizeLegacyStockSource()
+        // STOCK_PED_RETIREMENT_RETIRED
         require(heldDictionaries[0].cancelled,"source change did not cancel its raw dictionary transfer")
         carrier.loadLegacyDictionary(key)
         require(heldDictionaries.count==2 && heldDictionaries[1].resumed && carrier.legacyTextureLoads.contains(key),"new dictionary request did not replace cancelled work")
@@ -336,11 +343,38 @@ final class Tests {
                     require(self.carrier.legacyTextureRetries[key]==nil,"old callback poisoned the new retry policy")
                     NativeResourceTransport.install({URLSession.shared.dataTask(with:$0,completionHandler:$1)},bounded:{NativeBoundedResourceTask(request:$0,maximumBytes:$1,completion:$2)})
                     self.sourcePhases.append("cancelled-raw-dictionary-cannot-publish-or-retire-new-request")
-                    self.beginGate()
+                    self.afterSourcePhases()
                 })
             }
         }
     }
+    func afterSourcePhases(){
+        let requested:Bool = // MODELS_ONLY_ENABLED
+        if requested{beginModelsOnly()}else{beginGate()}
+    }
+    func beginModelsOnly(){do {
+        let url=modelsBase
+        let partial=try Carrier(device:device,library:library,server:ServerAddress(url.absoluteString)!)
+        let object=NativeSAMPObjects.Instance(id:600,model:966,position:SIMD3(0,0,20),rotation:.zero,drawDistance:100_000,cameraCollision:true,attachment:nil,materials:[:])
+        try partial.receiveLegacyObject(.create(object))
+        wait("models-only actual metadata bootstrap",condition:{partial.legacyStockMetadataPending==0 && partial.legacyStockMetadataTasks.isEmpty},then:{
+            require(partial.legacyStockCatalog != nil && partial.legacyStockCollisionCatalog==nil,"models-only fixture did not separate valid model/missing collision metadata")
+            guard let loader=partial.legacyStockLoader,let catalog=partial.legacyStockCatalog else{fatalError("valid model metadata did not expose shared verified file acquisition")}
+            require(partial.legacyStockReferences.contains(966) && partial.legacyStockLoads.isEmpty && partial.legacyStockModels.isEmpty,"static model published without required collision catalogue")
+            do {
+                let resolution=try catalog.resolve(id:966,assetBaseURL:url)
+                guard let file=resolution.dff else{fatalError("model-only original DFF unavailable")}
+                _=loader.loadFile(file){result in do {
+                    let verified=try result.get()
+                    require(verified.data.count==file.metadata.bytes,"models-only shared verifier lost exact original bytes")
+                    partial.pumpLegacyStockObjects()
+                    require(partial.legacyStockModels.isEmpty && partial.legacyModels.isEmpty && partial.legacyCollisionWorld!.colliderCount==0,"shared acquisition bypassed static render/physics publication barrier")
+                    self.modelsOnlyComplete=true;self.sourcePhases.append("models-only-shared-acquisition-with-static-publication-blocked")
+                    self.beginGate()
+                }catch{fatalError("models-only verified file acquisition: \(error)")}}
+            }catch{fatalError("models-only resolution: \(error)")}
+        })
+    }catch{fatalError("models-only actual carrier: \(error)")}}
     func beginGate(){
         var request=URLRequest(url:base.appendingPathComponent("control/gate"));request.httpShouldHandleCookies=false
         URLSession.shared.dataTask(with:request){_,response,error in
@@ -389,6 +423,7 @@ final class Tests {
         let report:[String:Any]=["passed":true,"checks":checks,"metalDevice":device.name,"gpuReadbacks":gpuRows,
             "sourceTransitions":sourcePhases,
             "gatedRBootstrapAndFourRetailModels":gatedComplete,
+            "modelsOnlySharedAcquisition":modelsOnlyComplete,
             "readback":"explicit texture-to-shared-buffer GPU blit, 256-byte-aligned rows",
             "maximumWholeModelLoads":maximumWholeLoads,"maximumVerifiedLoaderActive":maximumLoaderActive,
             "limits":["Actual extracted Renderer methods with real HTTP decoder, Metal and Rapier; carrier supplies device/view formats and no external attachment parents",

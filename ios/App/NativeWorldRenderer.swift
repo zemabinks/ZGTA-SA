@@ -2,6 +2,7 @@ import Foundation
 import MetalKit
 import simd
 import CryptoKit
+import OSLog
 
 /// Renders the locally hosted WRL2 world directly with Metal. Game meshes and
 /// texture atlases stay on the Mac; the app fetches only visible cells.
@@ -190,6 +191,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var legacyPedPipelines:NativeRenderWarePedModel.Pipelines?
     private var legacyModels:[Int32:NativeRenderWareModel.Uploaded]=[:]
     private var legacyPedModels:[String:NativeRenderWarePedModel.Uploaded]=[:]
+    private var stockPedRuntime:NativeStockPedRuntime<NativeRenderWarePedModel.Uploaded>?
+    private var stockPedIDs:[String:Int32]=[:]
+    private var stockPedCatalogueSHA:String?
+    private var stockPedErrors=Set<Int32>()
+    private var stockPedDrawn=Set<Int32>()
+    private let stockPedLogger=Logger(subsystem:"com.zema.zgtasa",category:"StockPed")
     private var fixedCJ:NativeCJRuntimeModel?
     private var fixedCJObserver:UUID?
     private var legacyPedStyles:[String:String]=[:]
@@ -3283,6 +3290,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return
         }
         if let custom=legacyPedModels[name]{skeletalActors[name]=custom.actor;return}
+        if let original=stockPedResource(name){skeletalActors[name]=original.actor;return}
         let isPed=pedModels.values.contains(name),isVehicle=vehicleModels.values.contains(name)
         if isPed,let family=pedAtlasFamilies[name] {pedAtlasDemand.insert(name);loadPedAtlasActor(name,family:family);return}
         let complete=actorMeshes[name] != nil && (!isPed || skeletalActors[name] != nil) &&
@@ -3665,6 +3673,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for task in legacyStockMetadataTasks.values{task.cancel()}
         legacyStockMetadataTasks.removeAll();legacyStockMetadataPending=0;legacyStockMetadataRetryAfter=0
         legacyStockCatalog=nil;legacyStockCollisionCatalog=nil;legacyStockManifestSHA256=nil
+        invalidateStockPedResources()
         _=legacyStockLoader?.reset();legacyStockLoader=nil
         legacyStockLoads.removeAll();legacyStockRetries.removeAll()
         for task in legacyTextureTasks.values{task.cancel()}
@@ -3678,6 +3687,90 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         legacyStockModels.removeAll();legacyStockUse.removeAll();legacyStockCollisionKinds.removeAll();legacyStockReferences.removeAll()
         retireLegacyStockTextures(retired,includeExternal:true)
+    }
+
+    private func stockPedSourceIdentity()->String {
+        fixedCJSourceIdentity()+"|stock-peds:"+(legacyStockManifestSHA256 ?? "unavailable")
+    }
+    private func invalidateStockPedResources() {
+        let retired=stockPedRuntime;stockPedRuntime=nil
+        stockPedIDs.removeAll();stockPedCatalogueSHA=nil;stockPedErrors.removeAll();stockPedDrawn.removeAll()
+        retired?.reset()
+    }
+    private func stockPedResource(_ name:String)->NativeRenderWarePedModel.Uploaded? {
+        guard name != "null",!name.hasPrefix("samp-dl-"),let id=stockPedIDs[name] else{return nil}
+        return stockPedRuntime?.ready(id,at:ProcessInfo.processInfo.systemUptime)?.resource
+    }
+    /// Original resources replace only their exact existing model family. The
+    /// converted family still supplies validated hand/parts metadata and a
+    /// same-model fallback; neither native nor legacy wire IDs are remapped.
+    private func synchronizeStockPedDemand() {
+        loadLegacyStockCatalogs()
+        guard let catalog=legacyStockCatalog,let digest=legacyStockManifestSHA256,
+              let files=legacyStockLoader,let server else{return}
+        if stockPedCatalogueSHA != digest {
+            stockPedRuntime?.synchronizeSource()
+            let models=catalog.modelIDs.compactMap{catalog.model($0)}.filter{$0.kind == .ped && $0.id != 0}
+            let groups=Dictionary(grouping:models,by:{$0.model})
+            // An ambiguous name is not permission to guess a canonical ID.
+            stockPedIDs=groups.compactMapValues{$0.count==1 ? $0[0].id:nil}
+            stockPedCatalogueSHA=digest
+        }
+        if stockPedRuntime==nil {
+            do {
+                let cpu=try NativeStockPedLoader(fileLoader:files,sourceIdentity:{[weak self]in self?.stockPedSourceIdentity() ?? ""})
+                let owner=try NativeStockPedRuntime<NativeRenderWarePedModel.Uploaded>(loader:cpu,
+                    sourceIdentity:{[weak self]in self?.stockPedSourceIdentity() ?? ""},estimate:{[weak self] value in
+                        guard let self else{throw NativeStockPedAllocation.Failure.budget}
+                        return try NativeStockPedAllocation.reservation(value,device:self.device)
+                    },upload:{[weak self] value,allowance in
+                        guard let self else{throw NativeStockPedAllocation.Failure.budget}
+                        if self.legacyPedPipelines==nil {
+                            guard let library=self.device.makeDefaultLibrary()else{throw NativeRenderWarePedModel.Failure.gpu("stock character shader library")}
+                            self.legacyPedPipelines=try .init(device:self.device,library:library,color:self.view.colorPixelFormat,depth:self.view.depthStencilPixelFormat)
+                        }
+                        guard let expected=self.skeletalActors[value.model.model]else{throw NativeRenderWarePedModel.Failure.incompatible("stock actor family retired")}
+                        return try NativeStockPedAllocation.upload(value,device:self.device,allowance:allowance,validateActor:{actor in
+                            guard actor.matchesRig(expected)else{throw NativeRenderWarePedModel.Failure.incompatible("stock rig/skin order differs from its prepared actor family")}
+                        })
+                    })
+                owner.onRetired={[weak self] value in
+                    guard let self else{return};let name=value.model.model
+                    if self.skeletalActors[name] === value.resource.actor{self.skeletalActors.removeValue(forKey:name)}
+                    self.stockPedDrawn.remove(value.model.id)
+                    if value.sourceIdentity != self.stockPedSourceIdentity() {
+                        self.ownRiderCapture=nil;self.ownRiderPrevious=nil
+                        self.remoteRiderCapture.removeAll();self.remoteRiderPrevious.removeAll()
+                    }
+                }
+                owner.onReady={[weak self,weak owner] value in
+                    guard let self,let owner,self.stockPedRuntime === owner,
+                          value.sourceIdentity==self.stockPedSourceIdentity(),self.stockPedIDs[value.model.model]==value.model.id else{return}
+                    self.skeletalActors[value.model.model]=value.resource.actor;self.stockPedErrors.remove(value.model.id)
+                    // Rig equivalence was checked before upload. Preserve
+                    // ongoing foot/seat phases and unrelated rider captures.
+                }
+                owner.onUnavailable={[weak self] id,error in
+                    if self?.stockPedErrors.insert(id).inserted==true{self?.onStatus?("ORIGINAL PEDESTRIAN RESOURCE UNAVAILABLE (\(id)): \(error)")}
+                }
+                stockPedRuntime=owner
+            }catch{onStatus?("ORIGINAL PEDESTRIAN OWNER UNAVAILABLE: \(error)");return}
+        }
+        var names=Set<String>()
+        if let own=pedModels[String(localSkin)]{names.insert(own)}
+        for player in remotePlayers where simd_distance(player.position,camera)<140 {
+            if let name=pedModels[String(player.skin)]{names.insert(name)}
+        }
+        let ids=Set(names.compactMap{stockPedIDs[$0]})
+        stockPedRuntime?.setDemand(ids)
+        let now=ProcessInfo.processInfo.systemUptime
+        for name in names.sorted() {
+            guard let id=stockPedIDs[name] else{continue}
+            if let ready=stockPedRuntime?.ready(id,at:now){skeletalActors[name]=ready.resource.actor;continue}
+            guard actorMeshes[name] != nil,skeletalActors[name] != nil,
+                  let resolution=try? catalog.resolve(id:id,assetBaseURL:server.url),resolution.allFilesAvailable else{continue}
+            stockPedRuntime?.ensure(resolution,at:now)
+        }
     }
     /// A shared base-model texture key can also belong to verified custom
     /// artwork. Retiring stock bytes must reveal that surviving binding rather
@@ -3726,7 +3819,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         self.legacyStockMetadataPending-=1
                         do {
                             switch try parsed.get(){case .models(let value,let digest):self.legacyStockCatalog=value;self.legacyStockManifestSHA256=digest;case .collision(let value):self.legacyStockCollisionCatalog=value}
-                            if self.legacyStockLoader==nil,self.legacyStockCatalog != nil,self.legacyStockCollisionCatalog != nil {
+                            // Pedestrian files need the verified model index;
+                            // static object publication still requires its
+                            // separate collision index in the object pump.
+                            if self.legacyStockLoader==nil,self.legacyStockCatalog != nil {
                                 var limits=NativeSAMPStockAssetLoader.Limits();limits.concurrentLoads=2;limits.pendingLoads=8
                                 self.legacyStockLoader=try .init(assetBaseURL:server.url,limits:limits,accessProvider:{[weak self]in self?.legacyStockAccess()})
                             }
@@ -4637,6 +4733,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private func drawActors(encoder: MTLRenderCommandEncoder, matrix: simd_float4x4) {
         pedAtlasDemand.removeAll(keepingCapacity:true)
+        // Establish the selected actor before constructing this frame's poses.
+        synchronizeStockPedDemand()
         remoteSuspensionRayBudget = 64
         let riderTime = riderMonotonicNow()
         lastRiderDraw = riderTime
@@ -4979,9 +5077,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let queued = occurrence.map { actorOverrides[$0] }
             let mesh = (vehicleContext != nil ? vehicleRigMeshes[name]:nil) ?? actorMeshes[name]
             let fixedPlayer=name=="null" ? fixedCJ?.ready:nil
-            let customPed=fixedPlayer?.gpu.uploaded ?? legacyPedModels[name]
+            let originalPed=stockPedResource(name)
+            let customPed=fixedPlayer?.gpu.uploaded ?? legacyPedModels[name] ?? originalPed
             guard mesh != nil || customPed != nil else { loadActor(name); continue }
-            if pedAtlasFamilies[name] != nil {
+            if customPed==nil,pedAtlasFamilies[name] != nil {
                 guard let bound=pedAtlasGPU[name],bound.source==pedAtlasDrawSource,bound.family==pedAtlasFamilies[name] else{loadActor(name);continue}
             }
             let originalFoot = queued?.original ?? false
@@ -5021,7 +5120,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 let environment=NativeRenderWarePedModel.Environment(fogColor:uniforms.fogColor,fogSettings:uniforms.fogSettings)
                 do {for index in customPed.plan.model.draws.indices {
                     try customPed.encode(drawIndex:index,pose:pose,encoder:encoder,pipelines:pipelines,viewProjection:matrix,worldTransform:transform,overrides:overrides,environment:environment)
-                }}catch{onStatus?("CUSTOM CHARACTER DRAW FAILED: \(error)");continue}
+                }
+                    if customPed === originalPed,let id=stockPedIDs[name],stockPedDrawn.insert(id).inserted {
+                        stockPedLogger.info("Encoded original pedestrian \(name,privacy:.public) id \(id,privacy:.public)")
+                    }
+                }catch{onStatus?("CUSTOM CHARACTER DRAW FAILED: \(error)");continue}
             } else if let mesh {
             if let pose, let actor = skeletalActors[name], let skeletalPipeline {
                 if let bound=pedAtlasGPU[name] {guard let selected=bound.native == nil ? pedAtlasSkeletalPipeline:pedNativeSkeletalPipeline else{continue};encoder.setRenderPipelineState(selected)}

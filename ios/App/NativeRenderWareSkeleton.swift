@@ -55,9 +55,13 @@ enum NativeRenderWareSkeleton {
         let axis: simd_float4x4
         let floor: Float
 
+        /// SKN1's fixed-width fields permit admission without allocating a
+        /// second encoded rig on the render thread merely to count its bytes.
+        var encodedByteCount:Int {144 + frames.count * 72 + bones.count * 68 + vertices.count * 32}
+
         func encodedSKN1() -> Data {
             var output = Data()
-            output.reserveCapacity(144 + frames.count * 72 + bones.count * 68 + vertices.count * 32)
+            output.reserveCapacity(encodedByteCount)
             func u32(_ value: UInt32) {
                 output.append(contentsOf: [UInt8(truncatingIfNeeded: value), UInt8(truncatingIfNeeded: value >> 8),
                     UInt8(truncatingIfNeeded: value >> 16), UInt8(truncatingIfNeeded: value >> 24)])
