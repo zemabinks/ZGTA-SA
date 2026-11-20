@@ -99,7 +99,12 @@ def carrier(renderer, historical=None):
     assert draw.count('delta:riderDelta,') == 0
     assert draw.count('presentationDelta:riderDelta,') == 1 # actual remote-bike presentation owner
     if foot_clocked:
-        assert draw.count('animator.update(at:riderTime,') == 1
+        # NPCs use the same admitted display timestamp but own a separate
+        # animation collection. Keep the human clock assertion scoped to its
+        # actual loop, and fail closed if either consumer moves or multiplies.
+        human, ambient = draw.split('        for npc in presentedAmbientPedestrians {', 1)
+        assert human.count('animator.update(at:riderTime,') == 1
+        assert ambient.count('animator.update(at:riderTime,') == 1
     assert draw.count('playback.enter(') == 4 and draw.count('playback.leave(') == 2
     assert 'guard let drawable = view.currentDrawable' not in draw
     drawable = renderer.index('view.currentDrawable')

@@ -495,6 +495,15 @@ class LocalGame {
     this.chat = [];
     this.chatSequence = 0;
     this.nextNumber = 1;
+    this.population=null;
+    // Opt-in requires verified owner-local graph and model selection. Older
+    // source-only installations keep their existing empty population policy.
+    if(fs.existsSync(path.join(__dirname,'local-only/selfhost/population.json'))){
+      try{this.population=require('./server/population/load')(__dirname,{
+        ground:point=>{const value=worldCollision.height(point[0],point[1],point[2]+2,5);return worldCollision.lastQueryComplete?value:null;},
+        clear:(from,to)=>worldCollision.lineOfSight(from.map((v,i)=>v+(i===2?0.9:0)),to.map((v,i)=>v+(i===2?0.9:0)))
+      });}catch(error){console.error('Original pedestrian population unavailable:',error.message);}
+    }
     this.lastPoliceTick = 0;
     this.lastTurfTick = 0;
     this.territories = Object.fromEntries(TURFS.map(id => [id, null]));
@@ -508,7 +517,8 @@ class LocalGame {
       complete: () => worldCollision.lastQueryComplete,
       players: () => [...this.peers].filter(p => p.ready && this.position(p.player)).map(p => ({
         id: String(p.player.number), position: [p.state.x,p.state.y,p.state.z], health: p.player.health,
-        passive: p.player.passive, dimension: p.player.insideHome || null})),
+        passive: p.player.passive, dimension: p.player.insideHome || null})).concat(
+          this.population?[...this.population.actors.values()].map(actor=>({id:'p'+actor.id,position:actor.position.slice(),health:actor.health,passive:false,dimension:null})):[]),
       onHit: (target, damage, event) => this.applyBlastHit(target, damage, event),
       onEvent: event => { for (const p of this.peers)
         if (p.ready && (p.player.insideHome || null) === (event.dimension || null))
@@ -934,6 +944,7 @@ class LocalGame {
     peer.lastShotAt = now;
     peer.lastWeapon = message.w;
     peer.lastShotHit = message.h;
+    if(message.w>=22&&message.w<=38&&!peer.player.insideHome)this.population?.gunshot(message.o,now);
     if (peer.inventoryEnabled && [16,17,18,19,20,35,36,39].includes(message.w)) {
       const direction = message.h.map((n,i) => n-message.o[i]);
       const result = this.projectiles.launch(String(peer.player.number),message.w,message.o,direction);
@@ -951,6 +962,7 @@ class LocalGame {
 
   handleHit(peer, message) {
     if (peer.inventoryAckEnabled && message.c!==peer.inventoryConnection) return;
+    if(this.population?.get(message.to)){this.handlePedestrianHit(peer,message);return;}
     const target = [...this.peers].find(other => other.ready &&
       String(other.player.number) === message.to);
     const from = this.position(peer.player);
@@ -1035,6 +1047,46 @@ class LocalGame {
     this.save();
   }
 
+  handlePedestrianHit(peer,message) {
+    const actor=this.population?.get(message.to),from=this.position(peer.player),now=Date.now();
+    if(!actor||actor.health<=0||!from||peer.player.health<=0||peer.player.passive||peer.player.insideHome)return;
+    const weapon=peer.inventoryEnabled&&Number.isInteger(message.w)?message.w:
+      now-(peer.lastShotAt||0)<=2000?peer.lastWeapon:peer.state?.weapon;
+    const gun=weapon>=22,melee=Number.isInteger(weapon)&&weapon>=0&&weapon<=15,area=AREA_EFFECTS[weapon];
+    const damage=area?area.damage:WEAPON_DAMAGE[weapon];if(!damage||(!gun&&!melee))return;
+    const origin=[from.x,from.y,from.z+(melee?1:1.35)],centre=actor.position.map((v,i)=>v+(i===2?1:0));
+    if(!worldCollision.lineOfSight(origin,centre))return;
+    if(peer.inventoryEnabled&&!gun&&weaponInventory.ensure(peer.player).selected!==weapon)return;
+    const authorized=peer.inventoryEnabled&&gun?[...(peer.acceptedShots||[])].reverse().find(record=>
+      !record.used&&record.weapon===weapon&&now-record.at>=0&&now-record.at<=(area?AREA_EVIDENCE_MS:2000)&&
+      (message.s===undefined?record.sequence===null:record.sequence===message.s)):null;
+    if(peer.inventoryEnabled&&gun&&!authorized)return;
+    if(area){
+      if(!authorized||!peer.inventoryEnabled||authorized.dimension!==null)return;
+      const inventory=weaponInventory.ensure(peer.player,now);
+      if(inventory.selected!==weapon||inventory.reload||!areaCylinder(authorized.origin,authorized.direction,centre,area.range,0.8)||
+        Math.hypot(authorized.origin[0]-from.x,authorized.origin[1]-from.y,authorized.origin[2]-from.z-0.9)>3.5||
+        authorized.areaTargets.has(message.to))return;
+      authorized.areaTargets.add(message.to);
+      const times=peer.areaHitTimes||(peer.areaHitTimes=new Map());
+      for(const[id,time]of times)if(now-time>AREA_EVIDENCE_MS)times.delete(id);
+      if(now-(times.get(message.to)??-Infinity)<AREA_HIT_MS||!worldCollision.lineOfSight(authorized.origin,centre))return;
+      times.set(message.to,now);
+    }else{
+      const range=gun?Math.min(200,weaponInventory.catalog.items.find(item=>item.id===weapon)?.stats?.range||90):4;
+      if(Math.hypot(from.x-actor.position[0],from.y-actor.position[1],from.z-actor.position[2])>range)return;
+      const hit=authorized?.hit||peer.lastShotHit;
+      if(gun&&(!authorized&&(now-(peer.lastShotAt||0)>2000||peer.lastWeapon!==weapon)||
+        !Array.isArray(hit)||Math.hypot(...hit.map((v,i)=>v-actor.position[i]))>8))return;
+      if(!(peer.inventoryEnabled&&gun)&&now-(peer.lastHitAt||0)<(gun?90:300))return;
+      if(authorized)authorized.used=true;
+    }
+    peer.lastHitAt=now;
+    if(this.population.damage(message.to,damage,{weapon,from:[from.x,from.y,from.z],now})){
+      this.setWanted(peer.player,Math.max(1,peer.player.wanted+1));this.publishPopulation(now,false);this.save();
+    }
+  }
+
   applyExtinguisher(peer,shot,now) {
     const player=peer.player,from=this.position(player),fire=player.job,target=fireSpot(fire);
     if (!from || player.health<=0 || player.passive || !this.onFoot(from.peer) ||
@@ -1056,6 +1108,14 @@ class LocalGame {
   }
 
   applyBlastHit(target, damage, event) {
+    const actor=this.population?.get(String(target.id));
+    if(actor){
+      const centre=actor.position.map((v,i)=>v+(i===2?0.9:0));
+      if(event.dimension==null&&worldCollision.lineOfSight(event.position,centre)){
+        this.population.damage(String(target.id),Math.min(1000,Math.max(0,Math.ceil(damage))),{weapon:event.weapon,from:event.position,now:Date.now()});
+      }
+      return;
+    }
     const peer = [...this.peers].find(p => p.ready && String(p.player.number) === String(target.id));
     if (!peer || peer.player.health <= 0 || peer.player.passive) return;
     const centre = [peer.state.x,peer.state.y,peer.state.z+0.9];
@@ -3233,6 +3293,7 @@ class LocalGame {
         peer.browserRecoveryEnabled=true;
       if(!peer.positionAckEnabled&&!peer.browserRecoveryEnabled)peer.player.insideHome = null;
       peer.inventoryEnabled = peer.inventoryEnabled || message.nativeInventory === true;
+      peer.populationEnabled=!!this.population&&(!peer.inventoryEnabled||message.npcProtocol===38);
       if (peer.inventoryEnabled && message.inventoryAck===1) {
         peer.inventoryAckEnabled=true;
         peer.inventoryConnection ||= crypto.randomBytes(18).toString('base64url');
@@ -3253,7 +3314,8 @@ class LocalGame {
         weather: 0, account: true, admin: false, rank: 'player',
         spot: placement?.spot || (browserPlacement?this.browserPlacement.state(peer).target.spot:[1480, -1738, 13, 0]),
         life: [peer.player.health, peer.player.armour],...this.healthState(peer), out: [1480, -1738],
-        zombies: false, traffic: 0, peds: 0, party: 0,
+        zombies: false, traffic: 0, peds: peer.populationEnabled?1:0, party: 0,
+        ...(peer.populationEnabled?{paths:this.population.graph.crc32,npcProtocol:38}:{}),
         ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {}),
         ...(placement?{positionAck:1,placement:placement.placement}:{}),
         ...(browserPlacement?{browserRecovery:1,browserPlacement}:{}),
@@ -3753,6 +3815,17 @@ class LocalGame {
     this.turfTick();
     this.mechanicTick();
     this.publishPlayerRows();
+    this.publishPopulation(Date.now(),true);
+  }
+
+  publishPopulation(now,advance) {
+    if(!this.population)return;
+    const position=peer=>peer.ready&&!peer.closed&&peer.state&&now-peer.lastSeen<10000&&!peer.player.insideHome?
+      [peer.state.x,peer.state.y,peer.state.z]:null;
+    if(advance)this.population.tick(now,[...this.peers].map(position).filter(Boolean));
+    for(const peer of this.peers)if(peer.ready&&peer.populationEnabled&&typeof peer.sendBinary==='function'){
+      for(const packet of this.population.packets(peer,position(peer),now))peer.sendBinary(packet);
+    }
   }
 
   publishPlayerRows() {
@@ -3765,6 +3838,7 @@ class LocalGame {
   }
 
   remove(peer) {
+    this.population?.forget(peer);
     this.terminalVehicleReports.delete(peer);
     if (!this.peers.delete(peer)) return;
     for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
@@ -3806,6 +3880,12 @@ class Peer {
     else { header = Buffer.alloc(10); header[0] = 0x81; header[1] = 127; header.writeBigUInt64BE(BigInt(data.length), 2); }
     if (this.socket.writable && this.socket.writableLength < 1024 * 1024)
       this.socket.write(Buffer.concat([header, data]));
+  }
+
+  sendBinary(data) {
+    if(this.closed||!this.populationEnabled||!Buffer.isBuffer(data)||data.length>65535)return;
+    const header=data.length<126?Buffer.from([0x82,data.length]):Buffer.from([0x82,126,data.length>>8,data.length&255]);
+    if(this.socket.writable&&this.socket.writableLength<1024*1024)this.socket.write(Buffer.concat([header,data]));
   }
 
   receive(bytes) {

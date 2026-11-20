@@ -6,7 +6,7 @@ from pathlib import Path as _zgta_Path
 _ZGTA_ROOT = _zgta_Path(__file__).resolve().parents[2]
 if str(_ZGTA_ROOT) not in _zgta_sys.path: _zgta_sys.path.insert(0, str(_ZGTA_ROOT))
 
-import hashlib,json,pathlib,subprocess,tempfile
+import hashlib,json,pathlib,subprocess,time
 ROOT=pathlib.Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/native-physics/tests/melee-delivery'
 OUT.mkdir(parents=True,exist_ok=True)
@@ -47,6 +47,9 @@ class Network {
  func detonateSatchels(){detonations+=1}
 }
 class Renderer {
+ var people:()->[RemotePlayer]={[]}
+ var presentedRemotePlayers:[RemotePlayer]{people()}
+ var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
  var isChuting=false,swimming=false,isClimbing=false,wearingJetpack=false,crouching=false
  // These are observed public Renderer outputs. The real eligibility and
  // actual Renderer wrapper have a separate CLP/source dispatch gate.
@@ -71,6 +74,7 @@ class Harness {
  var renderer:Renderer?=Renderer(),lastAttackTime=0.0
  let network=Network(),weaponCycle=Queue(),audio=Audio(),status=Status(),vehicleButton=Button(),radio=Radio()
  let weapons=NativeWeaponState(catalog:[.init(id:22,name:"Synthetic gun",model:"",range:40,capacity:17,interval:0.3,animation:"fixture",fireKind:"INSTANT_HIT"),.init(id:40,name:"Detonator",model:"",range:0,capacity:1,interval:0.3,animation:"",fireKind:"USE")],allowLegacySnapshots:true)
+ init(){renderer?.people = {[weak self]in self?.network.orderedPlayers ?? []}}
  var usingPistol:Bool{weapons.current.isGun}
  func setDrivingControls(_ value:Bool){};func updateWeaponHUD(){}
  func currentShotRay(weapon:Int,left:Bool)->Ray?{Ray()}
@@ -125,6 +129,16 @@ h.renderer!.visible=false
 let priorHits=h.network.hits.count,priorStrikes=h.network.strikes
 check(h.consumeFootMeleeHit(event) && h.network.hits.count==priorHits && h.network.strikes==priorStrikes+1,"Blocked nearest target silently retargeted or lost its remote animation")
 h.renderer!.visible=true
+h.network.orderedPlayers=[]
+h.renderer!.presentedAmbientPedestrians=[.init(id:1,skin:14,seed:1,flags:0,position:SIMD3(0,0.7,0),velocity:.zero,heading:0,state:nil)]
+let beforeNPC=h.network.hits.count
+check(h.consumeFootMeleeHit(event) && h.network.hits.count==beforeNPC+1 && h.network.hits.last=="p1","Actual VC did not dispatch distinct NPC target")
+h.renderer!.presentedAmbientPedestrians=[.init(id:1,skin:14,seed:1,flags:9,position:SIMD3(0,0.7,0),velocity:.zero,heading:0,state:nil)]
+// The existing original-style selector intentionally admits corpses for
+// ground strikes. A claim is not server health authority; dead-actor damage
+// rejection is exercised by the server task/backend gates.
+check(h.meleeCandidates.first?.dead==true && NativeMeleeTargeting.groundTarget(probe:event.probe,candidates:h.meleeCandidates,visible:h.renderer!.hasClearShot)?.id=="p1","NPC corpse lost distinct ground-target state")
+h.renderer!.presentedAmbientPedestrians=[]
 h.weapons.apply(["revision":2,"selected":22,"weapons":[["id":22,"clip":17,"rest":10]]])
 check(!h.consumeFootMeleeHit(event) && h.weapons.rounds==17,"Switched weapon accepted stale melee marker")
 h.weapons.setConnection("new-unacknowledged-connection")
@@ -135,12 +149,17 @@ h.attack();check(h.network.detonations==1 && h.weapons.rounds==1 && h.network.re
 h.renderer!.canUseFootUtility=false;h.attack();check(h.network.detonations==1,"Detonator bypassed hand/task eligibility")
 print("PASS: \(checks) actual VC melee dispatch/state/targeting checks;100 rejected requests cause0 hits and0 gun reservations")
 '''
-with tempfile.TemporaryDirectory(prefix='snapshot-',dir=OUT) as folder:
+def run():
+    folder=OUT/('snapshot-'+str(time.time_ns()));folder.mkdir()
     folder=pathlib.Path(folder)
     source=folder/'main.swift';source.write_text(profile+'\n'+stub+methods+'\n}\n'+tests)
-    files=['NativeInventoryPrediction.swift','NativeOriginalWorldArsenal.swift','NativeWeaponState.swift','NativeMelee.swift']
+    files=['NativeInventoryPrediction.swift','NativeOriginalWorldArsenal.swift','NativeWeaponState.swift','NativeMelee.swift','NativeAmbientPedestrianProtocol.swift','NativeAmbientPedestrianPaths.swift','NativeAmbientPedestrians.swift']
     binary=folder/'verify'
-    subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(OUT/'modules'),*[str(ROOT/'ios/App'/p) for p in files],str(source),'-o',str(binary)],check=True)
-    result=subprocess.run([str(binary)],text=True,capture_output=True);print(result.stdout,end='');print(result.stderr,end='');result.check_returncode()
+    subprocess.run(['xcrun','swiftc','-Onone','-whole-module-optimization','-num-threads','1','-module-cache-path',str(OUT/'modules'),*[str(ROOT/'ios/App'/p) for p in files],str(source),'-o',str(binary)],check=True)
+    result=subprocess.run([str(binary)],text=True,capture_output=True,timeout=60)
+    (folder/'runtime.log').write_text(result.stdout+result.stderr)
+    (folder/'result.json').write_text(json.dumps(dict(status='PASS'if result.returncode==0 else'FAIL',exitCode=result.returncode),indent=2)+'\n')
+    print(result.stdout,end='');print(result.stderr,end='');result.check_returncode()
     tracked=['tests/combat/smoke_native_melee_delivery.py','ios/App/NativeGameViewController.swift','ios/App/NativeGunAnimation.swift',*[f'ios/App/{p}' for p in files]]
     (OUT/'report.json').write_text(json.dumps({'pass':True,'sourceSHA256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in tracked},'result':result.stdout,'retailRuntimeParity':False,'transportBoundary':'Fail-fast test-only dataTask; any call preconditionFails. Actual catalog constructor/inventory/VC/attack logic compiled; resource loading is not exercised or replaced with successful data.'},indent=2)+'\n')
+run()

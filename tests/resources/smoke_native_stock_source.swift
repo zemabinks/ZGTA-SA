@@ -24,6 +24,9 @@ final class Carrier {
     func fixedCJSourceIdentity()->String{"\(server?.value ?? "none")|\(generation)"}
     let actorSelection=Selection();var fixedCJ:CJ?=CJ(),needsFixedCJ=false,atlasInvalidations=0
     func invalidatePedAtlasSourceIfChanged(){atlasInvalidations+=1}
+    // This carrier isolates legacy stock retirement. Actual NPC source/graph
+    // ownership is exercised by its separate typed-owner/resource/app gates.
+    func reloadAmbientPedestrianSourceIfChanged(){}
     func ensureFixedCJ(){fatalError("unrequested CJ load")}
     // Explicit cell/resource spies. Real parser/ground/Rapier behavior is
     // exercised separately by smoke_native_collision_source.

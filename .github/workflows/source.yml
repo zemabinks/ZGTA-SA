@@ -25,6 +25,13 @@ jobs:
       - run: python3 -m pip install Pillow==11.3.0
       - run: python3 tests/resources/test_native_ped_atlas.py
       - run: python3 tests/resources/test_native_texture_opacity.py
+      - run: python3 tests/resources/test_pedestrian_paths.py
+      - run: python3 tests/resources/test_population_selection.py
+      - run: node tests/server/smoke_population_paths.js
+      - run: node tests/server/smoke_population_protocol.js
+      - run: node tests/server/smoke_population_tasks.js
+      - run: node tests/server/smoke_population_routes.js
+      - run: node tests/server/smoke_population_backend.js
       - run: node tests/server/smoke_discord.js
       - run: node tests/combat/smoke_inventory_ack.js
       - run: node tests/combat/smoke_weapon_transport.js
@@ -59,4 +66,4 @@ jobs:
         with:
           node-version: '22'
       - run: python3 -m pip install Pillow==11.3.0
-      - run: python3 tests/core/smoke_core_157.py
+      - run: python3 tests/core/smoke_core_159.py

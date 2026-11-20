@@ -425,6 +425,12 @@ final class NativeGameViewController: UIViewController {
             self.renderer?.remoteServerTimeOffsetMilliseconds=self.network.serverTimeOffsetMilliseconds
             self.renderer?.remotePlayers=players
         }
+        network.onAmbientPedestrianConfiguration = {[weak self]level,paths in
+            self?.renderer?.configureAmbientPedestrians(level:level,paths:paths)
+        }
+        network.onAmbientPedestrianEvent = {[weak self]event,serverNow,received in
+            self?.renderer?.receiveAmbientPedestrians(event,serverNow:serverNow,received:received)
+        }
         network.onChat = { [weak self] lines in
             self?.chatFeed.text = lines.suffix(3).joined(separator: "\n")
             self?.chatFeed.isHidden = lines.isEmpty
@@ -1623,10 +1629,15 @@ final class NativeGameViewController: UIViewController {
     }
 
     private var meleeCandidates:[NativeMeleeTargeting.Candidate] {
-        (renderer?.presentedRemotePlayers ?? network.orderedPlayers).filter {$0.code.hasPrefix("s") && $0.ridingVehicleID == nil}.map {
-            .init(id:$0.id,feet:$0.position,heading:$0.heading,crouching:$0.crouching,
+        let people:[NativeMeleeTargeting.Candidate]=(renderer?.presentedRemotePlayers ?? network.orderedPlayers).filter {$0.code.hasPrefix("s") && $0.ridingVehicleID == nil}.map {
+            NativeMeleeTargeting.Candidate(id:$0.id,feet:$0.position,heading:$0.heading,crouching:$0.crouching,
                 down:$0.down != 0,dead:$0.life <= 0)
         }
+        let pedestrians:[NativeMeleeTargeting.Candidate]=(renderer?.presentedAmbientPedestrians ?? []).map{
+            NativeMeleeTargeting.Candidate(id:$0.targetID,feet:SIMD3<Float>($0.position),heading:Float($0.heading),
+                crouching:$0.state?.crouching ?? false,down:$0.down,dead:$0.dead)
+        }
+        return people+pedestrians
     }
 
     private func finishRespawn() {
@@ -1663,7 +1674,7 @@ final class NativeGameViewController: UIViewController {
         guard let target=NativeMeleeTargeting.select(event:event,candidates:meleeCandidates,visible:renderer.hasClearShot),
               network.sendMeleeHit(to:target.id,weapon:event.weapon) else{return true}
         audio.meleeHit()
-        status.text="MELEE ATTACK ON \(network.players[target.id]?.name.uppercased() ?? "PLAYER")"
+        status.text="MELEE ATTACK ON \(network.players[target.id]?.name.uppercased() ?? "PEDESTRIAN")"
         return true
     }
 
@@ -1714,6 +1725,8 @@ final class NativeGameViewController: UIViewController {
         if NativeStreamShotTargets.weapons.contains(weapon) {
             let candidates=renderer.presentedRemotePlayers.map {
                 NativeShotTargeting.Candidate(id:$0.id,point:$0.position+SIMD3(0,0,0.9))
+            } + renderer.presentedAmbientPedestrians.filter{!$0.dead}.map{
+                NativeShotTargeting.Candidate(id:$0.targetID,point:SIMD3<Float>($0.position)+SIMD3(0,0,0.9))
             }
             let targets=NativeStreamShotTargets.players(ray:ray,candidates:candidates,
                 visible:{renderer.hasClearShot(from:$0,to:$1)})
@@ -1722,6 +1735,8 @@ final class NativeGameViewController: UIViewController {
         }
         let candidates=renderer.presentedRemotePlayers.map {
             NativeShotTargeting.Candidate(id:$0.id,point:NativeShotTargeting.torso(feet:$0.position))
+        } + renderer.presentedAmbientPedestrians.filter{!$0.dead}.map{
+            NativeShotTargeting.Candidate(id:$0.targetID,point:NativeShotTargeting.torso(feet:SIMD3<Float>($0.position)))
         }
         let target=NativeShotTargeting.select(ray:ray,aiming:aiming,candidates:candidates,
             visible:{renderer.hasClearShot(from:$0,to:$1)})
@@ -1945,6 +1960,7 @@ final class NativeGameViewController: UIViewController {
         network.tickConnection(now:ProcessInfo.processInfo.systemUptime)
         let active = applicationActive && view.window != nil
         renderer?.advanceRemoteFootPresentation(at:ProcessInfo.processInfo.systemUptime,active:active)
+        renderer?.advanceAmbientPedestrians(at:ProcessInfo.processInfo.systemUptime,active:active)
         let timing = frameClock.advance(timestamp: link.timestamp, active: active)
         if timing.discontinuity { resetControls();renderer?.rebaseLegacyObjectClock() }
         let delta = Float(timing.delta)
