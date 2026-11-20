@@ -57,7 +57,7 @@ def main():
     owned += list(map(Path,skeletons.values()))
     hashes = {str(path):hashlib.sha256(path.read_bytes()).hexdigest() for path in owned}
     binary = out/'ped-tests'
-    build = subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(out/'module-cache'),
+    build = subprocess.run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-O','-module-cache-path',str(out/'module-cache'),
         *map(str,paths),str(ROOT/'tests/resources/smoke_native_renderware_ped.swift'),'-o',str(binary)],
         cwd=ROOT,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
     (out/'build.log').write_text(build.stdout)

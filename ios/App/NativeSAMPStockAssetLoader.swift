@@ -168,8 +168,17 @@ final class NativeSAMPStockAssetLoader {
         value.pending.completion(valid ? result : .failure(Failure.cancelled))
         pump()
     }
-    private func validate(_ value: NativeSAMPStockModels.Resolution) throws -> [NativeSAMPStockModels.File] {
-        switch value.model.kind { case .object,.timed,.weapon: break; default: throw Failure.unsupportedKind(value.model.kind) }
+    /// Rig import uses the same origin/hash/size/dictionary contract, while its
+    /// CPU decoder remains separate from this static geometry importer.
+    func pedestrianFiles(_ value:NativeSAMPStockModels.Resolution)throws->[NativeSAMPStockModels.File] {
+        main();return try validate(value,pedestrian:true)
+    }
+    private func validate(_ value: NativeSAMPStockModels.Resolution,pedestrian:Bool=false) throws -> [NativeSAMPStockModels.File] {
+        if pedestrian {
+            guard value.model.kind == .ped else{throw Failure.unsupportedKind(value.model.kind)}
+        }else{
+            switch value.model.kind { case .object,.timed,.weapon: break; default: throw Failure.unsupportedKind(value.model.kind) }
+        }
         guard value.dictionaries.count < limits.filesPerModel,value.textureSearch.count == value.dictionaries.count else { throw Failure.limit("dictionary files") }
         let missing=([value.missingDFF].compactMap{$0})+value.missingTXDs
         guard missing.isEmpty else { throw Failure.missingAssets(missing) }
@@ -177,6 +186,7 @@ final class NativeSAMPStockAssetLoader {
         let names=value.dictionaries.map{$0.name},search=value.textureSearch.map{$0.name}
         guard !names.isEmpty,Set(names).count == names.count,Set(names) == Set(search),search.count == names.count,
               names.first == value.model.txd else { throw Failure.invalidResolution("dictionary chain") }
+        if pedestrian,search != names{throw Failure.invalidResolution("pedestrian dictionary precedence")}
         var files=[dff]
         for dictionary in value.textureSearch {
             guard let file=dictionary.file,let original=value.dictionaries.first(where:{$0.name == dictionary.name})?.file,

@@ -1,5 +1,23 @@
 # Core GTA San Andreas gameplay parity
 
+## Core150 native character material binding and stock rig preparation
+
+The existing native imported-CJ/custom-skin draw now admits its bound original
+textures and honors material, sampler, prelight, alpha and blending controls.
+An actual old-encoder GPU negative and 70 current checks over 28 static/skinned
+Metal renders distinguish the defect and repair. A bounded stock-rig CPU loader
+passes authored and three owner-local original-family resource/GPU-byte gates;
+it does not yet register ordinary raw pedestrians in gameplay.
+
+The full selected Metal/physics/audio/transport regression passes (851.1
+seconds), with all 227 app/build inputs and six captured test inputs held.
+Host, project and layout gates pass. The normal149 baseline confirms a white
+CJ silhouette despite all13 original files being requested. Both SDK products
+and the identical normal150 acceptance remain pending; physical-device and
+matched original-retail results are separate. Original assets and captures stay
+local. See the [character resource record](../research/resources/CORE_STOCK_PEDESTRIANS_150.md).
+
+
 ## Core149 stock resource lifetimes
 
 Asset-source changes and same-content installation repairs now retire obsolete

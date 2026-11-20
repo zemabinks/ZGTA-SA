@@ -29,7 +29,8 @@ vertex NativeRWPedOut native_rw_ped_vertex(uint id [[vertex_id]],
     NativeRWPedVertex source = vertices[id]; NativeRWPedOut out;
     out.position = u.viewProjection * u.model * nativeRWPedPosition(skin[id], palette);
     out.normal = (u.normalMatrix * float4(nativeRWPedNormal(source.normal, skin[id], palette), 0)).xyz;
-    out.uv = source.uv; out.color = source.color * u.color;
+    out.uv = source.uv;
+    out.color = (u.settings.z > 0.5f ? float4(1) : source.color) * u.color;
     return out;
 }
 // Uses the exact vertex-stage skinning helpers, for numerical Metal regressions.

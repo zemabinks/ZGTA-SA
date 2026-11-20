@@ -166,6 +166,7 @@
 		CA84DF1FA860D2EFBD115FBA /* NativeShotTargeting.swift in Sources */ = {isa = PBXBuildFile; fileRef = D785C9B1748A08EC230BA3B0 /* NativeShotTargeting.swift */; };
 		CAA69059457AF410AE0C5E95 /* NativeWorldDrawPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = C62EE664D13F786396D30AD5 /* NativeWorldDrawPlan.swift */; };
 		CB19D103A1B63A1DC55CA7DE /* NativeShotOcclusion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718A2BEE6959502177046670 /* NativeShotOcclusion.swift */; };
+		CFB0DD23C1361EB3382B2826 /* NativeStockPedLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3912E08A83695C62BF9FB077 /* NativeStockPedLoader.swift */; };
 		D039497D742CA7F0D2F08DE6 /* NativeRemoteMeleeContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BF84EEC926D9870EC20D6FB /* NativeRemoteMeleeContext.swift */; };
 		D745C8603A349B1A1BF11798 /* NativeRenderWareCollisionWorld.swift in Sources */ = {isa = PBXBuildFile; fileRef = E50732CAC0459F1094ED1A0F /* NativeRenderWareCollisionWorld.swift */; };
 		D77994ED43402194D25FD11B /* NativeMenuAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83BFEE8A2E28D3FE221B7470 /* NativeMenuAudio.swift */; };
@@ -261,6 +262,7 @@
 		3691761B787AB51C3173B5D4 /* NativeRenderWareSkeleton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderWareSkeleton.swift; sourceTree = "<group>"; };
 		377027377634687E2F67D980 /* NativeCJRuntimeLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCJRuntimeLoader.swift; sourceTree = "<group>"; };
 		38CD9A85767EC0BEF5EB4DEA /* NativeLocalHitReaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeLocalHitReaction.swift; sourceTree = "<group>"; };
+		3912E08A83695C62BF9FB077 /* NativeStockPedLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStockPedLoader.swift; sourceTree = "<group>"; };
 		3C625F976BE62852F37692C1 /* NativeVehicleSupportScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleSupportScene.swift; sourceTree = "<group>"; };
 		3C997172E8F7041ABEB93A87 /* NativeWorldRay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldRay.swift; sourceTree = "<group>"; };
 		3D458C1609000A0D15E78B34 /* NativeActorSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeActorSelection.swift; sourceTree = "<group>"; };
@@ -585,6 +587,7 @@
 				3370EFEF42EC80C853081EF9 /* NativeSkeletalActor.swift */,
 				6A10C388E455DD11D44E0A27 /* NativeSprintController.swift */,
 				BBC82BCB75D5520EBAFB5BAE /* NativeStockAssetAccess.swift */,
+				3912E08A83695C62BF9FB077 /* NativeStockPedLoader.swift */,
 				099D18E9BA9F51B3794D4E0B /* NativeStreamShotClaims.swift */,
 				E7C1456168675138F8BEADDF /* NativeSwimAnimation.swift */,
 				8366153EB29F47D815A85CC4 /* NativeSwimController.swift */,
@@ -886,6 +889,7 @@
 				930B4C0BC42CC474056DF5EC /* NativeSkeletalActor.swift in Sources */,
 				C3F9210132AD16BF049A0ED5 /* NativeSprintController.swift in Sources */,
 				F77A2756FA8F21F359C47D52 /* NativeStockAssetAccess.swift in Sources */,
+				CFB0DD23C1361EB3382B2826 /* NativeStockPedLoader.swift in Sources */,
 				5BFAAD16B01609CFD046DE23 /* NativeStreamShotClaims.swift in Sources */,
 				1EB0FE8F1B443455683C8E2B /* NativeSwimAnimation.swift in Sources */,
 				22BBDCBC3FB1FC0CF6650218 /* NativeSwimController.swift in Sources */,
