@@ -76,3 +76,16 @@ For detailed evidence and gaps, see:
 **When updating this page:** reflect the latest tested revision, mention the exact scenario/platform, and leave untested items marked as unverified. Do not list unfinished source features as publicly downloadable.
 
 [← All guides](README.md)
+
+
+Core155 prepares visual world cells on a bounded utility worker, prioritizes the
+current detail and retires obsolete visual/collision intents. Focused74 Metal/
+scheduling and50 collision checks pass. Three owner-local cells preserve full
+GPU geometry, base pixels and metadata; all327 available base cells fit declared
+bounds without downscaling. The selected source chain, both SDKs and payload
+checks pass with inputs held. Normal retained-data Simulator acceptance passes (one executed case, zero
+failures);12 captures and actual owned-server movement/entry/exit logs are
+reviewed. Installed world/collision/CJ require no HTTP fallback, resources and
+settings hold, and owned test services are stopped. Hardware, original-PC and
+complete gameplay parity remain open. See
+[visual streaming scope](research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md#bounded-visual-world-preparation-155).

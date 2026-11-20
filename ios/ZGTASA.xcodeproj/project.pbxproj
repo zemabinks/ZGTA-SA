@@ -125,6 +125,7 @@
 		88FA2B804167C679593B0C0F /* NativeRenderWareSkeleton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3691761B787AB51C3173B5D4 /* NativeRenderWareSkeleton.swift */; };
 		8AA926E95386F273B868FC34 /* NativeOriginalWorldAuthentication.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF9D504898CB0E8910633BF /* NativeOriginalWorldAuthentication.swift */; };
 		8B6D3FF8836239DF899B5089 /* NativeCameraVisibility.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD574FE74BEC5CF4D2483FB6 /* NativeCameraVisibility.swift */; };
+		8B885259C15089BE426F540B /* NativeWorldCellLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72DC77957C277A9E1F872E64 /* NativeWorldCellLoader.swift */; };
 		8BC98A505650FCB60D07A22F /* NativeRenderWareModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E13717B416A4B700A2B9519 /* NativeRenderWareModel.swift */; };
 		8C8615685FAF65731955D142 /* NativeSAMPObjectMaterials.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14857CAB9E6B2314EC6557E1 /* NativeSAMPObjectMaterials.swift */; };
 		8E2971A26FB902E66D2C20A5 /* NativeGameManagementController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D964C2804332F19C2A462E4 /* NativeGameManagementController.swift */; };
@@ -319,6 +320,7 @@
 		718A2BEE6959502177046670 /* NativeShotOcclusion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeShotOcclusion.swift; sourceTree = "<group>"; };
 		71B18DA5E2A1C83A92108893 /* NativeWeaponShotDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWeaponShotDelivery.swift; sourceTree = "<group>"; };
 		71CCB76198A96F7375458312 /* NativeWorldSharpManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldSharpManifest.swift; sourceTree = "<group>"; };
+		72DC77957C277A9E1F872E64 /* NativeWorldCellLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeWorldCellLoader.swift; sourceTree = "<group>"; };
 		72F768E1A0E5E278C48123E3 /* NativeVehicleForces.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleForces.swift; sourceTree = "<group>"; };
 		757E52EDD859D880D6BC142C /* NativeSAMPStockAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeSAMPStockAssetLoader.swift; sourceTree = "<group>"; };
 		76D0C529D9BA5FD134704CC1 /* NativeStockPedRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeStockPedRuntime.swift; sourceTree = "<group>"; };
@@ -630,6 +632,7 @@
 				92C9A22A90A5FF1D1996AA48 /* NativeWeaponState.swift */,
 				4DEED582EAC6344E9961902B /* NativeWeatherAudio.swift */,
 				24B8E5444BF25DE89BEFB795 /* NativeWeatherParticles.swift */,
+				72DC77957C277A9E1F872E64 /* NativeWorldCellLoader.swift */,
 				C62EE664D13F786396D30AD5 /* NativeWorldDrawPlan.swift */,
 				281AE20918C13B030D8575DE /* NativeWorldEnvironment.swift */,
 				3C997172E8F7041ABEB93A87 /* NativeWorldRay.swift */,
@@ -935,6 +938,7 @@
 				340F475D48ECA7DA11CC3493 /* NativeWeaponState.swift in Sources */,
 				F4251C46E93F4F6ACA5D5344 /* NativeWeatherAudio.swift in Sources */,
 				A15513AF40B8FAFEB4BB7E16 /* NativeWeatherParticles.swift in Sources */,
+				8B885259C15089BE426F540B /* NativeWorldCellLoader.swift in Sources */,
 				CAA69059457AF410AE0C5E95 /* NativeWorldDrawPlan.swift in Sources */,
 				F0C130DB14D1D5E142B7ABF5 /* NativeWorldEnvironment.swift in Sources */,
 				459CE633298742BFE95A137E /* NativeWorldRay.swift in Sources */,

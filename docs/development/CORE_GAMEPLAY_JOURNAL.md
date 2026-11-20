@@ -1,5 +1,32 @@
 # Core gameplay audit journal
 
+## Core155 — bounded visual world streaming
+
+Visual WRL2 decode, base PNG decode, Metal allocation and bounds preparation now
+run on one bounded utility worker. The current detailed cell takes priority;
+obsolete visual and collision intents retire before new acquisition. Mesh
+admission stays with the scene owner and retains source/request fences.
+
+The focused visual/Metal and collision gates pass 74 and 50 checks. Unchanged154
+fails the new queued-intent oracle. Three owner-local cells preserve complete
+GPU geometry bytes, decoded base pixels and metadata; all 327 available base
+cells fit declared bounds without downscaling. The complete selected source
+chain, both SDKs and payload checks pass with 231 App/build inputs, 20 captured
+test inputs and 39 dependency files held. A normal retained-data Simulator case
+passes (495.511s, one executed case, zero failures): streamed skins7/2/0,
+Taxi/camera/exit/jump, then installed CJ0 movement/camera/jump/menu restoration.
+Twelve full captures are reviewed. Actual owned-server logs confirm movement on
+all four joins and driver entry/exit. Installed world/collision/CJ require no
+HTTP fallback; resources/settings hold and owned services stop afterward.
+
+The initial fixture compiler rejection remains retained. Host preparation and
+static captures do not establish rendered frame times, retail camera/animation
+accuracy or hardware behavior. Parser scratch/input bytes are additional to the
+prepared-resource budget. Original assets, full captures, raw measurements and
+private history stay local; complete game and ambient-simulation parity remain
+open. See [streaming scope](../research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md#bounded-visual-world-preparation-155).
+
+
 ## Core154 bounded city collision preparation — scoped source and app acceptance
 
 City-cell transfers and CPU preparation now have one active serial owner and

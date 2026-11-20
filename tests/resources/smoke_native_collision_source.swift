@@ -15,13 +15,19 @@ private func check(_ condition:@autoclosure()throws->Bool,_ text:String)throws {
 private final class Request:NativeResourceTask {
     let url:URL,completion:NativeResourceTransport.Completion
     var resumes=0,cancels=0
-    init(_ request:URLRequest,_ completion:@escaping NativeResourceTransport.Completion){url=request.url!;self.completion=completion}
+    let bounded:Bool
+    private let lock=NSLock();private var completed=false
+    init(_ request:URLRequest,_ completion:@escaping NativeResourceTransport.Completion,bounded:Bool=false){url=request.url!;self.completion=completion;self.bounded=bounded}
     func resume(){resumes+=1}
-    func cancel(){cancels+=1}
+    func cancel(){cancels+=1;if bounded{DispatchQueue.global(qos:.utility).async{self.deliver(nil,status:200,error:URLError(.cancelled))}}}
+    private func deliver(_ data:Data?,status:Int,error:Error?=nil){
+        lock.lock();if bounded && completed{lock.unlock();return};completed=true;lock.unlock()
+        completion(data,HTTPURLResponse(url:url,statusCode:status,httpVersion:"HTTP/1.1",headerFields:nil),error)
+    }
     func complete(_ data:Data?,status:Int=200)throws {
         let done=DispatchSemaphore(value:0)
         DispatchQueue.global(qos:.utility).async {
-            self.completion(data,HTTPURLResponse(url:self.url,statusCode:status,httpVersion:"HTTP/1.1",headerFields:nil),nil)
+            self.deliver(data,status:status)
             done.signal()
         }
         guard done.wait(timeout: .now() + 5) == .success else{throw Failure("transport delivery timeout")}
@@ -88,7 +94,7 @@ private func drain()throws {
         try check(Thread.isMainThread,"main scene owner required")
         var requests:[Request]=[]
         let factory:NativeResourceTransport.Factory={request,completion in let task=Request(request,completion);requests.append(task);return task}
-        NativeResourceTransport.install(factory,bounded:{request,_,completion in factory(request,completion)})
+        NativeResourceTransport.install(factory,bounded:{request,_,completion in let task=Request(request,completion,bounded:true);requests.append(task);return task})
         let h=try Harness(),zero=authoredFloorData(0),raised=authoredFloorData(3)
         h.loadCollision(name:"c0");try check(requests.count==1,"initial collision request missing")
         try check(requests[0].url.path=="/game/world/c0.col.bin" && requests[0].resumes==1,"original collision route/resume changed")
@@ -144,6 +150,22 @@ private func drain()throws {
         try until("offscreen collision request did not release its slot"){h.collisionLoading.isEmpty};try drain()
         try check(h.collisions.isEmpty && !h.groundVehicle!.isCellLoaded("c0") && h.collisionLoading.isEmpty,"offscreen current response published or retained loading ownership")
         try check(try h.physicalHeight()==nil,"offscreen response installed physical geometry")
+        // Rapid teleport: obsolete queued/active city intents must retire
+        // before the next retained cell is admitted. These are actual loader
+        // slots and actual renderer revocation, not dictionary-only spies.
+        h.binding="authored-source-f";h.desiredPhysicsCells=["c0","c1","c2"]
+        let teleportStart=requests.count
+        h.loadCollision(name:"c0");h.loadCollision(name:"c1");h.loadCollision(name:"c2")
+        try check(requests.count==teleportStart+1,"serial collision transport admission changed")
+        h.desiredPhysicsCells=["c2"];h.retireUnretainedCollisionLoads()
+        try until("obsolete collision intents block the retained teleport cell"){requests.count==teleportStart+2}
+        try check(requests.last!.url.lastPathComponent=="c2.col.bin","obsolete queued collision descriptor started after teleport")
+        try check(h.collisionLoading==["c2"] && Set(h.collisionLoadTokens.keys)==["c2"] && Set(h.collisionLoadTasks.keys)==["c2"],"retirement callback erased current collision ownership")
+        try check(h.collisionRetryAfter.isEmpty && h.collisions.isEmpty,"retired collision request armed retries or geometry")
+        try requests.last!.complete(raised)
+        try until("retained teleport floor did not publish"){h.collisions["c2"] != nil}
+        try check(h.groundVehicle!.isCellLoaded("c2") && abs(((try h.physicalHeight()) ?? -100)-3)<0.0001,"retained teleport floor differs")
+        try check(h.collisionLoading.isEmpty && h.collisionLoadTokens.isEmpty && h.collisionLoadTasks.isEmpty,"teleport completion leaked slot ownership")
         try check(requests.allSatisfy{$0.resumes==1},"collision request resumed more than once")
     }
 }
