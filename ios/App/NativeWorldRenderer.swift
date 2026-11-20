@@ -198,6 +198,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var legacyModelBytes=0
     private var legacyAssetEpoch:UInt64=0
     private var legacyStockCatalog:NativeSAMPStockModels?
+    private var legacyStockSource:String?
     private var legacyStockCollisionCatalog:NativeSAMPStockCollisionCatalog?
     private var legacyStockManifestSHA256:String?
     private var legacyStockLoader:NativeSAMPStockAssetLoader?
@@ -220,6 +221,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var legacyTextureSources:[NativeSAMPObjectMaterials.TextureRequest:UInt32]=[:]
     private var legacyTextureConflicts=Set<NativeSAMPObjectMaterials.TextureRequest>()
     private var legacyTextureLoads=Set<NativeSAMPObjectMaterials.TextureRequest>()
+    private var legacyTextureTokens:[NativeSAMPObjectMaterials.TextureRequest:UUID]=[:]
+    private var legacyTextureTasks:[NativeSAMPObjectMaterials.TextureRequest:NativeResourceTask]=[:]
+    private var legacyArtworkTextureBindings:[Int32:[NativeSAMPObjectMaterials.TextureRequest:(crc:UInt32,texture:NativeSAMPObjectMaterials.Texture)]]=[:]
     private var legacyTextureRetries:[NativeSAMPObjectMaterials.TextureRequest:Double]=[:]
     private var legacyExternalTextureBytes:[NativeSAMPObjectMaterials.TextureRequest:Int]=[:]
     private var legacyTextureUse:[NativeSAMPObjectMaterials.TextureRequest:Double]=[:]
@@ -1021,6 +1025,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         super.init()
         fixedCJObserver=NativeResourceStore.shared.observe {[weak self] _ in
             guard let self else{return}
+            self.synchronizeLegacyStockSource()
             self.invalidatePedAtlasSourceIfChanged()
             self.loadNearby()
             _ = self.actorSelection.invalidateSource(self.fixedCJSourceIdentity())
@@ -3023,10 +3028,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var server: ServerAddress? {didSet{
-        if oldValue != server {invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+        if oldValue != server {synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
-    deinit {worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    deinit {for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
     private var needsFixedCJ:Bool {
         localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
     }
@@ -3649,18 +3654,66 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard let server else{return nil}
         return NativeStockAssetAccess(assetOrigin:server.url,sessionCookies:HTTPCookieStorage.shared.cookies(for:server.url) ?? [])
     }
+    /// An origin change or same-content installation repair starts a new stock
+    /// resource lifetime. Keep server object state and separately downloaded DL
+    /// artwork, but revoke the old bootstrap, work, render and physical owners.
+    private func synchronizeLegacyStockSource() {
+        let source=fixedCJSourceIdentity()
+        guard legacyStockSource != source else{return}
+        legacyStockSource=source
+        legacyStockMetadataEpoch &+= 1
+        for task in legacyStockMetadataTasks.values{task.cancel()}
+        legacyStockMetadataTasks.removeAll();legacyStockMetadataPending=0;legacyStockMetadataRetryAfter=0
+        legacyStockCatalog=nil;legacyStockCollisionCatalog=nil;legacyStockManifestSHA256=nil
+        _=legacyStockLoader?.reset();legacyStockLoader=nil
+        legacyStockLoads.removeAll();legacyStockRetries.removeAll()
+        for task in legacyTextureTasks.values{task.cancel()}
+        legacyTextureTasks.removeAll();legacyTextureTokens.removeAll();legacyTextureLoads.removeAll();legacyTextureRetries.removeAll()
+        let retired=legacyStockModels
+        for id in legacyCollisionKinds.keys.filter({retired.contains(legacyCollisionKinds[$0]!)}){removeLegacyObjectCollision(id)}
+        for id in retired {
+            legacyModels.removeValue(forKey:id);legacyCollisionModels.removeValue(forKey:id)
+            legacyModelBytes-=legacyModelCosts.removeValue(forKey:id) ?? 0
+            legacyMissingObjects.remove(id)
+        }
+        legacyStockModels.removeAll();legacyStockUse.removeAll();legacyStockCollisionKinds.removeAll();legacyStockReferences.removeAll()
+        retireLegacyStockTextures(retired,includeExternal:true)
+    }
+    /// A shared base-model texture key can also belong to verified custom
+    /// artwork. Retiring stock bytes must reveal that surviving binding rather
+    /// than erase it, or retain a conflict caused solely by the retired source.
+    private func retireLegacyStockTextures(_ models:Set<Int32>,includeExternal:Bool=false) {
+        let keys=Set(legacyExactTextures.keys).union(legacyTextureSources.keys).union(legacyTextureConflicts)
+            .union(legacyExternalTextureBytes.keys).filter{models.contains($0.model) || (includeExternal && legacyExternalTextureBytes[$0] != nil)}
+        for key in keys {
+            legacyExactTextures.removeValue(forKey:key);legacyTextureSources.removeValue(forKey:key);legacyTextureConflicts.remove(key)
+            legacyExternalTextureBytes.removeValue(forKey:key);legacyTextureUse.removeValue(forKey:key)
+        }
+        restoreLegacyArtworkTextures(Set(keys))
+        legacyMaterialOwner?.reset()
+    }
+    private func restoreLegacyArtworkTextures(_ keys:Set<NativeSAMPObjectMaterials.TextureRequest>) {
+        for bindings in legacyArtworkTextureBindings.values {for (key,binding) in bindings where keys.contains(key) {
+            if let previous=legacyTextureSources[key],previous != binding.crc {
+                legacyTextureConflicts.insert(key);legacyExactTextures.removeValue(forKey:key)
+            }else if !legacyTextureConflicts.contains(key) {
+                legacyTextureSources[key]=binding.crc;legacyExactTextures[key]=binding.texture
+            }
+        }}
+    }
     /// Metadata has no pre-advertised digest. Its dedicated HTTP sink bounds
     /// received bytes before append, rejects redirects, and never uses cookies.
     private func loadLegacyStockCatalogs() {
+        synchronizeLegacyStockSource()
         guard let server,legacyStockMetadataTasks.isEmpty,legacyStockMetadataPending==0,
               ProcessInfo.processInfo.systemUptime>=legacyStockMetadataRetryAfter,
               legacyStockCatalog == nil || legacyStockCollisionCatalog == nil else{return}
-        legacyStockMetadataEpoch &+= 1;let epoch=legacyStockMetadataEpoch
+        legacyStockMetadataEpoch &+= 1;let epoch=legacyStockMetadataEpoch,source=fixedCJSourceIdentity()
         legacyStockMetadataPending=2
         for (path,collision) in [("game/native/stock-models.json",false),("game/native/stock-collision/catalog.json",true)] {
             let id=UUID()
             let request=LegacyStockMetadataTransfer(url:server.path(path),maximumBytes:16*1024*1024,access:legacyStockAccess()) {[weak self] result in
-                guard let self,self.legacyStockMetadataEpoch==epoch else{return}
+                guard let self,self.legacyStockMetadataEpoch==epoch,self.fixedCJSourceIdentity()==source else{return}
                 self.legacyStockMetadataTasks.removeValue(forKey:id)
                 self.legacyImportQueue.async {[weak self] in
                     let parsed:Result<LegacyStockMetadata,Error>=Result {
@@ -3669,7 +3722,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                             .models(try NativeSAMPStockModels.decode(data),SHA256.hash(data:data).map{String(format:"%02x",$0)}.joined())
                     }
                     DispatchQueue.main.async {
-                        guard let self,self.legacyStockMetadataEpoch==epoch,self.server==server else{return}
+                        guard let self,self.legacyStockMetadataEpoch==epoch,self.server==server,self.fixedCJSourceIdentity()==source else{return}
                         self.legacyStockMetadataPending-=1
                         do {
                             switch try parsed.get(){case .models(let value,let digest):self.legacyStockCatalog=value;self.legacyStockManifestSHA256=digest;case .collision(let value):self.legacyStockCollisionCatalog=value}
@@ -3686,6 +3739,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
     private func refreshLegacyStockReferences() {
+        synchronizeLegacyStockSource()
         guard let objects=try?legacyObjects.sampledInstances(at:ProcessInfo.processInfo.systemUptime)else{return}
         var references=Set(objects.map(\.model).filter{(1...19999).contains($0)})
         for object in objects {for material in object.materials.values {
@@ -3701,11 +3755,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pumpLegacyStockObjects()
     }
     private func pumpLegacyStockObjects() {
+        let source=fixedCJSourceIdentity()
         guard !legacyStockPumping,let catalog=legacyStockCatalog,let collisionCatalog=legacyStockCollisionCatalog,
-              let loader=legacyStockLoader,let server else{return}
+              let loader=legacyStockLoader,let server,legacyStockSource==source else{return}
         legacyStockPumping=true;defer{legacyStockPumping=false}
         let now=ProcessInfo.processInfo.systemUptime
         for id in legacyStockReferences.sorted() {
+            guard legacyStockSource==source,fixedCJSourceIdentity()==source,legacyStockLoader === loader,self.server==server else{break}
             guard legacyStockLoads.count<2 else{break}
             guard !legacyStockModels.contains(id),legacyStockLoads[id]==nil,(legacyStockRetries[id] ?? 0)<=now else{continue}
             let token=UUID(),epoch=legacyAssetEpoch
@@ -3716,7 +3772,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     throw NativeRenderWareModel.Failure.unsupported("stock \(resolution.model.kind.rawValue) requires its verified activity/time adapter")
                 }
                 let request=loader.load(resolution){[weak self] result in
-                    guard let self,self.legacyAssetEpoch==epoch,self.legacyStockLoads[id]?.token==token else{return}
+                    guard let self,self.legacyAssetEpoch==epoch,self.legacyStockSource==source,self.fixedCJSourceIdentity()==source,self.legacyStockLoads[id]?.token==token else{return}
                     do {
                         let prepared=try result.get()
                         let collision=try collisionCatalog.resolve(modelID:id,modelName:prepared.model.model,
@@ -3735,11 +3791,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                             let metadata=file.metadata
                             let asset=NativeSAMPStockModels.Asset(path:metadata.path,bytes:metadata.bytes,crc32:metadata.crc32,sha256:metadata.sha256)
                             let request=loader.loadFile(.init(metadata:asset,url:file.url)){[weak self] result in
-                                guard let self,self.legacyAssetEpoch==epoch,self.legacyStockLoads[id]?.token==token else{return}
+                                guard let self,self.legacyAssetEpoch==epoch,self.legacyStockSource==source,self.fixedCJSourceIdentity()==source,self.legacyStockLoads[id]?.token==token else{return}
                                 self.legacyImportQueue.async {
                                     let decoded:Result<NativeRenderWareCollision.Model,Error>=Result {try collisionCatalog.prepare(try result.get().data,for:file)}
                                     DispatchQueue.main.async {
-                                        guard self.legacyAssetEpoch==epoch,self.legacyStockLoads[id]?.token==token else{return}
+                                        guard self.legacyAssetEpoch==epoch,self.legacyStockSource==source,self.fixedCJSourceIdentity()==source,self.legacyStockLoads[id]?.token==token else{return}
                                         do {self.installLegacyStockObject(prepared,collision:[try decoded.get()],id:id,token:token,epoch:epoch)}
                                         catch{self.failLegacyStockObject(id,token:token,error:error)}
                                     }
@@ -3754,7 +3810,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
     private func failLegacyStockObject(_ id:Int32,token:UUID,error:Error) {
-        guard legacyStockLoads[id]?.token==token else{return}
+        guard legacyStockSource==fixedCJSourceIdentity(),legacyStockLoads[id]?.token==token else{return}
         legacyStockLoads.removeValue(forKey:id);legacyStockRetries[id]=ProcessInfo.processInfo.systemUptime+30
         if legacyMissingObjects.insert(id).inserted{onStatus?("STOCK OBJECT \(id) UNAVAILABLE: \(error)")}
         pumpLegacyStockObjects()
@@ -3793,15 +3849,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             legacyModels.removeValue(forKey:unused);legacyStockModels.remove(unused);legacyStockUse.removeValue(forKey:unused)
             legacyStockCollisionKinds.removeValue(forKey:unused)
             legacyModelBytes-=legacyModelCosts.removeValue(forKey:unused) ?? 0;legacyCollisionModels.removeValue(forKey:unused)
-            for key in legacyExactTextures.keys.filter({$0.model==unused}) {
-                legacyExactTextures.removeValue(forKey:key);legacyTextureSources.removeValue(forKey:key);legacyTextureConflicts.remove(key)
-            }
-            legacyMaterialOwner?.reset()
+            retireLegacyStockTextures([unused])
         }
     }
     private func installLegacyStockObject(_ prepared:NativeSAMPStockAssetLoader.Prepared,collision:[NativeRenderWareCollision.Model],
                                           id:Int32,token:UUID,epoch:UInt64,inventoryAbsent:Bool=false) {
-        guard legacyAssetEpoch==epoch,legacyStockLoads[id]?.token==token else{return}
+        guard legacyAssetEpoch==epoch,legacyStockSource==fixedCJSourceIdentity(),legacyStockLoads[id]?.token==token else{return}
         do {
             guard legacyStockReferences.contains(id)else{legacyStockLoads.removeValue(forKey:id);pumpLegacyStockObjects();return}
             guard let catalog=legacyStockCatalog,let server,
@@ -3870,6 +3923,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         legacyCollisionKinds.removeValue(forKey:id)
     }
     private func synchronizeLegacyObjectPhysics(at timestamp:Double) {
+        synchronizeLegacyStockSource()
         guard let world=legacyCollisionWorld,let snapshot=legacyObjectSnapshot(at:timestamp)else{return}
         var live=Set<UInt16>()
         for draw in snapshot.draws {
@@ -3897,10 +3951,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func invalidateLegacyImports(){
         legacyAssetEpoch &+= 1
         _=legacyStockLoader?.reset();legacyStockLoads.removeAll();legacyStockRetries.removeAll()
+        for task in legacyTextureTasks.values{task.cancel()}
+        legacyTextureTasks.removeAll();legacyTextureTokens.removeAll();legacyTextureLoads.removeAll();legacyTextureRetries.removeAll()
     }
     func clearLegacyModels() {
-        legacyAssetEpoch &+= 1
-        _=legacyStockLoader?.reset();legacyStockLoads.removeAll();legacyStockRetries.removeAll();legacyStockUse.removeAll()
+        invalidateLegacyImports();legacyStockUse.removeAll()
         legacyStockReferences.removeAll();legacyStockModels.removeAll()
         legacyStockCollisionKinds.removeAll()
         for name in legacyPedModels.keys{skeletalActors.removeValue(forKey:name)}
@@ -3912,6 +3967,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return current
         }()
         legacyModels.removeAll();legacyPedModels.removeAll();legacyPedStyles.removeAll();legacyModelDefinitions.removeAll();legacyModelCosts.removeAll()
+        legacyArtworkTextureBindings.removeAll()
         legacyMaterialOwner?.reset();legacyExactTextures.removeAll();legacyTextureSources.removeAll();legacyTextureConflicts.removeAll();legacyTextureLoads.removeAll();legacyTextureRetries.removeAll();legacyMaterialErrors.removeAll();legacyExternalTextureBytes.removeAll();legacyTextureUse.removeAll()
         legacyModelBytes=0;legacyMissingObjects.removeAll()
         legacyCollisionWorld?.removeAll();legacyCollisionHandles.removeAll();legacyCollisionKinds.removeAll();legacyCollisionModels.removeAll()
@@ -3969,10 +4025,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     self.legacyModelDefinitions[model.customID]=model;self.legacyModelCosts[model.customID]=bytes
                     self.legacyCollisionModels[model.customID]=prepared.collision
                     for id in self.legacyCollisionKinds.keys.filter({self.legacyCollisionKinds[$0]==model.customID}){self.removeLegacyObjectCollision(id)}
+                    self.legacyArtworkTextureBindings.removeValue(forKey:model.customID)
                     if let dictionary,!dictionary.isEmpty {
+                        self.legacyArtworkTextureBindings[model.customID]=[:]
                         for (index,texture) in resources.plan.textures.enumerated() {
                             for id in Set([model.customID,model.baseID]) {
                                 let key=NativeSAMPObjectMaterials.TextureRequest(model:id,dictionary:dictionary.lowercased(),texture:texture.name.lowercased())
+                                let binding=NativeSAMPObjectMaterials.Texture(image:resources.textures[index],sampler:nil,containsTransparency:texture.containsTransparentPixels)
+                                self.legacyArtworkTextureBindings[model.customID]?[key]=(model.txd.checksum,binding)
                                 if let previous=self.legacyTextureSources[key],previous != model.txd.checksum {
                                     self.legacyTextureConflicts.insert(key);self.legacyExactTextures.removeValue(forKey:key)
                                 }else if !self.legacyTextureConflicts.contains(key) {
@@ -4003,15 +4063,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return try legacyMaterialOwner!.resolve(material)
     }
     private func loadLegacyDictionary(_ request:NativeSAMPObjectMaterials.TextureRequest) {
+        synchronizeLegacyStockSource()
         let now=ProcessInfo.processInfo.systemUptime
         guard legacyTextureLoads.count<2,!legacyTextureLoads.contains(request),(legacyTextureRetries[request] ?? 0)<=now,
               request.dictionary.utf8.count<=128,!request.dictionary.isEmpty,
               request.dictionary.utf8.allSatisfy({(48...57).contains($0)||(65...90).contains($0)||(97...122).contains($0)||$0==45||$0==95}),
               let server else{return}
-        legacyTextureLoads.insert(request);let epoch=legacyAssetEpoch
+        legacyTextureLoads.insert(request);let epoch=legacyAssetEpoch,source=fixedCJSourceIdentity(),token=UUID()
+        legacyTextureTokens[request]=token
         // Only the owner's exact raw dictionary path is considered. Server
         // strings cannot supply paths, hosts or a similarly named dictionary.
-        NativeResourceTransport.dataTask(with:server.path("game/\(request.dictionary).txd")){[weak self]data,response,_ in
+        let task=NativeResourceTransport.boundedDataTask(with:server.path("game/\(request.dictionary).txd"),maximumBytes:64*1024*1024){[weak self]data,response,_ in
             let result:Result<NativeRenderWareTXD.Texture,Error>=Result {
                 guard (response as?HTTPURLResponse)?.statusCode==200,let data,data.count<=64*1024*1024 else{throw NativeSAMPObjectMaterials.Failure.unresolvedTexture(request.dictionary,request.texture)}
                 let dictionary=try NativeRenderWareTXD.decode(data)
@@ -4019,8 +4081,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 return texture
             }
             DispatchQueue.main.async {
-                guard let self,self.legacyAssetEpoch==epoch else{return}
+                guard let self,self.legacyAssetEpoch==epoch,self.fixedCJSourceIdentity()==source,
+                      self.legacyTextureTokens[request]==token else{return}
                 self.legacyTextureLoads.remove(request)
+                self.legacyTextureTasks.removeValue(forKey:request);self.legacyTextureTokens.removeValue(forKey:request)
                 do {
                     let source=try result.get()
                     let bytes=source.mipLevels.compactMap(\.rgba8).reduce(0){$0+$1.count}
@@ -4036,7 +4100,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     self.legacyMaterialOwner?.reset()
                 }catch{self.legacyTextureRetries[request]=now+30}
             }
-        }.resume()
+        }
+        legacyTextureTasks[request]=task;task.resume()
     }
     private func drawLegacyObjects(encoder:MTLRenderCommandEncoder,matrix:simd_float4x4,eye:SIMD3<Float>) {
         refreshLegacyStockReferences()

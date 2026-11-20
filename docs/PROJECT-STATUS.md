@@ -1,6 +1,6 @@
 # ZGTA:SA project status
 
-**Snapshot date: 19 November 2026.** This page describes source and reported test evidence in the repository, **not** a guarantee of gameplay on every device. See the linked technical records for exact scope. New code may appear after this snapshot.
+**Snapshot date: 20 November 2026.** This page describes source and reported test evidence in the repository, **not** a guarantee of gameplay on every device. See the linked technical records for exact scope. New code may appear after this snapshot.
 
 ## At a glance
 
@@ -38,7 +38,9 @@ Core 146 connects the archived world's previously unused high-resolution image t
 
 Core 147 separates detailed-world solid and clear surfaces, then sorts clear world cells with vehicle parts. It also repairs vehicle paint-data binding after switching shader types. Focused actual-Metal/owner regressions, all 311 owner-local cell partitions and the full selected Metal/physics/audio/transport chain pass with 226 app/build inputs held. Both SDK products and a normal retained-resource Simulator join/Taxi/camera/exit/jump/base-source scene also pass. The initial private resource-link packaging failure and separate zero-test runner rejection remain retained; hardware and retail acceptance remain separate. [Surface scope and remaining gaps](research/rendering/CORE_PED_RENDERING_119.md#world-surface-phases-and-mixed-vehicle-transparency-147) distinguish this archived-client repair from original-PC parity.
 
-Core 148 repairs rider presentation time lost on slow displays and prevents new or repeatedly drawn rider/bike owners from borrowing elapsed time. Focused current/historical gates and the full selected Metal/physics/audio/transport chain pass with 226 app/build inputs held. SDK, archived direct-delta replays and normal retained-data Taxi/BMX checks are separate gates, with completed outcomes recorded in the release PR. [Timing scope and remaining differences](research/vehicles/CORE_VEHICLE_PRESENTATION_122.md#rider-presentation-intervals-148) preserve the distinction from original-PC accuracy.
+Core 148 repairs rider presentation time lost on slow displays and prevents new or repeatedly drawn rider/bike owners from borrowing elapsed time. Focused current/historical gates and the full selected Metal/physics/audio/transport chain pass with 226 app/build inputs held. Both SDK products, the actual archived direct-delta replays and normal retained-data Taxi/BMX cases subsequently pass. The owned server records 97 bicycle samples and 7.399 metres of movement. A separate normal installed148 third-person BMX case also passes, with the actual bike and rider visible and all camera preferences restored. Hardware and retail acceptance remain separate. [Timing scope and remaining differences](research/vehicles/CORE_VEHICLE_PRESENTATION_122.md#rider-presentation-intervals-148) preserve the distinction from original-PC accuracy.
+
+Core 149 repairs stock-resource lifetimes when the asset origin or installed-resource generation changes, including old callbacks, physical collision retirement and shared custom-artwork texture bindings. Authored owner and actual HTTP/RW/Metal/Rapier transition gates pass, followed by the full selected Metal/physics/audio/transport chain with all 226 app/build inputs held. Build, installed-game, hardware and retail acceptance remain separate. See the [source lifetime record](research/resources/CORE_STOCK_SOURCE_149.md).
 
 ## Where we're going
 

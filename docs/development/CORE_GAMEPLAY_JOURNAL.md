@@ -1,5 +1,18 @@
 # Core gameplay audit journal
 
+## Core149 stock resource lifetimes
+
+Asset-source changes and same-content installation repairs now retire obsolete
+stock metadata, loaders, meshes, collision bodies and pending dictionary work.
+Server object state and independently downloaded artwork retain their own
+ownership. Delayed/reentrant callbacks cannot publish old resources or retire a
+replacement request. Shared custom-artwork texture bindings survive retirement.
+Authored owner and actual HTTP/RW/Metal/Rapier gates pass, as does the full
+selected Metal/physics/audio/transport chain with all 226 app/build inputs held.
+SDK, installed-app, physical-device and original-PC acceptance are separate.
+See [source lifetime evidence](../research/resources/CORE_STOCK_SOURCE_149.md).
+
+
 ## 2026-11-20 — Rider presentation time and admission (148)
 
 Five seated fallback paths and the remote-bike presentation owner now consume

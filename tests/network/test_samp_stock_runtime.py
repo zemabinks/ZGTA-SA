@@ -12,6 +12,7 @@ _ZGTA_ROOT = _zgta_Path(__file__).resolve().parents[2]
 if str(_ZGTA_ROOT) not in _zgta_sys.path: _zgta_sys.path.insert(0, str(_ZGTA_ROOT))
 
 from pathlib import Path
+import argparse
 import copy
 import gzip
 import hashlib
@@ -30,7 +31,12 @@ from tests.movement.smoke_native_climb_runtime import function
 from tests.resources.smoke_native_renderware_collision import fixture
 
 ROOT=Path(__file__).resolve().parents[2]
-OUT=ROOT/'local-only/research/stock-runtime';OUT.mkdir(parents=True,exist_ok=True)
+parser=argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--renderer',type=Path,help='Optional historical renderer for an explicit negative reproduction')
+parser.add_argument('--source-transitions',action='store_true',help='Also exercise asset-source changes and resource-generation repair')
+parser.add_argument('--out',type=Path)
+args=parser.parse_args()
+OUT=args.out or ROOT/'local-only/research/stock-runtime';OUT.mkdir(parents=True,exist_ok=True)
 spec=importlib.util.spec_from_file_location('stock_runtime_own_fixtures',ROOT/'tests/artwork_session/fixtures.py')
 own=importlib.util.module_from_spec(spec);spec.loader.exec_module(own)
 dff,txd=own.assets()
@@ -48,7 +54,7 @@ def raw_col(name,model_id=0,empty=False):
 
 source_hash=hashlib.sha256(b'own generated IDE definitions for stock runtime regressions').hexdigest()
 models=[];assets={};collision=[]
-for i,name in [(1000,'panel'),(1001,'no_col'),(1002,'incomplete'),(1003,'bad_col'),(1004,'slow'),(1005,'empty_col')]:
+for i,name in [(1000,'panel'),(1001,'no_col'),(1002,'incomplete'),(1003,'bad_col'),(1004,'slow'),(1005,'empty_col'),(1006,'reentry')]:
     for ext,data in [('dff',dff),('txd',txd)]:
         if name=='slow'and ext=='dff':data=data[:8]+struct.pack('<I',int.from_bytes(data[8:12],'little')^1)+data[12:]
         path='game/native/stock-img/'+hashlib.sha256(data).hexdigest()+'.'+ext
@@ -95,8 +101,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args):pass
     def do_GET(self):
         global gate_enabled
+        original_path=self.path
+        for prefix in ['/source-b','/source-c']:
+            if self.path.startswith(prefix+'/'):self.path=self.path[len(prefix):];break
         cookie=self.headers.get('Cookie')
-        event=dict(path=self.path,cookie=None if cookie is None else '<redacted>',
+        event=dict(path=self.path,requestedPath=original_path,cookie=None if cookie is None else '<redacted>',
                    cookieNames=[]if cookie is None else sorted(v.strip().split('=',1)[0]for v in cookie.split(';')),
                    authorization=self.headers.get('Authorization'),encoding=self.headers.get('Accept-Encoding'),gated=gate_enabled)
         with event_lock:events.append(event)
@@ -123,7 +132,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data);self.wfile.flush()
         except(BrokenPipeError,ConnectionResetError):pass
 
-renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
+renderer=(args.renderer or ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
 markers=['private enum LegacyStockMetadata','func receiveLegacyObject(','private func loadLegacyStockCatalogs(',
          'private func legacyStockAccess(',
          'private func refreshLegacyStockReferences(','private func pumpLegacyStockObjects(','private func failLegacyStockObject(',
@@ -132,15 +141,26 @@ markers=['private enum LegacyStockMetadata','func receiveLegacyObject(','private
          'private func removeLegacyObjectCollision(','private func synchronizeLegacyObjectPhysics(','func invalidateLegacyImports(',
          'private func resolvedLegacyMaterial(','private func loadLegacyDictionary(','private func drawLegacyObjects(']
 methods='\n'.join(function(renderer,m).replace('private ','')for m in markers)
+for marker in ['private func synchronizeLegacyStockSource(', 'private func retireLegacyStockTextures(', 'private func restoreLegacyArtworkTextures(']:
+    if marker in renderer:methods+='\n'+function(renderer,marker).replace('private ','')
+if args.renderer and 'private func synchronizeLegacyStockSource(' not in renderer:
+    methods+='\nfunc synchronizeLegacyStockSource() {}\n'
 prefixes=['private var legacyStock','private enum LegacyStockCollisionKind','private var legacyModelPipelines:',
           'private var legacyModels:','private var legacyModelDefinitions:','private var legacyModelCosts:',
           'private var legacyModelBytes=','private var legacyAssetEpoch:','private let legacyImportQueue=',
           'private var legacyMissingObjects=','private var legacyMaterialOwner:','private var legacyExactTextures:',
           'private var legacyTexture','private var legacyExternalTextureBytes:','private var legacyMaterialErrors=',
+          'private var legacyArtworkTextureBindings:',
           'private var legacyCollision','private lazy var legacyCollisionWorld=','let legacyObjects=', 'var legacyVirtualWorld:']
 properties='\n'.join(line.strip().replace('private ','')for line in renderer.splitlines()if any(line.strip().startswith(p)for p in prefixes))
 transfer=function(renderer,'private final class LegacyStockMetadataTransfer:').replace('private final class','final class')
 carrier=(ROOT/'tests/stock_runtime/main.swift').read_text().replace('// ACTUAL_PROPERTIES',properties).replace('// ACTUAL_METHODS',methods).replace('// ACTUAL_METADATA_TRANSFER',transfer)
+carrier=carrier.replace('// SOURCE_TRANSITION_ENABLED',str(args.source_transitions).lower())
+if 'private var legacyArtworkTextureBindings:' in renderer:
+    carrier=carrier.replace('// ARTWORK_BINDING_WITNESS','''let bindingKey=carrier.legacyExactTextures.keys.first{$0.model==980}!
+            let binding=carrier.legacyExactTextures[bindingKey]!,crc=carrier.legacyTextureSources[bindingKey]!
+            carrier.legacyArtworkTextureBindings[20001]=[bindingKey:(crc,binding)]''')
+    carrier=carrier.replace('// ARTWORK_BINDING_RETAINED','''require(carrier.legacyExactTextures[bindingKey]?.image === binding.image && !carrier.legacyTextureConflicts.contains(bindingKey),"stock retirement lost surviving artwork texture binding")''')
 source=OUT/'main.swift';source.write_text(carrier)
 names=['ServerAddress.swift','NativeSAMPStockModels.swift','NativeSAMPStockCollisionCatalog.swift','NativeSAMPStockAssetLoader.swift',
        'NativeStockAssetAccess.swift',
@@ -151,6 +171,7 @@ hashes={n:hashlib.sha256((ROOT/'ios/App'/n).read_bytes()).hexdigest()for n in na
 library=ROOT/'local-only/native-physics'/('macos-arm64'if platform.machine()=='arm64'else'macos-x86_64')
 subprocess.run(['python3',str(ROOT/'native-physics/source_stamp.py'),'check',str(library)],check=True)
 binary=OUT/'stock-runtime-tests'
+if args.source_transitions:(OUT/'source-check.txd').write_bytes(txd)
 cmd=['xcrun','swiftc','-Onone','-module-cache-path',str(OUT/'host-modules'),'-I',str(ROOT/'native-physics/include'),
      *[str(ROOT/'ios/App'/n)for n in names],str(source),'-L',str(library),'-lzgtasa_native_physics',
      '-framework','Security','-framework','CoreFoundation','-o',str(binary)]
@@ -163,8 +184,9 @@ if not(binary.exists()and cached.get('fingerprint')==fingerprint and cached.get(
     assert build.returncode==0,(OUT/'build.log').read_text()
     build_info.write_text(json.dumps({'fingerprint':fingerprint,'binarySHA256':hashlib.sha256(binary.read_bytes()).hexdigest()},indent=2)+'\n')
 server=Server(('127.0.0.1',0),Handler);threading.Thread(target=server.serve_forever,daemon=True).start()
+second_server=Server(('127.0.0.1',0),Handler);threading.Thread(target=second_server.serve_forever,daemon=True).start()
 try:
-    run=subprocess.run([str(binary),f'http://127.0.0.1:{server.server_port}',str(ROOT/'ios/App/NativeRenderWareModel.metal'),str(OUT)],capture_output=True,text=True,timeout=180)
+    run=subprocess.run([str(binary),f'http://127.0.0.1:{server.server_port}',str(ROOT/'ios/App/NativeRenderWareModel.metal'),str(OUT),f'http://127.0.0.1:{second_server.server_port}'],capture_output=True,text=True,timeout=180)
     (OUT/'stdout.log').write_text(run.stdout);(OUT/'stderr.log').write_text(run.stderr)
     assert run.returncode==0,(run.returncode,run.stdout,run.stderr)
     report=json.loads((OUT/'report.json').read_text())
@@ -179,9 +201,10 @@ try:
     assert accepted and all(row['cookieNames']==['zgta_access']for row in accepted)
     assert not any('must-not-follow'in row['path']for row in events)
     report.update(httpRequests=len(events),credentialFreeBaseline=True,gatedHTTPRequests=len(gated),onlyFirstPartyAccessCookie=True,
-                  noAuthorizationOrIdentityCookies=True,redirectFollowed=False,sourceAndOwnerUnchanged=True,sourceSHA256=hashes)
+                  noAuthorizationOrIdentityCookies=True,redirectFollowed=False,sourceAndOwnerUnchanged=True,sourceSHA256=hashes,
+                  capturedRendererSHA256=hashlib.sha256(renderer.encode()).hexdigest())
     (OUT/'requests.json').write_text(json.dumps(events,indent=2)+'\n');(OUT/'report.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
     print(json.dumps(report,indent=2,sort_keys=True))
 finally:
     (OUT/'requests-last-attempt.json').write_text(json.dumps(events,indent=2)+'\n')
-    server.shutdown();server.server_close()
+    server.shutdown();server.server_close();second_server.shutdown();second_server.server_close()
