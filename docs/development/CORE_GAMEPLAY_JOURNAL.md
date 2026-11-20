@@ -1,5 +1,42 @@
 # Core gameplay audit journal
 
+## Core154 bounded city collision preparation — scoped source and app acceptance
+
+City-cell transfers and CPU preparation now have one active serial owner and
+up to32 queued descriptors. The shared bounded transport limits each response
+to16MiB. Spatial lookup construction, SCL2 decoding and physical mesh grouping
+run on a utility worker from immutable material/fallback snapshots. Only the
+existing main-thread owner registers native colliders. Source/request fences
+remain in force; a changed material snapshot must be prepared again.
+
+The actual worker passes49 authored scheduling/physical checks, the composed
+renderer passes41 floor/source checks, and the source-owner carrier retains
+all32 checks. The historical source still fails its intended obsolete-loading
+oracle. A matched host Debug comparison preserves225 CPU/Rapier height,
+surface and material samples across three unchanged owner-local cells. Main
+work measures235–404ms before and26–55ms after, while CPU preparation moves
+to the worker. This is not a rendered or physical-iPhone frame-time result.
+
+Initial fixture momentum and diagnostic compile failures remain retained.
+The complete selected Metal/physics/audio/transport chain passes (1015.34s),
+with all230 App/build inputs and17 captured test inputs held. Four original
+rigs, stock HTTP/Metal/Rapier, project, host and layout gates also pass. Both
+SDK products subsequently pass (universal Simulator490.6s; arm64 iPhone
+Release510.3s), with230 product inputs,39 dependency files and14 private menu
+files held. A normal retained-data Simulator case then passes (512.35s, one
+executed test, zero failures): development skins7/2/0, Taxi/camera/exit/jump,
+followed by installed CJ0 walking/camera/jump without CJ or collision HTTP
+fallback. Twelve reviewed captures retain original character textures and show
+a rear-to-front camera response. Actual owned-server logs confirm movement on
+all four joins and driver entry/exit. Resources/settings hold and owned test
+services are stopped. Original camera curves and full seated-pose quality
+remain unverified. Native
+collider registration and explicit deferred-metadata rebuilds still have
+synchronous cost. Original-PC parity, hardware behavior, full ambient
+simulation and every other unmeasured checklist row remain open. See the
+[streaming record](../research/resources/CORE_SCENE_RESOURCE_LIFETIMES_153.md#bounded-city-collision-preparation-154).
+
+
 ## Core153 camera and physical cell lifetimes — scoped source and app acceptance
 
 Per-invocation camera tokens reject queued obsolete publications and preserve

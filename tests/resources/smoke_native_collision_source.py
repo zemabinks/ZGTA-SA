@@ -38,6 +38,8 @@ def main():
     library = args.library.resolve() / 'libzgtasa_native_physics.a'
     subprocess.run(['python3', str(ROOT / 'native-physics/source_stamp.py'), 'check', str(library.parent)], check=True)
     paths = [source / 'ios/App' / (n + '.swift') for n in NAMES]
+    asynchronous = (source / 'ios/App/NativeCollisionCellLoader.swift').is_file()
+    if asynchronous: paths.append(source / 'ios/App/NativeCollisionCellLoader.swift')
     renderer = source / 'ios/App/NativeWorldRenderer.swift'
     fixture = Path(__file__).with_suffix('.swift')
     frozen = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in [*paths, renderer, fixture, Path(__file__), library]}
@@ -48,7 +50,11 @@ def main():
     # parser, ground-cell owner and physics engine remain unchanged.
     methods = helper + '\n' + function(text, '    private func loadCollision(name:String)')
     harness = out / 'Gate.swift'
-    harness.write_text(fixture.read_text().replace('// ACTUAL_RENDERER_METHODS', methods))
+    carrier = fixture.read_text().replace('// ACTUAL_RENDERER_METHODS', methods)
+    carrier = carrier.replace('COLLISION_TASK_TYPE', 'UUID' if asynchronous else 'NativeResourceTask')
+    carrier = carrier.replace('// ASYNC_COLLISION_OWNER', 'let collisionCellLoader=NativeCollisionCellLoader()' if asynchronous else '')
+    carrier = carrier.replace('ASYNC_COLLISION_VALUE', 'true' if asynchronous else 'false')
+    harness.write_text(carrier)
     command = ['xcrun', 'swiftc', '-j', '1', '-whole-module-optimization', '-num-threads', '1', '-Onone',
                '-module-cache-path', str(out / 'modules'), '-I', str(ROOT / 'native-physics/include'),
                *map(str, paths), str(harness), '-L', str(library.parent), '-lzgtasa_native_physics',

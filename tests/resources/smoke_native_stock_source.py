@@ -75,7 +75,10 @@ city.generation+=1;city.synchronizeCollisionResourceSource()
 require(cityCurrent.cancellations==1 && city.collisions.isEmpty && city.groundVehicle!.cells.isEmpty && city.collisionRequests.resets==heldCityReset+1,"installation-generation repair retained old city owner")
 print("PASS \\(checks) total actual stock/pedestrian/city-source composition checks; cell and transfer boundaries are explicit spies")
 '''
-    out=ROOT/'local-only/research/stock-source-149/owners'/str(time.time_ns());out.mkdir(parents=True)
+    if 'collisionCellLoader.reset()' in renderer:
+        source=source.replace('city.collisionLoadTasks=["c1":cityTask];', 'city.collisionCellLoader.tasks=[cityTask];city.collisionLoadTasks=["c1":cityTask];')
+        source=source.replace('city.collisionLoadTasks=["c1":cityCurrent];', 'city.collisionCellLoader.tasks=[cityCurrent];city.collisionLoadTasks=["c1":cityCurrent];')
+    out=ROOT/'local-only/research/stock-source-149/owners' /str(time.time_ns());out.mkdir(parents=True)
     (out/'main.swift').write_text(source)
     command=['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-Onone',
              '-module-cache-path',str(out/'modules'),str(out/'main.swift'),'-o',str(out/'owners')]

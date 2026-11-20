@@ -37,7 +37,8 @@ private final class Harness {
     var collisionRetryAfter:[String:Date]=[:]
     var collisionResourceSource:String?
     var collisionLoadTokens:[String:UUID]=[:]
-    var collisionLoadTasks:[String:NativeResourceTask]=[:]
+    var collisionLoadTasks:[String:COLLISION_TASK_TYPE]=[:]
+    // ASYNC_COLLISION_OWNER
     let groundVehicle:NativeGroundVehicle?
     init()throws {
         groundVehicle=NativeGroundVehicle()
@@ -66,6 +67,12 @@ private func authoredFloorData(_ height:Float)->Data {
     for n in [UInt32(0),1,2,0,2,3]{u32(n)}
     data.append(contentsOf:[2,2,0,0,1,1,0,0]);return data
 }
+private let asynchronous=ASYNC_COLLISION_VALUE
+private func until(_ message:String,_ condition:()->Bool)throws {
+    let end=Date().addingTimeInterval(8)
+    while !condition() && Date()<end{RunLoop.main.run(until:Date().addingTimeInterval(0.002))}
+    try check(condition(),message)
+}
 private func drain()throws {
     var finished=false;DispatchQueue.main.async{finished=true}
     let end=Date().addingTimeInterval(5)
@@ -80,19 +87,21 @@ private func drain()throws {
     private static func run()throws {
         try check(Thread.isMainThread,"main scene owner required")
         var requests:[Request]=[]
-        NativeResourceTransport.install{request,completion in let task=Request(request,completion);requests.append(task);return task}
+        let factory:NativeResourceTransport.Factory={request,completion in let task=Request(request,completion);requests.append(task);return task}
+        NativeResourceTransport.install(factory,bounded:{request,_,completion in factory(request,completion)})
         let h=try Harness(),zero=authoredFloorData(0),raised=authoredFloorData(3)
         h.loadCollision(name:"c0");try check(requests.count==1,"initial collision request missing")
         try check(requests[0].url.path=="/game/world/c0.col.bin" && requests[0].resumes==1,"original collision route/resume changed")
         // Old transport has already finished; its publication is queued.
         try requests[0].complete(zero)
         h.binding="authored-source-b";h.loadCollision(name:"c0")
+        if asynchronous {try until("obsolete collision loading blocks the new resource source"){requests.count==2}}
         try check(requests.count==2,"obsolete collision loading blocks the new resource source")
-        try check(requests[0].cancels==1,"old collision task not cancelled")
+        if !asynchronous{try check(requests[0].cancels==1,"old collision task not cancelled")}
         try drain()
         try check(h.collisions.isEmpty && h.collisionLoading.contains("c0"),"old completion published geometry or erased the new loading slot")
         try check(try h.physicalHeight()==nil,"old queued collision installed a physical floor")
-        try requests[1].complete(raised);try drain()
+        try requests[1].complete(raised);try until("current collision preparation/publication timeout"){h.collisions["c0"] != nil};try drain()
         try check(h.collisions["c0"]?.height(x:0,y:0,near:4,maxDrop:10)==3,"current native cell query did not publish raised floor")
         try check(h.groundVehicle?.isCellLoaded("c0")==true && h.collisionLoading.isEmpty,"current physical cell/loading ownership not committed")
         try check(abs(((try h.physicalHeight()) ?? -100)-3) < 0.0001,"actual current physical floor differs")
@@ -118,10 +127,12 @@ private func drain()throws {
         // A late prior-source failure cannot arm a current-source retry delay.
         h.loadCollision(name:"c0");let oldFailure=requests.count-1
         try requests[oldFailure].complete(nil,status:503)
-        h.binding="authored-source-d";h.loadCollision(name:"c0");let current=requests.count-1
+        h.binding="authored-source-d";h.loadCollision(name:"c0")
+        if asynchronous{try until("new source after old failure not admitted"){requests.count==oldFailure+2}}
+        let current=requests.count-1
         try drain()
         try check(h.collisionRetryAfter["c0"]==nil && h.collisionLoading.contains("c0"),"old-source failure poisoned the current retry/loading owner")
-        try requests[current].complete(zero);try drain()
+        try requests[current].complete(zero);try until("new source after old failure publication timeout"){h.collisions["c0"] != nil};try drain()
         try check(abs((try h.physicalHeight()) ?? -100)<0.0001,"new source after obsolete failure did not install its floor")
         // Same-source refresh holds the accepted floor; this is no blanket
         // collision reset on each scene update.
@@ -129,7 +140,8 @@ private func drain()throws {
         try check(requests.count==count && h.groundVehicle!.isCellLoaded("c0"),"same source unnecessarily reloaded/retired its floor")
         // A result for a no-longer-retained cell is discarded normally.
         h.binding="authored-source-e";h.loadCollision(name:"c0")
-        h.desiredPhysicsCells=[];try requests.last!.complete(raised);try drain()
+        h.desiredPhysicsCells=[];try requests.last!.complete(raised)
+        try until("offscreen collision request did not release its slot"){h.collisionLoading.isEmpty};try drain()
         try check(h.collisions.isEmpty && !h.groundVehicle!.isCellLoaded("c0") && h.collisionLoading.isEmpty,"offscreen current response published or retained loading ownership")
         try check(try h.physicalHeight()==nil,"offscreen response installed physical geometry")
         try check(requests.allSatisfy{$0.resumes==1},"collision request resumed more than once")
