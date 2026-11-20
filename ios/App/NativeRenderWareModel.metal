@@ -33,20 +33,42 @@ vertex NativeRWOut native_rw_model_vertex(uint index [[vertex_id]],
     out.color = (u.settings.z > 0.5f ? float4(1) : v.color) * u.color;
     return out;
 }
+static float4 nativeRWMaterial(float2 uv, float4 vertexColor, float3 normal,
+                              texture2d<float> image, sampler imageSampler,
+                              constant NativeRWUniforms &u) {
+    // No-map materials have no texture operation. A bound identity texture
+    // alone is insufficient: a border sampler can turn it into zero outside
+    // the image. The fallback binding still satisfies Metal's resource ABI.
+    float4 texel = u.settings.w > 0.5f ? image.sample(imageSampler, uv) : float4(1);
+    float4 color = texel * vertexColor;
+    if (color.a < u.settings.y) discard_fragment();
+    float n2 = dot(normal, normal);
+    float l2 = dot(u.lightDirectionAmbient.xyz, u.lightDirectionAmbient.xyz);
+    float diffuse = n2 > 1e-12 && l2 > 1e-12
+        ? max(0.0f, dot(normal * rsqrt(n2), u.lightDirectionAmbient.xyz * rsqrt(l2))) : 0.0f;
+    color.rgb *= max(0.0f, u.lightDirectionAmbient.w + u.settings.x * diffuse);
+    return color;
+}
 fragment float4 native_rw_model_fragment(NativeRWOut in [[stage_in]],
                                         texture2d<float> image [[texture(0)]],
                                         sampler imageSampler [[sampler(0)]],
                                         constant NativeRWUniforms &u [[buffer(1)]]) {
-    // No-map materials have no texture operation. A bound identity texture
-    // alone is insufficient: a border sampler can turn it into zero outside
-    // the image. The fallback binding still satisfies Metal's resource ABI.
-    float4 texel = u.settings.w > 0.5f ? image.sample(imageSampler, in.uv) : float4(1);
-    float4 color = texel * in.color;
-    if (color.a < u.settings.y) discard_fragment();
-    float n2 = dot(in.normal, in.normal);
-    float l2 = dot(u.lightDirectionAmbient.xyz, u.lightDirectionAmbient.xyz);
-    float diffuse = n2 > 1e-12 && l2 > 1e-12
-        ? max(0.0f, dot(in.normal * rsqrt(n2), u.lightDirectionAmbient.xyz * rsqrt(l2))) : 0.0f;
-    color.rgb *= max(0.0f, u.lightDirectionAmbient.w + u.settings.x * diffuse);
+    return nativeRWMaterial(in.uv, in.color, in.normal, image, imageSampler, u);
+}
+
+// The skinned stage adds clip-W depth. The existing static-object interface and
+// uniforms stay unchanged; both fragments share the exact material operation.
+struct NativeRWPedSceneOut {
+    float4 position [[position]]; float2 uv; float4 color; float3 normal; float depth;
+};
+struct NativeRWPedEnvironment { float4 fogColor; float4 fogSettings; };
+fragment float4 native_rw_ped_fragment(NativeRWPedSceneOut in [[stage_in]],
+    texture2d<float> image [[texture(0)]], sampler imageSampler [[sampler(0)]],
+    constant NativeRWUniforms &u [[buffer(1)]],
+    constant NativeRWPedEnvironment &scene [[buffer(4)]]) {
+    float4 color = nativeRWMaterial(in.uv, in.color, in.normal, image, imageSampler, u);
+    float fog = scene.fogSettings.z * clamp((in.depth - scene.fogSettings.x) /
+        max(1.0f, scene.fogSettings.y - scene.fogSettings.x), 0.0f, 1.0f);
+    color.rgb = mix(color.rgb, scene.fogColor.rgb, fog);
     return color;
 }

@@ -5018,8 +5018,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let customPed {
                 guard let pose,let pipelines=fixedPlayer?.gpu.pipelines ?? legacyPedPipelines else{continue}
                 var overrides=NativeRenderWareModel.DrawOverrides();overrides.tint.w=opacity
+                let environment=NativeRenderWarePedModel.Environment(fogColor:uniforms.fogColor,fogSettings:uniforms.fogSettings)
                 do {for index in customPed.plan.model.draws.indices {
-                    try customPed.encode(drawIndex:index,pose:pose,encoder:encoder,pipelines:pipelines,viewProjection:matrix,worldTransform:transform,overrides:overrides)
+                    try customPed.encode(drawIndex:index,pose:pose,encoder:encoder,pipelines:pipelines,viewProjection:matrix,worldTransform:transform,overrides:overrides,environment:environment)
                 }}catch{onStatus?("CUSTOM CHARACTER DRAW FAILED: \(error)");continue}
             } else if let mesh {
             if let pose, let actor = skeletalActors[name], let skeletalPipeline {

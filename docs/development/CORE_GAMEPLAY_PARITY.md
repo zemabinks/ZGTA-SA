@@ -1,5 +1,23 @@
 # Core GTA San Andreas gameplay parity
 
+## Core151 imported-character scene fog — scoped source and app acceptance
+
+The native CJ/custom-pedestrian path now receives the environment already
+configured for the actor. A separate skinned fragment applies clip-W distance
+fog after the shared material operation and before blending. Every draw binds
+its own environment; the disabled preview/interior path is explicit. Static
+object uniforms and movement/network ownership are unchanged. Actual150 fails the intended half-fog pixel assertion;151 passes5424 scene/pixel
+checks over32 skinned draws/14 Metal passes. The full selected Metal/physics/
+audio/transport chain passes (854.5s), with227 App/build inputs and three
+test inputs held. Both SDK products subsequently pass (Simulator470.7s; iPhone492.7s), as does
+the normal retained-data151 case (one executed test, zero failures; the separate
+zero-test runner rejection remains retained). Reviewed near-character captures
+retain original CJ textures, objects/HUD/controls and the installed main menu;
+distant fog values remain the GPU oracle's scope. Owned QA processes are stopped. This is not a verified retail or timecycle-lighting
+claim. See the [scene record](../research/rendering/CORE_IMPORTED_CHARACTER_SCENE_151.md).
+
+
+
 ## Core150 native character material binding and stock rig preparation
 
 The existing native imported-CJ/custom-skin draw now admits its bound original
