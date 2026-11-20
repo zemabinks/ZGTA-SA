@@ -9,7 +9,7 @@ struct NativeRWPedUniforms {
     float4 color; float4 lightDirectionAmbient; float4 settings;
 };
 struct NativeRWPedSkin { float4 point; uint4 bones; float4 weights; };
-struct NativeRWPedOut { float4 position [[position]]; float2 uv; float4 color; float3 normal; };
+struct NativeRWPedOut { float4 position [[position]]; float2 uv; float4 color; float3 normal; float depth; };
 
 static float4 nativeRWPedPosition(const device NativeRWPedSkin &skin, constant float4x4 *palette) {
     float4 point(0);
@@ -28,6 +28,7 @@ vertex NativeRWPedOut native_rw_ped_vertex(uint id [[vertex_id]],
     const device NativeRWPedSkin *skin [[buffer(2)]], constant float4x4 *palette [[buffer(3)]]) {
     NativeRWPedVertex source = vertices[id]; NativeRWPedOut out;
     out.position = u.viewProjection * u.model * nativeRWPedPosition(skin[id], palette);
+    out.depth = out.position.w;
     out.normal = (u.normalMatrix * float4(nativeRWPedNormal(source.normal, skin[id], palette), 0)).xyz;
     out.uv = source.uv;
     out.color = (u.settings.z > 0.5f ? float4(1) : source.color) * u.color;

@@ -23,6 +23,14 @@ enum NativeRenderWarePedModel {
         let model: NativeRenderWareModel.Plan
     }
 
+    /// Uses the same clip-W distance and linear fog interval as ordinary
+    /// actors. Kept separate from material tint, alpha and directional light.
+    /// The default preserves isolated resource previews and verifier draws.
+    struct Environment {
+        var fogColor = SIMD4<Float>(0, 0, 0, 1)
+        var fogSettings = SIMD4<Float>(0, 1, 0, 0)
+    }
+
     static func prepare(dff: NativeRenderWareDFF, txd: NativeRenderWareTXD.TextureDictionary?,
                         rigLimits: NativeRenderWareSkeleton.Limits = .init(),
                         modelLimits: NativeRenderWareModel.Limits = .init()) throws -> Plan {
@@ -80,8 +88,8 @@ enum NativeRenderWarePedModel {
         let blendedDepth: MTLDepthStencilState
         init(device: MTLDevice, library: MTLLibrary, color: MTLPixelFormat, depth: MTLPixelFormat = .depth32Float) throws {
             guard let vertex = library.makeFunction(name: "native_rw_ped_vertex"),
-                  let fragment = library.makeFunction(name: "native_rw_model_fragment") else {
-                throw Failure.gpu("ped vertex/static model fragment missing from library")
+                  let fragment = library.makeFunction(name: "native_rw_ped_fragment") else {
+                throw Failure.gpu("ped vertex/scene fragment missing from library")
             }
             func pipeline(_ blend: Bool) throws -> MTLRenderPipelineState {
                 let d = MTLRenderPipelineDescriptor(); d.vertexFunction = vertex; d.fragmentFunction = fragment
@@ -118,7 +126,8 @@ enum NativeRenderWarePedModel {
         /// DFF atomic transform or skeleton.axis again would double-transform it.
         func encode(drawIndex: Int, pose: NativeSkeletalActor.Pose, encoder: MTLRenderCommandEncoder,
                     pipelines: Pipelines, viewProjection: simd_float4x4, worldTransform: simd_float4x4,
-                    overrides: NativeRenderWareModel.DrawOverrides = .init()) throws {
+                    overrides: NativeRenderWareModel.DrawOverrides = .init(),
+                    environment: Environment = .init()) throws {
             guard overrides.visible else { return }
             guard plan.model.draws.indices.contains(drawIndex), pose.palette.count == plan.skeleton.bones.count,
                   pose.palette.allSatisfy({ NativeRenderWarePedModel.finite($0) }) else {
@@ -130,6 +139,7 @@ enum NativeRenderWarePedModel {
             guard NativeRenderWarePedModel.finite(viewProjection), NativeRenderWarePedModel.finite(model),
                   determinant.isFinite, abs(determinant) > 1e-12,
                   (0..<4).allSatisfy({ overrides.tint[$0].isFinite }), overrides.alphaCutoff.isFinite,
+                  (0..<4).allSatisfy({environment.fogColor[$0].isFinite && environment.fogSettings[$0].isFinite}),
                   overrides.ambient.isFinite, overrides.diffuse.isFinite,
                   (0..<3).allSatisfy({ overrides.lightDirection[$0].isFinite }) else {
                 throw Failure.malformed("non-finite/singular transform or lighting")
@@ -156,6 +166,10 @@ enum NativeRenderWarePedModel {
             encoder.setVertexBuffer(resources.geometries[0].vertices, offset: 0, index: 0)
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<NativeRenderWareModel.Uniforms>.stride, index: 1)
             encoder.setFragmentBytes(&uniforms, length: MemoryLayout<NativeRenderWareModel.Uniforms>.stride, index: 1)
+            // Every draw binds its scene, including the disabled default. A
+            // prior character's fog may never leak into another render owner.
+            var scene = environment
+            encoder.setFragmentBytes(&scene, length: MemoryLayout<Environment>.stride, index: 4)
             actor.bind(pose: pose, encoder: encoder)
             encoder.setFragmentTexture(boundTexture ?? resources.whiteTexture, index: 0)
             encoder.setFragmentSamplerState(overrides.samplerOverride ?? resources.samplers[material.sampler], index: 0)
