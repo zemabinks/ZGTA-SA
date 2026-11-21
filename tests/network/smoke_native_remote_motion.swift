@@ -20,6 +20,7 @@ private final class PacketOwner {
 }
 private final class SceneOwner {
     let weaponFlashes=NativeWeaponFlash(),humanShots=NativeHumanShots()
+    let localShotPlayerOwners=NativeShotOwners.Ledger<NativeShotOwners.Player>()
     var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
     var remoteServerTimeOffsetMilliseconds:Double?
     var support:[String:SIMD3<Float>]=[:]

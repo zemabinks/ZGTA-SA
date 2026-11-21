@@ -163,7 +163,7 @@ def source_files(root):
         for path in sorted((root / 'ios').iterdir()):
             if path.is_file() and allowed(path.relative_to(root).as_posix()):
                 yield path
-    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'native-installer', 'native-audio', 'tests', 'tools', 'docs', 'test-fixtures/native-menu', '.github'):
+    for directory in ('ios/App', 'ios/ZGTASA.xcodeproj', 'native-physics', 'native-samp', 'native-menu-codec', 'native-installer', 'native-audio', 'server', 'tests', 'tools', 'docs', 'test-fixtures/native-menu', '.github'):
         base = root / directory
         if base.is_dir():
             for path in sorted(base.rglob('*')):

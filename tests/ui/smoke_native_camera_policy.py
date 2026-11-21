@@ -54,7 +54,7 @@ def main():
     def compile_and_run(label,source):
         carrier.write_text(source)
         binary=work/label
-        command=['xcrun','swiftc','-whole-module-optimization','-Onone','-module-cache-path',str(OUT/'modules'),'-I',str(ROOT/'native-physics/include'),
+        command=['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-Onone','-module-cache-path',str(OUT/'modules'),'-I',str(ROOT/'native-physics/include'),
                  *sources,str(carrier),'-L',str(args.library),'-lzgtasa_native_physics','-framework','Security',
                  '-framework','CoreFoundation','-o',str(binary)]
         (OUT/(label+'-command.json')).write_text(json.dumps(command,indent=2)+'\n')

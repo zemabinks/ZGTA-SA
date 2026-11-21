@@ -80,7 +80,7 @@ final class Renderer {
  let humanShots=Effects(),weaponFlashes=Effects();let remoteGunAudio=RemoteGunOwner()
  var humanShotPathsReported:Set<String>=["foot"];var onRemoteGunAudio:((Int)->Void)?
  let ordinaryShotEffects=Effects(),localShots=Effects()
- var localShotKindsReported:Set<Int>=[221];var localShotVehicles=[1],localShotVehiclesAt:Double=123,localShotVehicleSource:String?="old-world"
+ var localShotKindsReported:Set<Int>=[221];var localShotVehicles=[1],localShotVehicleSource:String?="old-world"
  var ordinaryShotKindsReported:Set<UInt8>=[1,2],ordinaryShotDrawReported=true
  var vehicleRigStates=["old":1],vehicleRigTimes=["old":1],vehicleRigSpins=["old":1]
  var remoteRiderPlayback=["old":1],remoteRiderActions=["old":1],remoteRiderCapture=["old":1],remoteRiderPrevious=["old":1],remoteRiderAnimations=["old":1]
@@ -174,7 +174,7 @@ check(world.trafficDisables==1,"old traffic presentation survives session reset"
 check(world.weaponEffects.clears==1 && world.particleEffects!.clears==1 && world.blasts.isEmpty,"old fires, particles, stream or blasts survive new world")
 check(world.humanShots.clears==1 && world.weaponFlashes.clears==1 && world.remoteGunAudio.clears==1 && world.humanShotPathsReported.isEmpty,"Human shot owners survived world reset")
 check(world.ordinaryShotEffects.clears==1,"old ordinary shot tracers survive new world")
-check(world.localShots.clears==1 && world.localShotKindsReported.isEmpty && world.localShotVehicles.isEmpty && world.localShotVehiclesAt == -.infinity && world.localShotVehicleSource==nil,"local recoil or previous posed vehicle target survived world reset")
+check(world.localShots.clears==1 && world.localShotKindsReported.isEmpty && world.localShotVehicles.isEmpty && world.localShotVehicleSource==nil,"local recoil or previous posed vehicle target survived world reset")
 check(world.ordinaryShotKindsReported.isEmpty && !world.ordinaryShotDrawReported,"shot draw receipts survive new world")
 check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")

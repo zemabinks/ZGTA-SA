@@ -114,6 +114,11 @@ atlases, models, skeletons, animations, HUD, handling, vehicle rigs, effects and
 runtime catalogs under `local-only/site/game/native/`. Some missing public
 animation/flight files can be fetched by their preparation tools. Radio
 recordings are not bundled; see [NATIVE_RADIO.md](docs/development/guides/NATIVE_RADIO.md).
+Native setup prepares original HUD weapon icons after the weapon definitions
+and includes them in the resource index. It verifies and reuses an unchanged
+icon generation. Changed inputs or corrupt generated icons stop setup rather
+than silently keeping stale artwork. Preserve the old `local-only/native-weapon-icons`
+directory separately before preparing a replacement; original TXDs stay untouched.
 Native setup also creates the separate local coupling catalog and complete
 working-vehicle rig stage. To upgrade an already prepared native archive:
 

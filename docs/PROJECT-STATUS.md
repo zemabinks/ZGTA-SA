@@ -19,30 +19,68 @@ packaged public iPhone release. Users must supply their own supported game files
 
 ## Latest verified source
 
-The current verified batch adds shared human/traffic shot presentation, remote
-hit reactions and native local ordinary-hit selection. Original shot groups
-and material-aware impacts feed bounded Metal effects and positioned audio.
-Native hit selection uses the current actor/vehicle pose, typed targets and
-world coverage; unloaded collision cannot grant a clear shot. Session and
-resource ownership prevent retired actors or resources from supplying targets.
+The independent server negotiates grouped ordinary shots with compatible
+native clients. One firing marker spends one cartridge and sequence; each
+admitted target group settles once. Player damage uses the server's catalog,
+world/life/coverage checks and accepted strike metadata. Vehicle hit reports
+still do not supply complete vehicle-health authority. Older browser and
+legacy adapters retain their own accounting and protocol limits.
 
-Universal Simulator Debug and arm64 iPhone Release builds pass, together with
-the complete current source regression chain. Controlled Simulator cases pass
-for four normal retained-resource joins, compact traffic and bike/NPC lifetime
-transitions, and normal-input pistol/shotgun firing, reload and hit reports.
-All 62 captures were reviewed. Original assets and application settings remain
-held; owned test services and the Simulator stop afterward.
+Vehicle queries refresh admitted bodies and nominal tyres through the shared
+read-only transform producers. Actor/registry lifetimes, resource identity and
+compact-vehicle promotion fence completed geometry. A shot query never advances
+physics or animation. Model-local hierarchy/visibility and human manually
+followed poses remain tied to their last completed presentation phase.
 
-These cases establish a limited integration scope. Vehicle hit reports do not
-provide complete vehicle-damage authority. Browser/native shot accounting,
-complete traffic AI, every animation/contact transition, audible playback,
-physical-iPhone performance and original-PC gameplay fidelity remain open.
-The NPC handoff has a draw receipt but is partly obscured visually. Weapon-icon
-coverage, stale reload text and crouch grounding also need follow-up. No full
-gameplay or 1:1 accuracy claim is made.
+The HUD clears superseded weapon images, rejects stale source completions and
+reuses loaded requests. An optional local converter prepares original HUD
+sprites at their source resolution and adds them to the prepared resource
+index. It requires the user's original files; those files are excluded from
+this repository. Preparing a resource is separate from verifying its use in
+the running app and after a persistent resource update.
 
-See the [traffic implementation scope](research/gameplay/CORE_AMBIENT_TRAFFIC.md)
-and [core gameplay checklist](development/CORE_GAMEPLAY_PARITY.md).
+Positive foreground render hitches retain held input and touch aim while
+skipping excess simulation time. Clock reversal and existing focus/modal
+ownership loss still clear controls. Successful reloads use their owned HUD and
+animation feedback without leaving a generic progress message after completion.
+
+Core176 passes both SDK products, the full physics/audio/transport source chain,
+four normal resource-preserving joins, six grouped ordinary-shot markers and a
+separate scoped far-target case. The latter confirms the original distant actor,
+source delivery, ammunition, damage and retained touch aim. All 26 selected
+captures are reviewed. The older Core173 far-target failure remains recorded;
+it is not relabeled by this newer case. Scope captures also demonstrate exposed
+world strips outside the shortened HUD mask; that presentation gap remains open
+in this verified build.
+
+Native setup prepares source-resolution weapon icons before indexing. Repeated
+preparation verifies current definition/TXD and output identities before reuse;
+changed or corrupt output fails without replacing the retained generation. Ten
+authored tests pass. Persistent installed icon-package updates remain unverified.
+
+An isolated, explicitly supplemental pedestrian identity admits the user's
+original Maccer model without mislabeling it as a retail IDE entry. Genuine
+collision inventory regeneration, complete native rig admission, original
+material/GPU checks and normal original-model drawing pass in the unchanged
+Core176 app. The normal four-join case retains resources and settings. Selected
+captures confirm original artwork; resources and supplemental local configuration
+are not distributed in this source repository.
+
+Separate normal-input jetpack cases cover short forward takeoffs and a stronger
+vertical-thrust, held-brake, descent and landing sequence. The stronger case has
+airborne packets during braking/descent and sampled landing headings without a
+half-turn. Post-case samples also show a steady
+airborne interval during each held brake. All 32 selected flight stills across
+the two cases are reviewed. These samples do not rule out subframe animation
+faults or establish original-PC flight timing. The first case's nominal hover
+and descent phases were grounded, so that case alone does not verify them.
+
+Standing/crouched feet remain visually questionable. Old contact log records
+were truncated; a separate read-only debugger attempt failed to decode its array
+and detached cleanly. No incomplete measurement supplies a guessed height fix.
+Vehicle hierarchy timing, full vehicle-health authority, browser/native combat
+accounting, continuous animation, device performance and original-PC fidelity
+remain open. No complete-game or 1:1 claim is made.
 
 ## Development priorities
 

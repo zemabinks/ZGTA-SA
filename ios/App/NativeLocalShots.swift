@@ -7,6 +7,11 @@ import simd
 final class NativeLocalShots {
     typealias V = SIMD3<Double>
     static let weapons=Set(22...34).union([38])
+    static func scopedRange(camera:V,feet:V)->Double? {
+        guard finite(camera),finite(feet)else{return nil}
+        let range=800+simd_distance(camera,feet)
+        return range.isFinite ? range:nil
+    }
     struct Ray {
         let origin:V,direction:V,range:Double,minimum:Double
         func point(_ distance:Double)->V {origin+direction*distance}
@@ -213,7 +218,7 @@ final class NativeLocalShots {
             guard let biased=Self.unit(direction+up*(0.2*tangent)+right*(input.aspect*0.06*tangent))else{return nil}
             direction=biased
         }
-        var range=(input.weapon==34 && input.scoped ? 800:input.range)+simd_distance(origin,input.feet)
+        var range=input.weapon==34 && input.scoped ? Self.scopedRange(camera:origin,feet:input.feet) ?? 0:input.range+simd_distance(origin,input.feet)
         if input.hip {
             origin=input.hipOrigin.flatMap{Self.finite($0) ? $0:nil} ?? input.feet+V(0,0,1.62-input.crouchOffset)
             let end=(muzzle ?? origin)+V(sin(input.heading),cos(input.heading),0)*input.range

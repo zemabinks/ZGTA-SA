@@ -263,7 +263,45 @@ function create(catalog = {}, options = {}) {
       clip: ammo?.clip || 0, rest: ammo?.rest || 0};
   }
 
-  return {ensure, tick, state, action, acceptShot, cadence, nearestShop, quote,
+  function ordinaryRange(id, presentation=false) {
+    const item=byID.get(id),range=item?.stats?.range;
+    if(!item||item.fire!=='INSTANT_HIT'||!Number.isFinite(range)||range<=0)return 0;
+    // The scoped native ray uses800m plus its camera offset. Retain the
+    // existing15m origin allowance. Other damage stays catalog-bounded.
+    const damageRange=Math.max(id===34?815:0,Math.min(2000,range));
+    // Camera-to-muzzle presentation can extend past the damage distance;
+    // accepting its tracer must not grant a longer damaging hit.
+    return damageRange+(presentation?32:0);
+  }
+
+  // Opt-in ordinary fire uses one inventory emission and a bounded set of
+  // target groups. Metadata comes from this server's catalog, never the client.
+  function ordinaryGroups(id, values) {
+    const item=byID.get(id),stats=item?.stats;
+    if (!Number.isInteger(id)||!((id>=22&&id<=34)||id===38)||!item || item.fire!=='INSTANT_HIT' || !Number.isInteger(stats?.pellets) ||
+        stats.pellets<1 || stats.pellets>100 || !Number.isFinite(stats.damage) ||
+        stats.damage<=0 || stats.damage>1000 || !Number.isFinite(stats.range) || stats.range<=0 ||
+        !Array.isArray(values) || values.length<1 || values.length>stats.pellets) return null;
+    const point=p=>Array.isArray(p)&&p.length===3&&p.every(v=>Number.isFinite(v)&&Math.abs(v)<=10000);
+    const targets=new Set(),groups=[];let pellets=0;
+    for (const value of values) {
+      if (!value || !point(value.o) || !point(value.h) || !Number.isInteger(value.ht) || value.ht<0 || value.ht>4) return null;
+      const n=value.n===undefined?1:value.n;
+      if (!Number.isInteger(n)||n<1||(pellets+=n)>stats.pellets ||
+          Math.hypot(...value.h.map((v,i)=>v-value.o[i]))>ordinaryRange(id,true)+0.05) return null;
+      const group={o:[...value.o],h:[...value.h],ht:value.ht,n};
+      if (value.ht>=1&&value.ht<=3) {
+        if (typeof value.id!=='string'||!value.id.length||value.id.length>64) return null;
+        const key=value.ht+':'+value.id;if(targets.has(key))return null;targets.add(key);group.id=value.id;
+      } else if(value.id!==undefined)return null;
+      if(value.bp!==undefined){if(value.ht!==1||!Number.isInteger(value.bp)||value.bp<1||value.bp>9)return null;group.bp=value.bp;}
+      if(value.wh!==undefined){if(![2,3].includes(value.ht)||!Number.isInteger(value.wh)||value.wh<0||value.wh>3)return null;group.wh=value.wh;}
+      groups.push(group);
+    }
+    return {groups,damage:stats.damage};
+  }
+
+  return {ensure, tick, state, action, acceptShot, cadence, nearestShop, quote, ordinaryGroups, ordinaryRange,
     catalog: {items, shops, armourID}, SHOP_RADIUS, MAX_AMMO};
 }
 

@@ -218,6 +218,12 @@ def candidates(local):
                     continue
                 if path.is_file() and path.stat().st_size > 0:
                     result[relative] = path
+    # Explicitly prepared original HUD artwork replaces incomplete archived
+    # PNG copies. The producer verifies exact IDs, paths and content hashes.
+    weapon_icons = local / 'native-weapon-icons'
+    if weapon_icons.exists() or weapon_icons.is_symlink():
+        from tools.assets.prepare_native_weapon_icons import candidates as icon_candidates
+        result.update(icon_candidates(local))
     # Match the existing server's exact sidecar/working precedence.
     for source in sorted((local / 'native-working/models').glob('*')):
         if source.is_file() and valid_path('game/native/models/' + source.name):

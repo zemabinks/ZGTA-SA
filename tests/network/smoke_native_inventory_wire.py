@@ -58,6 +58,7 @@ const server=http.createServer((req,res)=>{
   const input=JSON.parse(body);
   if(input.action==='fixture.hold'){heldPosts++;assert.equal(heldPosts,1,'Uncertain old action must not replay');stalePOST={res,state:state(current)};releaseStaleWhenHeld();return}
   if(input.action==='weapon.reload'){
+   if(input.fixtureReject===true){res.writeHead(400,{'Content-Type':'application/json'});res.end(JSON.stringify({error:'Reload refused'}));return;}
    const before=state(current);inventory(current,before);reloading=true;revision++;
    const result=state(current);setTimeout(()=>json(res,{state:{weaponInventory:result},message:'Reload started'}),60);
    setTimeout(()=>{reloading=false;ammo[22]=17;revision++;inventory(current)},200);
@@ -87,6 +88,7 @@ let smg=NativeWeaponState.Weapon(id:28,name:"SMG",model:"",range:40,capacity:50,
 let weapons=NativeWeaponState(catalog:[gun,smg])
 var phase="start",httpDuplicate=false,acceptedFirst=false,rejectedSecond=false,oldHTTPReleased=false,newShot=false,finished=false,settling=false
 var httpStates=0,httpResults=0,heldStates=0,heldResults=0,heldCompletions=0
+var resultMessages:[String]=[]
 var connections:[String]=[],oldTicket:NativeShotTicket?
 func shot(_ weapon:Int)->NativeShotTicket {
  let ticket=client.reserveShot()!
@@ -110,14 +112,20 @@ func startSwitchIfReady(){
  phase="switch"
  http.perform("weapon.select",payload:["weapon":28]){result in
   precondition(result==true && weapons.selected==28 && weapons.rounds==50)
+  precondition(resultMessages==["Reload refused","Selected"],"Default success feedback or suppressed-reload error feedback changed")
   phase="afterSwitch";oldTicket=shot(28)
  }
 }
 func startReloadIfReady(){
  guard phase=="shoot",httpDuplicate,acceptedFirst,rejectedSecond else{return}
- phase="reloadRequest";let id=weapons.beginReloadRequest();precondition(weapons.reloading && !weapons.canFire)
- http.perform("weapon.reload"){result in
-  precondition(result==true);weapons.finishReloadRequest(id:id,succeeded:result);phase="reloading";startSwitchIfReady()
+ phase="reloadRefusal"
+ http.perform("weapon.reload",payload:["fixtureReject":true],reportSuccess:false){result in
+  precondition(result==false && resultMessages==["Reload refused"],"Suppressing success hid a genuine reload error")
+  phase="reloadRequest";let id=weapons.beginReloadRequest();precondition(weapons.reloading && !weapons.canFire)
+  http.perform("weapon.reload",reportSuccess:false){result in
+   precondition(result==true && resultMessages==["Reload refused"],"Successful reload left a sticky progress result")
+   weapons.finishReloadRequest(id:id,succeeded:result);phase="reloading";startSwitchIfReady()
+  }
  }
 }
 func receive(_ inventory:[String:Any],httpResponse:Bool){
@@ -168,7 +176,7 @@ client.onConnectionState={state in
  }
 }
 http.onState={httpStates += 1;receive($0["weaponInventory"] as! [String:Any],httpResponse:true)}
-http.onResult={_ in httpResults += 1}
+http.onResult={message in httpResults += 1;resultMessages.append(message)}
 heldHTTP.onState={_ in heldStates += 1;preconditionFailure("Old-peer action state delivered")}
 heldHTTP.onResult={_ in heldResults += 1;preconditionFailure("Old-peer action result delivered")}
 client.onStatus={text in
@@ -189,6 +197,6 @@ def main():
         sources=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery','NativeGameplayClient','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots','NativeLocalShotPackets','NativeMultiplayerClient']
         source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in sources)+'\n'+actor+'\n'+SWIFT
         (folder/'main.swift').write_text(source)
-        subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(output/'modules'),str(folder/'main.swift'),'-o',str(folder/'client')],check=True)
+        subprocess.run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-O','-module-cache-path',str(output/'modules'),str(folder/'main.swift'),'-o',str(folder/'client')],check=True)
         subprocess.run(['node',str(folder/'peer.cjs'),str(folder/'client')],check=True)
 if __name__=='__main__':main()

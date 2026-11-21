@@ -438,16 +438,31 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var localShotKindsReported=Set<Int>()
     private var localShotMeshes:[String:NativeLocalShotMesh]=[:]
     private var localShotTyreDefinitions:[Int:[NativeLocalShots.Tyre]]=[:]
+    private struct LocalShotOccupantFrame {
+        enum Owner {
+            case player(id:String,skin:Int,car:String?,seat:Int,driver:Bool)
+            case traffic(id:UInt16,generation:UInt64,seat:Int,skin:Int)
+        }
+        let owner:Owner,model:String,actor:NativeSkeletalActor,incarnation:UInt64,hit:NativeLocalShots.Occupant
+    }
     private struct LocalShotVehicleFrame {
         enum Owner {case player(String,String),registered(String,String),traffic(UInt16,UInt64)}
         let owner:Owner,key:String,target:NativeLocalShots.Target,mesh:NativeLocalShotMesh
-        let body:simd_double4x4,matrices:[simd_double4x4],visible:[Bool],low:SIMD3<Double>,high:SIMD3<Double>
-        var occupants:[NativeLocalShots.Occupant]=[]
+        let model:String,rig:ObjectIdentifier,incarnation:UInt64
+        var body:simd_double4x4
+        let matrices:[simd_double4x4],visible:[Bool],low:SIMD3<Double>,high:SIMD3<Double>
+        var nominalTyres:[NativeLocalShots.Tyre]=[]
+        var occupants:[LocalShotOccupantFrame]=[]
         var tyres:[NativeLocalShots.Tyre]=[]
     }
+#if DEBUG
+    private var footContactObservation:(key:String,at:Double,recorded:Bool)?
+    private let footContactLogger=Logger(subsystem:"com.zema.zgtasa",category:"FootContact")
+#endif
     private var localShotVehicles:[LocalShotVehicleFrame]=[]
-    private var localShotVehiclesAt = -Double.infinity
     private var localShotVehicleSource:String?
+    private let localShotPlayerOwners=NativeShotOwners.Ledger<NativeShotOwners.Player>()
+    private let localShotRegisteredOwners=NativeShotOwners.Ledger<NativeShotOwners.Vehicle>()
     private let humanShots=NativeHumanShots()
     private let remoteGunAudio=NativeRemoteGunAudio()
     var onRemoteGunAudio:((NativeRemoteGunAudio.Event)->Void)?
@@ -982,6 +997,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private var trafficOccupantDrawn:[String:String]=[:]
     var remotePlayers: [RemotePlayer] = [] { didSet {
+        recordLocalShotPlayerOwners()
         weaponFlashes.retain(Set(remotePlayers.map(\.id)).union(["own"]))
         for player in remotePlayers {
             weaponFlashes.select(identity:player.id,weapon:Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) ? player.weapon:0)
@@ -1005,7 +1021,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return remoteFootPresentation[player.id] ?? player
         }
     }
-    var remoteVehicles: [RemoteVehicle] = []
+    private var remoteDrawDistance:Float {
+        guard equippedWeapon==34,let frame=gameCameraFrame,frame.hidesPlayer,
+              let range=NativeLocalShots.scopedRange(camera:SIMD3<Double>(frame.aimSource ?? frame.source),feet:SIMD3<Double>(shotFeet))else{return 130}
+        // Include the classic body bounds around the root at the ray's end.
+        return Float(max(130,range+2))
+    }
+    var remoteVehicles: [RemoteVehicle] = [] {didSet{recordLocalShotRegisteredOwners()}}
     var currentVehicleID: String?
     var objective: SIMD2<Float>?
     var onStatus: ((String) -> Void)?
@@ -1322,6 +1344,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         return input
     }
     func resolveLocalShot(_ input:NativeLocalShots.Input)->NativeLocalShots.Frame? {
+        let targetDistance=input.weapon==34 && input.scoped ? (NativeLocalShots.scopedRange(camera:input.camera,feet:input.feet).map{$0+2} ?? 130):130
         let vehicleFrames=currentLocalShotVehicleFrames()
         var excluded=ambientBodies?.colliders ?? []
         for frame in vehicleFrames {
@@ -1336,7 +1359,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let hasUnresolvedVehicleCover = !physical.subtracting(excluded).isEmpty
         let people=presentedRemotePlayers.filter {
             Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && $0.life>0 &&
-                simd_distance($0.position,scenePosition)<130 && actorName(code:$0.code).flatMap{skeletalActors[$0]} != nil
+                simd_distance(SIMD3<Double>($0.position),input.feet)<targetDistance && actorName(code:$0.code).flatMap{skeletalActors[$0]} != nil
         }.map { player in
             NativeLocalShots.Person(id:player.id,feet:SIMD3<Double>(remoteSupportPosition(player) ?? player.position),
                 heading:Double(player.heading),crouched:player.crouching)
@@ -1392,23 +1415,179 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return .init(center:point,radius:spec.radius,piece:spec.piece,bone:spec.bone)
         }
     }
-    private func currentLocalShotVehicleFrames()->[LocalShotVehicleFrame] {
-        let age=riderMonotonicNow()-localShotVehiclesAt
-        guard age>=0,age<=0.25,localShotVehicleSource==fixedCJSourceIdentity()else{return []}
-        return localShotVehicles.filter { frame in
-            let current:Bool
-            switch frame.owner {
-            case .player(let id,let code):current=presentedRemotePlayers.contains{$0.id==id && $0.code==code && $0.vehicleHealth>0 && !$0.code.hasPrefix("s")}
-            case .registered(let id,let code):current=remoteVehicles.contains{$0.id==id && $0.code==code} && !presentedRemotePlayers.contains{$0.vehicleID==id}
-            case .traffic(let id,let generation):current=ambientTraffic.traffic.actors[id]?.generation==generation
+    /// Recheck mutable owner/seat eligibility at the emission. A completed
+    /// pose is not permission to hit an actor that has since died, left or
+    /// changed its model. This query never advances an animation clock.
+    private func currentLocalShotOccupant(_ frame:LocalShotOccupantFrame)->Bool {
+        guard skeletalActors[frame.model] === frame.actor,
+              localShotOccupantIncarnation(frame.owner)==frame.incarnation else{return false}
+        switch frame.owner {
+        case .player(let id,let skin,let car,let seat,let driver):
+            guard let player=presentedRemotePlayers.first(where:{$0.id==id}),player.life>0,
+                  player.skin==skin,pedModels[String(skin)]==frame.model else{return false}
+            if let state=remoteRiderPlayback[id]?.1.state,state == .out || state == .stood{return false}
+            if driver {
+                return Self.remoteAppearanceIsDriver(code:player.code,ridingVehicleID:player.ridingVehicleID) && player.vehicleID==car
             }
-            return current
+            return player.ridingVehicleID==car && player.ridingSeat==seat
+        case .traffic(let id,let generation,let seat,let skin):
+            guard let current=ambientTraffic.traffic.actors[id],current.generation==generation,
+                  current.flags&32==0,(0...2).contains(seat),current.deadSeats & UInt8(1<<seat)==0,
+                  seat==0 || (current.crewCount.map({Int($0)>seat}) ?? true),
+                  trafficOccupantSeats.contains(where:{$0.id==id && $0.generation==generation && $0.index==seat && $0.skin==skin && !$0.dead}),
+                  let rider=trafficRiderOwners[frame.hit.id],!rider.falling,
+                  !trafficRiderRetention.isThrown(id:id,generation:generation),pedModels[String(skin)]==frame.model else{return false}
+            return true
         }
     }
+    private func recordLocalShotPlayerOwners() {
+        var states:[String:NativeShotOwners.Player]=[:]
+        for player in remotePlayers {
+            states[player.id] = .init(code:player.code,vehicle:player.vehicleID,riding:player.ridingVehicleID,
+                seat:player.ridingSeat,skin:player.skin,alive:player.life>0,vehicleAlive:player.vehicleHealth>0)
+        }
+        localShotPlayerOwners.receive(states)
+    }
+    private func recordLocalShotRegisteredOwners() {
+        var states:[String:NativeShotOwners.Vehicle]=[:]
+        for vehicle in remoteVehicles {
+            states[vehicle.id] = .init(code:vehicle.code,driver:vehicle.driverID,traffic:vehicle.trafficSourceID,alive:vehicle.health>0)
+        }
+        localShotRegisteredOwners.receive(states)
+    }
+    private func localShotVehicleIncarnation(_ owner:LocalShotVehicleFrame.Owner)->UInt64? {
+        switch owner {
+        case .player(let id,_):return localShotPlayerOwners.generation(id)
+        case .registered(let id,_):return localShotRegisteredOwners.generation(id)
+        case .traffic(let id,let generation):return ambientTraffic.traffic.actors[id]?.generation==generation ? generation:nil
+        }
+    }
+    private func localShotOccupantIncarnation(_ owner:LocalShotOccupantFrame.Owner)->UInt64? {
+        switch owner {
+        case .player(let id,_,_,_,_):return localShotPlayerOwners.generation(id)
+        case .traffic(let id,let generation,_,_):return ambientTraffic.traffic.actors[id]?.generation==generation ? generation:nil
+        }
+    }
+    /// Refresh the body from already admitted presentation/physical snapshots.
+    /// Context and transform producers are read-only: do not sample/step a rig,
+    /// interpolate traffic again or consume suspension/animation time here.
+    private func currentLocalShotVehicleBody(_ frame:LocalShotVehicleFrame)->simd_double4x4? {
+        let position:SIMD3<Float>,heading:Float,pitch:Float,context:VehicleDrawContext
+        switch frame.owner {
+        case .player(let id,let code):
+            guard let player=presentedRemotePlayers.first(where:{$0.id==id && $0.code==code})else{return nil}
+            position=player.position;heading=player.heading;pitch=player.pitch
+            context=remoteVehicleDrawContext(name:frame.model,player:player)
+        case .registered(let id,let code):
+            guard let source=remoteVehicles.first(where:{$0.id==id && $0.code==code})else{return nil}
+            let vehicle=predictedVehicle(source)
+            position=vehicle.position;heading=vehicle.heading;pitch=vehicle.pitch
+            context=parkedVehicleDrawContext(name:frame.model,vehicle:vehicle)
+        case .traffic(let id,let generation):
+            guard let traffic=presentedAmbientTraffic.first(where:{$0.identity.id==id && $0.generation==generation})else{return nil}
+            position=SIMD3<Float>(traffic.body.position);heading=Float(traffic.body.heading);pitch=Float(traffic.body.pitch)
+            context=ambientTrafficDrawContext(name:frame.model,frame:traffic)
+        }
+        let base=Self.translation(position)*Self.rotationZ(-heading)*Self.rotationX(pitch)
+        // A registered physical snapshot already includes roll/model origin.
+        let body=Self.vehicleDrawTransform(base,context:context)
+        guard (0..<4).allSatisfy({column in (0..<4).allSatisfy{body[column][$0].isFinite}}),
+              abs(simd_determinant(body))>0.000001 else{return nil}
+        return Self.shotMatrix(body)
+    }
+    private func currentLocalShotVehicleFrames()->[LocalShotVehicleFrame] {
+        guard localShotVehicleSource==fixedCJSourceIdentity()else{return []}
+        return localShotVehicles.compactMap { frame in
+            guard localShotMeshes[frame.model] === frame.mesh,vehicleRigMeshes[frame.model] != nil,
+                  vehicleRigs[frame.model].map({ObjectIdentifier($0)})==frame.rig,
+                  localShotVehicleIncarnation(frame.owner)==frame.incarnation else{return nil}
+            let current:Bool
+            switch frame.owner {
+            case .player(let id,let code):current=presentedRemotePlayers.contains {
+                $0.id==id && $0.code==code && $0.vehicleHealth>0 &&
+                Self.remoteAppearanceIsDriver(code:$0.code,ridingVehicleID:$0.ridingVehicleID) &&
+                ($0.vehicleID.map{"vehicle:\($0)"} ?? "player:\($0.id)")==frame.key
+            }
+            case .registered(let id,let code):current=remoteVehicles.contains{$0.id==id && $0.code==code} && !presentedRemotePlayers.contains{$0.vehicleID==id}
+            case .traffic(let id,let generation):current=ambientTraffic.traffic.actors[id]?.generation==generation &&
+                !remoteVehicles.contains{$0.trafficSourceID==id}
+            }
+            guard current,let body=currentLocalShotVehicleBody(frame),
+                  (0..<4).allSatisfy({column in (0..<4).allSatisfy{frame.body[column][$0].isFinite}}),
+                  abs(simd_determinant(frame.body))>0.000001 else{return nil}
+            var live=frame;live.body=body
+            live.tyres=frame.nominalTyres.map{tyre in
+                let point=body*SIMD4(tyre.center,1)
+                return .init(index:tyre.index,center:SIMD3(point.x,point.y,point.z),radius:tyre.radius)
+            }
+            let bodyChange=body*frame.body.inverse
+            live.occupants=frame.occupants.filter(currentLocalShotOccupant).map{occupant in
+                // Only ordinary, live, nonthrown compact seats reach this
+                // branch. Retained/fallen compact riders remain excluded by
+                // currentLocalShotOccupant. Human controllers keep their last
+                // completed manual/exit matrix, matching their separate phase.
+                guard case .traffic=occupant.owner else{return occupant}
+                let spheres=occupant.hit.spheres.map{sphere in
+                    let point=bodyChange*SIMD4(sphere.center,1)
+                    return NativeLocalShots.BodySphere(center:SIMD3(point.x,point.y,point.z),radius:sphere.radius,piece:sphere.piece,bone:sphere.bone)
+                }
+                return .init(owner:occupant.owner,model:occupant.model,actor:occupant.actor,incarnation:occupant.incarnation,
+                    hit:.init(id:occupant.hit.id,spheres:spheres))
+            }
+            return live
+        }
+    }
+#if DEBUG
+    /// One passive sample after a stance settles. This consumes the exact
+    /// submitted palette/model matrix; it never samples or advances an actor.
+    /// CPU mesh minimum and bone points are measurements, not contact fixes.
+    private func recordOwnFootContact(model:String,actor:NativeSkeletalActor,pose:NativeSkeletalActor.Pose,
+                                      transform:simd_float4x4,at now:Double) {
+        guard now.isFinite,let state=character?.state,state.grounded,!driving,!swimming,
+              climb==nil,!personalFlight.on,let frame=footAnimationFrame else{return}
+        let key="\(ObjectIdentifier(actor)):\(model):\(localSkin):\(crouching):\(equippedWeapon)"
+        guard let previous=footContactObservation,previous.key==key,now>=previous.at else {
+            footContactObservation=(key,now,false);return
+        }
+        guard !previous.recorded,now-previous.at>=0.75 else{return}
+        let points=actor.positions(pose:pose)
+        var minimum:SIMD3<Float>?
+        for point in points {
+            let p=transform*SIMD4(point,1),world=SIMD3(p.x,p.y,p.z)
+            guard world.x.isFinite,world.y.isFinite,world.z.isFinite else{return}
+            if minimum==nil || world.z<minimum!.z {minimum=world}
+        }
+        guard let minimum else{return}
+        func xyz(_ p:SIMD3<Float>)->[Double]{[Double(p.x),Double(p.y),Double(p.z)]}
+        let bones=[0,1,41,42,43,44,51,52,53,54].compactMap{bone->[String:Any]? in
+            guard let local=actor.transform(bone:bone,in:pose)else{return nil}
+            let world=transform*local.columns.3
+            return ["bone":bone,"local":xyz(SIMD3(local.columns.3.x,local.columns.3.y,local.columns.3.z)),
+                    "world":xyz(SIMD3(world.x,world.y,world.z))]
+        }
+        let palette=pose.palette.withUnsafeBytes{Data($0)}
+        var row:[String:Any]=["model":model,"skin":localSkin,"crouched":crouching,"weapon":equippedWeapon,
+            "at":now,"feet":xyz(state.feet),"renderRoot":xyz(camera),"motorEasing":state.eased,
+            "grounded":state.grounded,"meshVertices":points.count,"meshMinimum":xyz(minimum),"bones":bones,
+            "paletteSHA256":SHA256.hash(data:palette).map{String(format:"%02x",$0)}.joined(),
+            "modelMatrix":(0..<4).flatMap{column in (0..<4).map{Double(transform[column][$0])}},
+            "crouchShare":frame.crouchShare,"blends":frame.blends.map{blend->[String:Any] in
+                ["clip":blend.clip,"time":blend.time,"weight":blend.weight,"operation":String(describing:blend.operation),
+                 "rooted":blend.rooted,"zeroSide":blend.zeroSide,"skipArms":blend.skipArms,"skipLegs":blend.skipLegs]},
+            "scope":"CPU palette/model at successful draw submission; not GPU completion, mesh-sole contact or retail acceptance"]
+        if let height=collision?.ground(x:state.feet.x,y:state.feet.y,near:state.feet.z,maxDrop:3)?.height {row["staticGroundAtFeet"]=Double(height)}
+        if let height=collision?.ground(x:minimum.x,y:minimum.y,near:state.feet.z,maxDrop:3)?.height {row["staticGroundAtMeshMinimum"]=Double(height)}
+        if let support=character?.supportFeet {row["dynamicSupportFeet"]=xyz(support)}
+        guard let data=try? JSONSerialization.data(withJSONObject:row,options:[.sortedKeys]),
+              let json=String(data:data,encoding:.utf8)else{return}
+        footContactObservation=(key,previous.at,true)
+        footContactLogger.info("Submitted own foot contact \(json,privacy:.public)")
+    }
+#endif
     private func localVehicleShotHits(_ ray:NativeLocalShots.Ray,frames:[LocalShotVehicleFrame])->[NativeLocalShots.Hit] {
         frames.compactMap { frame in
             let bounds=NativeLocalShots.bounds(ray:ray,body:frame.body,low:frame.low,high:frame.high)
-            guard let hit=NativeLocalShots.vehicle(ray:ray,bounds:bounds,target:frame.target,occupants:frame.occupants,hull:{
+            guard let hit=NativeLocalShots.vehicle(ray:ray,bounds:bounds,target:frame.target,occupants:frame.occupants.map(\.hit),hull:{
                 frame.mesh.hit(ray:ray,body:frame.body,matrices:frame.matrices,visible:frame.visible).map {
                     .init(distance:$0.distance,transparent:$0.transparent)
                 }
@@ -1587,7 +1766,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     func resetDisplayClock() {
         for event in remoteGunAudio.clear(){onRemoteGunAudio?(event)}
         weaponFlashes.clear()
-        localShotVehicles.removeAll();localShotVehiclesAt = -.infinity;localShotVehicleSource=nil
+        localShotVehicles.removeAll();localShotVehicleSource=nil
         renderClock.reset();riderPoseClock.reset(at:riderMonotonicNow())
         for (_,cached) in remoteFootAnimations { cached.1.resetDisplayClock() }
         resetRemoteFootPresentation()
@@ -2634,6 +2813,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
     }
 
+    /// Warm the existing bounded physics-cell owner while the scope is up.
+    /// Fire still checks actual coverage; requesting a cell never makes it solid.
+    private func prefetchScopedShotCoverage() {
+        guard !driving,legacyCameraSample?.active != true,equippedWeapon==34,
+              let frame=gameCameraFrame,frame.hidesPlayer,
+              let length=NativeLocalShots.scopedRange(camera:SIMD3<Double>(frame.aimSource ?? frame.source),feet:SIMD3<Double>(shotFeet))else{return}
+        let forward=frame.target-frame.source,magnitude=simd_length(forward),distance=Float(length)
+        guard magnitude.isFinite,magnitude>0.0001,distance.isFinite,distance>0 else{return}
+        let origin=frame.aimSource ?? frame.source
+        guard let coverage=NativeWorldRay.coverage(from:origin,to:origin+forward/magnitude*distance,
+                                                  interior:isInterior,loaded:{_ in true})else{return}
+        let now=ProcessInfo.processInfo.systemUptime
+        collisionRequests.request(coverage.cells,now:now,visible:activeDetails)
+        desiredPhysicsCells=collisionRequests.retained(now:now,visible:activeDetails)
+        for name in desiredPhysicsCells {loadCollision(name:name)}
+        loadWorldSharpIfNeeded()
+    }
+
     private func worldRay(from origin:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,
                           groups:UInt32,excluding:Set<UInt64>=[],onHit:((SwiftRapierWorld.Hit)->Void)?=nil) -> NativeWorldRay.Result {
         guard let vehicle=groundVehicle else{return .unavailable(0)}
@@ -3064,7 +3261,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         lastRiderDraw=0;riderPoseClock.reset();remoteServerTimeOffsetMilliseconds=nil
         weaponEffects.clear();particleEffects?.clear();blasts.removeAll();gameCamera.cancelShake()
         ordinaryShotEffects.clear();ordinaryShotKindsReported=[];ordinaryShotDrawReported=false
-        localShots.clear();localShotKindsReported=[];localShotVehicles.removeAll();localShotVehiclesAt = -.infinity;localShotVehicleSource=nil
+        localShots.clear();localShotKindsReported=[];localShotVehicles.removeAll();localShotVehicleSource=nil
         humanShots.clear();humanShotPathsReported=[]
         for event in remoteGunAudio.clear(){onRemoteGunAudio?(event)}
         weaponFlashes.clear()
@@ -3531,6 +3728,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         }
     }
+    /// This server receipt explains a later authoritative target-life change.
+    /// It cannot damage the actor or replay the local shot's sound/effects.
+    func receiveAcceptedStrike(_ row:[String:Any]) {
+        guard let packet=NativeHumanShots.Packet(row),packet.kind == .person,
+              let id=packet.target,let target=remotePlayers.first(where:{$0.id==id}),
+              target.code.hasPrefix("s"),let owner=remoteFootAnimations[id],
+              owner.0==actorName(code:target.code)else{return}
+        humanShots.observeStrike(packet,targetReady:true,at:riderMonotonicNow())
+    }
+
     func receiveOriginalShot(_ row:[String:Any]) {
         guard let packet=NativeHumanShots.Packet(row),let player=remotePlayers.first(where:{$0.id==packet.shooter})else{return}
         let now=riderMonotonicNow()
@@ -4461,7 +4668,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         var names=Set<String>()
         if let own=pedModels[String(localSkin)]{names.insert(own)}
-        for player in remotePlayers where simd_distance(player.position,camera)<140 {
+        for player in remotePlayers where simd_distance(player.position,camera)<max(140,remoteDrawDistance+10) {
             if let name=pedModels[String(player.skin)]{names.insert(name)}
         }
         for actor in presentedAmbientPedestrians {
@@ -4995,6 +5202,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 if !sampled.diagnostics.isEmpty{onStatus?("SERVER CAMERA: \(sampled.diagnostics)")}
             }
         }catch{legacyCameraSample=nil;onStatus?("SERVER CAMERA UNAVAILABLE: \(error)")}
+        prefetchScopedShotCoverage()
         let pose=legacyCameraSample?.pose ?? normal,eye=pose.eye,target=pose.target
         if legacyCameraSample?.active == true{loadNearby()}
         let viewMatrix = Self.lookAt(eye:eye,target:target,up:pose.up)
@@ -5530,7 +5738,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // co-located players with the same skin. No position key is needed.
         var actorOverrides: [ActorPoseOverride] = []
         var nextShotVehicles:[LocalShotVehicleFrame]=[]
-        var nextShotOccupants:[String:[NativeLocalShots.Occupant]]=[:]
+        var nextShotOccupants:[String:[LocalShotOccupantFrame]]=[:]
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
                        pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil,trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil,shotSeat:(car:String,target:String)? = nil) {
             let occurrence = actorOverrides.count
@@ -5656,7 +5864,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             // A passenger's public carText is still a pedestrian; draw its
             // source seat inside the referenced car instead of a second walker.
             if let vehicleID = player.ridingVehicleID {
-                guard let shared=sharedVehicleFrame(id:vehicleID),simd_distance(shared.vehicle.position,scenePosition)<130,
+                guard let shared=sharedVehicleFrame(id:vehicleID),simd_distance(shared.vehicle.position,scenePosition)<remoteDrawDistance,
                       let ped=pedModels[String(player.skin)]else{continue}
                 let code=shared.vehicle.code
                 guard let actor=skeletalActors[ped],let library=skeletalLibrary else {loadActor(ped);continue}
@@ -5699,7 +5907,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     shotSeat:player.life>0 ? ("vehicle:\(vehicleID)",player.id):nil)
                 continue
             }
-            guard simd_distance(player.position,scenePosition)<130 else{continue}
+            guard simd_distance(player.position,scenePosition)<remoteDrawDistance else{continue}
             guard let name=actorName(code:player.code) else {continue}
             if Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) {
                 let footPosition=remoteSupportPosition(player) ?? player.position
@@ -5942,7 +6150,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         for source in remoteVehicles where (isPassenger || source.id != currentVehicleID) && !drivenVehicleIDs.contains(source.id) {
             let vehicle=predictedVehicle(source)
-            guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
+            guard simd_distance(vehicle.position,camera)<remoteDrawDistance,let name=actorName(code:vehicle.code) else{continue}
             let context=parkedVehicleDrawContext(name:name,vehicle:vehicle)
             modelInstances.append((name,vehicle.position,vehicle.heading,vehicle.pitch,"",0,0,context,nil))
             parkedTrainCandidates.append(vehicle)
@@ -6012,11 +6220,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 !swimming && health > 0 ? locomotionClip : nil
             let wire = clip.split(separator: "/")
             let loops: Bool? = wire.count >= 2 ? (wire.count < 3 || wire[2] == "l") : nil
-            let sampledPose = skeletalActors[name].flatMap { actor in skeletalLibrary.flatMap {
-                return actor.pose(clip: clip, elapsed: elapsed, library: $0,
+            // The owned original/rider pose already supplies this occurrence.
+            // Keep the legacy fallback lazy instead of calculating a second
+            // complete hierarchy that will be discarded.
+            let pose = queued?.pose ?? skeletalActors[name].flatMap { actor in skeletalLibrary.flatMap {
+                actor.pose(clip: clip, elapsed: elapsed, library: $0,
                            locomotion: locomotion, locomotionElapsed: locomotionTime, looping: loops)
             } }
-            let pose = queued?.pose ?? sampledPose
             if let queued,let pose,let actor=skeletalActors[name] {
                 var seat=queued.shotSeat
                 if let traffic=queued.trafficOccupant,!traffic.dead {
@@ -6024,7 +6234,17 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
                 if let seat {
                     let spheres=shotSpheres(actor:actor,pose:pose,transform:transform)
-                    if !spheres.isEmpty{nextShotOccupants[seat.car,default:[]].append(.init(id:seat.target,spheres:spheres))}
+                    let owner:LocalShotOccupantFrame.Owner?
+                    if let traffic=queued.trafficOccupant {
+                        owner = .traffic(id:traffic.id,generation:traffic.generation,seat:traffic.seat,skin:traffic.skin)
+                    }else if let player=presentedRemotePlayers.first(where:{$0.id==seat.target}) {
+                        owner = .player(id:player.id,skin:player.skin,car:player.ridingVehicleID ?? player.vehicleID,
+                            seat:player.ridingSeat,driver:player.ridingVehicleID==nil)
+                    }else{owner=nil}
+                    if !spheres.isEmpty,let owner,let incarnation=localShotOccupantIncarnation(owner) {
+                        nextShotOccupants[seat.car,default:[]].append(.init(owner:owner,model:name,actor:actor,incarnation:incarnation,
+                            hit:.init(id:seat.target,spheres:spheres)))
+                    }
                 }
             }
             var actorDrawSubmitted=false
@@ -6083,7 +6303,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         case .traffic(let traffic):record=(.traffic(traffic.identity.id,traffic.generation),"traffic:\(traffic.identity.id):\(traffic.generation)",.init(id:"t\(traffic.identity.id)",kind:3))
                         case .own,.carriage:break
                         }
-                        if let (owner,key,target)=record {
+                        if let (owner,key,target)=record,let incarnation=localShotVehicleIncarnation(owner) {
                             var tyres=localShotTyreDefinitions[rig.document.id] ?? []
                             if let bike=rig.document.joints.bike,!bike.pedalled {
                                 tyres=["front","rear"].enumerated().compactMap{index,name in
@@ -6091,14 +6311,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                     return .init(index:index,center:SIMD3(hub.at[0],hub.at[1],hub.at[2]+bike.restDrop),radius:hub.radius)
                                 }
                             }
+                            let nominalTyres=tyres
                             let shotBody=Self.shotMatrix(transform)
                             tyres=tyres.map{tyre in
                                 let center=shotBody*SIMD4(tyre.center,1)
                                 return .init(index:tyre.index,center:SIMD3(center.x,center.y,center.z),radius:tyre.radius)
                             }
-                            nextShotVehicles.append(.init(owner:owner,key:key,target:target,mesh:geometry,body:shotBody,
+                            nextShotVehicles.append(.init(owner:owner,key:key,target:target,mesh:geometry,model:name,rig:ObjectIdentifier(rig),incarnation:incarnation,body:shotBody,
                                 matrices:completeFrame.matrices,visible:completeFrame.visible,
-                                low:SIMD3(Double(box.min[0]),Double(box.min[1]),Double(box.min[2])),high:SIMD3(Double(box.max[0]),Double(box.max[1]),Double(box.max[2])),tyres:tyres))
+                                low:SIMD3(Double(box.min[0]),Double(box.min[1]),Double(box.min[2])),high:SIMD3(Double(box.max[0]),Double(box.max[1]),Double(box.max[2])),nominalTyres:nominalTyres,tyres:tyres))
                         }
                     }
                     // Keep opaque hulls in the normal actor phase. Transparent
@@ -6176,6 +6397,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 pedAtlasError(name,"NATIVE PED TEXTURE DRAW FAILED: \(name)");continue
             }
             }
+#if DEBUG
+            if actorDrawSubmitted,queued?.ownFoot==true,originalFoot,let pose,let actor=skeletalActors[name] {
+                recordOwnFootContact(model:name,actor:actor,pose:pose,transform:transform,at:riderTime)
+            }
+#endif
             if actorDrawSubmitted,let occupant=queued?.trafficOccupant,let actor=skeletalActors[name] {
                 let kind=customPed==nil ? "converted":customPed === originalPed ? "stock":fixedPlayer != nil ? "fixed-cj":"custom"
                 recordTrafficOccupantDraw(occupant,model:name,kind:kind,asset:ObjectIdentifier(actor))
@@ -6221,7 +6447,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.setDepthStencilState(depth)
         }
         for index in nextShotVehicles.indices {nextShotVehicles[index].occupants=nextShotOccupants[nextShotVehicles[index].key] ?? []}
-        localShotVehicles=nextShotVehicles;localShotVehiclesAt=riderTime;localShotVehicleSource=fixedCJSourceIdentity()
+        localShotVehicles=nextShotVehicles;localShotVehicleSource=fixedCJSourceIdentity()
         if deferredVehicleSurfaces != nil {deferredVehicleSurfaces=transparentVehicleDraws}
         else{encodeTransparentVehicles(transparentVehicleDraws,encoder:encoder)}
         let visible = Set(modelInstances.map { $0.0 } + modelInstances.compactMap { weaponModels[String($0.6)] })

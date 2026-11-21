@@ -53,7 +53,9 @@ final class NativeGameplayClient {
         }
         tasks[id]=task;task.resume()
     }
-    func perform(_ action:String,payload:[String:Any]=[:],completion:((Bool?)->Void)?=nil) {
+    /// Progress already represented by an owned HUD/animation can omit the
+    /// successful status toast. Errors and connection fences always remain.
+    func perform(_ action:String,payload:[String:Any]=[:],reportSuccess:Bool=true,completion:((Bool?)->Void)?=nil) {
         guard connectionReady else {onResult?("MULTIPLAYER IS RECONNECTING");completion?(false);return}
         guard actionID==nil else{completion?(false);return}
         // An older GET must never arrive after this mutation and roll back the
@@ -72,7 +74,7 @@ final class NativeGameplayClient {
                 if (response as? HTTPURLResponse)?.statusCode==200,let next=body["state"] as? [String:Any] {
                     self.state=next;self.onState?(next)
                     guard self.connectionReady,self.connectionGeneration==connectionEpoch,self.inventoryConnection==connection else{return}
-                    if self.generation==epoch {self.onResult?((body["message"] as? String) ?? "DONE")}
+                    if reportSuccess,self.generation==epoch {self.onResult?((body["message"] as? String) ?? "DONE")}
                     guard self.connectionReady,self.connectionGeneration==connectionEpoch,self.inventoryConnection==connection else{return}
                     completion?(true)
                 } else {

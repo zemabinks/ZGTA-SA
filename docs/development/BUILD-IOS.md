@@ -56,6 +56,29 @@ If you have no usable local browser archive yet, the hosting guide describes `--
 
 When developing against an existing Mac resource server, the app can reuse its verified cache. You should not have to reimport gigabytes after every normal Xcode rebuild. See [Game files](../GAME-FILES.md).
 
+### Original HUD weapon artwork
+
+`host.py setup --native` prepares these icons after the weapon definitions and
+before the resource index. To run that stage separately when the prepared
+definitions and their original TXDs are available:
+
+```sh
+local-only/venv/bin/python tools/assets/prepare_native_weapon_icons.py \
+  --catalog local-only/site/game/native/weapons.json \
+  --game local-only/site/game --if-needed
+local-only/venv/bin/python tools/assets/prepare_native_resource_package.py
+```
+
+The new directory is `local-only/native-weapon-icons`. Exact original sprite
+resolution and RGBA are retained. `--if-needed` verifies every PNG and current
+definition/TXD identity before reusing an unchanged generation without decoding
+or writing it again. Changed inputs or corrupt output fail explicitly. Preserve
+the old generated directory separately before preparing a replacement. Restart the host after
+refreshing its prepared resource index. Normal app resource updates transfer
+missing/changed files through the existing resource system. Original TXDs and
+generated PNGs remain outside GitHub. Preparing these sprites alone does not
+verify their appearance in a rendered application.
+
 ## Step 4: Build
 
 From the repository root, choose one:
