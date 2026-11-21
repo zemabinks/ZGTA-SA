@@ -65,7 +65,7 @@ def fixture():
                defaults=[0,0],colorVariants=[[0,0,1,1]],customFlag=0x1000000,customLimit=0x2000000)
     draw=dict(node=0,start=0,count=3,materialVisible=True,lens=-1,texture=0,litTexture=0,
               alphaTest=0,paint=0,color=[1,1,1])
-    rigs={kind:dict(version=2,id=400,kind=kind,nodes=nodes,draws=[draw],joints=joints,paint=paint,
+    rigs={kind:dict(version=2,id=400,kind=kind,nodes=nodes,draws=[draw,{**draw,'start':3,'lens':0,'litTexture':1},{**draw,'node':1,'start':6,'lens':2,'litTexture':2}],joints=joints,paint=paint,
                    binaryEncoding='VPC2',binarySHA256=digest(b'authored CPU-only toy mesh descriptor'))
           for kind in ['heli','plane','car','boat','bike','train']}
     suspension=dict(id=400,kind='car',origin=0,table=dict(upper=0.2,lower=-0.2,flags=0),
@@ -115,6 +115,7 @@ final class VehiclePresentationHarness {
     }
     var groundVehicle:GroundCarrier?=GroundCarrier()
     var camera=SIMD3<Float>.zero
+    var gameHour:Float=12,roadWetness:Float=0
     var vehicleRigTimes:[String:Double]=[:]
     var vehicleRigSpins:[String:SIMD2<Double>]=[:]
     var vehicleRigStates:[String:NativeVehicleRig.State]=[:]
@@ -160,7 +161,7 @@ def main():
     parser.add_argument('--prepare-only',action='store_true')
     parser.add_argument('--out',type=Path,default=ROOT/'local-only/research/vehicle-presentation-122')
     parser.add_argument('--historical-root',type=Path)
-    parser.add_argument('--historical-witness',choices=['remote-aircraft','compact-health','compact-rotor'],default='remote-aircraft')
+    parser.add_argument('--historical-witness',choices=['remote-aircraft','compact-health','compact-rotor','compact-lamps'],default='remote-aircraft')
     args=parser.parse_args();out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
     paths=[ROOT/'ios/App'/name for name in HELPERS]+[ROOT/'ios/App/NativeWorldRenderer.swift',
              ROOT/'tests/vehicles/smoke_native_vehicle_presentation.swift',Path(__file__).resolve()]
@@ -187,7 +188,7 @@ def main():
         report['status']='PASS'if report['current']['status']=='PASS'else'FAIL'
         if args.historical_root:
             report['historical']=execute(out/'historical')
-            witness={'remote-aircraft':'remote helicopter presentation default','compact-health':'compact health alone invented scorched materials','compact-rotor':'compact heli rotor default'}[args.historical_witness]
+            witness={'remote-aircraft':'remote helicopter presentation default','compact-health':'compact health alone invented scorched materials','compact-rotor':'compact heli rotor default','compact-lamps':'compact nighttime headlamp'}[args.historical_witness]
             report['historicalWitness']=witness
             rejected=report['historical'].get('compileExitCode')==0 and report['historical'].get('exitCode')!=0 and witness in report['historical'].get('output','')
             report['historicalRejectedForExpectedReason']=rejected

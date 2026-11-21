@@ -33,21 +33,22 @@ final class NativeAmbientTraffic {
     private(set) var roadsHash:String?
     private(set) var graph:NativeAmbientTrafficRoads?
     private(set) var actors:[UInt16:Actor]=[:]
+    private var actorOrder:[UInt16]=[]
     private(set) var plates:[UInt16:String]=[:]
     private var plateOrder:[UInt16]=[]
     private var generation:UInt64=0
 
     func reset() {
-        actors.removeAll();plates.removeAll();plateOrder.removeAll()
+        actors.removeAll();actorOrder.removeAll();plates.removeAll();plateOrder.removeAll()
         level=0;roadsHash=nil;graph=nil
     }
     /// Geometry changes retire actors; disabling level retains the matching
     /// geometry and plate cache within this connection. Full disconnect/source
     /// replacement must call reset(), including the independent plate cache.
     @discardableResult func configure(level:Double,roads:String?)->Bool {
-        if let roads,roads != roadsHash{roadsHash=roads;graph=nil;actors.removeAll()}
+        if let roads,roads != roadsHash{roadsHash=roads;graph=nil;actors.removeAll();actorOrder.removeAll()}
         self.level=level.isFinite ? level:0
-        if self.level<=0{actors.removeAll()}
+        if self.level<=0{actors.removeAll();actorOrder.removeAll()}
         guard self.level>0,let hash=roadsHash,hash.utf8.count==8,
               hash.utf8.allSatisfy({(48...57).contains($0)||(97...102).contains($0)})else{return false}
         return graph==nil
@@ -61,7 +62,8 @@ final class NativeAmbientTraffic {
     func snapshots(serverNow:Double)->[Actor] {
         guard serverNow.isFinite,serverNow>0,graph != nil else{return []}
         for (id,actor) in actors where serverNow-actor.baseAt>6500{actors[id]=nil}
-        return actors.values.sorted{$0.identity.id<$1.identity.id}
+        actorOrder.removeAll{actors[$0]==nil}
+        return actorOrder.compactMap{actors[$0]}
     }
     /// Returns shot observations for a separate visible/ranged effects owner.
     /// These are not damage instructions and never alter health themselves.
@@ -76,6 +78,7 @@ final class NativeAmbientTraffic {
                 let old=actors[value.identity.id]
                 if old?.identity != value.identity {
                     guard old != nil || actors.count<4096 else{continue}
+                    if old==nil{actorOrder.append(value.identity.id)}
                     generation &+= 1;if generation==0{generation=1}
                     actors[value.identity.id]=Actor(identity:value.identity,generation:generation,
                         road:RoadState(value),baseAt:time,received:received)
@@ -89,7 +92,9 @@ final class NativeAmbientTraffic {
                     actor.baseAt=time;actor.received=received;actor.fresh=true;actors[value.identity.id]=actor
                 }
             }
-        case .gone(let ids):for id in ids{actors[id]=nil}
+        case .gone(let ids):
+            for id in ids{actors[id]=nil}
+            actorOrder.removeAll{actors[$0]==nil}
         case .plates(let values):
             for value in values {
                 plates[value.id]=value.text;plateOrder.removeAll{$0==value.id};plateOrder.append(value.id)
