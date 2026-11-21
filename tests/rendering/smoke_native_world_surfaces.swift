@@ -2,6 +2,7 @@
 import Foundation
 import MetalKit
 import simd
+import OSLog
 private enum Failed:Error{case check(String)}
 private var checks=0,renders=0
 private func check(_ value:Bool,_ reason:String)throws{checks+=1;if !value{throw Failed.check(reason)}}
@@ -23,6 +24,13 @@ private final class Harness {
  // ACTUAL_BASE
  let device:MTLDevice,queue:MTLCommandQueue
  let pipeline:MTLRenderPipelineState,depth:MTLDepthStencilState,markerDepth:MTLDepthStencilState
+ let weaponFlashPipeline:MTLRenderPipelineState?,weaponFlashDepth:MTLDepthStencilState
+ let weaponFlashes=NativeWeaponFlash()
+ private var humanShotPathsReported=Set<String>()
+ private let ordinaryShotLogger=Logger(subsystem:"org.zgtasa.source-tests",category:"flash")
+ private var riderMonotonicNow:()->Double={ProcessInfo.processInfo.systemUptime}
+ private var weaponFlashMeshes:[String:Mesh]=[:]
+ private func loadWeaponFlash(_ name:String){}
  let worldSurfacePipelines:[String:MTLRenderPipelineState]
  private var deferredWorldSurfaces:[TransparentWorldDraw]=[]
  private var worldSharpSource:String?="current",worldSharpName:String?,worldSharpGPU:NativeWorldSharpTextures?
@@ -39,6 +47,8 @@ private final class Harness {
  }
  private func fixedCJSourceIdentity()->String{"current"}
  private func configureEnvironment(_ uniforms:inout Uniforms){}
+ // ACTUAL_FLASH_DRAW
+ // ACTUAL_MESH_DRAW
  // ACTUAL_STAGE
  // ACTUAL_ENCODE_WORLD
  // ACTUAL_ENCODE_SCENE
@@ -63,14 +73,14 @@ private final class Harness {
  private func uniforms(_ mesh:Mesh)->Uniforms {
   Uniforms(viewProjection:matrix_identity_float4x4,settings:SIMD4(Float(mesh.atlas.width),Float(mesh.atlas.height),0,128))
  }
- private func render(background:SIMD4<Double>=SIMD4(0,0,0,1),_ body:(MTLRenderCommandEncoder)throws->Void)throws->SIMD4<UInt8> {
+ private func render(background:SIMD4<Double>=SIMD4(0,0,0,1),clearDepth:Double=1,_ body:(MTLRenderCommandEncoder)throws->Void)throws->SIMD4<UInt8> {
   let d=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.bgra8Unorm,width:1,height:1,mipmapped:false)
   d.storageMode=device.hasUnifiedMemory ? .shared:.managed;d.usage = .renderTarget
   let z=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.depth32Float,width:1,height:1,mipmapped:false);z.storageMode = .private;z.usage = .renderTarget
   guard let target=device.makeTexture(descriptor:d),let depthTexture=device.makeTexture(descriptor:z),let command=queue.makeCommandBuffer()else{throw Failed.check("render allocation")}
   let pass=MTLRenderPassDescriptor();pass.colorAttachments[0].texture=target;pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
   pass.colorAttachments[0].clearColor=MTLClearColorMake(background.x,background.y,background.z,background.w)
-  pass.depthAttachment.texture=depthTexture;pass.depthAttachment.loadAction = .clear;pass.depthAttachment.storeAction = .dontCare;pass.depthAttachment.clearDepth=1
+  pass.depthAttachment.texture=depthTexture;pass.depthAttachment.loadAction = .clear;pass.depthAttachment.storeAction = .dontCare;pass.depthAttachment.clearDepth=clearDepth
   guard let e=command.makeRenderCommandEncoder(descriptor:pass)else{throw Failed.check("render encoder")}
   e.setCullMode(.none);e.setDepthStencilState(depth);try body(e);e.endEncoding()
   if target.storageMode == .managed{guard let b=command.makeBlitCommandEncoder()else{throw Failed.check("readback encoder")};b.synchronize(resource:target);b.endEncoding()}
@@ -87,6 +97,39 @@ private final class Harness {
   worldSharpBase["c0"] = .init(layers:2,mapping:[1,0],source:"current",indices:3,center:SIMD3(0,0,0.5))
  }
  func exercise(_ library:MTLLibrary)throws->[String:Any] {
+  let flashAtlas=try atlas([64,32,16,128],[0,0,0,0])
+  let flashFront=try mesh(flashAtlas,0.4),flashBack=try mesh(flashAtlas,0.6)
+  weaponFlashMeshes["authored"]=flashFront
+  func drawFlash(_ e:MTLRenderCommandEncoder,_ identity:String="peer",_ left:Bool=false){
+   drawWeaponFlash(name:"authored",identity:identity,weapon:22,left:left,
+    transform:matrix_identity_float4x4,matrix:matrix_identity_float4x4,encoder:e)
+  }
+  let unlit=try render(background:.zero){e in drawFlash(e)}
+  try close(unlit,.zero,"Embedded flash initially hidden")
+  let flashPixel=try render(background:.zero){e in
+   weaponFlashes.fire(identity:"peer",weapon:22,left:false,twin:false,at:ProcessInfo.processInfo.systemUptime)
+   drawFlash(e)
+  }
+  try close(flashPixel,SIMD4(32,16,8,64),"Actual embedded unlit additive flash")
+  let behind=try render(background:.zero,clearDepth:0.2){e in
+   weaponFlashes.fire(identity:"peer",weapon:22,left:false,twin:false,at:ProcessInfo.processInfo.systemUptime)
+   drawFlash(e)
+  }
+  try close(behind,.zero,"Embedded flash respects solid depth")
+  let stacked=try render(background:.zero){e in
+   weaponFlashes.fire(identity:"peer",weapon:22,left:false,twin:false,at:ProcessInfo.processInfo.systemUptime)
+   drawFlash(e);weaponFlashMeshes["authored"]=flashBack;drawFlash(e)
+  }
+  try close(stacked,SIMD4(64,32,16,128),"Embedded flash additive stack with no depth write")
+  let unrelated=try render(background:.zero){e in drawFlash(e,"other")}
+  try close(unrelated,.zero,"Embedded shared mesh leaks no holder visibility")
+  let wrongHand=try render(background:.zero){e in drawFlash(e,"peer",true)}
+  try close(wrongHand,.zero,"Single-gun flash does not light the other hand")
+  let expired=try render(background:.zero){e in
+   weaponFlashes.fire(identity:"peer",weapon:22,left:false,twin:false,at:ProcessInfo.processInfo.systemUptime-0.06)
+   drawFlash(e)
+  }
+  try close(expired,.zero,"Expired flash submits no geometry")
   let t=try atlas([255,0,0,128],[0,255,0,64]),solid=try mesh(t,0.8),clear=try mesh(t,0.2,1)
   try source()
   let opaque=try render{e in try check(stageWorldSurface(name:"c0",mesh:solid,matrix:matrix_identity_float4x4,encoder:e),"Actual source/geometry stage admits solid prefix")}

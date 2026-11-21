@@ -174,6 +174,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private let skyDepth: MTLDepthStencilState
     private let depth: MTLDepthStencilState
     private let markerDepth: MTLDepthStencilState
+    private let weaponFlashPipeline:MTLRenderPipelineState?
+    private let weaponFlashDepth:MTLDepthStencilState
+    private let weaponFlashes=NativeWeaponFlash()
+    private var weaponFlashMeshes:[String:Mesh]=[:]
+    private struct WeaponFlashLoad {
+        let token:UUID
+        var completed=Set<String>(),data:[String:Data]=[:],tasks:[NativeResourceTask]=[]
+    }
+    private var weaponFlashLoads:[String:WeaponFlashLoad]=[:]
+    private var weaponFlashSource:String?,weaponFlashMissing=Set<String>()
     private let textureLoader: MTKTextureLoader
     private var meshes: [String: Mesh] = [:]
     private struct WorldSharpBase {let layers:Int,mapping:[UInt16],source:String;let indices:Int,center:SIMD3<Float>}
@@ -372,6 +382,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var canopySamples:[NativeFlightAnimation.Canopy?] = []
         var trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil
         var trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil
+        var shotSeat:(car:String,target:String)? = nil
     }
     /// A draw occurrence owns its source, even when another body has the same
     /// model and position. None of these render identities grants body control.
@@ -423,6 +434,24 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var waterMesh: Mesh?
     private let weaponEffects = NativeWeaponEffects()
     private let ordinaryShotEffects=NativeOrdinaryShotEffects()
+    private let localShots=NativeLocalShots()
+    private var localShotKindsReported=Set<Int>()
+    private var localShotMeshes:[String:NativeLocalShotMesh]=[:]
+    private var localShotTyreDefinitions:[Int:[NativeLocalShots.Tyre]]=[:]
+    private struct LocalShotVehicleFrame {
+        enum Owner {case player(String,String),registered(String,String),traffic(UInt16,UInt64)}
+        let owner:Owner,key:String,target:NativeLocalShots.Target,mesh:NativeLocalShotMesh
+        let body:simd_double4x4,matrices:[simd_double4x4],visible:[Bool],low:SIMD3<Double>,high:SIMD3<Double>
+        var occupants:[NativeLocalShots.Occupant]=[]
+        var tyres:[NativeLocalShots.Tyre]=[]
+    }
+    private var localShotVehicles:[LocalShotVehicleFrame]=[]
+    private var localShotVehiclesAt = -Double.infinity
+    private var localShotVehicleSource:String?
+    private let humanShots=NativeHumanShots()
+    private let remoteGunAudio=NativeRemoteGunAudio()
+    var onRemoteGunAudio:((NativeRemoteGunAudio.Event)->Void)?
+    private var humanShotPathsReported=Set<String>()
     private let bulletPass=NativeBulletPass()
     private lazy var shotTracerRenderer:NativeShotTracerRenderer? = {
         guard let library=device.makeDefaultLibrary()else{return nil}
@@ -889,7 +918,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var onParachuteUsed: (() -> Void)?
     private var actionTimeRemaining: Float = 0
     private var actionClip = ""
-    var equippedWeapon = 0
+    var equippedWeapon = 0 {didSet{weaponFlashes.select(identity:"own",weapon:equippedWeapon)}}
     /// Native utility-gear policy auto-selects the granted bag during a fall.
     /// The visual model and wire must agree. The full browser utility slot and
     /// mid-chute selection are still separate from the server's ammo inventory.
@@ -953,6 +982,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private var trafficOccupantDrawn:[String:String]=[:]
     var remotePlayers: [RemotePlayer] = [] { didSet {
+        weaponFlashes.retain(Set(remotePlayers.map(\.id)).union(["own"]))
+        for player in remotePlayers {
+            weaponFlashes.select(identity:player.id,weapon:Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) ? player.weapon:0)
+        }
+        humanShots.retain(Set(remotePlayers.map(\.id)))
         recordRemoteAnimationPackets()
         recordRemoteFootPackets()
         if remotePlayers.contains(where:{$0.skin==0}){ensureFixedCJ()}
@@ -1084,6 +1118,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard let markerDepth = device.makeDepthStencilState(descriptor: depthDescriptor) else { return nil }
         depthDescriptor.depthCompareFunction = .always
         guard let skyDepth = device.makeDepthStencilState(descriptor: depthDescriptor) else { return nil }
+        let flash=MTLRenderPipelineDescriptor()
+        flash.vertexFunction=vertex;flash.fragmentFunction=library.makeFunction(name:"nativeWeaponFlashFragment")
+        flash.colorAttachments[0].pixelFormat=view.colorPixelFormat;flash.depthAttachmentPixelFormat=view.depthStencilPixelFormat
+        flash.colorAttachments[0].isBlendingEnabled=true
+        flash.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha;flash.colorAttachments[0].destinationRGBBlendFactor = .one
+        flash.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha;flash.colorAttachments[0].destinationAlphaBlendFactor = .one
+        weaponFlashPipeline=flash.fragmentFunction.flatMap{_ in try? device.makeRenderPipelineState(descriptor:flash)}
+        depthDescriptor.depthCompareFunction = .lessEqual
+        guard let flashDepth=device.makeDepthStencilState(descriptor:depthDescriptor)else{return nil}
+        weaponFlashDepth=flashDepth
         self.view = view
         self.device = device
         self.queue = queue
@@ -1207,6 +1251,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ordinaryShotEffects.struck = {[weak self] origin,direction,distance in
             self?.ordinaryShotWorldHit(origin:origin,direction:direction,distance:distance)?.1
         }
+        ordinaryShotEffects.shellFloor = {[weak self] point,drop in
+            let point=SIMD3<Float>(point)
+            return self?.collisionFor(point)?.height(x:point.x,y:point.y,near:point.z,maxDrop:Float(drop)).map(Double.init)
+        }
         view.delegate = self
     }
 
@@ -1252,6 +1300,124 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         return NativeWeaponMuzzle.sample(weapon:weapon,left:left,feet:shotFeet,
             definition:weaponMuzzleCatalog?.definition(weapon:weapon),pose:source)
+    }
+    /// Capture before inventory consumption can change the selected weapon or
+    /// readiness. The accepted marker later resolves this immutable snapshot.
+    func captureLocalShot(weapon:Int,left:Bool,range:Float,pellets:Int,accuracy:Double,damage:Double,
+                          muzzle:NativeWeaponMuzzle.Sample,barrelClear:Bool)->NativeLocalShots.Input? {
+        guard NativeLocalShots.weapons.contains(weapon),!driving,let frame=gameCameraFrame,let definition=weaponMuzzleCatalog?.definition(weapon:weapon),
+              footWeaponDefinitions[weapon]?.use=="gun" else{return nil}
+        let forward=frame.target-frame.source
+        guard simd_length_squared(forward)>0 else{return nil}
+        let gunReady=weaponModels[String(weapon)].flatMap{actorMeshes[$0]} != nil
+        let actualMuzzle=gunReady && muzzle.posed ? SIMD3<Double>(barrelClear ? muzzle.origin:muzzle.safetyOrigin):nil
+        var input=NativeLocalShots.Input(weapon:weapon,range:Double(range),pellets:pellets,accuracy:accuracy,damage:damage,
+            feet:SIMD3<Double>(shotFeet),heading:Double(actorHeading),crouched:crouching,
+            camera:SIMD3<Double>(frame.aimSource ?? frame.source),forward:SIMD3<Double>(simd_normalize(forward)),
+            up:SIMD3(0,0,1),verticalFov:Double(frame.verticalFov),aspect:Double(view.drawableSize.width/max(1,view.drawableSize.height)),
+            muzzle:actualMuzzle,hipOrigin:muzzle.handOrigin.map{SIMD3<Double>($0)+SIMD3(0,0,Double(definition.offset.z)+0.15)},
+            scoped:frame.hidesPlayer,hip:!aiming,milliseconds:riderMonotonicNow()*1000)
+        input.crouchOffset=gameCamera.footShotCrouchDrop
+        if !barrelClear{input.coverOrigin=SIMD3<Double>(muzzle.safetyOrigin)}
+        return input
+    }
+    func resolveLocalShot(_ input:NativeLocalShots.Input)->NativeLocalShots.Frame? {
+        let vehicleFrames=currentLocalShotVehicleFrames()
+        var excluded=ambientBodies?.colliders ?? []
+        for frame in vehicleFrames {
+            switch frame.owner {
+            case .player(let id,_):
+                if let vehicle=presentedRemotePlayers.first(where:{$0.id==id})?.vehicleID {excluded.formUnion(groundVehicle?.shotVehicleColliders(id:vehicle) ?? [])}
+            case .registered(let id,_):excluded.formUnion(groundVehicle?.shotVehicleColliders(id:id) ?? [])
+            case .traffic(let id,let generation):excluded.formUnion(ambientTrafficBodies?.colliderIDs(id:id,generation:generation) ?? [])
+            }
+        }
+        let physical=(groundVehicle?.otherColliders ?? []).union(groundVehicle?.chassisColliders ?? []).union(ambientTrafficBodies?.colliders ?? [])
+        let hasUnresolvedVehicleCover = !physical.subtracting(excluded).isEmpty
+        let people=presentedRemotePlayers.filter {
+            Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && $0.life>0 &&
+                simd_distance($0.position,scenePosition)<130 && actorName(code:$0.code).flatMap{skeletalActors[$0]} != nil
+        }.map { player in
+            NativeLocalShots.Person(id:player.id,feet:SIMD3<Double>(remoteSupportPosition(player) ?? player.position),
+                heading:Double(player.heading),crouched:player.crouching)
+        } + presentedAmbientPedestrians.filter{!$0.dead}.map {
+            NativeLocalShots.Person(id:$0.targetID,feet:$0.position,heading:$0.heading,crouched:$0.state?.mood==1)
+        }
+        return localShots.fire(input,people:people,world:{[weak self] ray in
+            guard let self else{return .unavailable(0)}
+            func trace(_ groups:UInt32,excluding:Set<UInt64>=[])->NativeLocalShots.World {
+                switch self.worldRay(from:SIMD3<Float>(ray.origin),direction:SIMD3<Float>(ray.direction),distance:Float(ray.range),groups:groups,excluding:excluding) {
+                case .clear:return .clear
+                case .hit(let hit):return .hit(Double(hit.distance))
+                case .unavailable(let at):return .unavailable(Double(at))
+                }
+            }
+            let world=trace(0xffff0001)
+            return NativeLocalShots.cover(world:world,unresolved:hasUnresolvedVehicleCover ? trace(0xffff0082,excluding:excluded):nil)
+        },vehicles:{[weak self] ray in self?.localVehicleShotHits(ray,frames:vehicleFrames) ?? []})
+    }
+    func presentLocalShot(_ frame:NativeLocalShots.Frame,input:NativeLocalShots.Input,left:Bool,beforePellets:()->Void) {
+        let kinds=Set(frame.pellets.map(\.kind))
+        let fresh=kinds.reduce(false){fresh,kind in localShotKindsReported.insert(input.weapon*10+kind).inserted || fresh}
+        if fresh {
+            let description=kinds.sorted().map(String.init).joined(separator:",")
+            ordinaryShotLogger.info("Resolved own ordinary shot weapon \(input.weapon,privacy:.public) pellets \(frame.pellets.count,privacy:.public) claims \(frame.claims.count,privacy:.public) kinds \(description,privacy:.public) collision complete \(frame.collisionComplete,privacy:.public)")
+        }
+        ordinaryShotEffects.particles=particleEffects;ordinaryShotEffects.eye=SIMD3<Double>(audioEar)
+        weaponFlashes.fire(identity:"own",weapon:input.weapon,left:left,
+            twin:weaponMuzzleCatalog?.definition(weapon:input.weapon)?.twin == true,
+            at:riderMonotonicNow(),model:pedModels[String(localSkin)],ready:weaponFlashReady(input.weapon))
+        beforePellets()
+        for (index,pellet)in frame.pellets.prefix(5).enumerated() {
+            ordinaryShotEffects.shot(pellet.event,gunsmoke:false)
+            if index==0,!input.scoped,pellet.visualOrigin != pellet.end {
+                particleEffects?.play("gunsmoke",at:pellet.visualOrigin)
+                ordinaryShotEffects.casing(weapon:input.weapon,at:pellet.visualOrigin,direction:pellet.ray.direction)
+            }
+        }
+    }
+    private static func shotMatrix(_ value:simd_float4x4)->simd_double4x4 {
+        .init(columns:(SIMD4<Double>(value.columns.0),SIMD4<Double>(value.columns.1),SIMD4<Double>(value.columns.2),SIMD4<Double>(value.columns.3)))
+    }
+    private func shotSpheres(actor:NativeSkeletalActor,pose:NativeSkeletalActor.Pose,transform:simd_float4x4)->[NativeLocalShots.BodySphere] {
+        func center(_ bone:Int)->SIMD3<Double>? {
+            guard let matrix=actor.transform(bone:bone,in:pose)else{return nil}
+            let point=transform*matrix.columns.3
+            let value=SIMD3<Double>(Double(point.x),Double(point.y),Double(point.z))
+            return NativeLocalShots.finite(value) ? value:nil
+        }
+        return NativeLocalShots.bodySpheres.compactMap{spec in
+            guard var point=center(spec.bone)else{return nil}
+            if let to=spec.to {guard let other=center(to)else{return nil};point=(point+other)*0.5}
+            return .init(center:point,radius:spec.radius,piece:spec.piece,bone:spec.bone)
+        }
+    }
+    private func currentLocalShotVehicleFrames()->[LocalShotVehicleFrame] {
+        let age=riderMonotonicNow()-localShotVehiclesAt
+        guard age>=0,age<=0.25,localShotVehicleSource==fixedCJSourceIdentity()else{return []}
+        return localShotVehicles.filter { frame in
+            let current:Bool
+            switch frame.owner {
+            case .player(let id,let code):current=presentedRemotePlayers.contains{$0.id==id && $0.code==code && $0.vehicleHealth>0 && !$0.code.hasPrefix("s")}
+            case .registered(let id,let code):current=remoteVehicles.contains{$0.id==id && $0.code==code} && !presentedRemotePlayers.contains{$0.vehicleID==id}
+            case .traffic(let id,let generation):current=ambientTraffic.traffic.actors[id]?.generation==generation
+            }
+            return current
+        }
+    }
+    private func localVehicleShotHits(_ ray:NativeLocalShots.Ray,frames:[LocalShotVehicleFrame])->[NativeLocalShots.Hit] {
+        frames.compactMap { frame in
+            let bounds=NativeLocalShots.bounds(ray:ray,body:frame.body,low:frame.low,high:frame.high)
+            guard let hit=NativeLocalShots.vehicle(ray:ray,bounds:bounds,target:frame.target,occupants:frame.occupants,hull:{
+                frame.mesh.hit(ray:ray,body:frame.body,matrices:frame.matrices,visible:frame.visible).map {
+                    .init(distance:$0.distance,transparent:$0.transparent)
+                }
+            })else{return nil}
+            guard hit.target.kind != 1 else{return hit}
+            var tagged=hit.target
+            tagged.wheel=NativeLocalShots.tyre(ray:ray,hullDistance:hit.distance,tyres:frame.tyres)
+            return .init(distance:hit.distance,target:tagged)
+        }
     }
     var direction: Float { driving ? heading : actorHeading }
     var cameraDirection: Float { gameCameraFrame?.heading ?? heading }
@@ -1419,6 +1585,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             health<=0 || driving || swimming || climb != nil {acceptedStreamRay=nil}
     }
     func resetDisplayClock() {
+        for event in remoteGunAudio.clear(){onRemoteGunAudio?(event)}
+        weaponFlashes.clear()
+        localShotVehicles.removeAll();localShotVehiclesAt = -.infinity;localShotVehicleSource=nil
         renderClock.reset();riderPoseClock.reset(at:riderMonotonicNow())
         for (_,cached) in remoteFootAnimations { cached.1.resetDisplayClock() }
         resetRemoteFootPresentation()
@@ -1551,6 +1720,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     func move(forward: Float, sideways: Float, turn: Float, delta: Float,
               running: Bool = false, lookVertical: Float = 0, lift: Float = 0) {
+        let gun=footWeaponDefinitions[equippedWeapon],shotContext=combatEligibility()
+        let gunAim=health>0 && !driving && !swimming && climb==nil && !personalFlight.chuting && !legacySpectating &&
+            (!personalFlight.flying || gun?.arm==true) && gun?.use=="gun" && gun?.aims==true &&
+            (footAnimator?.gunUp==true || (aiming && shotContext.canAim) || (weaponTriggerHeld && shotContext.canRequestFire))
+        localShots.advance(seconds:Double(delta),aimState:gunAim)
         vehicleLeanInput = driving ? lookVertical : 0
         synchronizeOtherVehiclePhysics(delta:Double(delta))
         if legacySpectating {
@@ -2266,7 +2440,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         defer {weaponEventFeet=nil}
         for left in frame.shots {
             guard equippedWeapon==weapon,combatEligibility().canEmitShot else{break}
-            if onFootWeaponShot?(weapon,left) == true,[37,38,41,42].contains(weapon) {acceptedStreamShot=true}
+            let accepted=onFootWeaponShot?(weapon,left) == true
+            if accepted,[37,38,41,42].contains(weapon) {acceptedStreamShot=true}
         }
     }
 
@@ -2889,6 +3064,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         lastRiderDraw=0;riderPoseClock.reset();remoteServerTimeOffsetMilliseconds=nil
         weaponEffects.clear();particleEffects?.clear();blasts.removeAll();gameCamera.cancelShake()
         ordinaryShotEffects.clear();ordinaryShotKindsReported=[];ordinaryShotDrawReported=false
+        localShots.clear();localShotKindsReported=[];localShotVehicles.removeAll();localShotVehiclesAt = -.infinity;localShotVehicleSource=nil
+        humanShots.clear();humanShotPathsReported=[]
+        for event in remoteGunAudio.clear(){onRemoteGunAudio?(event)}
+        weaponFlashes.clear()
     }
 
     /// A new server peer owns a new world baseline. Discard the previous
@@ -3352,6 +3531,64 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         }
     }
+    func receiveOriginalShot(_ row:[String:Any]) {
+        guard let packet=NativeHumanShots.Packet(row),let player=remotePlayers.first(where:{$0.id==packet.shooter})else{return}
+        let now=riderMonotonicNow()
+        let targetReady=packet.target.map{id in
+            guard let target=remotePlayers.first(where:{$0.id==id}),target.code.hasPrefix("s"),
+                  let owner=remoteFootAnimations[id]else{return false}
+            return owner.0==actorName(code:target.code)
+        } ?? false
+        humanShots.observeStrike(packet,targetReady:targetReady,at:now)
+        guard let immediate=humanShots.receive(packet,footAppearance:player.code.hasPrefix("s"),at:now),
+              UIApplication.shared.applicationState == .active,view.window != nil else{return}
+        ordinaryShotEffects.particles=particleEffects;ordinaryShotEffects.eye=SIMD3<Double>(audioEar)
+        ordinaryShotEffects.shot(immediate.event,gunsmoke:false)
+        let direction=immediate.event.end-immediate.event.origin,length=simd_length(direction)
+        if immediate.event.weapon != 38,length>0 {
+            ordinaryShotEffects.casing(weapon:immediate.event.weapon,at:immediate.event.origin,direction:direction/length)
+        }
+        if let pass=bulletPass.pass(from:immediate.event.origin,to:immediate.event.end,audioAvailable:onBulletPass != nil){onBulletPass?(pass)}
+        onSpatialWeaponShot?(immediate.soundWeapon,immediate.event.origin)
+        if humanShotPathsReported.insert("vehicle").inserted {
+            ordinaryShotLogger.info("Observed registered vehicle shot with positioned audio")
+        }
+    }
+
+    private func emitRemoteFootShots(_ frame:NativeFootAnimation.Frame,player:RemotePlayer,
+                                     actor:NativeSkeletalActor,pose:NativeSkeletalActor.Pose?,feet:SIMD3<Float>) {
+        let weapon=player.weapon
+        guard footWeaponDefinitions[weapon]?.use == "gun",!frame.shots.isEmpty,
+              let definition=weaponMuzzleCatalog?.definition(weapon:weapon)else{return}
+        let body=Self.translation(feet)*Self.rotationZ(-player.heading)
+        let ready=weaponModels[String(weapon)].flatMap{actorMeshes[$0]} != nil
+        let source=pose.map{NativeWeaponMuzzle.Pose(weapon:weapon,feet:feet,actorToWorld:body,
+            rightHand:actor.transform(bone:24,in:$0),leftHand:actor.transform(bone:34,in:$0),visible:frame.handWeaponVisible)}
+        ordinaryShotEffects.particles=particleEffects;ordinaryShotEffects.eye=SIMD3<Double>(audioEar)
+        for left in frame.shots {
+            let posed=ready ? NativeWeaponMuzzle.sample(weapon:weapon,left:left,feet:feet,definition:definition,pose:source):nil
+            let muzzle=posed?.posed == true ? SIMD3<Double>(posed!.origin):SIMD3<Double>(feet)+SIMD3(0,0,1.3)
+            guard let marker=humanShots.marker(shooter:player.id,weapon:weapon,left:left,
+                at:riderMonotonicNow(),muzzle:muzzle,heading:Double(player.heading),
+                pitch:Double(player.aim ?? 0),range:Double(definition.range),along:{[weak self]origin,direction,distance in
+                    self?.ordinaryShotWorldHit(origin:origin,direction:direction,distance:distance)?.0
+                })else{continue}
+            // The firing marker owns smoke and sound. A queued distant
+            // packet can independently own the tracer's starting point.
+            weaponFlashes.fire(identity:player.id,weapon:weapon,left:left,twin:definition.twin,at:riderMonotonicNow(),
+                model:actorName(code:player.code),ready:weaponFlashReady(weapon))
+            particleEffects?.play("gunsmoke",at:marker.muzzle)
+            ordinaryShotEffects.casing(weapon:weapon,at:marker.muzzle,direction:marker.direction)
+            ordinaryShotEffects.shot(marker.event,gunsmoke:false)
+            if let pass=bulletPass.pass(from:marker.muzzle,to:marker.event.end,audioAvailable:onBulletPass != nil){onBulletPass?(pass)}
+            if let hold=remoteGunAudio.hold(identity:player.id,weapon:weapon,at:marker.muzzle){onRemoteGunAudio?(hold)}
+            else{onSpatialWeaponShot?(weapon,marker.muzzle)}
+            if humanShotPathsReported.insert(marker.usedPacket ? "foot-queued":"foot-predicted").inserted {
+                ordinaryShotLogger.info("Observed remote foot firing marker with queued packet \(marker.usedPacket,privacy:.public)")
+            }
+        }
+    }
+
     private func ordinaryShotWorldHit(origin:SIMD3<Double>,direction:SIMD3<Double>,distance:Double)->(Double,NativeOrdinaryShotEffects.Contact)? {
         var contact:NativeOrdinaryShotEffects.Contact?
         let result=worldRay(from:SIMD3<Float>(origin),direction:SIMD3<Float>(direction),distance:Float(distance),groups:0xffff0001,onHit:{hit in
@@ -3359,6 +3596,57 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         })
         guard case .hit(let hit)=result,let contact else{return nil}
         return(Double(hit.distance),contact)
+    }
+
+    private func weaponFlashReady(_ weapon:Int)->Bool {
+        guard weaponFlashSource==fixedCJSourceIdentity(),let name=weaponModels[String(weapon)]else{return false}
+        return actorMeshes[name] != nil && weaponFlashMeshes[name] != nil && weaponFlashPipeline != nil
+    }
+    private func loadWeaponFlash(_ name:String) {
+        guard let server,weaponModels.values.contains(name)else{return}
+        let source=fixedCJSourceIdentity()
+        if weaponFlashSource != source {
+            for load in weaponFlashLoads.values {for task in load.tasks{task.cancel()}}
+            weaponFlashLoads.removeAll();weaponFlashMeshes.removeAll();weaponFlashMissing.removeAll()
+            weaponFlashes.clear();weaponFlashSource=source
+        }
+        guard weaponFlashMeshes[name]==nil,weaponFlashLoads[name]==nil,!weaponFlashMissing.contains(name)else{return}
+        let token=UUID();weaponFlashLoads[name]=WeaponFlashLoad(token:token)
+        for kind in ["bin","png"] {
+            let task=NativeResourceTransport.dataTask(with:server.path("game/native/models/\(name).flash.\(kind)")) {[weak self]data,response,_ in
+                DispatchQueue.main.async {
+                    guard let self,self.fixedCJSourceIdentity()==source,self.weaponFlashLoads[name]?.token==token else{return}
+                    self.weaponFlashLoads[name]?.completed.insert(kind)
+                    if let data,data.count<=4*1024*1024,(response as? HTTPURLResponse)?.statusCode==200 {
+                        self.weaponFlashLoads[name]?.data[kind]=data
+                    }
+                    guard let load=self.weaponFlashLoads[name],load.completed.count==2 else{return}
+                    self.weaponFlashLoads[name]=nil
+                    guard let binary=load.data["bin"],let image=load.data["png"],
+                          let world=try? WorldBinary(data:binary),world.vertices.count<=4096,world.indices.count<=12288,
+                          let atlas=try? self.textureLoader.newTexture(data:image,options:[.SRGB:false]),
+                          atlas.width<=1024,atlas.height<=1024,
+                          let vertices=self.device.makeBuffer(bytes:world.vertices,length:world.vertices.count*MemoryLayout<NativeVertex>.stride),
+                          let indices=self.device.makeBuffer(bytes:world.indices,length:world.indices.count*MemoryLayout<UInt32>.stride)else{
+                        self.weaponFlashMissing.insert(name);return
+                    }
+                    self.weaponFlashMeshes[name]=Mesh(vertices:vertices,indices:indices,indexCount:world.indices.count,atlas:atlas)
+                }
+            }
+            weaponFlashLoads[name]?.tasks.append(task);task.resume()
+        }
+    }
+    private func drawWeaponFlash(name:String,identity:String?,weapon:Int,left:Bool,
+                                 transform:simd_float4x4,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder) {
+        loadWeaponFlash(name)
+        guard let identity,weaponFlashes.visible(identity:identity,weapon:weapon,left:left,at:riderMonotonicNow()),
+              let mesh=weaponFlashMeshes[name],let pipeline=weaponFlashPipeline else{return}
+        encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(weaponFlashDepth)
+        draw(mesh:mesh,cellSize:128,matrix:matrix*transform,encoder:encoder)
+        if humanShotPathsReported.insert("flash").inserted {
+            ordinaryShotLogger.info("Submitted embedded weapon flash weapon \(weapon,privacy:.public) left \(left,privacy:.public)")
+        }
+        encoder.setRenderPipelineState(self.pipeline);encoder.setDepthStencilState(depth)
     }
     func advanceAmbientTraffic(at time:Double,active:Bool) {
         if active{loadTrafficOccupantsIfNeeded()}
@@ -3630,6 +3918,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 self.vehicleCoupling?.reset(connection:self.couplingConnection)
                 self.groundVehicle?.loadDefinitions(data);self.cameraVehicleDefinitions = cameraDefinitions
                 self.remoteSuspensionConfigurations = suspension
+                self.localShotTyreDefinitions=NativeLocalShots.carTyreCatalog(suspensionRows)
                 self.supportScene?.clear()
                 if let snapshot=self.couplingSnapshot {self.applyVehicleCouplings(snapshot.links,revision:snapshot.revision,connection:snapshot.connection)}
                 self.loadVehicleCouplingDefinitions()
@@ -3792,6 +4081,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let stagedActor=skeleton.flatMap{NativeSkeletalActor(data:$0,vertexCount:world.vertices.count,device:self.device)}
             guard !isPed || stagedActor != nil else{return}
             var stagedRig:NativeVehicleRig?,stagedRigMesh:Mesh?,stagedMasks:[(Int,Mesh)]=[]
+            var stagedShotMesh:NativeLocalShotMesh?
             var stagedVehicleTextures:NativeVehicleTextures?
             if let rigBinary,let rigImage,let rigMetadata,let rig=NativeVehicleRig(data:rigMetadata),
                rig.validatesAssetFamily(binary:rigBinary,atlas:rigImage),
@@ -3805,6 +4095,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     stagedVehicleTextures=textures
                 }
                 rig.installSortCenters(positions:geometry.vertices.map{SIMD3($0.position.x,$0.position.y,$0.position.z)},indices:geometry.indices)
+                stagedShotMesh=NativeLocalShotMesh(positions:geometry.vertices.map{SIMD3($0.position.x,$0.position.y,$0.position.z)},indices:geometry.indices,
+                    surfaces:rig.document.draws.map{part in
+                        // Older base-vehicle exports share the proven original
+                        // DoubleSide/NormalBlending factory defaults. New exports
+                        // retain raw material values for additional materials.
+                        .init(node:part.node,start:part.start,count:part.count,side:part.materialSide ?? 2,
+                              transparent:part.materialTransparent ?? ((part.opacity ?? 1)<1 || part.alphaTest>0),
+                              opacity:part.opacity ?? 1,additive:part.meshAdditive == true || part.materialBlending==2)
+                    })
                 stagedRig=rig
                 stagedRigMesh=Mesh(vertices:vertices,indices:indices,indexCount:geometry.indices.count,atlas:atlas)
                 stagedMasks=(rig.document.waterMasks ?? []).compactMap { mask -> (Int,Mesh)? in
@@ -3822,6 +4121,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let stagedActor{self.skeletalActors[name]=stagedActor}
             if let rig=stagedRig,let mesh=stagedRigMesh{
                 self.vehicleRigs[name]=rig;self.vehicleRigMeshes[name]=mesh;self.vehicleWaterMasks[name]=stagedMasks
+                self.localShotMeshes[name]=stagedShotMesh
                 self.vehicleTextures[name]=stagedVehicleTextures
                 if self.activeVehicleModel==String(rig.document.id){self.groundVehicle?.setDamageHinges(rig.damageHinges)}
             }
@@ -5229,10 +5529,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // Each occurrence refers to its own draw-local override, including
         // co-located players with the same skin. No position key is needed.
         var actorOverrides: [ActorPoseOverride] = []
+        var nextShotVehicles:[LocalShotVehicleFrame]=[]
+        var nextShotOccupants:[String:[NativeLocalShots.Occupant]]=[:]
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
-                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil,trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil) {
+                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil,trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil,shotSeat:(car:String,target:String)? = nil) {
             let occurrence = actorOverrides.count
-            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples,trafficOccupant:trafficOccupant,trafficArrival:trafficArrival))
+            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples,trafficOccupant:trafficOccupant,trafficArrival:trafficArrival,shotSeat:shotSeat))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil,occurrence))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
@@ -5393,7 +5695,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         if let part=frame.doorPart{riderDoorHolds[vehicleID,default:[:]][part]=frame.doorOpen}
                     }else{pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat)}
                 }else{pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:definition.configuration(seat:player.ridingSeat),input:input),library:library,figurePosition:seat,figureTurn:Float(definition.seats[player.ridingSeat].turn ?? 0))}
-                appendPed(ped,shared.vehicle.position,shared.vehicle.heading,0,"",0,0,pose:pose,transform:shared.transform,original:true)
+                appendPed(ped,shared.vehicle.position,shared.vehicle.heading,0,"",0,0,pose:pose,transform:shared.transform,original:true,
+                    shotSeat:player.life>0 ? ("vehicle:\(vehicleID)",player.id):nil)
                 continue
             }
             guard simd_distance(player.position,scenePosition)<130 else{continue}
@@ -5410,6 +5713,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     if let cached=remoteFootAnimations[player.id],cached.0==name {animator=cached.1}
                     else {
                         animator=NativeRemoteFootAnimation(library:library,style:definitions.style(model:legacyPedStyles[name] ?? name,library:library),weapons:footWeaponDefinitions)
+                        humanShots.clearStrike(player.id)
                         remoteFootAnimations[player.id]=(name,animator)
                     }
                     let groundContext=NativeRemoteMeleeContext.nearFlooredTarget(attackerID:player.id,
@@ -5423,8 +5727,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         velocity:SIMD3<Double>(player.velocity),movement:Double(player.movementRatio),airborne:player.airborne,crouching:player.crouching,
                         weapon:player.weapon,aim:player.aim.map(Double.init),action:player.action,shots:player.shotCount,life:Double(player.life),
                         armour:Double(player.armour),down:player.down,paused:player.paused,pitch:Double(player.pitch),roll:Double(player.roll),script:player.scriptAnimation,
-                        nearFlooredTarget:groundContext)
+                        nearFlooredTarget:groundContext,struck:humanShots.recentStrike(player.id,at:riderTime).map{
+                            .init(weapon:$0.weapon,origin:$0.origin,piece:$0.piece,atMilliseconds:$0.atMilliseconds)
+                        })
                     sampledRemoteFootIDs.insert(player.id)
+                    let wasHeadless=animator.animator.lostHead
                     if let frame=animator.update(at:riderTime,
                         active:UIApplication.shared.applicationState == .active && view.window != nil,snapshot:state) {
                     if !frame.handWeaponVisible { handWeapon=0 }
@@ -5434,6 +5741,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)
                         original=true
                     }
+                    if !wasHeadless,animator.animator.lostHead,let pose,let head=actor.transform(bone:5,in:pose) {
+                        let world=Self.translation(footPosition)*Self.rotationZ(-player.heading)*head.columns.3
+                        ordinaryShotEffects.particles=particleEffects
+                        ordinaryShotEffects.blood(at:SIMD3<Double>(SIMD3(world.x,world.y,world.z)),direction:SIMD3(0,0,1),count:40)
+                    }
+                    emitRemoteFootShots(frame,player:player,actor:actor,pose:pose,feet:footPosition)
                     }
                 }
                 if (10...16).contains(player.action & 63) || (20...25).contains(player.action & 63) { handWeapon=0 }
@@ -5489,8 +5802,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let car = player.vehicleID.flatMap{sharedVehicleFrame(id:$0)?.transform} ?? Self.translation(player.position) * Self.rotationZ(-player.heading) *
                 Self.rotationX(player.pitch) * Self.rotationY(player.roll) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
-            appendPed(ped,player.position,player.heading,0,"",0,0,pose:pose,transform:car,original:true)
+            appendPed(ped,player.position,player.heading,0,"",0,0,pose:pose,transform:car,original:true,
+                shotSeat:player.life>0 ? (player.vehicleID.map{"vehicle:\($0)"} ?? "player:\(player.id)",player.id):nil)
         }
+        for event in remoteGunAudio.advance(delta:min(0.1,riderDelta)){onRemoteGunAudio?(event)}
         for arrival in trafficPedestrianArrivals.values where arrival.shown {
             trafficRiderRetention.complete(arrival.serial)
             trafficRiderDestinations[arrival.serial]=nil
@@ -5702,6 +6017,16 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                            locomotion: locomotion, locomotionElapsed: locomotionTime, looping: loops)
             } }
             let pose = queued?.pose ?? sampledPose
+            if let queued,let pose,let actor=skeletalActors[name] {
+                var seat=queued.shotSeat
+                if let traffic=queued.trafficOccupant,!traffic.dead {
+                    seat=("traffic:\(traffic.id):\(traffic.generation)","c\(traffic.id).\(traffic.seat)")
+                }
+                if let seat {
+                    let spheres=shotSpheres(actor:actor,pose:pose,transform:transform)
+                    if !spheres.isEmpty{nextShotOccupants[seat.car,default:[]].append(.init(id:seat.target,spheres:spheres))}
+                }
+            }
             var actorDrawSubmitted=false
             if let customPed {
                 guard let pose,let pipelines=fixedPlayer?.gpu.pipelines ?? legacyPedPipelines else{continue}
@@ -5746,6 +6071,36 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 if native==nil{encoder.setFragmentTexture(mesh.atlas,index:0)}
                 if clip.isEmpty,let context=vehicleContext,let rig=vehicleRigs[name],vehicleRigMeshes[name] != nil {
                     let completeFrame=vehicleRigFrame(position:position,modelTransform:transform,rig:rig,context:context)
+                    if let geometry=localShotMeshes[name],let box=cameraVehicleDefinitions[String(rig.document.id)]?.bounds.box,
+                       box.min.count==3,box.max.count==3 {
+                        var record:(LocalShotVehicleFrame.Owner,String,NativeLocalShots.Target)?
+                        switch context.source {
+                        case .remote(let player):
+                            if player.vehicleHealth>0 {
+                                record=(.player(player.id,player.code),player.vehicleID.map{"vehicle:\($0)"} ?? "player:\(player.id)",.init(id:player.id,kind:2))
+                            }
+                        case .parked(let vehicle,_):record=(.registered(vehicle.id,vehicle.code),"vehicle:\(vehicle.id)",.init(id:vehicle.id,kind:3))
+                        case .traffic(let traffic):record=(.traffic(traffic.identity.id,traffic.generation),"traffic:\(traffic.identity.id):\(traffic.generation)",.init(id:"t\(traffic.identity.id)",kind:3))
+                        case .own,.carriage:break
+                        }
+                        if let (owner,key,target)=record {
+                            var tyres=localShotTyreDefinitions[rig.document.id] ?? []
+                            if let bike=rig.document.joints.bike,!bike.pedalled {
+                                tyres=["front","rear"].enumerated().compactMap{index,name in
+                                    guard let hub=bike.hubs[name],hub.at.count==3 else{return nil}
+                                    return .init(index:index,center:SIMD3(hub.at[0],hub.at[1],hub.at[2]+bike.restDrop),radius:hub.radius)
+                                }
+                            }
+                            let shotBody=Self.shotMatrix(transform)
+                            tyres=tyres.map{tyre in
+                                let center=shotBody*SIMD4(tyre.center,1)
+                                return .init(index:tyre.index,center:SIMD3(center.x,center.y,center.z),radius:tyre.radius)
+                            }
+                            nextShotVehicles.append(.init(owner:owner,key:key,target:target,mesh:geometry,body:shotBody,
+                                matrices:completeFrame.matrices,visible:completeFrame.visible,
+                                low:SIMD3(Double(box.min[0]),Double(box.min[1]),Double(box.min[2])),high:SIMD3(Double(box.max[0]),Double(box.max[1]),Double(box.max[2])),tyres:tyres))
+                        }
+                    }
                     // Keep opaque hulls in the normal actor phase. Transparent
                     // materials must wait until every opaque rider has drawn.
                     let frame=completeFrame.opaque
@@ -5835,6 +6190,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let heldWeapon = NativeWeaponAttachment.selectedWeapon(weapon,swimming:false,
                 jetpackFlying:queued?.identity == "own" && personalFlight.flying,
                 armWeapon:footWeaponDefinitions[weapon]?.flags?["arm"] == true)
+            if let identity=queued?.identity{weaponFlashes.select(identity:identity,weapon:heldWeapon,model:name)}
             let rightHand:simd_float4x4?
             if let pose,let actor=skeletalActors[name] {
                 rightHand=actor.transform(bone:NativeWeaponAttachment.rightHandBone,in:pose)
@@ -5846,10 +6202,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 encoder.setRenderPipelineState(pipeline)
                 draw(mesh: pistol, cellSize: 128, matrix: matrix * transform * attachment,
                      encoder: encoder,tint:SIMD4(1,1,1,opacity))
+                drawWeaponFlash(name:weaponName,identity:queued?.identity,weapon:heldWeapon,left:false,
+                    transform:transform*attachment,matrix:matrix,encoder:encoder)
                 if weaponMuzzleCatalog?.definition(weapon:heldWeapon)?.twin == true,let pose,
                    let actor=skeletalActors[name],let left=actor.transform(bone:34,in:pose) {
                     draw(mesh:pistol,cellSize:128,matrix:matrix*transform*left*NativeWeaponMuzzle.attachment(left:true),
                         encoder:encoder,tint:SIMD4(1,1,1,opacity))
+                    drawWeaponFlash(name:weaponName,identity:queued?.identity,weapon:heldWeapon,left:true,
+                        transform:transform*left*NativeWeaponMuzzle.attachment(left:true),matrix:matrix,encoder:encoder)
                 }
             } else if let weaponName = weaponModels[String(heldWeapon)], heldWeapon > 0 {
                 loadActor(weaponName)
@@ -5860,6 +6220,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
             encoder.setDepthStencilState(depth)
         }
+        for index in nextShotVehicles.indices {nextShotVehicles[index].occupants=nextShotOccupants[nextShotVehicles[index].key] ?? []}
+        localShotVehicles=nextShotVehicles;localShotVehiclesAt=riderTime;localShotVehicleSource=fixedCJSourceIdentity()
         if deferredVehicleSurfaces != nil {deferredVehicleSurfaces=transparentVehicleDraws}
         else{encodeTransparentVehicles(transparentVehicleDraws,encoder:encoder)}
         let visible = Set(modelInstances.map { $0.0 } + modelInstances.compactMap { weaponModels[String($0.6)] })
@@ -5875,6 +6237,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             pedAtlasGPU=pedAtlasGPU.filter{visible.contains($0.key)}
             vehicleRigs=vehicleRigs.filter{visible.contains($0.key)}
             vehicleRigMeshes=vehicleRigMeshes.filter{visible.contains($0.key)}
+            localShotMeshes=localShotMeshes.filter{visible.contains($0.key)}
             vehicleTextures=vehicleTextures.filter{visible.contains($0.key)}
             vehicleWaterMasks=vehicleWaterMasks.filter{visible.contains($0.key)}
         }

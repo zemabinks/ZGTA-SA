@@ -32,7 +32,7 @@ def main():
     OUT.mkdir(parents=True, exist_ok=True)
     names = ['ServerAddress', 'NativeConnectionRecovery', 'NativeInventoryPrediction',
              'NativeShotTargeting', 'NativeStreamShotClaims', 'NativeOriginalWorldProtocol',
-             'NativeOriginalWorldCommands', 'NativeOriginalWorldVitals', 'NativeSAMPProtocol','NativeSAMPGameplayCommands', 'NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeMultiplayerClient']
+             'NativeOriginalWorldCommands', 'NativeOriginalWorldVitals', 'NativeSAMPProtocol','NativeSAMPGameplayCommands', 'NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots','NativeLocalShotPackets','NativeMultiplayerClient']
     inputs = {name: (ROOT / 'ios/App' / (name + '.swift')).read_text() for name in names}
     prediction = declaration(inputs['NativeMultiplayerClient'], 'struct NativeHealthPrediction {')
     with tempfile.TemporaryDirectory(prefix='health-ack-', dir=OUT) as directory:

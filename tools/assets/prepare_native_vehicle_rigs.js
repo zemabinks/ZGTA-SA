@@ -137,6 +137,8 @@ function exportRig(built,output,options={}) {
         materialVisible:material.visible,lens:material.userData.lens??-1,paint:material.userData.slot??-1,
         texture:slot,litTexture:litSlot,glass:!!material.userData.glass,alphaTest:material.alphaTest,
         color:[material.color.r,material.color.g,material.color.b],opacity:material.opacity,lighting:!!normal,
+        materialTransparent:material.transparent,materialSide:material.side,materialBlending:material.blending,
+        meshAdditive:[object.material].flat().some(value=>value?.blending===2),
         roughness:material.roughness??null,metalness:material.metalness??null});
     }
   }

@@ -111,6 +111,8 @@ final class NativeGameCamera {
     private var footNeedsReset = false
     private var aimShare: Double = 0,aimStart: Double = 0,aimClock: Double = 0,targetFov: Double = 70
     private var crouchDrop: Double = 0,aimDrop: Double = 0
+    /// The same smoothed drop owns the missing-hand hip-fire fallback.
+    var footShotCrouchDrop:Double {crouchDrop}
     private var ledgeClock: Double = 0
     private var feetAnchor = SIMD3<Double>.zero,previousFeet = SIMD3<Double>.zero
     private var chaseSource = SIMD3<Double>.zero,chaseBack = SIMD3<Double>.zero

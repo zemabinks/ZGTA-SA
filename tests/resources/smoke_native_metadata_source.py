@@ -28,8 +28,11 @@ def main():
    paths=[source/'ios/App'/f'{n}.swift'for n in ['ServerAddress',*(['NativeVehicleSeating']if case=='seating'else PHYSICS if case=='physics'else[])]]
    library=ROOT/'local-only/native-physics'/('macos-'+platform.machine());extras=[]
    if case=='physics':
+    if 'NativeLocalShots.carTyreCatalog' in text:
+     paths += [source/'ios/App'/f'{n}.swift'for n in ['NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots']]
+     extras += ['-D','HAS_LOCAL_SHOTS']
     subprocess.run(['python3',str(ROOT/'native-physics/source_stamp.py'),'check',str(library)],check=True)
-    pathsForHash=[library/'libzgtasa_native_physics.a'];extras=['-I',str(ROOT/'native-physics/include'),'-L',str(library),'-lzgtasa_native_physics','-framework','CoreFoundation']
+    pathsForHash=[library/'libzgtasa_native_physics.a'];extras+=['-I',str(ROOT/'native-physics/include'),'-L',str(library),'-lzgtasa_native_physics','-framework','CoreFoundation']
    else:pathsForHash=[]
    frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in [*paths,*pathsForHash,fixture,renderer,Path(__file__)]}
    row=dict(case=case,status='RUNNING',sourceHashes=frozen);report['results'].append(row);save()

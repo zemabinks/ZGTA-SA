@@ -913,6 +913,26 @@ final class NativeMultiplayerClient {
         sendWeaponShot(weapon: 22, from: origin, to: hit, player: player, ticket: ticket)
     }
 
+    @discardableResult func sendOrdinaryShotBatch(weapon:Int,claims:[NativeLocalShots.Claim],ticket:NativeShotTicket?)->Bool {
+        guard let packets=NativeLocalShotPackets.original(weapon:weapon,claims:claims)else{return false}
+        if usesOriginalWorldProtocol {
+            guard isReady,socket != nil,health>0,!passive else{return false}
+            var sent=false
+            for packet in packets {
+                guard sendOriginal(packet)else{break};sent=true
+            }
+            if sent{shots+=1}
+            return sent
+        }
+        // Existing SA-MP and acknowledged self-host adapters accept a single
+        // emission/ticket. Keep that authority boundary until a separately
+        // negotiated multi-target policy exists; do not spend per pellet.
+        guard let first=claims.first else{return false}
+        return sendWeaponShot(weapon:weapon,from:SIMD3<Float>(first.origin),to:SIMD3<Float>(first.end),
+            player:first.kind==1 ? first.target?.id:nil,ticket:ticket,
+            hitType:first.kind,pellets:first.pellets,piece:first.target?.piece)
+    }
+
     @discardableResult func sendWeaponShot(weapon: Int, from origin: SIMD3<Float>, to hit: SIMD3<Float>,
                         player: String?, ticket: NativeShotTicket? = nil,streamPlayers:[String]=[],
                         hitType:Int?=nil,pellets:Int=1,piece:Int?=nil) -> Bool {
@@ -934,9 +954,12 @@ final class NativeMultiplayerClient {
               ticket.connection == inventoryConnection, shotSequence.claim(ticket) else { return false }
         let effectTargets=NativeStreamShotClaims.normalized(streamPlayers)
         shots += 1
-        let shot: [String: Any] = ["t": "shot", "w": weapon, "s": ticket.sequence, "c": ticket.connection,
+        var shot: [String: Any] = ["t": "shot", "w": weapon, "s": ticket.sequence, "c": ticket.connection,
                                    "o": [Double(origin.x), Double(origin.y), Double(origin.z)],
                                    "h": [Double(hit.x), Double(hit.y), Double(hit.z)]]
+        if let hitType,(0...4).contains(hitType){shot["ht"]=hitType}
+        if hitType==1,let player{shot["id"]=player}
+        if let piece,(1...9).contains(piece){shot["bp"]=piece}
         guard let data = try? JSONSerialization.data(withJSONObject: shot), let text = String(data: data, encoding: .utf8) else {
             requestInventoryResync(); return false
         }
@@ -1224,7 +1247,6 @@ final class NativeMultiplayerClient {
             switch event {
             case .players(let rows):updateRows(rows)
             case .shot(let shot):
-                if let weapon=shot["w"] as? Int {onWeaponSound?(weapon)}
                 onOriginalShot?(shot)
             case .extensionRecord(let tag,let payload):
                 let now=Date().timeIntervalSince1970*1000+serverTimeOffsetMilliseconds
@@ -1321,7 +1343,7 @@ final class NativeMultiplayerClient {
             }
             return true
         case "shot":
-            if let weapon=message["w"] as? Int {onWeaponSound?(weapon)};onOriginalShot?(message);return true
+            onOriginalShot?(message);return true
         case "hit":
             if NativeOriginalWorldCommands.truthy(message["car"]) {onOriginalVehicleHit?(message);return true}
             guard isReady,originalFatal==nil,let amount=NativeOriginalWorldCommands.number(message["d"]),amount>0 else{return true}
@@ -1460,7 +1482,11 @@ final class NativeMultiplayerClient {
                 onBlast?(weapon,SIMD3(position[0].floatValue,position[1].floatValue,position[2].floatValue))
             }
         case "shot":
-            if let weapon = message["w"] as? Int { onWeaponSound?(weapon) }
+            // The independent server forwards the same normalized ray and
+            // snapshot firing counter. Let its observer use the same marker
+            // owner as the original-world adapter, with no duplicate sound.
+            if let onOriginalShot {onOriginalShot(message)}
+            else if let weapon = message["w"] as? Int {onWeaponSound?(weapon)}
         case "inventory":
             if let state = message["state"] as? [String: Any], let ack = NativeInventoryAcknowledgement(state),
                ack.connection == inventoryConnection, NativeConnectionRecovery.validInventory(state) {

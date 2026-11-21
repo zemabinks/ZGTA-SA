@@ -9,12 +9,14 @@ from tests.vehicles.smoke_native_vehicle_transparency import block
 def main():
  p=argparse.ArgumentParser();p.add_argument('--require-gpu',action='store_true');args=p.parse_args()
  out=ROOT/'local-only/research/world-transparency-147/gpu'/str(time.time_ns());out.mkdir(parents=True)
- names=['WorldBinary.swift','NativeWorldSharpLayout.swift','NativeWorldSharpManifest.swift','NativeWorldSharpTextures.swift','NativeWorldDrawPlan.swift']
+ names=['WorldBinary.swift','NativeWorldSharpLayout.swift','NativeWorldSharpManifest.swift','NativeWorldSharpTextures.swift','NativeWorldDrawPlan.swift','NativeWeaponFlash.swift']
  files=[ROOT/'ios/App'/n for n in names]+[ROOT/'ios/App/NativeWorldRenderer.swift',ROOT/'ios/App/WorldShaders.metal',ROOT/'ios/App/NativeVehicleRig.swift',Path(__file__),Path(__file__).with_suffix('.swift')]
  hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in files}
  renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text();rig=(ROOT/'ios/App/NativeVehicleRig.swift').read_text();source=Path(__file__).with_suffix('.swift').read_text()
  markers={'ACTUAL_UNIFORMS':'    private struct Uniforms {','ACTUAL_MESH':'    private struct Mesh {','ACTUAL_VEHICLE_PACKET':'    private struct TransparentVehicleDraw {','ACTUAL_WORLD_PACKET':'    private struct TransparentWorldDraw {','ACTUAL_BASE':'    private struct WorldSharpBase {','ACTUAL_STAGE':'    private func stageWorldSurface(','ACTUAL_ENCODE_WORLD':'    @discardableResult private func encodeWorldSurface(','ACTUAL_ENCODE_SCENE':'    private func encodeWorldAndVehicleSurfaces(','ACTUAL_ENCODE_VEHICLE':'    private func encodeTransparentVehicles('}
  for marker,begin in markers.items():source=source.replace('// '+marker+'\n',block(renderer,begin)+'\n')
+ for marker,begin in [('ACTUAL_FLASH_DRAW','    private func drawWeaponFlash('),('ACTUAL_MESH_DRAW','    private func draw(mesh: Mesh,')]:
+  source=source.replace('// '+marker+'\n',block(renderer,begin)+'\n')
  for marker,begin in [('ACTUAL_SORT','    static func farToNear('),('ACTUAL_DEPTH','    static func projectedDepth(')]:source=source.replace('// '+marker+'\n',block(rig,begin)+'\n')
  a=renderer.index('        let descriptor = MTLRenderPipelineDescriptor()');b=renderer.index('        descriptor.fragmentFunction = worldFragment',a);source=source.replace('// ACTUAL_DESCRIPTOR',renderer[a:b])
  a=renderer.index('        var worldSurfacePipelines:');b=renderer.index('        descriptor.colorAttachments[0].isBlendingEnabled=true',a);source=source.replace('// ACTUAL_SURFACE_PIPELINES',renderer[a:b])

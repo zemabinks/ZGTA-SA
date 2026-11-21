@@ -96,6 +96,13 @@ fragment half4 ordinaryModelFragment(Raster in [[stage_in]],
     return ordinaryActorShade(in,nativeAtlasColor(in,atlas,uniforms),uniforms);
 }
 
+// Embedded flash meshes use additive, unlit material and no fog.
+fragment half4 nativeWeaponFlashFragment(Raster in [[stage_in]],
+                                         texture2d<half> atlas [[texture(0)]],
+                                         constant Uniforms &uniforms [[buffer(1)]]) {
+    return nativeAtlasColor(in,atlas,uniforms)*half4(in.tint)*half4(uniforms.tintColor);
+}
+
 fragment half4 worldFragment(Raster in [[stage_in]],
                              texture2d<half> atlas [[texture(0)]],
                              constant Uniforms &uniforms [[buffer(1)]]) {

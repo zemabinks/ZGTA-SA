@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/native-physics/tests/connection-runtime'
 OUT.mkdir(parents=True,exist_ok=True)
 APP=['ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims',
-     'NativeConnectionRecovery','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeMultiplayerClient','NativeGameplayClient']
+     'NativeConnectionRecovery','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots','NativeLocalShotPackets','NativeMultiplayerClient','NativeGameplayClient']
 SERVER=['selfhost_backend.js','optional_discord.js','weapon_inventory.js','world_collision.js','local_projectiles.js', 'player_placement.js']
 FILES=[f'ios/App/{name}.swift' for name in APP]+['ios/App/NativeActorAnimation.swift',*SERVER,
        'tests/movement/smoke_native_recovery.swift','tests/server/smoke_native_recovery_server.js','tests/movement/smoke_native_recovery.py']

@@ -97,6 +97,12 @@ func connected(){
    check(weapons.weapons.map(\.id)==[0,22],"Alive escape does not revive staged equipment")
    check(weapons.selectOriginalWeapon(22)&&weapons.consumeAnimationShot(weapon:22),"Actual original local ammo event")
    check(client.sendWeaponShot(weapon:22,from:SIMD3(1,2,3),to:SIMD3(21,22,23),player:"7"),"Actual original shot send")
+   let grouped:[NativeLocalShots.Claim]=[
+    .init(origin:SIMD3(1,2,3),end:SIMD3(21,22,23),kind:1,target:.init(id:"7",kind:1,piece:9),pellets:8),
+    .init(origin:SIMD3(1,2,3),end:SIMD3(25,26,27),kind:3,target:.init(id:"t42",kind:3,wheel:0),pellets:7)]
+   check(client.sendOrdinaryShotBatch(weapon:25,claims:grouped,ticket:nil),"Actual original grouped transport")
+   let invalid=NativeLocalShots.Claim(origin:SIMD3(.nan,0,0),end:.zero,kind:0,target:nil,pellets:1)
+   check(!client.sendOrdinaryShotBatch(weapon:25,claims:[grouped[0],invalid],ticket:nil),"Invalid entire batch cannot partially queue")
    check(client.recordMeleeStrike(weapon:0)&&client.sendMeleeHit(to:"7"),"Actual original melee")
    let rows=weapons.outgoingOriginalGuns(flush:true)!;check(client.sendOriginalGuns(rows),"Actual original guns send");weapons.originalGunsSent(rows)
    client.requestEnter(client.vehicles["taxi"]!)

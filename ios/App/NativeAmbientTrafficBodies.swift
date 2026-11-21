@@ -22,6 +22,9 @@ final class NativeAmbientTrafficBodies {
     deinit{removeAll()}
     func removeAll(){for value in bodies.values{world.removeBody(value.body)};bodies=[:]}
     func trafficID(for collider:UInt64)->UInt16?{bodies.first{$0.value.colliders.contains(collider)}?.key}
+    func colliderIDs(id:UInt16,generation:UInt64)->Set<UInt64> {
+        guard let body=bodies[id],body.generation==generation else{return []};return body.colliders
+    }
     /// Native streaming policy: nearest24 inside40m. These are runtime work
     /// caps, not asserted original-game population/physics thresholds.
     func synchronize(_ frames:[Snapshot],near origin:SIMD3<Float>,enabled:Bool,shapes:(UInt16)->[Shape]?) {

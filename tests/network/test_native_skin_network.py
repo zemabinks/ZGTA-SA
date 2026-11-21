@@ -19,7 +19,7 @@ OUT = ROOT / 'local-only/research/skin-identity-104/network'
 APP = ['ServerAddress', 'NativeInventoryPrediction', 'NativeShotTargeting', 'NativeStreamShotClaims',
        'NativeConnectionRecovery', 'NativeOriginalWorldProtocol', 'NativeOriginalWorldCommands',
        'NativeOriginalWorldVitals', 'NativeSAMPProtocol', 'NativeSAMPGameplayCommands',
-       'NativeSAMPLocalVitals', 'NativeMultiplayerClient', 'NativeGameplayClient']
+       'NativeSAMPLocalVitals', 'NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots','NativeLocalShotPackets','NativeMultiplayerClient', 'NativeGameplayClient']
 
 
 def main():

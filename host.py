@@ -91,6 +91,7 @@ def setup(args):
         scripts = [
             ('tools/assets/prepare_native_assets.py', '--all-details'),
             ('tools/assets/prepare_native_models.py', '--all'),
+            ('tools/assets/prepare_native_weapon_flashes.py',),
             ('tools/assets/prepare_native_skeletons.py', '--all', '--archive-all-blocks'),
             ('tools/assets/prepare_native_hud.py',), ('tools/assets/prepare_native_weapons.py',),
             ('tools/assets/prepare_native_audio.py',), ('tools/assets/prepare_native_contact_audio.js',),

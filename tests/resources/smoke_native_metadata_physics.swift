@@ -26,6 +26,9 @@ private final class Harness {
     let groundVehicle=NativeGroundVehicle(),vehicleCoupling:Coupling?=Coupling(),supportScene:Support?=Support(),couplingConnection=UUID()
     var couplingSnapshot:Snapshot?,cameraVehicleDefinitions:[String:CameraVehicleDefinition]=[:]
     var remoteSuspensionConfigurations:[Int:NativeRemoteSuspension.Configuration]=[:]
+    #if HAS_LOCAL_SHOTS
+    var localShotTyreDefinitions:[Int:[NativeLocalShots.Tyre]]=[:]
+    #endif
     var couplingLoads=0,treadLoads=0
     func applyVehicleCouplings(_ links:[Int],revision:UInt64,connection:UUID){fatalError("unexpected absent snapshot")}
     func loadVehicleCouplingDefinitions(){couplingLoads+=1};func loadVehicleTreads(){treadLoads+=1}
@@ -38,7 +41,7 @@ private final class Harness {
     var configuration:NativeGroundVehicle.CellConfiguration?{groundVehicle?.cellConfiguration("c0")}
 }
 private func drain()throws{var done=false;DispatchQueue.main.async{done=true};let end=Date().addingTimeInterval(5);while !done && Date()<end{RunLoop.main.run(until:Date().addingTimeInterval(0.002))};try check(done,"main queue timeout")}
-private func metadata(_ material:Int)throws->Data{try JSONSerialization.data(withJSONObject:["models":[String:Any](),"materialClasses":Array(repeating:material,count:256)])}
+private func metadata(_ material:Int)throws->Data{try JSONSerialization.data(withJSONObject:["models":["420":["id":420,"kind":"car","origin":0,"wheels":[["centre":[material,0,0],"radius":0.3,"front":true,"left":true]]]],"materialClasses":Array(repeating:material,count:256)])}
 @main private enum Main {
     static func main(){do{try run();print("PASS \(checks) literal physics metadata/actual native ground owner checks; authored bytes, no rendered or retail acceptance")}
         catch{fputs("FAIL \(error)\n",stderr);exit(1)}}
@@ -53,13 +56,22 @@ private func metadata(_ material:Int)throws->Data{try JSONSerialization.data(wit
         if CommandLine.arguments.contains("--source-only"){
             let prior=h.configuration;h.loadPhysics();try requests[0].deliver(old);h.binding="source-b";try drain()
             try check(h.configuration==prior && h.vehicleCoupling!.resets==0 && h.supportScene!.clears==0,"old-source physics table mutated native ground/coupling/support owners")
+            #if HAS_LOCAL_SHOTS
+            try check(h.localShotTyreDefinitions.isEmpty,"Retired source published shot tyre metadata")
+            #endif
             return
         }
         h.loadPhysics();try requests[0].deliver(fresh);try drain();try check(h.configuration==freshConfig,"current actual ground metadata not installed")
+        #if HAS_LOCAL_SHOTS
+        try check(h.localShotTyreDefinitions[420]?.first?.center.x==7,"Current actual tyre catalog was not admitted with physics metadata")
+        #endif
         h.loadPhysics();let retired=requests.count-1;h.loadPhysics();let latest=requests.count-1
         try requests[latest].deliver(fresh);try drain();let resets=h.vehicleCoupling!.resets,clears=h.supportScene!.clears,coupling=h.couplingLoads,treads=h.treadLoads
         try requests[retired].deliver(old);try drain()
         try check(h.configuration==freshConfig && h.vehicleCoupling!.resets==resets && h.supportScene!.clears==clears,"late physics metadata replaced current materials or reset active coupling/support owners")
+        #if HAS_LOCAL_SHOTS
+        try check(h.localShotTyreDefinitions[420]?.first?.center.x==7,"Retired physics response replaced the current shot tyre catalog")
+        #endif
         try check(h.couplingLoads==coupling && h.treadLoads==treads,"retired physics callback restarted child metadata loads")
         guard let after=world.bodyState(body)else{throw Failure("metadata admission removed unrelated body")}
         try check(after.position==pose.position && after.rotation.vector==pose.rotation.vector && after.linearVelocity==pose.linearVelocity && after.angularVelocity==pose.angularVelocity,"metadata admission moved unrelated physical body")
