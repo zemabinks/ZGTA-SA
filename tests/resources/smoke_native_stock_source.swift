@@ -27,6 +27,10 @@ final class Carrier {
     // This carrier isolates legacy stock retirement. Actual NPC source/graph
     // ownership is exercised by its separate typed-owner/resource/app gates.
     func reloadAmbientPedestrianSourceIfChanged(){}
+    // This source-composition fixture observes the hook only. Actual traffic
+    // resource/scene ownership is verified by its separate production gates.
+    var trafficSourceReloads=0
+    func reloadAmbientTrafficSourceIfChanged(){trafficSourceReloads+=1}
     func ensureFixedCJ(){fatalError("unrequested CJ load")}
     // Explicit cell/resource spies. Real parser/ground/Rapier behavior is
     // exercised separately by smoke_native_collision_source.
@@ -103,3 +107,10 @@ c.retireLegacyStockTextures([980])
 require(c.legacyExactTextures[external]?.image === image && c.legacyExternalTextureBytes[external]==16,"ordinary stock eviction erased unrelated external dictionary")
 require(c.legacyExactTextures[imports.5]?.image === imports.4,"stock eviction did not reveal surviving artwork binding")
 print("PASS \(checks) actual source/repair/cancellation/texture lifetime checks")
+let trafficSource=Carrier()
+trafficSource.server=ServerAddress(value:"first")
+require(trafficSource.trafficSourceReloads==1,"Server setter omitted traffic source hook")
+trafficSource.server=ServerAddress(value:"first")
+require(trafficSource.trafficSourceReloads==1,"Same server unnecessarily invoked traffic source hook")
+trafficSource.server=ServerAddress(value:"second")
+require(trafficSource.trafficSourceReloads==2,"New server did not invoke traffic source hook")

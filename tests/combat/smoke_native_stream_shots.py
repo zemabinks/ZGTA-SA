@@ -58,7 +58,7 @@ def main():
   old='check(client.reserveShot()==nil,"Unnegotiated stream cannot fire")'
   assert old in tests
   tests=tests.replace(old,'client.onInventoryConnection={nonce in if nonce != nil {check(!client.isReady && client.reserveShot()==nil,"Hello alone cannot fire stream")}}\nclient.onInventory={_ in if !client.isReady {check(client.reserveShot()==nil,"Inventory before all cannot fire stream")}}\n'+old,1)
-  source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeMultiplayerClient'])+'\n'+motion+'\n'+tests
+  source='\n'.join((ROOT/'ios/App'/f'{name}.swift').read_text() for name in ['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting','NativeStreamShotClaims','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeMultiplayerClient'])+'\n'+motion+'\n'+tests
   (work/'main.swift').write_text(source)
   subprocess.run(['swiftc','-O','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',str(work/'main.swift'),'-o',str(work/'verify')],check=True)
   subprocess.run(['node',str(work/'peer.cjs'),str(work/'verify')],check=True)

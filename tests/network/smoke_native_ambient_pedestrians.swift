@@ -22,10 +22,6 @@ private struct Reference:Decodable {
     static func run()throws {
         typealias P=NativeAmbientPedestrianProtocol
         let near=Double(0x112345678)+100
-        // Literal protocol rows below are independently authored packing
-        // examples with invented IDs/coordinates, not captured game packets.
-        // Optional archived measurements are decoded only from a caller's
-        // local file at runtime; no original reference samples are embedded.
         let free=hex("12345678010250072a000004e2fffff63c0019000800103040")
         guard case .free(let at,let actors)=try P.decode(tag:10,payload:free,nowServerMilliseconds:near)else{throw Failure("Typed free record missing")}
         try check(at==Double(0x112345678) && actors.count==1,"Nearest32-bit epoch reconstruction")
@@ -67,9 +63,6 @@ private struct Reference:Decodable {
         try rejects("Partial outer record accepted"){_ = try P.decodeMessage(Data(message.dropLast()),nowServerMilliseconds:near)}
         try rejects("Partial two-byte length accepted"){_ = try P.decodeMessage(hex("0a80"),nowServerMilliseconds:near)}
         try check(try P.decode(tag:12,payload:Data(),nowServerMilliseconds:near)==nil,"Unimplemented shot channel claimed as complete")
-        // Independently authored SDPD graph: two invented nodes at(1,2,3)
-        // and(10,20,30), one link each way. Reproducible from the public
-        // format fields; no original path node data is included here.
         let golden=hex("53445044010000000200000002000000000000000000000000000000000000000800100018005000a000f00000000000010000000200000000000000081000000100000003010000")
         typealias G=NativeAmbientPedestrianPaths
         try check(G.crc32(Data("123456789".utf8))=="cbf43926","Standard CRC32 golden")

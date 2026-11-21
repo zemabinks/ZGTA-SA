@@ -46,7 +46,10 @@ def main():
  gpu='\n'.join(block(r,m).replace('private ','') for m in ['private struct PedAtlasGPU {','private struct PedAtlasLoad {'])
  first=r.index('            if let pose, let actor = skeletalActors[name], let skeletalPipeline {',r.index('private func drawActors('))
  end=r.index('\n            let native=pedAtlasGPU[name]?.native',first)
- dispatch=r[first:end]
+ # The native range helper captures the surrounding per-body submission flag.
+ # Keep its actual declaration; receipt publication is outside this atlas gate.
+ submitted=next(line for line in r.splitlines()if line.strip()=='var actorDrawSubmitted=false')
+ dispatch=submitted+'\n'+r[first:end]
  native_range=block(r,'            func drawActorRange(')
  recovery_start=r.index('            }catch{\n                clearPedAtlas(name);actorRetryAfter[name]',end)
  recovery=block(r[recovery_start:],'catch{')

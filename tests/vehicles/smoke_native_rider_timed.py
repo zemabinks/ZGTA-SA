@@ -92,7 +92,11 @@ def carrier(renderer, historical=None):
     passenger_enter = block(renderer, '    @discardableResult func enterPassenger(')
     passenger_reset = next(line for line in passenger_enter.splitlines() if 'vehicleExitSerial &+= 1' in line)
     # Fail closed on a moved/extra consumer or changed fallback ownership.
-    assert draw.count('.update(interval:riderPoseInterval,') == 9
+    traffic = block(draw, '        for seat in trafficOccupantSeats {')
+    assert traffic.count('animator.update(interval:riderPoseInterval,') == 1
+    assert traffic.count('.update(interval:riderPoseInterval,') == 1
+    assert draw.replace(traffic, '', 1).count('.update(interval:riderPoseInterval,') == 9
+    assert draw.count('.update(interval:riderPoseInterval,') == 10
     foot_clocked = 'animator.update(at:riderTime,' in draw
     assert foot_clocked,'Remote foot retains its independently owned timestamp adapter'
     assert draw.count('.update(delta:riderDelta,') == 0

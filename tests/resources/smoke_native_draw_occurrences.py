@@ -3,7 +3,7 @@
 """Execute the actual drawActors occurrence construction/consumption boundary.
 
 The generated Swift carrier extracts the production override declaration, queue,
-appendPed, all five non-ped append statements and loop preamble. Opaque fixture
+appendPed, retained non-ped append statements and loop preamble. Opaque fixture
 pose/transform/flight/context values test ownership and preservation, not Metal
 rendering. A position adapter counts real String-interpolation calls in the
 extracted historical path; this is not a timing test of Swift's SIMD formatter.
@@ -69,8 +69,9 @@ def extract(path):
         call = block(draw[start:], 'modelInstances.append(', '(', ')')
         calls.append(call)
         at = start + len(call)
-    if len(calls) != 6:
-        raise ValueError('Review new/removed production occurrence producers; expected appendPed plus five direct append sites')
+    has_traffic=any('SIMD3<Float>(traffic.body.position)' in call for call in calls)
+    if len(calls) != 6+int(has_traffic):
+        raise ValueError('Review new/removed production occurrence producers; expected appendPed, five retained direct sites and the explicit traffic site when present')
     roles = {}
     for name, marker in [('own', 'name,camera,'), ('remote', 'name,player.position,'),
                          ('projectile', 'projectile.model,'), ('parked', 'name,vehicle.position,'),
@@ -79,6 +80,10 @@ def extract(path):
         if len(matches) != 1:
             raise ValueError('Ambiguous production producer: ' + name)
         roles[name] = matches[0]
+    if has_traffic:
+        matches=[call for call in calls if 'SIMD3<Float>(traffic.body.position)'in call]
+        if len(matches)!=1:raise ValueError('Ambiguous traffic occurrence producer')
+        roles['traffic']=matches[0]
     return dict(override=override, queue=queue, consume=consume, roles=roles,
                 sourceSHA256=sha(path), source=str(path),
                 drawSHA256=hashlib.sha256(draw.encode()).hexdigest())
@@ -92,6 +97,7 @@ private enum FormatProbe { static var calls = 0 }
 private struct SIMD3<Scalar: BinaryFloatingPoint>: Equatable, CustomStringConvertible {
     let x: Scalar, y: Scalar, z: Scalar
     init(_ x: Scalar, _ y: Scalar, _ z: Scalar) { self.x=x; self.y=y; self.z=z }
+    init(_ other:Self){self=other}
     var description: String {
         FormatProbe.calls += 1
         return "[\(x),\(y),\(z)]"
@@ -125,10 +131,10 @@ INVOCATIONS = r'''
             pose:.init(marker:100+frame),transform:.init(marker:200+frame),original:true,
             flight:.init(marker:300+frame),identity:"own",ownFoot:true)
         appendPed("shared-skin",point,5,6,"remote-clip",7.25,8,
-            pose:.init(marker:400+frame),identity:"remote",ownFoot:false__CANOPY_ARGUMENT__)
+            pose:.init(marker:400+frame),identity:"__REMOTE_ID__",ownFoot:false__CANOPY_ARGUMENT__)
         appendPed("shared-skin",point,9,10,"rider-clip",11.25,12,
             pose:.init(marker:500+frame),transform:.init(marker:600+frame),original:true,
-            flight:.init(marker:700+frame),identity:"passenger",ownFoot:false)
+            flight:.init(marker:700+frame),identity:"passenger",ownFoot:false__TRAFFIC_OCCUPANT_ARGUMENT__)
         appendPed("fallback-skin",point,13,14,"fallback-clip",15.25,16)
     }
     do {
@@ -159,6 +165,7 @@ INVOCATIONS = r'''
         let context=VehicleDrawContext(marker:1100+frame)
         __CARRIAGE__
     }
+    // TRAFFIC_INVOCATION
 '''
 
 CHECKS = r'''
@@ -171,13 +178,14 @@ CHECKS = r'''
             for frame in 0..<3 {
                 let rows=productionFrame(frame)
                 let pedCount=frame == 1 ? 0:4
-                try check(rows.count == pedCount+5,"all five non-ped producers and expected pedestrians")
+                try check(rows.count == pedCount+__NONPED_COUNT__,"all explicit non-ped producers and expected pedestrians")
                 for (index,row) in rows.enumerated() {
                     try check(row.position == SIMD3<Float>(10,20,30),"position retained")
                     if index < pedCount {
                         try check(row.queued != nil,"ped has its own occurrence payload")
                         let q=row.queued!
                         // CANOPY_CHECKS
+                        // TRAFFIC_PROVENANCE_CHECKS
                         switch index {
                         case 0:
                             try check(row.name == "shared-skin" && row.angle == 1 && row.pitch == 2 && row.clip == "own-clip" && row.elapsed == 3.25 && row.weapon == 4,"owned first eight draw values")
@@ -191,7 +199,7 @@ CHECKS = r'''
                             try check(row.name == "shared-skin" && row.angle == 5 && row.pitch == 6 && row.clip == "remote-clip" && row.elapsed == 7.25 && row.weapon == 8,"co-located remote first eight values")
                             try check(q.pose?.marker == 400+frame && q.transform == nil,"remote pose/nil transform")
                             try check(!q.original && q.flight == nil,"remote original/flight defaults")
-                            try check(q.identity == "remote" && !q.ownFoot,"remote identity/foot flags")
+                            try check(q.identity == "__REMOTE_ID__" && !q.ownFoot,"remote identity/foot flags")
                         case 2:
                             try check(row.name == "shared-skin" && row.angle == 9 && row.pitch == 10 && row.clip == "rider-clip" && row.elapsed == 11.25 && row.weapon == 12,"co-located rider first eight values")
                             try check(q.pose?.marker == 500+frame && q.transform?.marker == 600+frame,"rider pose and transform")
@@ -206,11 +214,11 @@ CHECKS = r'''
                         let role=index-pedCount
                         try check(row.queued == nil,"vehicle/projectile has no ped override")
                         try check(row.clip.isEmpty && row.elapsed == 0 && row.weapon == 0,"non-ped non-appearance fields")
-                        let expectedAngles:[Float]=[21,23,25,27,0],expectedPitches:[Float]=[22,24,26,28,0]
+                        let expectedAngles:[Float]=[21,23,25,27,0,29],expectedPitches:[Float]=[22,24,26,28,0,30]
                         try check(row.angle == expectedAngles[role] && row.pitch == expectedPitches[role],"actual producer heading/pitch")
                         if role == 2 {try check(row.name == "projectile" && row.vehicleContext == nil,"projectile stays unowned")}
                         else {
-                            let expected=[800,900,0,1000,1100][role]+frame
+                            let expected=[800,900,0,1000,1100,1200][role]+frame
                             try check(row.name == "shared-car" && row.vehicleContext?.marker == expected,"co-located vehicle context preserved")
                         }
                     }
@@ -241,7 +249,19 @@ CHECKS = r'''
 
 def carrier(parts):
     invocation = INVOCATIONS
+    traffic='traffic'in parts['roles']
+    traffic_invocation='''do {
+        struct Traffic {struct Body {let position:SIMD3<Float>,heading:Double,pitch:Double};let body:Body}
+        let name="shared-car",traffic=Traffic(body:.init(position:point,heading:29,pitch:30))
+        let context=VehicleDrawContext(marker:1200+frame)
+        __TRAFFIC__
+    }'''if traffic else ''
+    invocation=invocation.replace('// TRAFFIC_INVOCATION',traffic_invocation)
     canopy = 'var canopySamples:' in parts['override']
+    occupant = 'var trafficOccupant:' in parts['override']
+    remote_id='c3.0'if occupant else'remote'
+    invocation=invocation.replace('__REMOTE_ID__',remote_id).replace('__TRAFFIC_OCCUPANT_ARGUMENT__',
+        ',trafficOccupant:(3,UInt64(20+frame),2,9,frame==2)'if occupant else'')
     invocation = invocation.replace('__CANOPY_ARGUMENT__',
         ',canopySamples:[.init(marker:10000+frame),nil,.init(marker:20000+frame)]' if canopy else '')
     canopy_checks = '''if index == 1 {
@@ -249,12 +269,17 @@ def carrier(parts):
                             try check(q.canopySamples[0]?.marker == 10000+frame && q.canopySamples[1] == nil && q.canopySamples[2]?.marker == 20000+frame,"remote ordered canopy targets/nil retained")
                         } else {try check(q.canopySamples.isEmpty,"co-located actor cannot acquire another canopy sequence")}
                         ''' if canopy else ''
+    occupant_checks='''if index == 2 {
+                            try check(q.trafficOccupant?.id==3 && q.trafficOccupant?.generation==UInt64(20+frame),"typed traffic lifetime stayed on its own occurrence")
+                            try check(q.trafficOccupant?.seat==2 && q.trafficOccupant?.skin==9 && q.trafficOccupant?.dead==(frame==2),"typed traffic seat/skin/death fields retained")
+                        }else{try check(q.trafficOccupant==nil,"human lookalike ID or adjacent occurrence acquired traffic provenance")}
+                        '''if occupant else''
     for name, text in parts['roles'].items():
         invocation = invocation.replace('__'+name.upper()+'__', text)
     return (PRELUDE + '\n' + parts['override'] + '\nprivate func productionFrame(_ frame:Int) -> [Observation] {\n' +
             parts['queue'] + invocation + '\n    var observations:[Observation]=[]\n' + parts['consume'] +
             '\n            observations.append(.init(name:name,position:position,angle:angle,pitch:pitch,clip:clip,elapsed:elapsed,weapon:weapon,vehicleContext:vehicleContext,queued:queued))\n' +
-            '        }\n    return observations\n}\n' + CHECKS.replace('// CANOPY_CHECKS',canopy_checks))
+            '        }\n    return observations\n}\n' + CHECKS.replace('// CANOPY_CHECKS',canopy_checks).replace('// TRAFFIC_PROVENANCE_CHECKS',occupant_checks).replace('__REMOTE_ID__',remote_id).replace('__NONPED_COUNT__',str(6 if traffic else 5)))
 
 def private_output(value):
     output = Path(os.path.abspath(value))

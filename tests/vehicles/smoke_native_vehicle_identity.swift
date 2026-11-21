@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Foundation
+import CoreFoundation
 import simd
 
 // ACTUAL_PACKET_STRUCTS
@@ -17,6 +18,7 @@ private struct GroundFixture {
         var transform=matrix_identity_float4x4
         var work=0,rotor=0.0,gearUp=false,dynamic=false,frontSpin=0.0,rearSpin=0.0,offsets=[Double]()
     }
+    var active=true
     var workingRenderValue=0.0,output:Output?,wheelAnglesDouble=[Double](),damageController:Damage?
     var others=[String:Other](),origins=[String:Float]()
     func handlingFlags(_ value:String)->Int{0}
@@ -43,10 +45,12 @@ private final class Carrier {
     func remoteSuspensionContact(_ ray:NativeRemoteSuspension.Ray)->NativeRemoteSuspension.Contact{fatalError("Fixture must not request physics")}
     // ACTUAL_RENDER_CONTEXT
     // ACTUAL_MODEL_INSTANCES
-    private var actorOverrides=[String:[ActorPoseOverride]](),actorOverrideOffsets=[String:Int]()
+    private var actorOverrides:[ActorPoseOverride]=[]
+    private var ownVehicleWheelClocks:[Double]{groundVehicle?.wheelAnglesDouble ?? []}
+    private var pendingVehicleSnapshot:Bool?
     // ACTUAL_PED_APPEND
-    // ACTUAL_PED_KEY
-    private func nextPedOverride(_ name:String,_ position:SIMD3<Float>)->ActorPoseOverride? {
+    private func nextPedOverride(_ index:Int)->ActorPoseOverride? {
+        let occurrence=modelInstances[index].8
         // ACTUAL_PED_TAKE
         return queued
     }
@@ -71,7 +75,7 @@ private final class Carrier {
         // ACTUAL_CARRIAGE_APPEND
     }
     private func render(_ index:Int,rig:NativeVehicleRig)->(simd_float4x4,NativeVehicleRig.Frame) {
-        let(name,position,angle,pitch,_,_,_,vehicleContext)=modelInstances[index]
+        let(name,position,angle,pitch,_,_,_,vehicleContext,_)=modelInstances[index]
         let originalFoot=false
         // ACTUAL_INSTANCE_TRANSFORM
         return(transform,vehicleRigFrame(position:position,modelTransform:transform,rig:rig,context:vehicleContext!))
@@ -236,24 +240,24 @@ private final class Carrier {
         let shared=Carrier();shared.appendRemote(player("one","same"));shared.appendParked(parked("same",health:1000))
         check(shared.modelInstances[0].7!.token==shared.modelInstances[1].7!.token,"Same authoritative vehicle keeps its cache when driver/parked role changes")
 
-        // The existing ordinal pose queue is intentionally retained. Its
+        // The actual per-occurrence pose array is retained. Its
         // actual append/take expressions preserve same-skin coincident riders.
-        resetDraws();actorOverrides=[:];actorOverrideOffsets=[:]
+        resetDraws();actorOverrides=[]
         camera = .zero;driving=false
         let at=SIMD3<Float>.zero
         appendPed("authored-ped",at,0,0,"",0,0,pose:.init(sentinel:1),transform:pa,original:true)
         appendPed("authored-ped",at,0,0,"",0,0,pose:.init(sentinel:2),transform:pb,original:true)
-        let riderA=nextPedOverride("authored-ped",at)!,riderB=nextPedOverride("authored-ped",at)!
+        let riderA=nextPedOverride(0)!,riderB=nextPedOverride(1)!
         check(riderA.pose?.sentinel==1 && riderB.pose?.sentinel==2,"Same-skin coincident rider poses retain ordinal identity")
         check(riderA.transform==pa && riderB.transform==pb,"Same-skin coincident rider car transforms stay independent")
         check(riderA.original && riderB.original,"Original-pose sampling flags unchanged")
         check(modelInstances.allSatisfy{$0.7==nil},"Pedestrian occurrences never acquire vehicle context")
-        actorOverrideOffsets=[:];_ = nextPedOverride("authored-ped",at)
-        check(nextPedOverride("authored-ped",at)!.pose?.sentinel==2,"Consume-before-unavailable-mesh does not shift following override")
-        resetDraws();actorOverrides=[:];actorOverrideOffsets=[:]
+        _ = nextPedOverride(0)
+        check(nextPedOverride(1)!.pose?.sentinel==2,"Consume-before-unavailable-mesh does not shift following override")
+        resetDraws();actorOverrides=[]
         appendPed("authored-ped",at,0,0,"",0,0,identity:"local-marker",ownFoot:true)
         appendPed("authored-ped",at,0,0,"",0,0,identity:"own")
-        let ownFoot=nextPedOverride("authored-ped",at)!,remoteFoot=nextPedOverride("authored-ped",at)!
+        let ownFoot=nextPedOverride(0)!,remoteFoot=nextPedOverride(1)!
         check(ownFoot.pose==nil && remoteFoot.pose==nil,"Nil-pose fallback controls are exercised")
         check(fallbackLocomotion("authored-ped",at,queued:ownFoot)==locomotionClip,"Own-foot fallback retains original action locomotion")
         check(fallbackLocomotion("authored-ped",at,queued:remoteFoot)==nil,"Coincident remote fallback cannot inherit own locomotion even with identity text own")

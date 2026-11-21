@@ -24,6 +24,8 @@ def main():
     root=(a.baseline or ROOT).resolve();out=ROOT/'local-only/research/input-audit-117';out.mkdir(parents=True,exist_ok=True)
     names=['ios/App/NativeGameViewController.swift','ios/App/NativeGameInput.swift','ios/App/NativeGameBindings.swift','ios/App/NativeVehicleHornController.swift','ios/App/NativeGameAudio.swift']
     inputs={n:(root/n).read_text() for n in names};vc=inputs[names[0]]
+    traffic=ROOT/'ios/App/NativeTrafficVehicleEntry.swift'
+    inputs['ios/App/NativeTrafficVehicleEntry.swift']=traffic.read_text()
     availability=vc.index('        var acceptsInput = active && presentedViewController == nil && network.isReady')
     availability_end=vc.index('\n',vc.index('        inputWasAvailable = acceptsInput',availability))
     select='        let controller = GCController.controllers().compactMap(\\.extendedGamepad).first'
@@ -69,7 +71,8 @@ def main():
     compile_inputs=[]
     for name in names[1:4]:
         target=work/pathlib.Path(name).name;target.write_text(inputs[name]);compile_inputs.append(str(target))
-    exe=work/'verify';command=['nice','-n','10','swiftc','-O','-whole-module-optimization','-num-threads','1','-swift-version','5','-module-cache-path',str(work/'modules'),*compile_inputs,str(work/'main.swift'),'-o',str(exe)]
+    traffic_copy=work/'NativeTrafficVehicleEntry.swift';traffic_copy.write_text(inputs['ios/App/NativeTrafficVehicleEntry.swift']);compile_inputs.append(str(traffic_copy))
+    exe=work/'verify';command=['xcrun','swiftc','-j','1','-O','-whole-module-optimization','-num-threads','1','-swift-version','5','-module-cache-path',str(work/'modules'),*compile_inputs,str(work/'main.swift'),'-o',str(exe)]
     manifest={'prepared':True,'compiled':False,'executed':False,'sourceRoot':str(root),'historical':a.expect_historical_drop,
               'sourceHashes':{n:hashlib.sha256(v.encode()).hexdigest() for n,v in inputs.items()},
               'testHashes':{n:hashlib.sha256((ROOT/n).read_bytes()).hexdigest() for n in ['tests/ui/smoke_native_controller_navigation.py','tests/ui/smoke_native_controller_navigation.swift']},

@@ -82,6 +82,9 @@ final class Renderer {
  var flightCanopyPoses=["own":1],flightCanopyLanded=["own":1],flightAudioVoices=[1]
  var lastRiderDraw:Double=123,remoteServerTimeOffsetMilliseconds:Double?=456
  var riderPoseClock=Clock()
+ var trafficDisables=0
+ func configureAmbientTraffic(level:Double,roads:String?){precondition(level==0 && roads==nil);trafficDisables+=1}
+ func resetAmbientTrafficSession(){trafficDisables+=1}
  func synchronizeProjectiles(_ rows:[Int]){projectileRows=rows}
  func cancelReloadAnimation(){reloadCancelled=true}
  func teleport(x:Float,y:Float,z:Float,direction:Float?=nil){camera=SIMD3(x,y,z);if let direction {self.heading=direction};resets+=1}
@@ -161,6 +164,7 @@ check(world.remoteFootAnimations.isEmpty && world.remoteBikeAnimations.isEmpty &
 check(world.flightCanopyPoses.isEmpty && world.flightCanopyLanded.isEmpty && world.flightAudioVoices.isEmpty,"own landed canopy or old flight audio survives new world")
 check(world.lastRiderDraw==0 && world.remoteServerTimeOffsetMilliseconds==nil,"old animation/server clock survives")
 check(world.riderPoseClock.resets>0,"old rider pose interval survives session reset")
+check(world.trafficDisables==1,"old traffic presentation survives session reset")
 check(world.weaponEffects.clears==1 && world.particleEffects!.clears==1 && world.blasts.isEmpty,"old fires, particles, stream or blasts survive new world")
 check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")

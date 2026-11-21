@@ -142,5 +142,41 @@ final class PresentationClock {
         var damaged=H.RemotePlayer(id:"damaged");var wire=Array(repeating:"0",count:19);wire[15]="2";damaged.vehicleDamage=wire.joined()
         let damagedFrame=draw(owners,"car",context(.remote(damaged),"damaged"),10.2)
         try check(!damagedFrame.visible[2] && damagedFrame.visible[3],"actual damage/rig tyre visibility boundary")
+        // Traffic's authoritative presentation owns wheel phase/steering;
+        // the generic remote-driver clock must not override these values.
+        func traffic(_ id:UInt16,phase:Double,steer:Double,health:Double)->NativeAmbientTrafficScene.Frame {
+            .init(identity:.init(id:id,model:400,first:1,second:0),generation:1,
+                body:.init(position:.zero,heading:0,pitch:0,steering:steer,spin:0,wheelPhase:phase),
+                speed:-2,health:health,flags:0,crewCount:0,deadSeats:0,plate:"AUTHORED")
+        }
+        let trafficHost=H(),trafficA=traffic(17,phase:0.7,steer:0.25,health:500)
+        let trafficContext=context(.traffic(trafficA),"traffic17")
+        let trafficFrame=draw(trafficHost,"car",trafficContext,20)
+        let front=simd_double4x4(simd_quatd(angle:-0.25,axis:SIMD3(0,0,1))*simd_quatd(angle:0.7,axis:SIMD3(1,0,0)))
+        let rear=simd_double4x4(simd_quatd(angle:0.7,axis:SIMD3(1,0,0)))
+        try matrix(trafficFrame.matrices[2],front,"traffic front wheel binding")
+        try matrix(trafficFrame.matrices[3],rear,"traffic rear wheel binding")
+        let trafficLater=draw(trafficHost,"car",trafficContext,25)
+        try matrix(trafficLater.matrices[2],front,"generic remote clock replaced traffic wheel phase")
+        let trafficB=traffic(18,phase:-0.4,steer:0,health:0)
+        let zeroHealth=draw(trafficHost,"car",context(.traffic(trafficB),"traffic18"),25)
+        try matrix(zeroHealth.matrices[2],simd_double4x4(simd_quatd(angle:-0.4,axis:SIMD3(1,0,0))),"traffic same-model owner isolation")
+        try check(zeroHealth.draws.first?.scorched==false && trafficFrame.draws.first?.scorched==false,"compact health alone invented scorched materials")
+        var remoteWreck=H.RemotePlayer(id:"authored-remote-wreck");remoteWreck.vehicleHealth=0
+        let remoteWreckFrame=draw(trafficHost,"car",context(.remote(remoteWreck),"remote-wreck"),25)
+        try check(remoteWreckFrame.draws.first?.scorched==true,"compact appearance policy changed remote wreck materials")
+        var parkedWreck=H.RemoteVehicle();parkedWreck.health=0
+        let parkedWreckFrame=draw(trafficHost,"car",context(.parked(parkedWreck,nil),"parked-wreck"),25)
+        try check(parkedWreckFrame.draws.first?.scorched==true,"compact appearance policy changed parked wreck materials")
+        // Every authored kind has a rotor node here on purpose. The compact
+        // helper supplies its omitted-option default; the production rig also
+        // requires an aircraft kind before animating rotor/propeller geometry.
+        for kind in ["heli","plane","car","boat","bike","train"] {
+            let host=H(),source=context(.traffic(traffic(30,phase:0,steer:0,health:1000)),"compact-rotor")
+            draw(host,kind,source,30);let frame=draw(host,kind,source,30.1)
+            let expected=kind=="heli" ? 1.1:kind=="plane" ? 0.9:0
+            try close(host.vehicleRigStates["compact-rotor"]!.rotorSpin,expected,"compact \(kind) rotor default")
+            try matrix(frame.matrices[1],rotorMatrix(expected),"compact applicable rotor matrix")
+        }
     }
 }

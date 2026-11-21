@@ -9,7 +9,7 @@ if str(_ZGTA_ROOT) not in _zgta_sys.path: _zgta_sys.path.insert(0, str(_ZGTA_ROO
 from pathlib import Path
 import hashlib,json,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2]
-NAMES=['ServerAddress','NativeConnectionRecovery','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeShotTargeting','NativeStreamShotClaims','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeOriginalWorldEffects','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeMultiplayerClient']
+NAMES=['ServerAddress','NativeConnectionRecovery','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeShotTargeting','NativeStreamShotClaims','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeOriginalWorldEffects','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeMultiplayerClient']
 def main():
  out=ROOT/'local-only/research/original-world-wire';out.mkdir(parents=True,exist_ok=True)
  paths=['ios/App/'+n+'.swift'for n in NAMES]+['ios/App/NativeActorAnimation.swift','tests/network/smoke_original_world_wire.py','tests/network/smoke_original_world_wire.js','tests/network/smoke_original_world_wire.swift']
@@ -17,7 +17,7 @@ def main():
  with tempfile.TemporaryDirectory(dir=out,prefix='verify-')as temp:
   w=Path(temp);actor=before['ios/App/NativeActorAnimation.swift'].decode();motion=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]
   (w/'main.swift').write_text('\n'.join(before['ios/App/'+n+'.swift'].decode()for n in NAMES)+'\n'+motion+'\n'+before['tests/network/smoke_original_world_wire.swift'].decode())
-  result=subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(out/'modules'),str(w/'main.swift'),'-o',str(w/'verify')],capture_output=True,text=True)
+  result=subprocess.run(['xcrun','swiftc','-O','-j','1','-whole-module-optimization','-num-threads','1','-module-cache-path',str(out/'modules'),str(w/'main.swift'),'-o',str(w/'verify')],capture_output=True,text=True)
   (out/'compile.log').write_text(result.stdout+result.stderr)
   if result.returncode:print(result.stdout+result.stderr);result.check_returncode()
   result=subprocess.run(['node',str(ROOT/'tests/network/smoke_original_world_wire.js'),str(w/'verify')],capture_output=True,text=True,timeout=40)

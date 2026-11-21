@@ -144,7 +144,9 @@ final class NativeGameViewController: UIViewController {
         NativeGameplayIdleTimer.shared.setActive(idleOwner,true)
         applicationActive = true;network.setApplicationActive(true); frameClock.reset();renderer?.resetDisplayClock(); resetControls()
     }
+    private var trafficVehicleEntry=NativeTrafficVehicleEntry()
     private func resetControls() {
+        trafficVehicleEntry.cancel()
         legacyKeys=0;legacyAxes = .zero;legacySpecialKeys=0;legacyCrouchUntil=0
         heldKeys.removeAll(); stick.reset(); lookStick.reset(); controllerGate.reset()
         previousPad = .init(); resetControllerMenuInput(); weaponCycle.cancel()
@@ -369,6 +371,7 @@ final class NativeGameViewController: UIViewController {
         renderer?.onCouplingRequest = { [weak self] request in self?.requestVehicleCoupling(request) ?? false }
         network.onInventory = { [weak self] state in self?.weapons.apply(state) }
         network.onOriginalGuns = { [weak self] rows,back in _ = self?.weapons.applyOriginalGuns(rows,back:back) }
+        network.onOriginalCommand = { [weak self] in self?.renderer?.receiveTrafficCrews($0) }
         network.onAuthenticationRequired = { [weak self] in self?.status.text="SIGN IN TO THE ORIGINAL SERVER AGAIN TO CONTINUE" }
         network.onLegacyEvent = { [weak self] in self?.receiveLegacyEvent($0) }
         network.onOriginalVehicleHit = { [weak self] in _ = self?.renderer?.receiveOriginalVehicleHit($0) }
@@ -431,6 +434,12 @@ final class NativeGameViewController: UIViewController {
         network.onAmbientPedestrianEvent = {[weak self]event,serverNow,received in
             self?.renderer?.receiveAmbientPedestrians(event,serverNow:serverNow,received:received)
         }
+        network.onAmbientTrafficConfiguration = {[weak self]level,roads in
+            self?.renderer?.configureAmbientTraffic(level:level,roads:roads)
+        }
+        network.onAmbientTrafficEvent = {[weak self]event,serverNow,received in
+            self?.renderer?.receiveAmbientTraffic(event,serverNow:serverNow,received:received)
+        }
         network.onChat = { [weak self] lines in
             self?.chatFeed.text = lines.suffix(3).joined(separator: "\n")
             self?.chatFeed.isHidden = lines.isEmpty
@@ -444,6 +453,7 @@ final class NativeGameViewController: UIViewController {
                 self.status.text = "VEHICLE ACCESS DENIED"
                 return
             }
+            self.trafficVehicleEntry.cancel()
             self.currentVehicle = vehicle
             self.audio.cancelReload()
             let kind = self.vehicleModelType(vehicle)
@@ -1773,12 +1783,29 @@ final class NativeGameViewController: UIViewController {
         guard let renderer else { return }
         if renderer.isClimbing {renderer.letGoOfLedge();return}
         if renderer.canDropJetpack {network.sendChat("/dropjetpack");return}
+        if trafficVehicleEntry.pending != nil{trafficVehicleEntry.cancel();status.text="VEHICLE ENTRY CANCELLED";return}
         if network.pendingVehicleEntry != nil{network.cancelVehicleEntry();status.text="VEHICLE ENTRY CANCELLED";return}
         if currentVehicle != nil {
             if [1,3].contains(renderer.riderWireAction) {status.text="ENTERING VEHICLE";return}
             if renderer.beginVehicleExit(onReady:{[weak self] in self?.completeVehicleExit()}) {return}
             completeVehicleExit();return
         }
+        if network.usesOriginalWorldProtocol,
+           let traffic=renderer.presentedAmbientTraffic.min(by:{simd_distance(SIMD3<Float>($0.body.position),renderer.position)<simd_distance(SIMD3<Float>($1.body.position),renderer.position)}),
+           simd_distance(SIMD3<Float>(traffic.body.position),renderer.position)<=8 {
+            let distance=network.orderedVehicles.map{simd_distance(renderer.predictedVehicle($0).position,renderer.position)}.min() ?? .infinity
+            if simd_distance(SIMD3<Float>(traffic.body.position),renderer.position)<distance {
+                if trafficVehicleEntry.request(traffic.identity.id,at:ProcessInfo.processInfo.systemUptime) {
+                    if network.sendOriginalCommand(["t":"tcar","id":Int(traffic.identity.id),"why":"door"]){status.text="APPROACHING VEHICLE"}
+                    else{trafficVehicleEntry.cancel();status.text="VEHICLE REQUEST COULD NOT BE SENT"}
+                }
+                return
+            }
+        }
+        requestNearestRegisteredVehicle()
+    }
+    private func requestNearestRegisteredVehicle() {
+        guard acceptsHeldInput,currentVehicle==nil,let renderer else{return}
         guard let nearest = network.orderedVehicles.map(renderer.predictedVehicle).min(by: {
             simd_distance($0.position, renderer.position) < simd_distance($1.position, renderer.position)
         }), simd_distance(nearest.position, renderer.position) <= 8 else {
@@ -1961,6 +1988,21 @@ final class NativeGameViewController: UIViewController {
         let active = applicationActive && view.window != nil
         renderer?.advanceRemoteFootPresentation(at:ProcessInfo.processInfo.systemUptime,active:active)
         renderer?.advanceAmbientPedestrians(at:ProcessInfo.processInfo.systemUptime,active:active)
+        renderer?.advanceAmbientTraffic(at:ProcessInfo.processInfo.systemUptime,active:active)
+        if trafficVehicleEntry.pending != nil,let renderer {
+            if !acceptsHeldInput || currentVehicle != nil{trafficVehicleEntry.cancel()}
+            else {
+                let vehicles=network.orderedVehicles.map{NativeTrafficVehicleEntry.Vehicle(id:$0.id,trafficID:$0.trafficSourceID)}
+                let result=trafficVehicleEntry.poll(at:ProcessInfo.processInfo.systemUptime,vehicles:vehicles,ready:{id in
+                    self.network.vehicles[id].map{renderer.registeredVehicleReadyForEntry($0)} ?? false
+                })
+                switch result {
+                case .ready:requestNearestRegisteredVehicle()
+                case .expired:status.text="SERVER DID NOT MAKE THIS VEHICLE AVAILABLE"
+                case .waiting:break
+                }
+            }
+        }
         let timing = frameClock.advance(timestamp: link.timestamp, active: active)
         if timing.discontinuity { resetControls();renderer?.rebaseLegacyObjectClock() }
         let delta = Float(timing.delta)
