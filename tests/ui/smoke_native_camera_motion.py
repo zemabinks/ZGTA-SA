@@ -49,6 +49,7 @@ def main():
     source = (ROOT / 'tests/ui/smoke_native_camera_motion.swift').read_text().replace('// ACTUAL_RENDERER_CAMERA_CALL', call)
     source = source.replace('// ACTUAL_RENDERER_CURRENT_VELOCITY', velocity)
     source = source.replace('// ACTUAL_RENDERER_AIM_PREDICATES', aim)
+    source = source.replace('// ACTUAL_RENDERER_PRESENTATION', property_('private var footPresentationPosition:'))
     out = ROOT / 'local-only/research/camera-motion'
     out.mkdir(parents=True, exist_ok=True)
     (out / 'renderer-call.sha256').write_text(hashlib.sha256(call.encode()).hexdigest() + '\n')

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import Metal
 import simd
 
@@ -286,6 +287,7 @@ final class NativeSkeletalActor {
     private struct Bone { let frame: Int; let inverseBind: simd_float4x4 }
     let skinVertices: MTLBuffer
     let vertexCount: Int
+    let sourceSHA256: String
     private let vertices: [NativeSkinVertex]
     private let frames: [Frame]
     private let restTurns: [simd_quatf]
@@ -345,6 +347,7 @@ final class NativeSkeletalActor {
             self.byBone = byBone
             self.correction = correction
             self.axis = axis
+            self.sourceSHA256 = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         } catch { return nil }
     }
 
