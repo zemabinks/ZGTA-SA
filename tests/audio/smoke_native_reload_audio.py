@@ -82,6 +82,7 @@ final class Audio {
  var reloads:[String:[NSNumber]]=["22":[11,12],"25":[21,22]]
  var oneShots:[ObjectIdentifier:AVAudioPlayer]=[:]
  var oneShotLevels:[ObjectIdentifier:NativeAudioEnvelope]=[:]
+ var spatialShotGroups=["old-shot"],spatialShotLayers:[String:Set<String>]=["old-shot":["body"]]
  let rateAudio=Graph(),weather=Graph(),vehicleLoops=Graph()
  var contactAudio:Graph?=Graph(),remoteEngines:[String:Int]=[:],flightPackIdle:[String:Double]=[:]
  var loops=Set<String>(),vehicleModel:Int?,distanceSinceStep:Float=0,lastEvent=""
@@ -131,6 +132,7 @@ check(Sink.played==["143_11","143_12"],"same-ID reload is a distinct owner")
 for stopKind in [0,1]{
  let audio=fresh();audio.deferFetch=true;audio.reload(weapon:22)
  if stopKind==0{audio.suspend()}else{audio.stop()}
+ check(audio.spatialShotGroups.isEmpty && audio.spatialShotLayers.isEmpty,"stop/suspend retained old positioned shot owners")
  audio.resume();DispatchQueue.main.drain();audio.releaseSamples()
  check(Sink.played.isEmpty,"stop/suspend then resume revived old reload")
  audio.deferFetch=false;audio.reload(weapon:25);DispatchQueue.main.drain()

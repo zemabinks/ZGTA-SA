@@ -76,6 +76,8 @@ final class Renderer {
  let gameCamera=Camera();var gameCameraFrame:Int?=1,heading:Float=1.2,actorHeading:Float=0.3,cameraPitch:Float=0.2,cameraWasDriving=true
  var projectileRows=[1],reloadCancelled=false,resets=0
  let weaponEffects=Effects();var particleEffects:Effects?=Effects(),blasts=[1]
+ let ordinaryShotEffects=Effects()
+ var ordinaryShotKindsReported:Set<UInt8>=[1,2],ordinaryShotDrawReported=true
  var vehicleRigStates=["old":1],vehicleRigTimes=["old":1],vehicleRigSpins=["old":1]
  var remoteRiderPlayback=["old":1],remoteRiderActions=["old":1],remoteRiderCapture=["old":1],remoteRiderPrevious=["old":1],remoteRiderAnimations=["old":1]
  var remoteFootAnimations=["old":1],remoteBikeAnimations=["old":1],remoteBikeSamples=["old":1],remoteBikeFrames=["old":1]
@@ -166,6 +168,8 @@ check(world.lastRiderDraw==0 && world.remoteServerTimeOffsetMilliseconds==nil,"o
 check(world.riderPoseClock.resets>0,"old rider pose interval survives session reset")
 check(world.trafficDisables==1,"old traffic presentation survives session reset")
 check(world.weaponEffects.clears==1 && world.particleEffects!.clears==1 && world.blasts.isEmpty,"old fires, particles, stream or blasts survive new world")
+check(world.ordinaryShotEffects.clears==1,"old ordinary shot tracers survive new world")
+check(world.ordinaryShotKindsReported.isEmpty && !world.ordinaryShotDrawReported,"shot draw receipts survive new world")
 check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")
 check(game.gameHUD.vehicle==nil && game.gameHUD.radar.target==nil && game.renderer!.objective==nil,"old HUD/objective survives")

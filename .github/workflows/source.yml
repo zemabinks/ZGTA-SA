@@ -68,4 +68,4 @@ jobs:
         with:
           node-version: '22'
       - run: python3 -m pip install Pillow==11.3.0
-      - run: python3 tests/core/smoke_core_168.py
+      - run: python3 tests/core/smoke_core_169.py

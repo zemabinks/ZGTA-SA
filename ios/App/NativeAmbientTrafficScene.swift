@@ -52,13 +52,13 @@ final class NativeAmbientTrafficScene {
     }
     /// Bound initial records while the asynchronous graph load is pending.
     /// Delayed shots are deliberately not replayed as fresh visual effects.
-    func receive(_ event:Wire.Event,serverNow:Double,received:Double) {
-        guard traffic.level>0,traffic.roadsHash != nil,serverNow.isFinite,serverNow>0,received.isFinite else{return}
+    @discardableResult func receive(_ event:Wire.Event,serverNow:Double,received:Double)->[Wire.Shot] {
+        guard traffic.level>0,traffic.roadsHash != nil,serverNow.isFinite,serverNow>0,received.isFinite else{return []}
         staged=[:]
         anchor=(serverNow,received)
-        guard traffic.graph==nil else{traffic.receive(event,serverNow:serverNow,received:received);return}
-        if case .shots=event{return}
-        guard event.count<=Self.maximumPendingRecords else{return}
+        guard traffic.graph==nil else{return traffic.receive(event,serverNow:serverNow,received:received)}
+        if case .shots=event{return []}
+        guard event.count<=Self.maximumPendingRecords else{return []}
         if pending.count>=Self.maximumPendingEvents || pendingRecords+event.count>Self.maximumPendingRecords {
             // Retire an incomplete prefix as one unit. Metadata alone can
             // never create a car; a subsequent base must establish it again.
@@ -66,6 +66,7 @@ final class NativeAmbientTrafficScene {
         }
         pending.append(.init(event:event,now:serverNow,received:received))
         pendingRecords+=event.count;pendingCount=pending.count
+        return []
     }
     /// Model readiness supplies original dimensions. Missing models are not
     /// replaced with decorative geometry. State is staged until a draw occurs.

@@ -401,6 +401,14 @@ final class NativeGameViewController: UIViewController {
             self?.audio.explosion(weapon:weapon,distance:distance)
         }
         network.onWeaponSound = { [weak self] weapon in self?.audio.shot(weapon:weapon) }
+        renderer?.onSpatialWeaponShot = {[weak self] weapon,position in self?.audio.shot(weapon:weapon,at:position)}
+        renderer?.onBulletPass = {[weak self] event in
+            switch event {
+            case .sound(let sound):self?.audio.bulletPass(sound)
+            case .preload(let samples):self?.audio.preloadBulletPass(samples)
+            }
+        }
+        audio.preloadBulletPass()
         renderer?.equippedWeapon = weapons.selected
         renderer?.onFootWeaponShot = { [weak self] weapon, left in
             self?.consumeFootWeaponShot(weapon: weapon, left: left) ?? false

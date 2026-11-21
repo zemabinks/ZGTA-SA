@@ -83,6 +83,9 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     private var loops=Set<String>()
     private var oneShots: [ObjectIdentifier: AVAudioPlayer] = [:]
     private var oneShotLevels:[ObjectIdentifier:NativeAudioEnvelope]=[:]
+    private var spatialShotSerial:UInt64=0
+    private var spatialShotGroups:[String]=[]
+    private var spatialShotLayers:[String:Set<String>]=[:]
     private var settingsGain:Float=1
     private var fadeTimer: DispatchSourceTimer?
     private var notifications: [NSObjectProtocol] = []
@@ -211,6 +214,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         suspended = true
         weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
         remoteEngines.removeAll()
+        spatialShotGroups=[];spatialShotLayers=[:]
         _ = contactAudio?.quiet();flightPackIdle.removeAll()
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
@@ -230,6 +234,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         suspended = true
         weather.stop();rateAudio.stop();vehicleLoops.stopAll(immediate:true)
         remoteEngines.removeAll()
+        spatialShotGroups=[];spatialShotLayers=[:]
         _ = contactAudio?.quiet();flightPackIdle.removeAll()
         loops.removeAll()
         oneShots.values.forEach { $0.stop() }
@@ -457,6 +462,63 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         if row[4].intValue >= 0 {
             once("143_\(row[4].intValue)", rate: row[7].floatValue * (Bool.random() ? 1 : 1.18921),
                  gain: 0.3 * level)
+        }
+    }
+
+    /// A remote muzzle is a fixed world source; the existing source-node
+    /// listener follows the camera at audio sample time. Keep at most six
+    /// native shot groups (up to24 layers), independently of engine loops.
+    /// Missing samples retain the existing native half-second loading window.
+    func shot(weapon id:Int,at position:SIMD3<Double>) {
+        guard !suspended,volume>0,(0..<3).allSatisfy({position[$0].isFinite}),
+              let row=weapons[String(id)],let plan=NativeShotAudioPlan.spatial(row.map(\.doubleValue))else{return}
+        let group=reserveShotGroup(prefix:"shot"),requested=ProcessInfo.processInfo.systemUptime
+        // GTA XYZ -> audio X/up/-Y, without narrowing the source to Float.
+        let source=SIMD3(position.x,position.z,-position.y)
+        for layer in plan.layers {
+            fetch(layer.sound){[weak self] bytes in
+                guard let self,!self.suspended,ProcessInfo.processInfo.systemUptime-requested<0.5,
+                      let retained=self.spatialShotLayers[group],let bytes,
+                      let sample=self.registerShotSample(bytes,name:layer.sound)else{return}
+                let playback=NativeVehicleAudioDynamics.Layer(name:layer.name,sound:sample,rate:layer.rate,gain:layer.gain)
+                self.vehicleLoops.apply(.init(layers:[playback],retain:retained),prefix:group,gain:Double(self.volume),
+                    spatialPosition:source,panner:.init(reference:14,maximum:260,rolloff:1.6),immediateGain:true)
+                self.spatialShotLayers[group]?.insert(layer.name)
+                self.lastEvent=layer.sound
+            }
+        }
+    }
+    private func reserveShotGroup(prefix:String)->String {
+        spatialShotSerial &+= 1
+        let group="\(prefix):\(spatialShotSerial)"
+        spatialShotGroups.append(group);spatialShotLayers[group]=[]
+        if spatialShotGroups.count>6 {
+            let oldest=spatialShotGroups.removeFirst()
+            for name in spatialShotLayers.removeValue(forKey:oldest) ?? [] {vehicleLoops.stop(oldest+":"+name,fade:0)}
+        }
+        return group
+    }
+    private func registerShotSample(_ bytes:Data,name:String)->String? {
+        // A bank may also supply a loop. Do not replace its registered loop
+        // metadata when the same PCM is requested as a finite one-shot.
+        let sample="one-shot:"+name
+        if !registeredVehicleSamples.contains(sample) {
+            guard vehicleLoops.register(bytes,name:sample,loopStart:-1)else{return nil}
+            registeredVehicleSamples.insert(sample)
+        }
+        return sample
+    }
+    func preloadBulletPass(_ samples:[String]=["28_0","28_1","28_2"]){preload(samples)}
+    func bulletPass(_ sound:NativeBulletPass.Sound) {
+        guard !suspended,volume>0 else{return}
+        let group=reserveShotGroup(prefix:"pass"),requested=ProcessInfo.processInfo.systemUptime
+        fetch(sound.sample){[weak self] bytes in
+            guard let self,!self.suspended,ProcessInfo.processInfo.systemUptime-requested<0.5,
+                  self.spatialShotLayers[group] != nil,let bytes,
+                  let sample=self.registerShotSample(bytes,name:sound.sample)else{return}
+            self.vehicleLoops.apply(.init(layers:[.init(name:"whizz",sound:sample,rate:sound.rate,gain:sound.gain)]),
+                prefix:group,gain:Double(self.volume),immediateGain:true,panSweep:sound.sweep)
+            self.spatialShotLayers[group]?.insert("whizz");self.lastEvent=sound.sample
         }
     }
 

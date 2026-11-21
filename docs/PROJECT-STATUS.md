@@ -52,6 +52,15 @@ incomplete. The previously
 reported intermittent pedestrian draw still lacks a confirmed cause. See the
 [traffic implementation scope](research/gameplay/CORE_AMBIENT_TRAFFIC.md).
 
+Compact traffic shots now enter a shared native bullet-presentation path with
+bounded Metal tracers, material-aware impacts and positioned attack/pass-by
+audio. The selected source chain, both native SDK builds and normal retained-data
+Simulator cases pass; 46 captures were reviewed. Actual tracer submission was
+observed, while the short-lived effects and audible playback are not verified
+for every shot. These shots cannot grant damage. Seated gun poses, the human
+shot path, local ordinary hit resolution and procedural fallback effects remain
+separate work. Original PC gameplay parity remains unverified.
+
 ## Development priorities
 
 Continue improving original movement, animation, cameras, physics, vehicles and

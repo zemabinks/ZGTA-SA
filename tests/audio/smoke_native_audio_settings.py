@@ -75,12 +75,12 @@ print("PASS actual audio settings dispatch/envelopes: \(checks) checks")
   subprocess.run(['swiftc','-O','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',str(work/'main.swift'),'-o',str(work/'verify')],check=True)
   subprocess.run([str(work/'verify')],check=True)
  # Real source mixer and rate node, with only synthetic PCM and offline engines.
- source='\n'.join((ROOT/'ios/App'/name).read_text() for name in ['NativeRateAudio.swift','NativeVehicleAudioDynamics.swift','NativeVehicleAudioSpatial.swift','NativeVehicleLoopAudio.swift'])
+ source='\n'.join((ROOT/'ios/App'/name).read_text() for name in ['NativeRateAudio.swift','NativeVehicleAudioDynamics.swift','NativeVehicleAudioSpatial.swift','NativeAudioPanSweep.swift','NativeVehicleLoopAudio.swift'])
  source+=(ROOT/'tests/audio/smoke_native_audio_settings.swift').read_text()
  with tempfile.TemporaryDirectory(prefix='pcm-',dir=OUT) as t:
   work=Path(t);(work/'main.swift').write_text(source)
   subprocess.run(['swiftc','-O','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',str(work/'main.swift'),'-o',str(work/'verify')],check=True)
   subprocess.run([str(work/'verify')],check=True)
- files=['NativeAudioEnvelope.swift','NativeGameAudio.swift','NativeRateAudio.swift','NativeVehicleLoopAudio.swift','NativeVehicleRadio.swift','NativeMenuAudio.swift','NativeMenuSoundData.swift']
+ files=['NativeAudioEnvelope.swift','NativeGameAudio.swift','NativeRateAudio.swift','NativeAudioPanSweep.swift','NativeVehicleLoopAudio.swift','NativeVehicleRadio.swift','NativeMenuAudio.swift','NativeMenuSoundData.swift']
  (OUT/'settings-report.json').write_text(json.dumps({'pass':True,'scope':'Actual extracted setting dispatch and real native offline PCM; no hardware output or microphone','sourceSHA256':{f:hashlib.sha256((ROOT/'ios/App'/f).read_bytes()).hexdigest() for f in files}},indent=2)+'\n')
 if __name__=='__main__':main()
