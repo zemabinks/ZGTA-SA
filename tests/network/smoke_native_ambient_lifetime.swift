@@ -16,6 +16,19 @@ import simd
         owner.receive(.gone([1]),serverNow:100001,received:100.001)
         owner.receive(.free(atServerMilliseconds:100002,[row]),serverNow:100002,received:100.002)
         let after=owner.frames(at:100.002,near:.zero)[0]
+        #if CHECK_GROUND_CONTEXT
+        var context=after
+        context.waitingLinkKind=5
+        context.admittedAt=91.25
+        let grounded=projectGround(context,z:7.5)
+        guard grounded.generation==context.generation,grounded.admittedAt==context.admittedAt,
+              grounded.waitingLinkKind==context.waitingLinkKind,grounded.id==context.id,
+              grounded.skin==context.skin,grounded.seed==context.seed,grounded.flags==context.flags,
+              grounded.position==SIMD3(context.position.x,context.position.y,7.5),
+              grounded.velocity==context.velocity,grounded.heading==context.heading else {
+            fatalError("Actual ground projection dropped NPC lifetime/context or changed motion")
+        }
+        #endif
         guard animationKey(before,name:"bmori") != animationKey(after,name:"bmori"),groundKey(before) != groundKey(after)else {
             print("FAIL same-ID/skin/seed respawn reuses actual renderer animation/ground identity");exit(1)
         }

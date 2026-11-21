@@ -37,8 +37,18 @@ renderer lamp-selection checks. These cases do not establish exact GPU lamp
 brightness, projected beams, audio playback, physical-iPhone performance or
 original-PC gameplay parity.
 
-Original traffic AI, ownership transfer/jacking, astride falls, driver gun/look/
-voice behavior and general traffic combat remain incomplete. The previously
+Compact motorcycle riders now play original fall clips, retain completed fallen
+poses and preserve their animation when a compatible original model arrives.
+Detached drivers expire independently of retained passengers. An existing
+server-owned NPC can receive the completed driver pose without creating a
+player or changing authoritative health or goals. The latest normal four-join
+and controlled traffic/bike cases pass, with 41 captures reviewed. The NPC
+handoff has an actual draw receipt; its body is partly obscured in the capture,
+so unobstructed visual continuity remains unverified.
+
+Original traffic AI, ownership transfer/jacking, broader collision-driven
+ejection, driver gun/look/voice behavior and general traffic combat remain
+incomplete. The previously
 reported intermittent pedestrian draw still lacks a confirmed cause. See the
 [traffic implementation scope](research/gameplay/CORE_AMBIENT_TRAFFIC.md).
 

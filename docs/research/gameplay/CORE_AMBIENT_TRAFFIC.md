@@ -13,8 +13,22 @@ and publish the resulting control state.
 Optional owner-provided traffic occupant metadata selects original character
 resources and seated poses. These actors remain separate from human player
 rosters. Missing metadata or unavailable resources do not produce substitute
-characters. Astride death/fall-off, driver gun/look/voice behavior, traffic combat
-and authoritative jacking remain incomplete.
+characters.
+
+Compact astride riders use original optional hit/fall clips and retain their
+completed down pose. A driver's detached lifetime is separate from the car and
+its passengers. Ready passengers retain their last completed pose when that
+driver is thrown; removing or replacing their authoritative car retires them.
+Compatible original-model uploads preserve this animation ownership.
+
+A completed driver may match an already admitted server NPC of the same skin.
+Local generation, age and proximity rules constrain this presentation handoff.
+It preserves server-owned health/goals and never manufactures a pedestrian or
+human roster entry. The landed-feet calculation is distinct from ordinary
+upright vehicle exit. Broader collision-driven ejection, registered passenger
+handle transfer, driver gun/look/voice behavior, traffic combat and
+authoritative jacking remain incomplete. Native scene admission also remains
+narrower than the original browser's quality-dependent traffic budgets.
 
 Main lamp selection uses time, weather and actor identity. Brake inputs use the
 same selected motion sample as vehicle presentation. Typed compact audio sources
@@ -40,3 +54,12 @@ recorded separately. Actual Taxi material metadata confirms day/night and
 rear-only brake selection, while GPU brightness and audible output still need
 separate verification. No original assets, private fixtures or captured gameplay
 are distributed here.
+
+The rider follow-up passes both SDK builds, the complete current source chain,
+the normal four-join retained-resource case and a controlled bike/NPC case.
+All 41 captures are reviewed. Visible fall stages, passenger down-state
+retention, driver expiry and car removal/reuse have scoped acceptance. The
+existing NPC is submitted once by the actual draw path; its partly obscured
+capture does not establish unobstructed pose continuity. Original-resource
+endpoint and archived-policy comparisons remain distinct from retail gameplay
+testing. Historical fixture and Apple runner failures remain recorded locally.

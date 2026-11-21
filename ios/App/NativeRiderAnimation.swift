@@ -8,6 +8,7 @@ struct NativeRiderDefinitions: Decodable {
         var doorOpenOut:[Double],doorCloseIn:[Double],doorOpenIn:[Double],doorCloseOut:[Double]
         var special:Int
         var shuffle:String
+        var fallOff:[String?]?=nil
     }
     struct Seat: Decodable {
         var at: [Float]
@@ -34,8 +35,33 @@ struct NativeRiderDefinitions: Decodable {
         var bike: [String:Double]?
         var afloat:Bool?
         var group:Group?
+        var astrideKind:String?=nil
         func configuration(seat: Int = 0) -> NativeRiderAnimation.Configuration {
             NativeRiderAnimation.Configuration(astride:astride,clips:clips,passenger:seat>0,side:seats.indices.contains(seat) ? seats[seat].side:-1)
+        }
+        /// Resource lookup keeps the seat's side first and admits the opposite
+        /// side only when its requested clip is absent. Missing optional clips
+        /// do not acquire a generic replacement animation.
+        func fallOffClip(seat:Int=0,side:Int = -1,contains:(String)->Bool)->String? {
+            guard astride,seats.indices.contains(seat),let choices=group?.fallOff else{return nil}
+            let direction=seats[seat].side==0 ? side:seats[seat].side
+            let first=direction<0 ? 0:1
+            for index in [first,1-first] where choices.indices.contains(index) {
+                guard let raw=choices[index],!raw.isEmpty else{continue}
+                let name=raw.replacingOccurrences(of:":",with:"/")
+                if contains(name){return name}
+            }
+            return nil
+        }
+        func hitClip(contains:(String)->Bool)->String? {
+            guard astride else{return nil}
+            // Older prepared catalogs retain the original family but omit
+            // the optional flat hit role. Reuse that declared family without
+            // reimporting the game or inventing a model-to-family table.
+            let family=astrideKind.map{kind in "\(kind)/\(kind == "wayfarer" ? "wf":kind)_hit"}
+            guard let raw=clips["hit"] ?? family,!raw.isEmpty else{return nil}
+            let name=raw.replacingOccurrences(of:":",with:"/")
+            return contains(name) ? name:nil
         }
     }
     var models: [String:Definition]

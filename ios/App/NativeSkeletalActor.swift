@@ -707,6 +707,17 @@ extension NativeSkeletalActor {
 
 
 extension NativeSkeletalActor {
+    /// The fallen export differs from the upright exit: C + the final clip's
+    /// raw root, projected onto the model plane before its frozen transform.
+    /// Rig rest translation and figure rotation do not move these feet.
+    func riderLanded(pose:Pose,rootTranslation:SIMD3<Double>,model:simd_float4x4,origin:Float)->(position:SIMD3<Float>,heading:Float)? {
+        guard let root=transform(bone:0,in:pose)else{return nil}
+        let anchor=pose.figurePosition+rootTranslation
+        let feet=model*SIMD4(Float(anchor.x),Float(anchor.y),-origin,1)
+        let world=model*root
+        let direction=world*SIMD4<Float>(0,1,0,0)
+        return(SIMD3(feet.x,feet.y,feet.z),atan2(direction.x,direction.y))
+    }
     /// bA.stood: root supplies horizontal feet; the figure anchor projected
     /// onto z=-origin supplies the upright ground plane beneath the car.
     func riderFeet(pose:Pose,model:simd_float4x4,origin:Float)->(position:SIMD3<Float>,heading:Float)? {

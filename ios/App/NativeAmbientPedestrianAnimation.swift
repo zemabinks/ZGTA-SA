@@ -28,6 +28,7 @@ final class NativeAmbientPedestrianAnimation {
     private var hitUntil = -Double.infinity
     private var wasDown = false
     private var faceDown = false
+    private var arrivalLying = false
     private var activity=NativeAmbientPedestrianActivity()
     private var waiting=NativeAmbientPedestrianWaiting()
     private let walkStyle:String
@@ -40,6 +41,12 @@ final class NativeAmbientPedestrianAnimation {
         duration={library.duration(of:$0)}
     }
     func resetDisplayClock(){displayTime=nil;displayRemainder=0}
+    /// Existing server flags still choose down/recovery. A lying arrival skips
+    /// replaying the fall from upright after its vehicle animation completed.
+    func acceptRider(lying:Bool) {
+        arrivalLying=lying
+        if lying{wasDown=false;animator.revive()}
+    }
 
     func update(at time:Double,active:Bool,snapshot:Snapshot)->NativeFootAnimation.Frame? {
         guard active,time.isFinite,(time*1000).isFinite else {
@@ -99,7 +106,8 @@ final class NativeAmbientPedestrianAnimation {
                     side:Self.incomingSide(wireFrom:state.hitFromWire,nativeHeading:snapshot.heading))
             }else{kind="floorHit"}
             faceDown=kind=="koSkidFront" || kind=="floorHitF"
-            animator.die(kind)
+            animator.die(kind,fallen:arrivalLying)
+            arrivalLying=false
         }else if !down && wasDown {
             animator.revive()
             _=animator.act(faceDown ? "ped/getup_front":"ped/getup",cut:true,once:true)

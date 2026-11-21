@@ -13,6 +13,7 @@ final class NativeAmbientPedestrians {
         let state:Wire.State?
         // Local admission lifetime; never changes the wire target namespace.
         var generation:UInt64=0
+        var admittedAt:Double=0
         // nil means free motion/no next edge. An existing next edge with no
         // matching graph link uses kind0, matching the graph query fallback.
         var waitingLinkKind:UInt8?=nil
@@ -69,6 +70,7 @@ final class NativeAmbientPedestrians {
         var generation:UInt64
         var state:Wire.State?,residual=SIMD3<Double>.zero,correctionAt:Double
         var heading:Double?,lastDisplay:Double?
+        var admittedAt:Double,arrivalUntil:Double?
     }
     private(set) var pathsHash:String?
     private(set) var level:Double=0
@@ -78,6 +80,7 @@ final class NativeAmbientPedestrians {
     private var pending:[(Wire.Event,Double,Double)]=[]
     private var pendingCount=0
     var count:Int{actors.count}
+    func contains(id:UInt16,generation:UInt64)->Bool{actors[id]?.generation==generation}
     func reset(){actors.removeAll();pending.removeAll();pendingCount=0;graph=nil;pathsHash=nil;level=0}
     @discardableResult func configure(level:Double,paths:String?)->Bool {
         let hash=paths ?? pathsHash
@@ -125,7 +128,9 @@ final class NativeAmbientPedestrians {
         // move an already admitted timeline backwards during presentation.
         let seconds=actor.identity.flags&9 != 0 ? 0:max(0,time-actor.received)
         guard let (position,direction)=try? motion.advance(min(9,seconds),graph:graph)else{return nil}
-        let correction=actor.residual*exp(-max(0,time-actor.correctionAt)/0.3)
+        let elapsed=max(0,time-actor.correctionAt)
+        let slow=max(0,min(elapsed,(actor.arrivalUntil ?? actor.correctionAt)-actor.correctionAt))
+        let correction=actor.residual*exp(-slow/0.6-(elapsed-slow)/0.3)
         return(position+correction,direction,motion.speed,motion.waitingLinkKind)
     }
     private func admit(identity:Wire.Identity,motion:Motion,time:Double,serverNow:Double,received:Double,graph:NativeAmbientPedestrianPaths) {
@@ -138,12 +143,26 @@ final class NativeAmbientPedestrians {
         let lifetime=same ? old!.generation:generation
         // Retain packet age in the monotonic origin; clamp small future skew.
         var value=Actor(identity:identity,motion:motion,serverAt:time,received:received-max(0,serverNow-time)/1000,generation:lifetime,
-            state:same ? old?.state:nil,correctionAt:received,heading:same ? old?.heading:nil,lastDisplay:same ? old?.lastDisplay:nil)
+            state:same ? old?.state:nil,correctionAt:received,heading:same ? old?.heading:nil,lastDisplay:same ? old?.lastDisplay:nil,
+            admittedAt:same ? old!.admittedAt:received,arrivalUntil:same ? old?.arrivalUntil:nil)
         if same,let old,let before=predicted(old,at:received,graph:graph),let after=predicted(value,at:received,graph:graph) {
             var residual=before.0-after.0;residual.z=0
-            if simd_length(residual)<=5{value.residual=residual}
+            if simd_length(residual)<=(received<(value.arrivalUntil ?? received) ? 12:5){value.residual=residual}
         }
         actors[identity.id]=value
+    }
+    /// Adopt a completed rider only into the same existing NPC generation.
+    /// This changes local correction/facing, never authoritative goals/flags.
+    @discardableResult func acceptRider(id:UInt16,generation:UInt64,feet:SIMD3<Double>,heading:Double,at time:Double)->Bool {
+        guard time.isFinite,heading.isFinite,feet.x.isFinite,feet.y.isFinite,feet.z.isFinite,
+              var actor=actors[id],actor.generation==generation,let graph else{return false}
+        var uncorrected=actor;uncorrected.residual = .zero
+        guard let point=predicted(uncorrected,at:time,graph:graph)?.0 else{return false}
+        var correction=feet-point;correction.z=0
+        if simd_length(correction)>12{correction = .zero}
+        actor.residual=correction;actor.correctionAt=time;actor.arrivalUntil=time+1.5
+        actor.heading=heading;actor.lastDisplay=time;actors[id]=actor
+        return true
     }
     func frames(at time:Double,near origin:SIMD3<Double>,active:Bool=true,maximum:Int=40,
                 turningRate:(UInt16)->Double={_ in 6.5})->[Frame] {
@@ -177,7 +196,7 @@ final class NativeAmbientPedestrians {
             let velocity=actor.identity.flags&9 != 0 ? .zero:SIMD3(travelDirection.x*speed,travelDirection.y*speed,0)
             result.append(.init(id:id,skin:actor.identity.skin,seed:actor.identity.seed,flags:actor.identity.flags,
                 position:position,velocity:velocity,heading:actor.heading ?? desired,state:actor.state,
-                generation:actor.generation,waitingLinkKind:waitingLinkKind))
+                generation:actor.generation,admittedAt:actor.admittedAt,waitingLinkKind:waitingLinkKind))
         }
         return result
     }

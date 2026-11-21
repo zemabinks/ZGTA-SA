@@ -71,6 +71,18 @@ enum NativeTrafficOccupants {
         let id:UInt16,generation:UInt64,model:UInt16,index:Int,skin:Int,dead:Bool
         var targetID:String{"c\(id).\(index)"}
     }
+    /// Passenger follow occurs before the driver can detach and mark the car
+    /// thrown. Preserve the selected vehicle order and each seat's identity.
+    static func followOrder(_ seats:[Seat])->[Seat] {
+        var vehicles:[UInt16:Int]=[:]
+        for seat in seats where vehicles[seat.id]==nil{vehicles[seat.id]=vehicles.count}
+        return seats.enumerated().sorted{left,right in
+            let a=vehicles[left.element.id]!,b=vehicles[right.element.id]!
+            if a != b{return a<b}
+            let x=left.element.index==0 ? 3:left.element.index,y=right.element.index==0 ? 3:right.element.index
+            return x==y ? left.offset<right.offset:x<y
+        }.map(\.element)
+    }
     /// Preserve rank before flag/thrown filtering: an excluded nearer car
     /// still occupies its original update-budget position. Missing assets do
     /// not synthesize actors; the renderer must bind the selected skin itself.
