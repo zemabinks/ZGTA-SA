@@ -38,6 +38,10 @@ final class Renderer {
     var pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0,manualAnimation=false
     var skeletalLibrary:ClipLibrary?=ClipLibrary(),footAnimator:Animator?=Animator(),climbQueries:Queries?=Queries()
     var gameCameraFrame:NativeGameCamera.Frame?,camera=SIMD3<Float>.zero,cameraLookDirection:String?
+    // Authored display-position boundary; the real fixed coordinator and
+    // interpolation have separate motor/physics gates. Aim uses the actual
+    // renderer camera call with this supplied presentation input.
+    var footPresentationPosition=SIMD3<Float>.zero
     var currentFootVelocity=SIMD3<Double>.zero
     var meleeGuardHeld=false,meleeBlockHeld=false,vehicleLights=false,canNativeFootMeleeGuard=false
     var vehicleKind="car",hasLandingGear=false,hasJetNozzle=false,hasVehicleWorkingControls=false,vehicleWorkingIsTow=false,canUnhitchVehicle=false
@@ -135,6 +139,13 @@ if historicalFlight {
     }
     fputs("Historical source did not reproduce incompatible flight aim\n",stderr);exit(1)
 }
+let presented=try Renderer(),samePresentation=try Renderer()
+presented.camera=SIMD3(700,800,50);presented.footPresentationPosition=SIMD3(10,20,3)
+samePresentation.camera=presented.footPresentationPosition;samePresentation.footPresentationPosition=presented.footPresentationPosition
+presented.aiming=true;samePresentation.aiming=true
+let presentedFrame=presented.render(step:1.0/60),sameFrame=samePresentation.render(step:1.0/60)
+check(simd_distance(presentedFrame.source,sameFrame.source)<0.00001 && simd_distance(presentedFrame.target,sameFrame.target)<0.00001,
+      "Actual aim camera call used committed physics feet instead of its supplied display target")
 for hz in [15,30,60,120] {for task in ["swim","chute","climb"] {for owner in ["touch","controller","keyboard"] {for weapon in [22,34] {
     let r=try Renderer(),g=Owner(r);r.equippedWeapon=weapon;g.weapons.selected=weapon
     if owner=="touch"{g.toggleAim()}else{g.poll(held:owner=="controller",keyboardHeld:owner=="keyboard")}

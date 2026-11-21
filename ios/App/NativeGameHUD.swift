@@ -446,10 +446,11 @@ final class NativeGameHUD: UIView {
         vehicle.frame = box(-35, 137, 165, 20); vehicle.font = .systemFont(ofSize: 18 * y)
         let radarSize: CGFloat = windowSize.height < 350 ? 96 : 122
         radar.frame = CGRect(x: 0, y: max(8, bounds.height - 196 - radarSize), width: radarSize, height: radarSize)
-        // The parent HUD excludes its top controls. Centre the sight on the
-        // actual game window, rather than the shortened HUD coordinate space.
-        aim.frame = bounds
-        if let window { aim.aimPoint = convert(CGPoint(x: window.bounds.midX, y: window.bounds.midY), from: window) }
+        // The HUD leaves space for controls, but the sight covers the entire
+        // game window. Its centre belongs to the sight's own coordinate space.
+        if let window { aim.frame = convert(window.bounds, from: window) }
+        else { aim.frame = bounds }
+        aim.aimPoint = CGPoint(x: aim.bounds.midX, y: aim.bounds.midY)
     }
 
     func updateVitals(health life: Int, armour protection: Int) {
@@ -550,12 +551,15 @@ private final class NativeAimHUDView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
     override func draw(_ rect: CGRect) {
-        let centre = aimPoint ?? CGPoint(x: rect.midX, y: rect.midY)
+        // UIKit can invalidate a small dirty rectangle. It clips the drawing;
+        // it does not change the viewport, aperture or crosshair geometry.
+        let viewport = bounds
+        let centre = aimPoint ?? CGPoint(x: viewport.midX, y: viewport.midY)
         guard let context = UIGraphicsGetCurrentContext() else { return }
         if scoped {
-            let radius = min(rect.width, rect.height) * 0.47
+            let radius = min(viewport.width, viewport.height) * 0.47
             let hole = CGRect(x: centre.x-radius, y: centre.y-radius, width: radius*2, height: radius*2)
-            let mask = UIBezierPath(rect: rect); mask.append(UIBezierPath(ovalIn: hole)); mask.usesEvenOddFillRule = true
+            let mask = UIBezierPath(rect: viewport); mask.append(UIBezierPath(ovalIn: hole)); mask.usesEvenOddFillRule = true
             UIColor.black.setFill(); mask.fill()
             UIColor.black.setStroke()
             let cross = UIBezierPath(); cross.move(to: CGPoint(x: hole.minX, y: centre.y)); cross.addLine(to: CGPoint(x: hole.maxX, y: centre.y))

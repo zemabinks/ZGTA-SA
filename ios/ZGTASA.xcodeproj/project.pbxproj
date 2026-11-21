@@ -41,6 +41,7 @@
 		2168C9A791950DF3561798A1 /* NativeRapierCharacterQueries.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68ECF76A29B2B319314833C7 /* NativeRapierCharacterQueries.swift */; };
 		22BBDCBC3FB1FC0CF6650218 /* NativeSwimController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8366153EB29F47D815A85CC4 /* NativeSwimController.swift */; };
 		22E6F6B98017F773FDBCE2B9 /* NativeMenuProfileClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49E1DB8E527A12C33170D18F /* NativeMenuProfileClient.swift */; };
+		23022701CF77F26930418E1A /* NativeDiagnosticChunks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47630E2AEDA2606359374A98 /* NativeDiagnosticChunks.swift */; };
 		24D7F42F5A14B834A88C3E9F /* NativeVehicleAudioDynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8162236584EA8A1768F6CBC2 /* NativeVehicleAudioDynamics.swift */; };
 		2529CC621442608637C1292E /* NativeCJAssembly.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0105373A7389E3A82B038BA4 /* NativeCJAssembly.swift */; };
 		2672E944F636AD4DD8DD1A60 /* NativeVehicleHornController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 502EC37E454A0689DA6E4869 /* NativeVehicleHornController.swift */; };
@@ -330,6 +331,7 @@
 		448985FE3A747FC2FA95E5FE /* NativeRemoteSuspension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRemoteSuspension.swift; sourceTree = "<group>"; };
 		45B4846180421489379816D5 /* NativeDEMenuStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDEMenuStyle.swift; sourceTree = "<group>"; };
 		47282B7063D6F96DA5391CCD /* NativeTrafficRiderFall.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeTrafficRiderFall.swift; sourceTree = "<group>"; };
+		47630E2AEDA2606359374A98 /* NativeDiagnosticChunks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeDiagnosticChunks.swift; sourceTree = "<group>"; };
 		48F21D9BA3DB131EEB43CCFF /* NativeVehicleCoupling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleCoupling.swift; sourceTree = "<group>"; };
 		49E1DB8E527A12C33170D18F /* NativeMenuProfileClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMenuProfileClient.swift; sourceTree = "<group>"; };
 		4C869C965C2E923B5C8B3588 /* NativeVehicleSeating.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeVehicleSeating.swift; sourceTree = "<group>"; };
@@ -568,6 +570,7 @@
 				6A94B01CC17E576695BB0572 /* NativeConnectionRecovery.swift */,
 				2C6BA81B3041DCDEDDDC0BEB /* NativeContactAudio.swift */,
 				45B4846180421489379816D5 /* NativeDEMenuStyle.swift */,
+				47630E2AEDA2606359374A98 /* NativeDiagnosticChunks.swift */,
 				1A079C289993B9B3644543FB /* NativeFallDamage.swift */,
 				13D9044A38C55A08C41FD1EB /* NativeFlightAnimation.swift */,
 				CB20BE9496B4863AC86ABF67 /* NativeFlightAssets.swift */,
@@ -909,6 +912,7 @@
 				75FC3E0DF53C7D9BFE2494DC /* NativeConnectionRecovery.swift in Sources */,
 				EDF00D63145A8D470AC46E33 /* NativeContactAudio.swift in Sources */,
 				99353400109D646830373149 /* NativeDEMenuStyle.swift in Sources */,
+				23022701CF77F26930418E1A /* NativeDiagnosticChunks.swift in Sources */,
 				DDC99373C20A989E4DBE0133 /* NativeFallDamage.swift in Sources */,
 				9E7CF5B1DA6910A81DFB7A8F /* NativeFlightAnimation.swift in Sources */,
 				148722B8565D51FD49DB61F6 /* NativeFlightAssets.swift in Sources */,

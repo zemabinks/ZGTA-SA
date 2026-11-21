@@ -216,8 +216,41 @@ private extension Float {var double:Double {Double(self)}}
         walking.cancelGameplayInput()
         check(groundedWalker.stepVelocity==groundVelocity && groundedWalker.state.feet==groundFeet,
               "Input loss erased committed grounded velocity or changed feet")
+        // Use real floor/wall contacts and the complete motor for the display
+        // boundary, in addition to the separately controlled motor fixture.
+        for rate in [30,60,120,144] {
+            let scene=FixedVelocityHarness(library:library,mode:"wall"),body=scene.character!
+            for _ in 0..<30 {_=body.update(delta:1/60,displacement:.zero,geometryReady:true)}
+            var previous=body.state.feet,remainder=0.0,betweenTicks=0
+            for frame in 0..<(rate*2) {
+                let delta=1/Double(rate)
+                remainder += delta
+                while remainder+1e-10 >= 1/60 {remainder=max(0,remainder-1/60)}
+                let physical=body.update(delta:delta,displacement:SIMD3(Float(2*delta),0,0),geometryReady:true,
+                                         motion:{_,state,input in previous=state.feet;return input})
+                let alpha=remainder*60
+                let expected=previous+(physical.feet-previous)*Float(alpha)+SIMD3(0,0,Float(body.motor.eased(alpha)))
+                let position=body.presentationFeet,velocity=body.stepVelocity
+                check(simd_distance(position,expected)<0.00025,"Real collision display escaped its physical interval")
+                check(position.x<=physical.feet.x+0.00025,"Display extrapolated through the blocking wall")
+                for _ in 0..<3 {_=body.presentationFeet}
+                check(body.state.feet==physical.feet && body.stepVelocity==velocity,"Display query changed real physics")
+                if alpha>0.1 && alpha<0.9 && abs(physical.feet.x-previous.x)>0.001 {
+                    check(position.x>previous.x && position.x<physical.feet.x,"High-refresh real movement repeated a fixed snapshot")
+                    betweenTicks += 1
+                }
+                if frame==rate {
+                    _=body.update(delta:delta,displacement:SIMD3(10,0,0),geometryReady:false)
+                    previous=body.state.feet;remainder=0
+                    check(simd_distance(body.presentationFeet,body.state.feet+SIMD3(0,0,Float(body.state.eased)))<0.00025,
+                          "Missing collision reused an earlier display interval")
+                }
+            }
+            if rate>60 {check(betweenTicks>10,"Real high-refresh fixture never exercised interpolation")}
+            check(body.state.feet.x<scene.startX+1.5,"Display integration changed actual wall blocking")
+        }
         let report:[String:Any]=["authority":"Actual Renderer swimming/personal-flight methods and velocity boundaries + real native motor/Rapier/original CLP animation; not retail runtime",
-                               "checks":checks,"cases":records,"limitations":["Controlled water plane and walking intent","No UIKit, display interpolation, camera or physical controller capture"]]
+                               "checks":checks,"cases":records,"realCollisionDisplayRates":[30,60,120,144],"limitations":["Controlled floor/wall/water plane and walking intent","No UIKit, camera, GPU pose or physical controller capture"]]
         let output=root.appendingPathComponent("local-only/research/fixed-velocity/report.json")
         try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:output)
         print("PASS fixed velocity: \(checks) checks across 16 actual motor/animation/water/parachute/jetpack/collision cadence cases; report \(output.path)")

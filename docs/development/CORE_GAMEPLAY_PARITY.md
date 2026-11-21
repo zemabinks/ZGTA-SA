@@ -1,5 +1,32 @@
 # Core GTA San Andreas gameplay parity
 
+## Core178–179 — scoped native display, scope and contact acceptance
+
+Local foot rendering and camera follow now interpolate fixed-step display
+history and vertical easing. Physics state, velocity, network positions and
+shot-marker feet retain their committed boundaries. Focused source regressions
+cover 30/60/75/120/144 Hz and reproduce the previous high-refresh defect.
+
+The scope mask covers the full game window, including partial redraws. Bounded,
+checksummed diagnostics retain complete submitted-pose records, including the
+maximum slash-heavy payload case. No generic gravity or character-height offset
+was changed to compensate for incomplete contact evidence.
+
+Both unsigned SDK products and the full selected physics/audio/transport
+regression chain pass. Dedicated Simulator cases pass normal development and
+installed-resource joins, grouped pistol/shotgun firing, reload and far-target
+scoped shooting. Original characters, HUD resources, real server settlement,
+settings and installed metadata are retained. All 26 selected saved stills are
+reviewed, and 16 complete contact records are decoded. Earlier failed attempts
+remain preserved locally; later passing cases do not relabel them.
+
+These cases establish limited integration scopes. Stable CPU contact records
+are not visible-sole measurements. Continuous animation and display behavior,
+complete vehicle/world interactions, ambient AI, physical-iPhone performance and
+original-PC retail equivalence remain open. Original resources, captures and
+private history remain outside this repository. No complete-game or 1:1 claim
+is made.
+
 ## Core176–177 — scoped input, resource and flight acceptance
 
 Positive foreground render hitches retain held input and touch aim while

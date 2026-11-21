@@ -13,11 +13,16 @@ final class CameraMotionHarness {
     struct WeaponDefinition { var aims:Bool;var arm=false }
     var footWeaponDefinitions:[Int:WeaponDefinition]=[:]
     var health=100,driving=false
+    var legacySpectating=false,characterActive=true
     var swimming:Bool {false}
     // ACTUAL_RENDERER_AIM_PREDICATES
     var cameraLookDirection:String?
     var lastFootVelocity=SIMD3<Double>.zero
     var character:NativeCharacterController?
+    // Actual renderer publication getter, backed by the complete native
+    // coordinator and real motor/physics used below. Other camera owners
+    // stay explicit inactive boundaries in this on-foot fixture.
+    // ACTUAL_RENDERER_PRESENTATION
     // ACTUAL_RENDERER_CURRENT_VELOCITY
     init(data:Data)throws {gameCamera=try NativeGameCamera(data:data);gameCamera.setDirection(heading:0,pitch:0)}
     func render(step:Double)->NativeGameCamera.Frame {

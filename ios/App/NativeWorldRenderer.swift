@@ -501,6 +501,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var legacySpectating:Bool{legacyGameCamera.spectating}
     var legacySpectatorPosition:SIMD3<Float>?{legacyCameraSample?.spectating == true ? legacyCameraSample?.pose.eye:nil}
     private var scenePosition:SIMD3<Float>{legacyCameraSample?.active == true ? legacyCameraSample!.pose.eye:camera}
+    /// Normal foot rendering follows the motor's display history. Gameplay and
+    /// network publication keep using the committed `camera` feet boundary.
+    private var footPresentationPosition: SIMD3<Float> {
+        guard !driving, !legacySpectating, climb == nil, swimController.hauled == nil,
+              characterActive, let character, character.movementAvailable else { return camera }
+        return character.supportFeet ?? character.presentationFeet
+    }
+
     private var appPreferences = NativeAppSettings.defaults
     private var ownCameraVisibility=NativeCameraVisibility()
     private var gameCameraFrame: NativeGameCamera.Frame?
@@ -1562,16 +1570,20 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let bones=[0,1,41,42,43,44,51,52,53,54].compactMap{bone->[String:Any]? in
             guard let local=actor.transform(bone:bone,in:pose)else{return nil}
             let world=transform*local.columns.3
-            return ["bone":bone,"local":xyz(SIMD3(local.columns.3.x,local.columns.3.y,local.columns.3.z)),
+            var point:[String:Any] = ["bone":bone,"local":xyz(SIMD3(local.columns.3.x,local.columns.3.y,local.columns.3.z)),
                     "world":xyz(SIMD3(world.x,world.y,world.z))]
+            if let height=collision?.ground(x:world.x,y:world.y,near:state.feet.z,maxDrop:3)?.height {point["staticGround"]=Double(height)}
+            return point
         }
         let palette=pose.palette.withUnsafeBytes{Data($0)}
         var row:[String:Any]=["model":model,"skin":localSkin,"crouched":crouching,"weapon":equippedWeapon,
-            "at":now,"feet":xyz(state.feet),"renderRoot":xyz(camera),"motorEasing":state.eased,
+            "at":now,"feet":xyz(state.feet),"renderRoot":xyz(SIMD3(transform.columns.3.x,transform.columns.3.y,transform.columns.3.z)),"motorEasing":state.eased,"rising":state.rising,"propped":state.propped,
             "grounded":state.grounded,"meshVertices":points.count,"meshMinimum":xyz(minimum),"bones":bones,
+            "actorSkeletonSHA256":actor.sourceSHA256,"stockCatalogueSHA256":legacyStockManifestSHA256 ?? "",
             "paletteSHA256":SHA256.hash(data:palette).map{String(format:"%02x",$0)}.joined(),
             "modelMatrix":(0..<4).flatMap{column in (0..<4).map{Double(transform[column][$0])}},
-            "crouchShare":frame.crouchShare,"blends":frame.blends.map{blend->[String:Any] in
+            "crouchShare":frame.crouchShare,"presentationAlpha":character?.presentationAlpha ?? 1,
+            "figurePitch":frame.figurePitch,"figureRoll":frame.figureRoll,"legBend":[frame.legBend.x,frame.legBend.y],"blends":frame.blends.map{blend->[String:Any] in
                 ["clip":blend.clip,"time":blend.time,"weight":blend.weight,"operation":String(describing:blend.operation),
                  "rooted":blend.rooted,"zeroSide":blend.zeroSide,"skipArms":blend.skipArms,"skipLegs":blend.skipLegs]},
             "scope":"CPU palette/model at successful draw submission; not GPU completion, mesh-sole contact or retail acceptance"]
@@ -1579,9 +1591,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         if let height=collision?.ground(x:minimum.x,y:minimum.y,near:state.feet.z,maxDrop:3)?.height {row["staticGroundAtMeshMinimum"]=Double(height)}
         if let support=character?.supportFeet {row["dynamicSupportFeet"]=xyz(support)}
         guard let data=try? JSONSerialization.data(withJSONObject:row,options:[.sortedKeys]),
-              let json=String(data:data,encoding:.utf8)else{return}
+              let lines=try? NativeDiagnosticChunks.encode(data)else{return}
         footContactObservation=(key,previous.at,true)
-        footContactLogger.info("Submitted own foot contact \(json,privacy:.public)")
+        for line in lines {footContactLogger.info("FootContactRecord \(line,privacy:.public)")}
     }
 #endif
     private func localVehicleShotHits(_ ray:NativeLocalShots.Ray,frames:[LocalShotVehicleFrame])->[NativeLocalShots.Hit] {
@@ -5181,7 +5193,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             } else if !driving {
                 gameCamera.setDirection(heading:heading,pitch:cameraPitch)
                 let cameraAiming=aiming && canMaintainFootAim
-                gameCameraFrame=gameCamera.followFoot(.init(position:camera,actorHeading:actorHeading,weapon:equippedWeapon,
+                gameCameraFrame=gameCamera.followFoot(.init(position:footPresentationPosition,actorHeading:actorHeading,weapon:equippedWeapon,
                     aiming:cameraAiming,crouching:crouching,holdingLedge:climb != nil || swimController.hauled != nil,parachuting:personalFlight.chuting,
                     sight:cameraAiming ? gameCamera.sightForWeapon(equippedWeapon):nil,
                     planarSpeed:Float(hypot(currentFootVelocity.x,currentFootVelocity.z))),delta:Float(step),look:cameraLookDirection)
@@ -5858,7 +5870,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 footAnimationFrame.flatMap { actor.originalPose(blends:$0.blends,library:library,aim:$0.aim,hiddenBones:$0.hiddenBones,figurePitch:$0.figurePitch,figureRoll:$0.figureRoll,legBend:$0.legBend) }
             } }
             let handWeapon = climb != nil || footAnimationFrame?.handWeaponVisible == false ? 0:effectiveWireWeapon
-            appendPed(name,camera,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own",ownFoot:true)
+            appendPed(name,footPresentationPosition,actorHeading,swimmingPitch,ownClip,ownClipTime,handWeapon,pose:pose,original:original,flight:footAnimationFrame?.flight,identity:"own",ownFoot:true)
         }
         for player in presentedRemotePlayers {
             // A passenger's public carText is still a pedestrian; draw its
@@ -6216,7 +6228,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             let opacity:Float = queued?.identity == "own" ? ownCameraVisibility.opacity:1
             uniforms.tintColor.w *= opacity
             encoder.setDepthStencilState(opacity<1 ? markerDepth:depth)
-            let locomotion = queued?.ownFoot == true && name == pedModels[String(localSkin)] && position == camera && !driving && actionTimeRemaining > 0 &&
+            let locomotion = queued?.ownFoot == true && name == pedModels[String(localSkin)] && !driving && actionTimeRemaining > 0 &&
                 !swimming && health > 0 ? locomotionClip : nil
             let wire = clip.split(separator: "/")
             let loops: Bool? = wire.count >= 2 ? (wire.count < 3 || wire[2] == "l") : nil
@@ -6399,7 +6411,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
 #if DEBUG
             if actorDrawSubmitted,queued?.ownFoot==true,originalFoot,let pose,let actor=skeletalActors[name] {
-                recordOwnFootContact(model:name,actor:actor,pose:pose,transform:transform,at:riderTime)
+                recordOwnFootContact(model:name,actor:customPed?.actor ?? actor,pose:pose,transform:transform,at:riderTime)
             }
 #endif
             if actorDrawSubmitted,let occupant=queued?.trafficOccupant,let actor=skeletalActors[name] {

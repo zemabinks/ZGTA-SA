@@ -37,6 +37,7 @@ final class NativeCharacterController {
     let queries: NativeRapierCharacterQueries
     let motor: NativeCharacterMotor
     private var head = SIMD3<Double>.zero
+    private var presentation = NativeFootPresentation()
     private var accumulator = 0.0
     private var pendingTravel = SIMD3<Double>.zero
     private var pendingJump = 0.0
@@ -83,7 +84,10 @@ final class NativeCharacterController {
         supportAfloat=false;supportFeet=nil
     }
     private static func finite(_ p: SIMD3<Float>) -> Bool { p.x.isFinite && p.y.isFinite && p.z.isFinite }
-    private func clearPendingMotion() { accumulator = 0; pendingTravel = .zero; pendingJump = 0 }
+    private func clearPendingMotion() {
+        accumulator = 0; pendingTravel = .zero; pendingJump = 0
+        presentation.reset(head: head)
+    }
     /// Input loss discards unconsumed commands, preserving the fixed clock,
     /// committed velocity, airborne momentum and animation-owned root.
     func cancelPendingInput() { pendingTravel = .zero; pendingJump = 0 }
@@ -91,6 +95,17 @@ final class NativeCharacterController {
         let p = SIMD3<Float>(Float(head.x), Float(head.y - 1.7), Float(head.z))
         return Output(feet: SwiftRapierWorld.rapierToGTA(p), grounded: motor.grounded,
                       rising: motor.rising, eased: motor.eased(), propped: motor.propped, pressed: motor.pressed)
+    }
+    var presentationAlpha: Double {
+        NativeFootPresentation.fraction(remainder: accumulator, step: Self.fixed,
+                                        available: movementAvailable && !rootHeld)
+    }
+    /// Visual interpolation is separate from state, contact, velocity and wire
+    /// publication. Moving supports can provide their own rendered anchor.
+    var presentationFeet: SIMD3<Float> {
+        let alpha = presentationAlpha
+        let point = presentation.head(alpha: alpha, easing: motor.eased(alpha))
+        return SwiftRapierWorld.rapierToGTA(SIMD3(Float(point.x), Float(point.y - 1.7), Float(point.z)))
     }
     /// Displacement is the intended horizontal GTA-world travel for this frame.
     /// No movement/physics tick is performed until required collision cells exist.
@@ -133,7 +148,7 @@ final class NativeCharacterController {
                   input.verticalOverride?.isFinite != false,
                   input.heldFeet.map(Self.finite) != false else {
                 pendingJump = 0; stepVelocity = .zero; movementAvailable = false
-                motor.clearContactEvents(); world.step(); continue
+                motor.clearContactEvents(); world.step(); presentation.reset(head: head); continue
             }
             if let feet = input.heldFeet {
                 // Animation roots own translation while hanging/hauling. A
@@ -158,11 +173,44 @@ final class NativeCharacterController {
             settleSupport?(Self.fixed,motor,&head,input)
             if settleSupport != nil {queries.setTranslation(queries.walker,head-SIMD3(0,0.8,0))}
             world.step()
+            presentation.commit(head: head, held: rootHeld)
             // Use the same published Float feet boundary as the renderer's
             // prior 60-Hz measurement, with the tick that actually moved it.
             stepVelocity = SIMD3<Double>(SwiftRapierWorld.gtaToRapier((state.feet-previousFeet)/Float(Self.fixed)))
             movementAvailable = true
         }
         return state
+    }
+}
+
+/// Display history for a fixed-step character. Queries never advance physics
+/// or consume input; committed positions remain owned by the motor.
+private struct NativeFootPresentation {
+    private var previous = SIMD3<Double>.zero
+    private var current = SIMD3<Double>.zero
+
+    mutating func reset(head: SIMD3<Double>) {
+        previous = head
+        current = head
+    }
+
+    mutating func commit(head: SIMD3<Double>, held: Bool) {
+        previous = held ? head : current
+        current = head
+    }
+
+    static func fraction(remainder: Double, step: Double, available: Bool) -> Double {
+        guard available, remainder.isFinite, step.isFinite, step > 0 else { return 1 }
+        return min(1, max(0, remainder / step))
+    }
+
+    /// The motor's vertical step easing uses the same interpolation fraction.
+    /// Head coordinates use Rapier's Y-up convention; feet conversion belongs
+    /// to the character coordinator.
+    func head(alpha: Double, easing: Double) -> SIMD3<Double> {
+        let share = alpha.isFinite ? min(1, max(0, alpha)) : 1
+        var point = previous + (current - previous) * share
+        point.y += easing.isFinite ? easing : 0
+        return point
     }
 }

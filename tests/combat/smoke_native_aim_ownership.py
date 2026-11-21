@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Asset-free literal task/GVC/camera aim-ownership regression; no device/UI."""
+"""Literal task/GVC/camera aim ownership with authored display input; no device/UI."""
 
 import sys as _zgta_sys
 from pathlib import Path as _zgta_Path
