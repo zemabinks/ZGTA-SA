@@ -25,14 +25,16 @@ final class NativeVehicleLoopAudio {
         var pan: Double
         var azimuth: Double?
         var spatialGroup: String?
+        var panSweep:(curve:NativeAudioPanSweep,began:UInt64)?
         var tau = 0.03
         var stopFrames: Int?
         let loop: Bool
         var finished = false
-        init(sample: Sample, layer: NativeVehicleAudioDynamics.Layer, pan: Double, forceLoop: Bool, azimuth: Double?) {
+        init(sample: Sample, layer: NativeVehicleAudioDynamics.Layer, pan: Double, forceLoop: Bool, azimuth: Double?,immediateGain:Bool) {
             self.sample = sample; sound = layer.sound
             position = max(0,min(0.99,layer.startFraction))*Double(sample.count)
             rate = layer.rate; targetRate = layer.rate; targetGain = layer.gain
+            if immediateGain{gain=layer.gain}
             self.pan = max(-1,min(1,pan)); loop = sample.loop >= 0 || forceLoop
             self.azimuth = azimuth
         }
@@ -96,21 +98,25 @@ final class NativeVehicleLoopAudio {
     }
     @discardableResult func play(_ layer: NativeVehicleAudioDynamics.Layer, id: String,
                                  forceLoop: Bool = false, pan: Double = 0, spatialAzimuth: Double? = nil,
-                                 spatialGroup: String? = nil) -> Bool {
+                                 spatialGroup: String? = nil,immediateGain:Bool=false,panSweep:NativeAudioPanSweep?=nil) -> Bool {
         guard layer.rate.isFinite, layer.rate > 0, layer.gain.isFinite, layer.gain >= 0 else { return false }
+        if let panSweep {guard panSweep.values.count>=2,panSweep.values.allSatisfy({$0.isFinite}),panSweep.seconds.isFinite,panSweep.seconds>0 else{return false}}
         lock.lock(); defer { lock.unlock() }
         collect()
         guard let sample = samples[layer.sound] else { return false }
         if let key = current[id], let voice = voices[key], !voice.finished,
            voice.sound == layer.sound, !layer.restart {
             voice.targetRate = layer.rate; voice.targetGain = layer.gain; voice.pan = max(-1,min(1,pan))
+            if immediateGain{voice.gain=layer.gain}
             voice.azimuth = spatialAzimuth
             voice.spatialGroup = spatialGroup
+            voice.panSweep=panSweep.map{($0,renderedFrames)}
         } else {
             if let key = current[id], let old = voices[key] { fade(old,seconds:0.09) }
             let key = UUID()
-            voices[key] = Voice(sample:sample,layer:layer,pan:pan,forceLoop:forceLoop,azimuth:spatialAzimuth)
+            voices[key] = Voice(sample:sample,layer:layer,pan:pan,forceLoop:forceLoop,azimuth:spatialAzimuth,immediateGain:immediateGain)
             voices[key]?.spatialGroup = spatialGroup
+            voices[key]?.panSweep=panSweep.map{($0,renderedFrames)}
             current[id] = key
         }
         return true
@@ -119,7 +125,7 @@ final class NativeVehicleLoopAudio {
     /// one source node while retaining independent voice lifecycles.
     func apply(_ plan: NativeVehicleAudioDynamics.Plan, prefix: String = "mine", gain: Double = 1, pan: Double = 0,
                spatialAzimuth: Double? = nil, spatialPosition: SIMD3<Double>? = nil,
-               panner: NativeVehicleAudioSpatial.Panner? = nil) {
+               panner: NativeVehicleAudioSpatial.Panner? = nil,immediateGain:Bool=false,panSweep:NativeAudioPanSweep?=nil) {
         var group: String?
         if let spatialPosition, let panner {
             lock.lock()
@@ -133,7 +139,7 @@ final class NativeVehicleLoopAudio {
             var layer = original
             layer = NativeVehicleAudioDynamics.Layer(name:original.name,sound:original.sound,rate:original.rate,
                 gain:original.gain*gain,restart:original.restart,startFraction:original.startFraction)
-            play(layer,id:prefix+":"+layer.name,pan:pan,spatialAzimuth:spatialAzimuth,spatialGroup:group)
+            play(layer,id:prefix+":"+layer.name,pan:pan,spatialAzimuth:spatialAzimuth,spatialGroup:group,immediateGain:immediateGain,panSweep:panSweep)
         }
         let wanted = Set(plan.layers.map { prefix+":"+$0.name }).union(plan.retain.map { prefix+":"+$0 })
         lock.lock()
@@ -247,6 +253,11 @@ final class NativeVehicleLoopAudio {
                     let matrix = sample.mono ? moving.frames[i].mono:moving.frames[i].stereo
                     let original = l; l = l*matrix.x+r*matrix.y; r = original*matrix.z+r*matrix.w
                 } else if let spatial { let original = l; l = l*spatial.x+r*spatial.y; r = original*spatial.z+r*spatial.w }
+                else if let sweep=voice.panSweep {
+                    let age=Double(renderedFrames+UInt64(i)-sweep.began)/outputRate
+                    let matrix=NativeAudioPanSweep.matrix(pan:sweep.curve.value(at:age),mono:sample.mono)
+                    let original=l;l=l*matrix.x+r*matrix.y;r=original*matrix.z+r*matrix.w
+                }
                 else if pan < 0 { l += r*panCos; r *= panSin }
                 else if pan > 0 { r += l*panSin; l *= panCos }
                 left[i] += Float(l); right[i] += Float(r)

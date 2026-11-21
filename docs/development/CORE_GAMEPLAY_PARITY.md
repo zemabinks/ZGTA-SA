@@ -488,3 +488,13 @@ Core100 corrects the first exit packet's actor/body/camera heading ownership in
 destinations remained explicit unimplemented targets at that checkpoint. The
 later bounded0.3.7/DL and original-world observations are recorded in
 `docs/development/SERVER_COMPATIBILITY.md`; universal server compatibility is still incomplete.
+
+
+Compact traffic bullet presentation now consumes typed shot records immediately,
+uses a shared bounded Metal tracer/impact path, and positions shot/pass-by audio.
+Current complete source and both native SDK gates pass, followed by the normal
+four-join and controlled traffic/bike/shot Simulator cases. All 46 captures were
+reviewed; an actual tracer draw receipt is distinct from transient-effect pixel
+or audible-output proof. Local gun hit resolution, human shot/struck integration,
+seated holders, procedural fallback effects and retail comparisons remain open.
+No checklist category is promoted to 1:1.

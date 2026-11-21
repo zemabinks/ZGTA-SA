@@ -422,6 +422,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var objectiveMarker: Mesh?
     private var waterMesh: Mesh?
     private let weaponEffects = NativeWeaponEffects()
+    private let ordinaryShotEffects=NativeOrdinaryShotEffects()
+    private let bulletPass=NativeBulletPass()
+    private lazy var shotTracerRenderer:NativeShotTracerRenderer? = {
+        guard let library=device.makeDefaultLibrary()else{return nil}
+        return NativeShotTracerRenderer(device:device,library:library,colorFormat:view.colorPixelFormat,depthFormat:view.depthStencilPixelFormat)
+    }()
+    private let ordinaryShotLogger=Logger(subsystem:"com.zema.zgtasa",category:"Shots")
+    private var ordinaryShotKindsReported=Set<UInt8>()
+    private var ordinaryShotDrawReported=false
     private var particleEffects:NativeParticleEffects?
     private var particleRenderer:NativeParticleRenderer?
     private var particleLoading=false
@@ -896,6 +905,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     /// Fixed-step animation events own firing time; the inventory/network
     /// consumer can synchronously update weaponReady before the next substep.
     var onFootWeaponShot: ((Int,Bool) -> Bool)?
+    var onSpatialWeaponShot:((Int,SIMD3<Double>)->Void)?
+    var onBulletPass:((NativeBulletPass.Event)->Void)?
     /// A successfully admitted task replaced an active reload animation.
     var onReloadTaskCancelled: (() -> Void)?
     /// A movement task took ownership of an active aim latch. The input/HUD
@@ -1189,6 +1200,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             self?.collisionFor(SIMD3(x,y,z))?.height(x:x,y:y,near:z,maxDrop:4)
         }
         weaponEffects.onDetonation = { [weak self] event in self?.showBlast(weapon: event.weapon, position: event.position) }
+        ordinaryShotEffects.waterLevel = {[weak self] point in
+            guard let height=self?.worldWater?.height(x:Float(point.x),y:Float(point.y),z:Float(point.z))else{return nil}
+            return Double(height)
+        }
+        ordinaryShotEffects.struck = {[weak self] origin,direction,distance in
+            self?.ordinaryShotWorldHit(origin:origin,direction:direction,distance:distance)?.1
+        }
         view.delegate = self
     }
 
@@ -2870,6 +2888,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         flightCanopyPoses.removeAll();flightCanopyLanded.removeAll();flightAudioVoices.removeAll()
         lastRiderDraw=0;riderPoseClock.reset();remoteServerTimeOffsetMilliseconds=nil
         weaponEffects.clear();particleEffects?.clear();blasts.removeAll();gameCamera.cancelShake()
+        ordinaryShotEffects.clear();ordinaryShotKindsReported=[];ordinaryShotDrawReported=false
     }
 
     /// A new server peer owns a new world baseline. Discard the previous
@@ -3306,7 +3325,40 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ambientRoadTask=task;task.resume()
     }
     func receiveAmbientTraffic(_ event:NativeAmbientTrafficProtocol.Event,serverNow:Double,received:Double) {
-        ambientTraffic.receive(event,serverNow:serverNow,received:received)
+        let shots=ambientTraffic.receive(event,serverNow:serverNow,received:received)
+        guard UIApplication.shared.applicationState == .active,view.window != nil else{return}
+        for shot in shots {
+            guard let actor=ambientTraffic.traffic.actors[shot.id],
+                  !remoteVehicles.contains(where:{$0.trafficSourceID==shot.id}),
+                  let car=presentedAmbientTraffic.first(where:{$0.identity.id==shot.id && $0.generation==actor.generation})else{continue}
+            let rear=trafficOccupantSeats.contains{$0.id==shot.id && $0.generation==actor.generation && $0.index==2} ||
+                trafficRiderRetention.passengers.contains{$0.key.id==shot.id && $0.key.generation==actor.generation && $0.seat==2}
+            let yaw=simd_quatd(angle:-car.body.heading,axis:SIMD3(0,0,1)),pitch=simd_quatd(angle:car.body.pitch,axis:SIMD3(1,0,0))
+            let body=NativeTrafficShotSource.Car(position:car.body.position,rotation:yaw*pitch,
+                distance:simd_distance(car.body.position,SIMD3<Double>(camera)),visible:true,hasRearPassenger:rear)
+            // Current compact riders have no held-gun controller. The exact
+            // car-group fallback is valid until that separate posture/holder
+            // path is ready; packet weapon offsets must not invent a muzzle.
+            guard let source=NativeTrafficShotSource.sample(target:shot.target,car:body,muzzle:{_ in nil}),
+                  let observation=NativeOrdinaryShot.traffic(shot,origin:source.origin,along:{[weak self] origin,direction,distance in
+                      self?.ordinaryShotWorldHit(origin:origin,direction:direction,distance:distance)?.0
+                  })else{continue}
+            ordinaryShotEffects.particles=particleEffects;ordinaryShotEffects.eye=SIMD3<Double>(audioEar)
+            ordinaryShotEffects.shot(observation)
+            if let pass=bulletPass.pass(from:observation.origin,to:observation.end,audioAvailable:onBulletPass != nil){onBulletPass?(pass)}
+            onSpatialWeaponShot?(observation.weapon,observation.origin)
+            if ordinaryShotKindsReported.insert(shot.kind).inserted {
+                ordinaryShotLogger.info("Observed compact traffic shot id \(shot.id,privacy:.public) generation \(actor.generation,privacy:.public) kind \(shot.kind,privacy:.public) weapon \(shot.weapon,privacy:.public) car-frame fallback")
+            }
+        }
+    }
+    private func ordinaryShotWorldHit(origin:SIMD3<Double>,direction:SIMD3<Double>,distance:Double)->(Double,NativeOrdinaryShotEffects.Contact)? {
+        var contact:NativeOrdinaryShotEffects.Contact?
+        let result=worldRay(from:SIMD3<Float>(origin),direction:SIMD3<Float>(direction),distance:Float(distance),groups:0xffff0001,onHit:{hit in
+            contact = .init(normal:SIMD3<Double>(SwiftRapierWorld.rapierToGTA(hit.normal)),material:hit.material,surface:hit.surface)
+        })
+        guard case .hit(let hit)=result,let contact else{return nil}
+        return(Double(hit.distance),contact)
     }
     func advanceAmbientTraffic(at time:Double,active:Bool) {
         if active{loadTrafficOccupantsIfNeeded()}
@@ -4649,6 +4701,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let forward = -SIMD3(viewMatrix.columns.0.z,viewMatrix.columns.1.z,viewMatrix.columns.2.z)
         let right = SIMD3(viewMatrix.columns.0.x,viewMatrix.columns.1.x,viewMatrix.columns.2.x)
         let up = SIMD3(viewMatrix.columns.0.y,viewMatrix.columns.1.y,viewMatrix.columns.2.y)
+        bulletPass.update(delta:Double(delta),camera:.init(eye:SIMD3<Double>(eye),right:SIMD3<Double>(right),up:SIMD3<Double>(up),forward:SIMD3<Double>(forward)))
         let weather = regionalWeather.pick(automatic: automaticWeather && !returningToRegionalWeather,
             epochMilliseconds: Date().timeIntervalSince1970*1000+weatherClockShiftMilliseconds,position: SIMD2(eye.x,eye.y),
             manualFrom: weatherFrom,manualTo: weatherTo,manualBlend: manualBlend,delta: delta)
@@ -6052,6 +6105,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func drawEffects(encoder:MTLRenderCommandEncoder,matrix:simd_float4x4,eye:SIMD3<Float>,viewMatrix:simd_float4x4,projection:simd_float4x4,delta:Double) {
+        ordinaryShotEffects.tracers.advance(delta:delta)
+        if let renderer=shotTracerRenderer {
+            let count=renderer.draw(ordinaryShotEffects.tracers.lines,matrix:matrix,encoder:encoder)
+            if count>0,!ordinaryShotDrawReported {
+                ordinaryShotDrawReported=true
+                ordinaryShotLogger.info("Submitted ordinary shot tracer batch lines \(count,privacy:.public)")
+            }
+            encoder.setDepthStencilState(depth)
+        }
         if let effects=particleEffects,let renderer=particleRenderer {
             if originalActorBurning,!driving{effects.burst("fire",at:SIMD3<Double>(camera)+SIMD3(0,0,health>0 ? 1:0.1),delta:delta)}
             effects.update(delta:delta,brightness:1-0.6*Double(night))

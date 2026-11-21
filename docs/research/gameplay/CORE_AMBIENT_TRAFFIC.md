@@ -63,3 +63,24 @@ existing NPC is submitted once by the actual draw path; its partly obscured
 capture does not establish unobstructed pose continuity. Original-resource
 endpoint and archived-policy comparisons remain distinct from retail gameplay
 testing. Historical fixture and Apple runner failures remain recorded locally.
+
+
+### Ordinary traffic shots
+
+The compact shot receiver now returns presentation observations to the native
+renderer immediately. The current rider path uses the loaded car-frame muzzle
+fallback until seated gun controllers and held weapons are implemented. Shared
+tracers, water crossings and material-aware blood/spark/dust presentation reuse
+the available native effect resources. Audio attacks have a positioned path and
+pass-by sweeps use sample time. Neither path mutates authoritative health.
+
+The current source chain (including physics, audio and transport), universal
+Simulator and arm64 iPhone builds pass. Normal retained-data joins and the
+controlled traffic, bike and five typed-shot cases pass, with 46 screenshots
+reviewed. The test uses authored server trajectories and rays with original
+local geometry and rigs; it does not prove original traffic AI or physical
+vehicle driving. A positive application tracer submission and separate real
+Metal checks do not establish that each short-lived impact was visible in the
+screenshots. Audible output, seated gun pose/holders, procedural fallback FX,
+local ordinary hit resolution and original retail behavior remain unverified.
+Original resources, private reference captures and test observations stay local.
