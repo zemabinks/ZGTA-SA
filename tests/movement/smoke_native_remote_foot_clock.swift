@@ -175,6 +175,18 @@ do {
     try check(!held.shot && held.shots.isEmpty,"suspension repeated shots")
     let resumed=shooter.sample(15,true,armed)!
     try check(!resumed.shot && resumed.shots.isEmpty,"resume replayed shots")
+    for fps in [15,30,60,120] {
+        let owner=DrawOwner(engine(library,NativeFootAnimationStyle(),weapons))
+        var state=armed;state.weapon=501;state.shots=0
+        _=owner.sample(20,true,state);state.shots=3
+        var emitted=0
+        for step in 1...(fps*2){emitted+=owner.sample(20+Double(step)/Double(fps),true,state)!.shots.count}
+        try check(emitted==3,"Finishing gun cycle emitted beyond the three observed shots")
+        for step in 1...fps {
+            let quiet=owner.sample(22+Double(step)/Double(fps),true,state)!
+            try check(quiet.shots.isEmpty && !quiet.shot,"Consumed shot counter kept firing")
+        }
+    }
     for id in [501,502,503] {
         let direct=engine(library,NativeFootAnimationStyle(),weapons)
         let display=DrawOwner(engine(library,NativeFootAnimationStyle(),weapons))

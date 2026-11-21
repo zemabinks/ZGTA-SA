@@ -7,6 +7,7 @@ class HarnessBase {init(nibName:String?,bundle:Bundle?){}}
 protocol NativeLegacyWorldConnection:AnyObject {}
 final class HarnessLegacy:NativeLegacyWorldConnection {}
 struct HarnessPlayer {let id:String;let position:SIMD3<Float>}
+struct HarnessAmbient {let targetID:String;let position:SIMD3<Double>;let dead:Bool}
 final class NativeMultiplayerClient {
  enum Flavor {case selfHost;case originalWorld(build:String,deviceID:String)}
  let server:ServerAddress,flavor:Flavor
@@ -26,6 +27,9 @@ final class NativeMultiplayerClient {
   if !usesClientOwnedWeapons {guard let ticket,sequence.claim(ticket)else{return false}}
   packets.append(.init(weapon:weapon,origin:origin,target:target,player:player,ticket:ticket));return true
  }
+ @discardableResult func sendOrdinaryShotBatch(weapon:Int,claims:[NativeLocalShots.Claim],ticket:NativeShotTicket?)->Bool {
+  preconditionFailure("Ordinary resolver is covered by the separate actual local-shot dispatch gate")
+ }
 }
 final class NativeGameplayClient {
  let server:ServerAddress;var calls=0,state:[String:Any]=[:]
@@ -34,12 +38,15 @@ final class NativeGameplayClient {
 }
 final class NativeVehicleRadio {let server:ServerAddress;init(server:ServerAddress){self.server=server}}
 final class NativeGameAudio {
- let server:ServerAddress;var shots=0,reloads=0
+ let server:ServerAddress;var shots=0,reloads=0,reloadCancels=0
  init(server:ServerAddress){self.server=server}
  func shot(weapon:Int){shots+=1}
  func reload(weapon:Int){reloads+=1}
+ func cancelReload(){reloadCancels+=1}
 }
 final class NativeWorldRenderer {
+ var presentedRemotePlayers:[HarnessPlayer]=[.init(id:"peer",position:SIMD3(0,10,0))]
+ var presentedAmbientPedestrians:[HarnessAmbient]=[]
  struct Muzzle {let origin:SIMD3<Float>,safetyOrigin:SIMD3<Float>}
  var swimming=false,isChuting=false,isClimbing=false,crouching=false
  var hasNativeFootWeaponTiming=true,canEmitFootWeaponShot=true,weaponReady=false
@@ -51,6 +58,9 @@ final class NativeWorldRenderer {
   return .init(origin:p,safetyOrigin:p)
  }
  func hasClearShot(from:SIMD3<Float>,to:SIMD3<Float>)->Bool{clear}
+ func captureLocalShot(weapon:Int,left:Bool,range:Float,pellets:Int,accuracy:Double,damage:Double,muzzle:Muzzle,barrelClear:Bool)->NativeLocalShots.Input?{nil}
+ func resolveLocalShot(_ input:NativeLocalShots.Input)->NativeLocalShots.Frame?{preconditionFailure("Separate local-shot gate")}
+ func presentLocalShot(_ frame:NativeLocalShots.Frame,input:NativeLocalShots.Input,left:Bool,beforePellets:()->Void){preconditionFailure("Separate local-shot gate")}
  func recordWeaponShot(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>){records+=1}
  func cancelWeaponInput(){cancels+=1}
  func cancelReloadAnimation(){reloadCancels+=1}
@@ -131,7 +141,7 @@ let before=original.weapons.rounds;check(!original.consumeFootWeaponShot(weapon:
 clock=1.1;original.weapons.tick();check(original.consumeFootWeaponShot(weapon:22,left:false),"Original controller resumes after local reload deadline")
 original.cycleWeapon(1);check(original.weapons.selected==31&&original.gameplay.calls==0,"Original actual cycle selects owned next slot without HTTP")
 let strict=game(false);_=strict.consumeFootWeaponShot(weapon:22,left:false)
-strict.reload();check(strict.gameplay.calls==1&&!strict.weapons.reloading&&strict.renderer!.fireStarts==0,"Strict original-independent HTTP reload rejection retained")
+strict.reload();check(strict.gameplay.calls==1&&!strict.weapons.reloading&&strict.renderer!.fireStarts==0 && strict.audio.reloadCancels==1,"Strict original-independent HTTP reload rejection retained")
 strict.cycleWeapon(1);check(strict.gameplay.calls==2,"Strict cycle still uses independent server authority")
 let noAuthority=game(false);noAuthority.weapons.setConnection(nil)
 check(!noAuthority.consumeFootWeaponShot(weapon:22,left:false)&&noAuthority.network.packets.isEmpty,"Strict controller cannot use original no-ticket path")
@@ -154,4 +164,17 @@ for (original,legacy) in [(true,false),(false,true),(false,false)] {
   if kind=="PROJECTILE" {check(g.network.packets[0].player==nil&&g.network.packets[0].target==SIMD3(0.15,40,1),"last projectile retains launch path")}
  }
 }
+let shotgunInventory=NativeWeaponState(catalog:[.init(id:25,name:"Authored pellet gate",model:"",range:35,capacity:1,interval:0.1,animation:"fixture",fireKind:"INSTANT_HIT",pellets:15)],
+ policy:.originalWorld,originalDefinitions:[.init(id:25,slot:3,capacity:1,kind:"INSTANT_HIT",wait:0,reload:1)],clock:{clock})
+check(shotgunInventory.applyOriginalGuns([[25,15]]) && shotgunInventory.selectOriginalWeapon(25),"Authored owned shotgun admitted")
+let beforePelletAmmo=shotgunInventory.rounds+shotgunInventory.reserve
+let pelletInput=NativeLocalShots.Input(weapon:25,range:35,pellets:15,accuracy:1,damage:10,feet:.zero,heading:0,crouched:false,
+ camera:SIMD3(0,-3,1.6),forward:SIMD3(0,1,0),up:SIMD3(0,0,1),verticalFov:55,aspect:2,muzzle:SIMD3(0,0,1.6),hipOrigin:SIMD3(0,0,1.6),scoped:false,hip:true,milliseconds:250)
+var pelletEmissions=0,pelletCount=0,publishedPelletReady=true
+check(NativeWeaponShotDelivery.deliver(weapon:25,left:false,inventory:shotgunInventory,readiness:{publishedPelletReady=$0},emission:{_,_ in
+ pelletEmissions+=1
+ pelletCount=NativeLocalShots(random:{0.5}).fire(pelletInput,people:[],world:{_ in .clear})!.pellets.count
+}),"One real inventory/marker delivery resolves shotgun pellets")
+check(pelletEmissions==1 && pelletCount==15 && beforePelletAmmo-shotgunInventory.rounds-shotgunInventory.reserve==1,"Fifteen resolved pellets spend exactly one real arsenal round")
+check(!publishedPelletReady,"Exhausted one-round clip readiness published before emission")
 print("PASS actual GameVC original/self-host/legacy controller dispatch: \(checks) checks")

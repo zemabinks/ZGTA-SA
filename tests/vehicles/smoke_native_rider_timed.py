@@ -157,6 +157,9 @@ final class Ground {let damageController:DamageController?=DamageController();fu
 final class Coupling {func setOwnedVehicle(_ id:String?){}}
 final class RendererCarrier {
 ''' + declarations + r'''
+    let remoteGunAudio=NativeRemoteGunAudio(),weaponFlashes=NativeWeaponFlash()
+    var onRemoteGunAudio:((NativeRemoteGunAudio.Event)->Void)?
+    var localShotVehicles=[42],localShotVehiclesAt:Double=1,localShotVehicleSource:String?="old-source"
     var now:Double=0
     let view=View();var renderClock=RenderClock()
     var remoteServerTimeOffsetMilliseconds:Double?=1
@@ -266,6 +269,8 @@ def main():
     paths=[ROOT/'ios/App'/name for name in ['NativeSkeletalActor.swift','NativeRiderAnimation.swift',
         'NativeBoardingAnimation.swift','NativeRiderPlayback.swift','NativeWorldRenderer.swift']]
     paths += [ROOT/'tests/vehicles/smoke_native_rider_clock.swift',Path(__file__).resolve(),ROOT/'tests/vehicles/smoke_native_rider_timed.swift']
+    shot_sources=[ROOT/'ios/App'/name for name in ['NativeAmbientPedestrianProtocol.swift','NativeAmbientTrafficProtocol.swift','NativeOrdinaryShot.swift','NativeRemoteGunAudio.swift','NativeWeaponFlash.swift']]
+    paths += shot_sources
     if old is not None:
         paths += [old/'ios/App'/name for name in ['NativeRiderPlayback.swift','NativeWorldRenderer.swift',
             'NativeRiderAnimation.swift','NativeBoardingAnimation.swift']]
@@ -285,11 +290,12 @@ def main():
         'BoardingAnimation.swift':paths[2].read_text(),'Playback.swift':current,
         'Fixtures.swift':fixture,'RendererCarrier.swift':carrier(paths[4].read_text(),(old/'ios/App/NativeWorldRenderer.swift').read_text() if old else None),
         'TimedTests.swift':paths[7].read_text()}
+    for path in shot_sources:snapshots[path.name]=path.read_text()
     if historical is not None:
         snapshots['HistoricalPlayback.swift']=historical.replace('final class NativeRiderPlayback {','final class HistoricalRiderPlayback {',1)
     for name,text in snapshots.items():(out/name).write_text(text)
     binary=out/'verify'
-    command=['xcrun','swiftc','-Onone','-whole-module-optimization','-j','1','-module-cache-path',str(out/'modules'),
+    command=['xcrun','swiftc','-Onone','-whole-module-optimization','-j','1','-num-threads','1','-module-cache-path',str(out/'modules'),
         *[str(out/name) for name in snapshots],'-o',str(binary)]
     if historical is not None:command[2:2]=['-D','HISTORICAL_CONTROLS']
     start=time.monotonic()

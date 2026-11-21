@@ -9,6 +9,7 @@ enum NativeOrdinaryShot {
         let weapon:Int
         let origin:SIMD3<Double>,end:SIMD3<Double>
         let impact:Impact?
+        var piece:Int? = nil
     }
     typealias Along=(_ origin:SIMD3<Double>,_ direction:SIMD3<Double>,_ length:Double)->Double?
     static func traffic(_ shot:NativeAmbientTrafficProtocol.Shot,origin:SIMD3<Double>,along:Along?)->Event? {
@@ -27,7 +28,7 @@ enum NativeOrdinaryShot {
         }
         return .init(weapon:Int(shot.weapon),origin:origin,end:end,impact:impact)
     }
-    private static func finite(_ value:SIMD3<Double>)->Bool {
+    static func finite(_ value:SIMD3<Double>)->Bool {
         value.x.isFinite && value.y.isFinite && value.z.isFinite
     }
 }

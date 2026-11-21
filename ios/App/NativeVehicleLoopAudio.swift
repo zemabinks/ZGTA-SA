@@ -125,7 +125,7 @@ final class NativeVehicleLoopAudio {
     /// one source node while retaining independent voice lifecycles.
     func apply(_ plan: NativeVehicleAudioDynamics.Plan, prefix: String = "mine", gain: Double = 1, pan: Double = 0,
                spatialAzimuth: Double? = nil, spatialPosition: SIMD3<Double>? = nil,
-               panner: NativeVehicleAudioSpatial.Panner? = nil,immediateGain:Bool=false,panSweep:NativeAudioPanSweep?=nil) {
+               panner: NativeVehicleAudioSpatial.Panner? = nil,immediateGain:Bool=false,panSweep:NativeAudioPanSweep?=nil,forceLoop:Bool=false) {
         var group: String?
         if let spatialPosition, let panner {
             lock.lock()
@@ -139,7 +139,7 @@ final class NativeVehicleLoopAudio {
             var layer = original
             layer = NativeVehicleAudioDynamics.Layer(name:original.name,sound:original.sound,rate:original.rate,
                 gain:original.gain*gain,restart:original.restart,startFraction:original.startFraction)
-            play(layer,id:prefix+":"+layer.name,pan:pan,spatialAzimuth:spatialAzimuth,spatialGroup:group,immediateGain:immediateGain,panSweep:panSweep)
+            play(layer,id:prefix+":"+layer.name,forceLoop:forceLoop,pan:pan,spatialAzimuth:spatialAzimuth,spatialGroup:group,immediateGain:immediateGain,panSweep:panSweep)
         }
         let wanted = Set(plan.layers.map { prefix+":"+$0.name }).union(plan.retain.map { prefix+":"+$0 })
         lock.lock()

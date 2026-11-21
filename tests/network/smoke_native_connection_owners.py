@@ -47,6 +47,7 @@ final class Flight {var worn=true;func wear(_ value:Bool){worn=value}}
 struct Vehicle {let id:String}
 final class Camera {var shakeCancels=0;func cancelShake(){shakeCancels+=1};func resumeFoot(from:Int?,fallbackHeading:Float,fallbackPitch:Float)->SIMD2<Float>{SIMD2(fallbackHeading,fallbackPitch)}}
 final class Effects {var clears=0;func clear(){clears+=1}}
+final class RemoteGunOwner {var clears=0;func clear()->[Int]{clears+=1;return []}}
 final class DamageOwner {var resets=0;func reset(){resets+=1}}
 final class Renderer {
  var displayResets=0
@@ -76,7 +77,10 @@ final class Renderer {
  let gameCamera=Camera();var gameCameraFrame:Int?=1,heading:Float=1.2,actorHeading:Float=0.3,cameraPitch:Float=0.2,cameraWasDriving=true
  var projectileRows=[1],reloadCancelled=false,resets=0
  let weaponEffects=Effects();var particleEffects:Effects?=Effects(),blasts=[1]
- let ordinaryShotEffects=Effects()
+ let humanShots=Effects(),weaponFlashes=Effects();let remoteGunAudio=RemoteGunOwner()
+ var humanShotPathsReported:Set<String>=["foot"];var onRemoteGunAudio:((Int)->Void)?
+ let ordinaryShotEffects=Effects(),localShots=Effects()
+ var localShotKindsReported:Set<Int>=[221];var localShotVehicles=[1],localShotVehiclesAt:Double=123,localShotVehicleSource:String?="old-world"
  var ordinaryShotKindsReported:Set<UInt8>=[1,2],ordinaryShotDrawReported=true
  var vehicleRigStates=["old":1],vehicleRigTimes=["old":1],vehicleRigSpins=["old":1]
  var remoteRiderPlayback=["old":1],remoteRiderActions=["old":1],remoteRiderCapture=["old":1],remoteRiderPrevious=["old":1],remoteRiderAnimations=["old":1]
@@ -168,7 +172,9 @@ check(world.lastRiderDraw==0 && world.remoteServerTimeOffsetMilliseconds==nil,"o
 check(world.riderPoseClock.resets>0,"old rider pose interval survives session reset")
 check(world.trafficDisables==1,"old traffic presentation survives session reset")
 check(world.weaponEffects.clears==1 && world.particleEffects!.clears==1 && world.blasts.isEmpty,"old fires, particles, stream or blasts survive new world")
+check(world.humanShots.clears==1 && world.weaponFlashes.clears==1 && world.remoteGunAudio.clears==1 && world.humanShotPathsReported.isEmpty,"Human shot owners survived world reset")
 check(world.ordinaryShotEffects.clears==1,"old ordinary shot tracers survive new world")
+check(world.localShots.clears==1 && world.localShotKindsReported.isEmpty && world.localShotVehicles.isEmpty && world.localShotVehiclesAt == -.infinity && world.localShotVehicleSource==nil,"local recoil or previous posed vehicle target survived world reset")
 check(world.ordinaryShotKindsReported.isEmpty && !world.ordinaryShotDrawReported,"shot draw receipts survive new world")
 check(world.gameCamera.shakeCancels==1,"old camera impact survives new peer")
 check(!game.renderer!.hasParachute && !game.renderer!.personalFlight.worn && game.renderer!.reloadCancelled,"old equipment/reload state survives")

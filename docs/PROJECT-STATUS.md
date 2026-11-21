@@ -19,47 +19,30 @@ packaged public iPhone release. Users must supply their own supported game files
 
 ## Latest verified source
 
-Compact traffic now has separate native record/scene ownership, original road
-prediction and vehicle presentation, bounded nearby contacts and materialization
-requests. Optional owner-provided metadata selects original seated characters.
-Source/session cleanup, graph and metadata retries, predicted lane presentation
-and passenger camera filtering have corresponding regressions.
+The current verified batch adds shared human/traffic shot presentation, remote
+hit reactions and native local ordinary-hit selection. Original shot groups
+and material-aware impacts feed bounded Metal effects and positioned audio.
+Native hit selection uses the current actor/vehicle pose, typed targets and
+world coverage; unloaded collision cannot grant a clear shot. Session and
+resource ownership prevent retired actors or resources from supplying targets.
 
-Compact lamp inputs now follow time, weather and the selected signed motion
-sample. Spatial vehicle audio accepts typed traffic sources separately from
-players, with stable ordering and voice identities.
+Universal Simulator Debug and arm64 iPhone Release builds pass, together with
+the complete current source regression chain. Controlled Simulator cases pass
+for four normal retained-resource joins, compact traffic and bike/NPC lifetime
+transitions, and normal-input pistol/shotgun firing, reload and hit reports.
+All 62 captures were reviewed. Original assets and application settings remain
+held; owned test services and the Simulator stop afterward.
 
-Both unsigned native builds, the current full source regression chain and
-controlled retained-resource Simulator cases pass. Reviewed captures show
-original characters, Taxi/Infernus presentation, healthy/dead/restored seated
-poses and day/night transitions. Actual original Taxi metadata also passes the
-renderer lamp-selection checks. These cases do not establish exact GPU lamp
-brightness, projected beams, audio playback, physical-iPhone performance or
-original-PC gameplay parity.
+These cases establish a limited integration scope. Vehicle hit reports do not
+provide complete vehicle-damage authority. Browser/native shot accounting,
+complete traffic AI, every animation/contact transition, audible playback,
+physical-iPhone performance and original-PC gameplay fidelity remain open.
+The NPC handoff has a draw receipt but is partly obscured visually. Weapon-icon
+coverage, stale reload text and crouch grounding also need follow-up. No full
+gameplay or 1:1 accuracy claim is made.
 
-Compact motorcycle riders now play original fall clips, retain completed fallen
-poses and preserve their animation when a compatible original model arrives.
-Detached drivers expire independently of retained passengers. An existing
-server-owned NPC can receive the completed driver pose without creating a
-player or changing authoritative health or goals. The latest normal four-join
-and controlled traffic/bike cases pass, with 41 captures reviewed. The NPC
-handoff has an actual draw receipt; its body is partly obscured in the capture,
-so unobstructed visual continuity remains unverified.
-
-Original traffic AI, ownership transfer/jacking, broader collision-driven
-ejection, driver gun/look/voice behavior and general traffic combat remain
-incomplete. The previously
-reported intermittent pedestrian draw still lacks a confirmed cause. See the
-[traffic implementation scope](research/gameplay/CORE_AMBIENT_TRAFFIC.md).
-
-Compact traffic shots now enter a shared native bullet-presentation path with
-bounded Metal tracers, material-aware impacts and positioned attack/pass-by
-audio. The selected source chain, both native SDK builds and normal retained-data
-Simulator cases pass; 46 captures were reviewed. Actual tracer submission was
-observed, while the short-lived effects and audible playback are not verified
-for every shot. These shots cannot grant damage. Seated gun poses, the human
-shot path, local ordinary hit resolution and procedural fallback effects remain
-separate work. Original PC gameplay parity remains unverified.
+See the [traffic implementation scope](research/gameplay/CORE_AMBIENT_TRAFFIC.md)
+and [core gameplay checklist](development/CORE_GAMEPLAY_PARITY.md).
 
 ## Development priorities
 

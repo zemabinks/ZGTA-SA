@@ -82,5 +82,23 @@ local geometry and rigs; it does not prove original traffic AI or physical
 vehicle driving. A positive application tracer submission and separate real
 Metal checks do not establish that each short-lived impact was visible in the
 screenshots. Audible output, seated gun pose/holders, procedural fallback FX,
-local ordinary hit resolution and original retail behavior remain unverified.
+complete local-hit integration and original retail behavior remain unverified.
 Original resources, private reference captures and test observations stay local.
+
+### Human and local ordinary-shot follow-up
+
+Human and compact traffic shots share the native presentation path while
+retaining distinct source identities. Remote struck metadata feeds the
+existing original-animation controller without applying presentation damage.
+Native local ordinary shots select eligible live foot targets, current
+vehicle bounds and occupants through typed owner/source guards. Collision
+coverage remains required before targets beyond the known world can be used.
+
+The current complete source chain and both native SDK products pass. Normal
+four-join, full controlled traffic and normal-input local pistol/shotgun cases
+pass; 62 captures across these cases are reviewed. The own-fire case observes
+head and vehicle hit reports, crouched fire, actual reload inventory changes
+and subsequent firing. Captures do not establish continuous contact or
+animation fidelity, every transient impact or audible playback. A vehicle hit
+report alone does not establish vehicle health authority. Original traffic AI,
+complete browser/native damage consistency and retail fidelity remain open.

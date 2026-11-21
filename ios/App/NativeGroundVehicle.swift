@@ -217,6 +217,7 @@ final class NativeGroundVehicle {
         others.synchronize(poses,excluding:excluding,near:position,promoteNear:promoteNear,delta:delta)
     }
     func otherVehicle(_ id:String)->NativeOtherVehicles.Snapshot?{others.snapshot(id)}
+    func shotVehicleColliders(id:String)->Set<UInt64>{others.colliderIDs(id)}
     /// Exclusion is for camera queries only; colliders remain physically live.
     func otherVehicleColliders(id:String)->Set<UInt64>{
         guard let body=others.bodyID(id)else{return []}

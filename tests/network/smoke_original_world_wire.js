@@ -59,7 +59,12 @@ function received(p,m){
  if(p.index===4){
   check(m.t==='me'&&m.walking&&m.shots===0&&!m.say,'Reconnect drops prior shots/chat');reconnected=true;send(p,{t:'note',text:'RECONNECTED COMPLETE'});return;
  }
- if(m.t==='shot'){check(m.w===22&&m.ht===1&&m.id==='7','Original shot target');check(!('c'in m)&&!('s'in m),'No fake shot ACK');p.shots++;return}
+ if(m.t==='shot'){
+  if(p.shots===0)check(m.w===22&&m.ht===1&&m.id==='7','Original shot target');
+  else if(p.shots===1)check(m.w===25&&m.ht===1&&m.id==='7'&&m.n===8&&m.bp===9,'First grouped person claim');
+  else check(p.shots===2&&m.w===25&&m.ht===3&&m.id==='t42'&&m.n===7&&m.wh===0,'Second grouped car claim');
+  check(!('c'in m)&&!('s'in m),'No fake shot ACK');p.shots++;return
+ }
  if(m.t==='hit'){check(m.to==='7'&&m.n===1&&!('c'in m)&&!('s'in m),'Original melee shape');p.melee++;return}
  if(m.t==='guns'){check(JSON.stringify(m.w)==='[[22,19]]','Original carried total after paid local shot');p.guns++;return}
  if(m.t==='enter'){check(m.v==='taxi','Actual vehicle request');send(p,{t:'enter',v:'taxi',ok:true});return}
@@ -70,7 +75,7 @@ function received(p,m){
   check(/^[0-9a-f]{32}$/.test(m.key),'Original per-client world key');check(Number.isFinite(m.clock),'Original packet clock');
   if(m.walking&&m.health===0)p.deadPosition=true;
   if(m.driving){check(m.life===83&&m.armour===2,'Fractional vitals ceil only at wire boundary');p.livingReport=true}
-  if(m.walking&&Math.abs(m.heading+1.9)<1e-6)p.actorHeading=true;
+  if(m.walking&&Math.abs(m.heading+1.9)<1e-6){p.actorHeading=true;if(Object.hasOwn(m,'shots')){check(m.shots===3,'Expected three firing markers, got '+String(m.shots));p.actorCounter=true;}}
   if(m.say){check(m.say==='/help'&&m.heard===1,'Original queued chat and heard ACK');p.chat++;}
   return;
  }
@@ -86,7 +91,7 @@ function received(p,m){
   check(Array.isArray(m.ids)&&m.ids.every(id=>id==='7'||id==='88'),'Only known stale/missing fixture baselines requested');
   if(m.ids.includes('7'))send(p,full('7'),true);
   if(!m.ids.includes('88'))return;
-  check(m.ids.includes('88'),'Missing binary baseline resync '+JSON.stringify(m)+' respawns='+p.respawns);check(p.shots===1&&p.melee===1&&p.guns===1&&p.exits===1&&p.chat===1&&p.actorHeading&&p.livingReport,'Gameplay flow completed');
+  check(m.ids.includes('88'),'Missing binary baseline resync '+JSON.stringify(m)+' respawns='+p.respawns);check(p.shots===3&&p.melee===1&&p.guns===1&&p.exits===1&&p.chat===1&&p.actorHeading&&p.actorCounter&&p.livingReport,'Gameplay flow completed');
   send(p,full('88'),true);for(const invalid of [1,0,false,'true'])send(p,{t:'spawned',v:['arbitrary-registered','owner','420.6.1.0.',4,5,6,0,0,0,900,null,null,null,null,17],in:invalid});send(p,{t:'spawned',v:['arbitrary-registered','owner','420.6.1.0.',4,5,6,0,0,0,900,null,null,null,null,17],in:true});originalFlow=true;send(p,{t:'note',text:'RECONNECT NOW'});return;
  }
  throw Error('Unexpected original packet '+JSON.stringify(m));

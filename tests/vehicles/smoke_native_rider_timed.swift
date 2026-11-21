@@ -298,11 +298,19 @@ import Darwin
         // Foreground rebase through the literal Renderer lifecycle method.
         let footA=RemoteFootClockSpy(),footB=RemoteFootClockSpy()
         local.remoteFootAnimations=["a":("same-model",footA),"b":("same-model",footB)]
+        var retiredVoices:[NativeRemoteGunAudio.Event]=[]
+        local.onRemoteGunAudio={retiredVoices.append($0)}
+        _=local.remoteGunAudio.hold(identity:"rider",weapon:38,at:SIMD3(1,2,3))
+        local.weaponFlashes.fire(identity:"own",weapon:38,left:false,twin:false,at:10)
         local.now=10;local.resetDisplayClock();local.now=10.02
         try check(footA.resets==1 && footB.resets==1,"literal lifecycle rebases each remote foot owner")
         try check(local.remoteRootClockResets==1,"literal lifecycle retires the remote world-presentation owner")
         try near(delta(local.successfulDraw().2),0.02,"literal resume floor")
         try check(local.renderClock.resets==1,"existing render clock still resets")
+        try check(retiredVoices.count==1 && retiredVoices[0].key=="minigun:rider" && !retiredVoices[0].held && !retiredVoices[0].tail,"display reset stops the actual held sound without a delayed tail")
+        try check(local.remoteGunAudio.advance(delta:1).isEmpty,"retired held sound cannot emit a later tail")
+        try check(!local.weaponFlashes.visible(identity:"own",weapon:38,left:false,at:10.01),"display reset clears live flash timer")
+        try check(local.localShotVehicles.isEmpty && local.localShotVehiclesAt == -.infinity && local.localShotVehicleSource==nil,"display reset retires old posed vehicle target namespace")
         UIApplication.shared.applicationState = .inactive;local.now=10.1
         try rejected(local.successfulDraw().2)
         UIApplication.shared.applicationState = .active;local.now=13;local.resetDisplayClock();local.now=13.03

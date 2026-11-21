@@ -55,6 +55,18 @@ import simd
         check(output.0.prefix(8).allSatisfy{$0==0.5} && output.0.suffix(8).allSatisfy{$0==0},"Shot attack was delayed or sample repeated")
         check(short.activeVoiceCount==0,"Finished shot retained an active mixer voice")
         short.stopAll(immediate:true)
+        let held=mixer();check(held.register(wave(frames:8),name:"finite-held",loopStart:-1),"Finite held PCM")
+        let heldPlan=NativeVehicleAudioDynamics.Plan(layers:[.init(name:"body",sound:"finite-held",rate:1,gain:1)])
+        held.apply(heldPlan,prefix:"remote-gun",spatialPosition:SIMD3(0,0,-14),
+            panner:.init(reference:14,maximum:260,rolloff:1.6),immediateGain:true,forceLoop:true)
+        let repeated=render(held,32),level=Float(0.5*sqrt(0.5))
+        check(repeated.0.allSatisfy{abs($0-level)<1e-7} && repeated.1==repeated.0,"Remote held sample stopped at a nonloop metadata boundary")
+        held.apply(heldPlan,prefix:"remote-gun",spatialPosition:SIMD3(0,0,-14),
+            panner:.init(reference:14,maximum:260,rolloff:1.6),forceLoop:true)
+        check(held.activeVoiceCount==1,"Remote marker refresh restarted a second held voice")
+        held.stop("remote-gun:body",fade:0);let quietHeld=render(held,8)
+        check(quietHeld.0.allSatisfy{$0==0} && held.activeVoiceCount==0,"Remote held stop retained audio")
+        held.stopAll(immediate:true)
         let swept=mixer();check(swept.register(wave(frames:24000),name:"swept",loopStart:-1),"Sweep PCM")
         let curve=NativeAudioPanSweep(values:[-1,1,-1],seconds:0.4)
         check(swept.play(.init(name:"whizz",sound:"swept",rate:1,gain:1),id:"whizz",immediateGain:true,panSweep:curve),"Atomic one-shot sweep scheduling")

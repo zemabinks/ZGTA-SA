@@ -358,7 +358,9 @@ def tight_ped_atlas_layout(texture_images, texture_slots, maximum_rgba_bytes=512
     return result
 
 
-def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
+def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy', selection='body'):
+    if selection not in ('body', 'weapon-flash') or (selection == 'weapon-flash' and pedestrian):
+        raise ValueError('Invalid actor geometry selection')
     if ped_atlas_layout not in ('legacy', 'tight-native', 'tight-native-v2'):
         raise ValueError('Unknown pedestrian atlas layout')
     mode = ped_atlas_layout if pedestrian else 'legacy'
@@ -377,6 +379,16 @@ def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
     frames = frame_list(data, frame_chunk)
     names = frame_names(data, frame_chunk)
     names += [''] * (len(frames) - len(names))
+    def is_flash(frame):
+        visited = set()
+        while frame >= 0 and frame not in visited:
+            if frame >= len(frames):
+                raise ValueError('Invalid flash frame hierarchy')
+            visited.add(frame)
+            if re.search('flash', names[frame], re.I):
+                return True
+            frame = frames[frame][1]
+        return False
     geometries = [geometry(data, part) for part in children(data, geometry_chunk) if part[0] == 0x0f]
     if not geometries:
         raise ValueError('DFF has no drawable geometry')
@@ -388,14 +400,20 @@ def convert(source, destination, pedestrian=False, ped_atlas_layout='legacy'):
         if info:
             frame_number, geometry_number = struct.unpack_from('<II', data, info[1])
             if geometry_number < len(geometries) and frame_number < len(frames):
+                if selection == 'weapon-flash':
+                    if is_flash(frame_number):
+                        atomics.append((frame_number, geometry_number))
+                    continue
                 # Match the archived browser's default visibility filter.
                 # Damage/LOD meshes overlap intact panels when all are drawn.
-                if re.search(r'(_dam|_vlo|_lo|_l[1-9])$|^moving_rotor|^gunflash', names[frame_number], re.I):
+                if is_flash(frame_number) or re.search(r'(_dam|_vlo|_lo|_l[1-9])$|^moving_rotor', names[frame_number], re.I):
                     continue
                 if any(ancestor(frame_number, f'extra{n}', frames, names) is not None for n in range(1, 7)):
                     continue
                 atomics.append((frame_number, geometry_number))
     if not atomics:
+        if selection == 'weapon-flash':
+            raise ValueError('DFF has no weapon flash geometry')
         atomics = [(0, number) for number in range(len(geometries))]
     is_tight = mode in ('tight-native', 'tight-native-v2')
     profiles = ped_native_sampler_profiles(data, source.with_suffix('.txd').read_bytes()) if mode == 'tight-native-v2' else None

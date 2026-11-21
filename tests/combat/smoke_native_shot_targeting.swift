@@ -17,7 +17,17 @@ func collision(rectangles:[(Float,Float,Float,Float,Float)])->WorldCollision {
 }
 
 struct FixturePlayer {let id:String;let position:SIMD3<Float>}
+struct FixtureAmbient {let targetID:String;let position:SIMD3<Double>;let dead:Bool}
 final class FixtureRenderer {
+    var presentedRemotePlayers:[FixturePlayer]=[],presentedAmbientPedestrians:[FixtureAmbient]=[]
+    var localConfig:NativeLocalShots.Input?
+    var localPeople:[NativeLocalShots.Person]=[]
+    var localWorld=NativeLocalShots.World.clear
+    let localResolver=NativeLocalShots(random:{0.5})
+    var localFrames:[NativeLocalShots.Frame]=[]
+    func captureLocalShot(weapon:Int,left:Bool,range:Float,pellets:Int,accuracy:Double,damage:Double,muzzle:NativeWeaponMuzzle.Sample,barrelClear:Bool)->NativeLocalShots.Input? {localConfig}
+    func resolveLocalShot(_ input:NativeLocalShots.Input)->NativeLocalShots.Frame? {localResolver.fire(input,people:localPeople,world:{_ in self.localWorld})}
+    func presentLocalShot(_ frame:NativeLocalShots.Frame,input:NativeLocalShots.Input,left:Bool,beforePellets:()->Void){beforePellets();localFrames.append(frame)}
     var position=SIMD3<Float>.zero,aimDirection=SIMD3<Float>(0,1,0)
     var eventFeet:SIMD3<Float>?
     var shotFeet:SIMD3<Float> {eventFeet ?? position}
@@ -34,7 +44,7 @@ final class FixtureRenderer {
     func recordWeaponShot(weapon:Int,origin:SIMD3<Float>,direction:SIMD3<Float>) {recordedRays.append((weapon,origin,direction))}
 }
 final class FixtureWeapons {
-    struct Weapon {var range:Float=35;var fireKind="INSTANT_HIT"}
+    struct Weapon {var range:Float=35;var fireKind="INSTANT_HIT";var pellets=1;var accuracy=1.0;var damage:Float?=25}
     var selected=22,current=Weapon()
     func definition(for id:Int)->Weapon? {id==selected ? current:nil}
 }
@@ -42,12 +52,17 @@ final class FixtureAudio {var count=0;func shot(weapon:Int){count += 1}}
 final class FixtureNetwork {
     struct Shot {let weapon:Int;let origin:SIMD3<Float>;let end:SIMD3<Float>;let player:String?;let ticket:NativeShotTicket;let streamPlayers:[String]}
     let sequence=NativeShotSequence()
-    var orderedPlayers:[FixturePlayer]=[],shots:[Shot]=[]
+    var shots:[Shot]=[]
+    var ordinaryBatches:[[NativeLocalShots.Claim]]=[]
     init(){precondition(sequence.negotiate("target-geometry-fixture"))}
     func reserveShot()->NativeShotTicket? {sequence.reserve()}
     @discardableResult func sendWeaponShot(weapon:Int,from:SIMD3<Float>,to:SIMD3<Float>,player:String?,ticket:NativeShotTicket?,streamPlayers:[String]=[])->Bool {
         guard let ticket,sequence.claim(ticket) else{return false}
         shots.append(.init(weapon:weapon,origin:from,end:to,player:player,ticket:ticket,streamPlayers:streamPlayers));return true
+    }
+    @discardableResult func sendOrdinaryShotBatch(weapon:Int,claims:[NativeLocalShots.Claim],ticket:NativeShotTicket?)->Bool {
+        guard let ticket,sequence.claim(ticket)else{return false}
+        ordinaryBatches.append(claims);return true
     }
 }
 final class ShotEmissionHarness {
@@ -55,8 +70,9 @@ final class ShotEmissionHarness {
     let weapons=FixtureWeapons(),audio=FixtureAudio(),network=FixtureNetwork()
     var aiming=true
     // ACTUAL_EMISSION_METHODS
-    @discardableResult func fire(left:Bool=false)->Bool {
+    @discardableResult func fire(left:Bool=false,afterCapture:()->Void = {})->Bool {
         guard let ray=currentShotRay(weapon:weapons.selected,left:left),let ticket=network.reserveShot() else{return false}
+        afterCapture()
         emitWeaponShot(weapon:weapons.selected,left:left,ticket:ticket,ray:ray)
         return true
     }
@@ -136,7 +152,7 @@ final class ShotEmissionHarness {
     // must be exactly the origin/endpoint forwarded with the reserved ticket.
     let emission=ShotEmissionHarness(),renderer=emission.renderer!,feet=SIMD3<Float>(0,1,0.6),torso=T.torso(feet:feet)
     renderer.aimDirection=torso-T.muzzle(feet:renderer.position)
-    emission.network.orderedPlayers=[.init(id:"elevated",position:feet)]
+    emission.renderer!.presentedRemotePlayers=[.init(id:"elevated",position:feet)]
     precondition(emission.fire() && emission.network.shots.count==1 && emission.audio.count==1)
     let shot=emission.network.shots[0]
     precondition(shot.origin==T.muzzle(feet:renderer.position) && shot.end==torso && shot.player=="elevated")
@@ -155,7 +171,7 @@ final class ShotEmissionHarness {
     let event=ShotEmissionHarness(),eventRenderer=event.renderer!,eventFeet=SIMD3<Float>(4,8,2),eventTarget=SIMD3<Float>(4,18,2)
     eventRenderer.eventFeet=eventFeet
     eventRenderer.aimDirection=T.torso(feet:eventTarget)-T.muzzle(feet:eventFeet)
-    event.network.orderedPlayers=[.init(id:"event-target",position:eventTarget)]
+    event.renderer!.presentedRemotePlayers=[.init(id:"event-target",position:eventTarget)]
     precondition(event.fire());let eventShot=event.network.shots[0]
     precondition(eventShot.origin==T.muzzle(feet:eventFeet) && eventShot.origin != T.muzzle(feet:eventRenderer.position),"Fixed-step shot incorrectly used stale display feet")
     precondition(eventShot.player=="event-target" && eventShot.end==T.torso(feet:eventTarget) && eventShot.ticket.sequence==1)
@@ -166,20 +182,44 @@ final class ShotEmissionHarness {
     let blocked=ShotEmissionHarness(),blockedRenderer=blocked.renderer!
     blockedRenderer.muzzleOverride = .init(weapon:22,skill:1,origin:SIMD3(0,1,1.35),safetyOrigin:SIMD3(0,0,1.35),handOrigin:SIMD3(0,0.6,1.35),requestedLeft:false,usedLeft:false,fallbackReason:nil)
     blockedRenderer.geometry=collision(rectangles:[(-2,2,0.5,0,3)])
-    blocked.network.orderedPlayers=[.init(id:"behind-wall",position:SIMD3(0,5,0))]
+    blocked.renderer!.presentedRemotePlayers=[.init(id:"behind-wall",position:SIMD3(0,5,0))]
     precondition(blocked.fire());let safeShot=blocked.network.shots[0]
     precondition(safeShot.origin==SIMD3(0,0,1.35) && safeShot.player==nil,"A barrel crossing a wall cannot create a shot past it")
     precondition(blockedRenderer.recordedRays.last!.1==safeShot.origin);checks += 3
     let stream=ShotEmissionHarness(),streamRenderer=stream.renderer!
     stream.weapons.selected=37;stream.weapons.current.range=5.1;stream.weapons.current.fireKind="AREA_EFFECT"
     streamRenderer.aimDirection=SIMD3(0,1,0)
-    stream.network.orderedPlayers=[.init(id:"side-a",position:SIMD3(0.7,2,0.45)),.init(id:"side-b",position:SIMD3(-0.7,2,0.45)),.init(id:"outside",position:SIMD3(0.81,2,0.45))]
+    stream.renderer!.presentedRemotePlayers=[.init(id:"side-a",position:SIMD3(0.7,2,0.45)),.init(id:"side-b",position:SIMD3(-0.7,2,0.45)),.init(id:"outside",position:SIMD3(0.81,2,0.45))]
     precondition(stream.fire());let streamShot=stream.network.shots[0]
     precondition(streamShot.player==nil && streamShot.streamPlayers==["side-a","side-b"],"Stream must use all eligible cylinder targets, not the aim cone")
     precondition(streamShot.end==streamShot.origin+SIMD3(0,5.1,0) && streamRenderer.recordedRays.last!.1==streamShot.origin);checks += 3
 
-    let report:[String:Any]=["checks":checks,"baseline":baseline,"evidence":"Actual selection helper, current extracted VC emission methods, real triangle LOS and real shot-sequence tickets; no retail parity claim",
-      "limits":["Muzzle1.35m and torso1.15m offsets remain body approximations","No per-hand or bone-derived hitboxes","Renderer native cross-cell occlusion gate is tested separately","No UIKit, GPU or live multiplayer playtest"]]
+    func ordinaryInput(_ weapon:Int,pellets:Int=1)->NativeLocalShots.Input {
+        .init(weapon:weapon,range:35,pellets:pellets,accuracy:1,damage:25,feet:.zero,heading:0,crouched:false,
+            camera:SIMD3(0,-3,1.6),forward:SIMD3(0,1,0),up:SIMD3(0,0,1),verticalFov:55,aspect:2,
+            muzzle:SIMD3(0,0,1.6),hipOrigin:SIMD3(0,0,1.6),scoped:false,hip:true,milliseconds:250)
+    }
+    let local=ShotEmissionHarness(),localRenderer=local.renderer!
+    localRenderer.localConfig=ordinaryInput(22)
+    localRenderer.localPeople=[.init(id:"p9",feet:SIMD3(0,5,0),heading:0,crouched:false)]
+    precondition(local.fire(afterCapture:{localRenderer.localConfig=nil;localRenderer.position=SIMD3(20,0,0)}))
+    precondition(local.network.shots.isEmpty && local.network.ordinaryBatches.count==1,"Ordinary branch must bypass point-cone transport")
+    let firstLocal=local.network.ordinaryBatches[0][0]
+    precondition(firstLocal.target?.id=="p9" && firstLocal.kind==1 && firstLocal.target?.piece==9,"Actual VC dispatch must retain typed NPC/body-piece resolution")
+    precondition(firstLocal.origin==SIMD3(0,0,1.6) && firstLocal.end.y<5,"Event-time shot input must survive subsequent renderer mutation")
+    precondition(local.audio.count==1 && localRenderer.localFrames.count==1,"One ordinary marker produces one attack sound and one local frame")
+    local.weapons.selected=25;local.weapons.current.pellets=15
+    localRenderer.localConfig=ordinaryInput(25,pellets:15)
+    precondition(local.fire())
+    precondition(localRenderer.localFrames.last!.pellets.count==15 && local.network.ordinaryBatches.count==2 && local.network.ordinaryBatches.last!.first!.pellets==15,"Shotgun traces every pellet but hands one grouped batch to one sequence claim")
+    precondition(local.audio.count==2,"Shotgun pellets cannot multiply attack sounds")
+    local.weapons.selected=38;local.weapons.current.pellets=1
+    localRenderer.localConfig=ordinaryInput(38)
+    precondition(local.fire() && local.audio.count==2 && local.network.ordinaryBatches.count==3,"Local minigun uses its existing stream owner without an extra per-pellet attack")
+    checks+=8
+
+    let report:[String:Any]=["checks":checks,"baseline":baseline,"evidence":"Actual compatibility selection helper, current extracted VC capture/emission, ordinary pellet resolver, triangle LOS and real shot-sequence claims; no retail parity claim",
+      "limits":["Compatibility fallback retains body offsets; ordinary capsule inputs and camera/hand snapshot are authored","Full posed renderer/vehicle targets are outside this controller carrier","Renderer native cross-cell occlusion gate is tested separately","No UIKit, GPU or live multiplayer playtest"]]
     let destination=root.appendingPathComponent("local-only/research/combat-targeting.json")
     try FileManager.default.createDirectory(at:destination.deletingLastPathComponent(),withIntermediateDirectories:true)
     try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]).write(to:destination)

@@ -472,6 +472,10 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
     func shot(weapon id:Int,at position:SIMD3<Double>) {
         guard !suspended,volume>0,(0..<3).allSatisfy({position[$0].isFinite}),
               let row=weapons[String(id)],let plan=NativeShotAudioPlan.spatial(row.map(\.doubleValue))else{return}
+        positionedShot(plan,at:position)
+    }
+    private func positionedShot(_ plan:NativeVehicleAudioDynamics.Plan,at position:SIMD3<Double>) {
+        guard !suspended,volume>0 else{return}
         let group=reserveShotGroup(prefix:"shot"),requested=ProcessInfo.processInfo.systemUptime
         // GTA XYZ -> audio X/up/-Y, without narrowing the source to Float.
         let source=SIMD3(position.x,position.z,-position.y)
@@ -487,6 +491,25 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
                 self.lastEvent=layer.sound
             }
         }
+    }
+    func remoteGun(_ event:NativeRemoteGunAudio.Event) {
+        let id="held:remote-gun:"+event.key
+        if !event.held {
+            loops.remove(id+":body");vehicleLoops.stop(id+":body")
+            if event.tail {positionedShot(.init(layers:[.init(name:"minigun-tail",sound:"143_63",rate:1,gain:0.5)]),at:event.position)}
+            return
+        }
+        guard !suspended,let sound=streamSounds[event.kind],let metadata=samples[sound.sample]else{return}
+        guard let bytes=data[sound.sample]else{if requests[sound.sample]==nil{fetch(sound.sample){_ in}};return}
+        if !registeredVehicleSamples.contains(sound.sample) {
+            guard vehicleLoops.register(bytes,name:sound.sample,loopStart:metadata.loop)else{return}
+            registeredVehicleSamples.insert(sound.sample)
+        }
+        let point=event.position
+        let layer=NativeVehicleAudioDynamics.Layer(name:"body",sound:sound.sample,rate:Double(sound.rate),gain:Double(sound.gain))
+        vehicleLoops.apply(.init(layers:[layer]),prefix:id,gain:Double(volume),spatialPosition:SIMD3(point.x,point.z,-point.y),
+            panner:.init(reference:14,maximum:260,rolloff:1.6),forceLoop:true)
+        loops.insert(id+":body")
     }
     private func reserveShotGroup(prefix:String)->String {
         spatialShotSerial &+= 1

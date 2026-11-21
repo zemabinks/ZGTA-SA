@@ -34,6 +34,8 @@ final class NativeWeaponState {
         let animation: String
         let fireKind: String
         var damage:Float? = nil
+        var pellets=1
+        var accuracy=1.0
         var isMelee: Bool { id == 0 || ((1...15).contains(id) && fireKind.uppercased() == "MELEE") }
         // Existing callers use this for ammunition-driven attacks, including
         // throwables/streams. USE/CAMERA and the parachute's legacy MELEE data
@@ -101,7 +103,9 @@ final class NativeWeaponState {
                     capacity: (stat["clip"] as? NSNumber)?.intValue ?? 0,
                     interval: max(0.08, (loop.count > 1 ? loop[1] - loop[0] : 10) / 30),
                     animation: stat["anim"] as? String ?? "unarmed",
-                    fireKind: stat["fire"] as? String ?? "MELEE",damage:(stat["damage"]as?NSNumber).map{max(0,min(1000,$0.floatValue))})
+                    fireKind: stat["fire"] as? String ?? "MELEE",damage:(stat["damage"]as?NSNumber).map{max(0,min(1000,$0.floatValue))},
+                    pellets:max(1,min(100,(stat["pellets"]as?NSNumber)?.intValue ?? 1)),
+                    accuracy:(stat["accuracy"]as?NSNumber).map{$0.doubleValue.isFinite && $0.doubleValue>=0 ? $0.doubleValue:1} ?? 1)
             }
             DispatchQueue.main.async { if !entries.isEmpty { self.catalog = entries }; self.onChange?() }
         }.resume()

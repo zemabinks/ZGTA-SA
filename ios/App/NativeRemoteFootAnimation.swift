@@ -5,6 +5,9 @@ import simd
 /// the local player. Inputs are the decoded/interpolated public snapshot; all
 /// coordinates here are GTA Z-up and native clockwise heading.
 final class NativeRemoteFootAnimation {
+    struct Strike {
+        let weapon:Int,origin:SIMD3<Double>,piece:Int?,atMilliseconds:Double
+    }
     struct Snapshot {
         var position = SIMD3<Double>.zero
         var heading: Double = 0
@@ -26,6 +29,7 @@ final class NativeRemoteFootAnimation {
         var roll: Double = 0
         var script: String?
         var nearFlooredTarget = false
+        var struck:Strike?
     }
     private struct Flight { var at: Double;var jumped: Bool;var fell = false;var fastest: Double = 0 }
     let animator: NativeFootAnimation
@@ -119,17 +123,25 @@ final class NativeRemoteFootAnimation {
         let sum = state.life+state.armour
         let downKinds = ["koSkidBack","koSpinR","koSkidFront","koSpinL","floorHit","floorHitF"]
         let down = (1...6).contains(state.down) ? downKinds[state.down-1] : nil
+        let recent=state.struck.flatMap{now-$0.atMilliseconds<1000 ? $0:nil}
+        let side=recent.map{NativePedestrianReaction.incomingSide(from:$0.origin,position:state.position,heading:state.heading)} ?? 0
         if let down,state.life > 0 && previousDown != state.down { _ = animator.knock(down) }
         previousDown = state.down
         if state.life <= 0 {
-            if !animator.dead { animator.die(down ?? deathClip ?? "koFront") }
+            if !animator.dead {
+                animator.die(down ?? deathClip ?? NativePedestrianReaction.deathKind(weapon:recent?.weapon ?? 0,side:side))
+                if let recent,NativePedestrianReaction.losesHead(weapon:recent.weapon,piece:recent.piece){animator.loseHead()}
+            }
         } else {
             if animator.dead { animator.revive() }
             if feature != 30 { deathClip = nil }
             if let life,sum < life {
-                let hit = NativePedestrianReaction.reaction(.init(weapon:22,still:state.movement < 0.05 && !state.airborne,crouched:state.crouching,damage:life-sum,now:now,until:hitUntil))
+                let hit = NativePedestrianReaction.reaction(.init(weapon:recent?.weapon ?? 22,side:side,piece:recent?.piece ?? 3,
+                    still:state.movement < 0.05 && !state.airborne,crouched:state.crouching,damage:life-sum,now:now,until:hitUntil))
                 hitUntil = hit.until
-                if let kind = hit.kind { animator.flinch(kind,stun:hit.stun) }
+                // Remote motion remains snapshot-owned. The original
+                // wrapper selects this clip without the local input stun.
+                if let kind = hit.kind { animator.flinch(kind) }
             }
         }
         life = sum
@@ -184,8 +196,12 @@ final class NativeRemoteFootAnimation {
         input.position=state.position;input.heading=state.heading
         if (50...62).contains(action),!state.riding {input.fly = .init(state:action-49,pitch:state.pitch,roll:state.roll)}
         hasUnsupportedFlight = false
-        let frame = animator.update(delta:delta,input:input)
+        var frame = animator.update(delta:delta,input:input)
         if frame.shot && pending { fired! += 1 }
+        // The original remote wrapper gates a controller marker by the
+        // outstanding observed shot counter. A finishing gun cycle alone
+        // cannot emit another remote shot after that counter was consumed.
+        if !pending {frame.shots=[];frame.shot=false}
         return frame
     }
 

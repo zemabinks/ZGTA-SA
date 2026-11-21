@@ -344,6 +344,7 @@ final class NativeOtherVehicles {
         }
     }
     func bodyID(_ id:String)->SwiftRapierWorld.BodyID?{entries[id]?.bodyID}
+    func colliderIDs(_ id:String)->Set<SwiftRapierWorld.ColliderID>{entries[id]?.colliderIDs ?? []}
     func bodyState(_ id:String)->SwiftRapierWorld.BodyState?{entries[id]?.bodyID.flatMap{world.bodyState($0)}}
     func supportFrames(configurations:[String:NativeGroundVehicle.CouplingDefinition])->[NativeGroundVehicle.SupportFrame] {
         order.compactMap { id in

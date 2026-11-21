@@ -111,6 +111,11 @@ private enum NativeFlightAnimation {
 private struct simd_float4x4: Equatable { let marker: Int }
 private struct VehicleDrawContext: Equatable { let marker: Int }
 private struct TransparentVehicleDraw {}
+// Draw-local shot staging is declared alongside the occurrence queue but is
+// not populated/evaluated by this ownership carrier. Geometry has separate
+// actual-source gates; these two declarations are opaque type boundaries.
+private struct LocalShotVehicleFrame {}
+private enum NativeLocalShots { struct Occupant {} }
 private struct Observation {
     let name: String, position: SIMD3<Float>, angle: Float, pitch: Float
     let clip: String, elapsed: Double, weapon: Int
@@ -134,7 +139,7 @@ INVOCATIONS = r'''
             pose:.init(marker:400+frame),identity:"__REMOTE_ID__",ownFoot:false__CANOPY_ARGUMENT__)
         appendPed("shared-skin",point,9,10,"rider-clip",11.25,12,
             pose:.init(marker:500+frame),transform:.init(marker:600+frame),original:true,
-            flight:.init(marker:700+frame),identity:"passenger",ownFoot:false__TRAFFIC_OCCUPANT_ARGUMENT__)
+            flight:.init(marker:700+frame),identity:"passenger",ownFoot:false__TRAFFIC_OCCUPANT_ARGUMENT____SHOT_SEAT_ARGUMENT__)
         appendPed("fallback-skin",point,13,14,"fallback-clip",15.25,16)
     }
     do {
@@ -186,6 +191,7 @@ CHECKS = r'''
                         let q=row.queued!
                         // CANOPY_CHECKS
                         // TRAFFIC_PROVENANCE_CHECKS
+                        // SHOT_SEAT_CHECKS
                         switch index {
                         case 0:
                             try check(row.name == "shared-skin" && row.angle == 1 && row.pitch == 2 && row.clip == "own-clip" && row.elapsed == 3.25 && row.weapon == 4,"owned first eight draw values")
@@ -259,11 +265,17 @@ def carrier(parts):
     invocation=invocation.replace('// TRAFFIC_INVOCATION',traffic_invocation)
     canopy = 'var canopySamples:' in parts['override']
     occupant = 'var trafficOccupant:' in parts['override']
+    shot_seat = 'var shotSeat:' in parts['override']
     remote_id='c3.0'if occupant else'remote'
     invocation=invocation.replace('__REMOTE_ID__',remote_id).replace('__TRAFFIC_OCCUPANT_ARGUMENT__',
         ',trafficOccupant:(3,UInt64(20+frame),2,9,frame==2)'if occupant else'')
     invocation = invocation.replace('__CANOPY_ARGUMENT__',
         ',canopySamples:[.init(marker:10000+frame),nil,.init(marker:20000+frame)]' if canopy else '')
+    invocation=invocation.replace('__SHOT_SEAT_ARGUMENT__',',shotSeat:("shared-car","passenger")'if shot_seat else'')
+    shot_checks='''if index==2 {
+                            try check(q.shotSeat?.car=="shared-car" && q.shotSeat?.target=="passenger","shot occupant retains its own vehicle/target occurrence")
+                        }else{try check(q.shotSeat==nil,"co-located actor acquired another occurrence's shot seat")}
+                        '''if shot_seat else''
     canopy_checks = '''if index == 1 {
                             try check(q.canopySamples.count == 3,"remote ordered canopy payload count")
                             try check(q.canopySamples[0]?.marker == 10000+frame && q.canopySamples[1] == nil && q.canopySamples[2]?.marker == 20000+frame,"remote ordered canopy targets/nil retained")
@@ -279,7 +291,7 @@ def carrier(parts):
     return (PRELUDE + '\n' + parts['override'] + '\nprivate func productionFrame(_ frame:Int) -> [Observation] {\n' +
             parts['queue'] + invocation + '\n    var observations:[Observation]=[]\n' + parts['consume'] +
             '\n            observations.append(.init(name:name,position:position,angle:angle,pitch:pitch,clip:clip,elapsed:elapsed,weapon:weapon,vehicleContext:vehicleContext,queued:queued))\n' +
-            '        }\n    return observations\n}\n' + CHECKS.replace('// CANOPY_CHECKS',canopy_checks).replace('// TRAFFIC_PROVENANCE_CHECKS',occupant_checks).replace('__REMOTE_ID__',remote_id).replace('__NONPED_COUNT__',str(6 if traffic else 5)))
+            '        }\n    return observations\n}\n' + CHECKS.replace('// CANOPY_CHECKS',canopy_checks).replace('// TRAFFIC_PROVENANCE_CHECKS',occupant_checks).replace('// SHOT_SEAT_CHECKS',shot_checks).replace('__REMOTE_ID__',remote_id).replace('__NONPED_COUNT__',str(6 if traffic else 5)))
 
 def private_output(value):
     output = Path(os.path.abspath(value))
@@ -320,7 +332,7 @@ def main():
         else:
             for name in parts:
                 executable=output/name
-                command=['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-O','-swift-version','5',
+                command=['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-j','1','-num-threads','1','-O','-swift-version','5',
                          '-module-cache-path',str(output/'modules'),str(output/(name+'.swift')),'-o',str(executable)]
                 built=subprocess.run(command,capture_output=True,timeout=180,cwd=ROOT)
                 (output/(name+'-compile.log')).write_bytes(built.stdout+built.stderr)

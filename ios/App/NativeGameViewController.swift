@@ -351,7 +351,13 @@ final class NativeGameViewController: UIViewController {
             self.updateWeaponHUD()
         }
         weapons.onNeedsRefresh = { [weak self] in self?.gameplay.refresh() }
-        weapons.onNeedsResync = { [weak self] in self?.network.requestInventoryResync() }
+        weapons.onNeedsResync = { [weak self] in
+            guard let self else { return }
+            // The transport owns the initial baseline deadline. The shorter
+            // inventory timeout protects unsettled writes in an accepted session.
+            guard self.network.usesClientOwnedWeapons || self.network.state == .ready else { return }
+            self.network.requestInventoryResync()
+        }
         network.onInventoryConnection = { [weak self] nonce in
             guard let self else{return}
             if self.network.legacy == nil && !self.network.usesOriginalWorldProtocol {
@@ -401,7 +407,9 @@ final class NativeGameViewController: UIViewController {
             self?.audio.explosion(weapon:weapon,distance:distance)
         }
         network.onWeaponSound = { [weak self] weapon in self?.audio.shot(weapon:weapon) }
+        network.onOriginalShot = {[weak self] shot in self?.renderer?.receiveOriginalShot(shot)}
         renderer?.onSpatialWeaponShot = {[weak self] weapon,position in self?.audio.shot(weapon:weapon,at:position)}
+        renderer?.onRemoteGunAudio = {[weak self] event in self?.audio.remoteGun(event)}
         renderer?.onBulletPass = {[weak self] event in
             switch event {
             case .sound(let sound):self?.audio.bulletPass(sound)
@@ -1718,25 +1726,42 @@ final class NativeGameViewController: UIViewController {
 
     /// Freeze valid geometry before reserving/spending a ticket. Emission is
     /// synchronous, so both hands retain their own event-time ray snapshot.
-    private func currentShotRay(weapon:Int,left:Bool)->NativeShotTargeting.Ray? {
-        guard let renderer,let muzzle=renderer.weaponMuzzle(weapon:weapon,left:left) else{return nil}
+    private struct CapturedWeaponShot {
+        let ray:NativeShotTargeting.Ray
+        let ordinary:NativeLocalShots.Input?
+    }
+    private func currentShotRay(weapon:Int,left:Bool)->CapturedWeaponShot? {
+        guard let renderer,let muzzle=renderer.weaponMuzzle(weapon:weapon,left:left),
+              let definition=weapons.definition(for:weapon) else{return nil}
         // Do not spawn a shot past a wall merely because an extended barrel
         // crossed it. Retain the existing safe body origin in that case.
         let clear=simd_distance(muzzle.safetyOrigin,muzzle.origin)<0.0001 ||
             renderer.hasClearShot(from:muzzle.safetyOrigin,to:muzzle.origin)
-        return .init(origin:clear ? muzzle.origin:muzzle.safetyOrigin,
-                     direction:renderer.aimDirection,range:weapons.current.range)
+        guard let ray=NativeShotTargeting.Ray(origin:clear ? muzzle.origin:muzzle.safetyOrigin,
+                     direction:renderer.aimDirection,range:definition.range)else{return nil}
+        let ordinary=renderer.captureLocalShot(weapon:weapon,left:left,range:definition.range,pellets:definition.pellets,
+            accuracy:definition.accuracy,damage:Double(definition.damage ?? 0),muzzle:muzzle,barrelClear:clear)
+        return CapturedWeaponShot(ray:ray,ordinary:ordinary)
     }
 
     /// Shared effects/network emission uses the captured event-time hand muzzle.
     /// Unavailable or wall-obstructed poses retain the safe body-origin fallback.
     /// Animation-event firing never restarts a clip here.
-    private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket?,ray:NativeShotTargeting.Ray) {
+    private func emitWeaponShot(weapon: Int, left: Bool,ticket:NativeShotTicket?,ray captured:CapturedWeaponShot) {
         guard let renderer,let definition=weapons.definition(for:weapon) else { return }
+        let ray=captured.ray
         renderer.recordWeaponShot(weapon:weapon,origin:ray.origin,direction:ray.direction)
         if definition.fireKind == "PROJECTILE" {
             network.sendWeaponShot(weapon: weapon, from: ray.origin,
                 to: ray.point(at:max(5,min(100,ray.range))), player: nil,ticket:ticket)
+            return
+        }
+        if let input=captured.ordinary {
+            guard let frame=renderer.resolveLocalShot(input)else{return}
+            renderer.presentLocalShot(frame,input:input,left:left,beforePellets:{[audio]in
+                if weapon != 38{audio.shot(weapon:weapon)}
+            })
+            network.sendOrdinaryShotBatch(weapon:weapon,claims:frame.claims,ticket:ticket)
             return
         }
         audio.shot(weapon: weapon)

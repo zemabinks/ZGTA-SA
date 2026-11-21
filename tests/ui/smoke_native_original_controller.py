@@ -10,18 +10,18 @@ from pathlib import Path
 import hashlib,json,subprocess,tempfile
 from tests.movement.smoke_native_climb_runtime import function
 ROOT=Path(__file__).resolve().parents[2]
-NAMES=['ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery','NativeShotTargeting','NativeStreamShotClaims','NativeGameBindings']
+NAMES=['ServerAddress','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeWeaponShotDelivery','NativeShotTargeting','NativeStreamShotClaims','NativeGameBindings','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots']
 def main():
  out=ROOT/'local-only/research/original-controller';out.mkdir(parents=True,exist_ok=True)
  paths=['ios/App/'+n+'.swift'for n in NAMES]+['ios/App/NativeGameViewController.swift','ios/App/NativeActorAnimation.swift','tests/ui/smoke_native_original_controller.py','tests/ui/smoke_native_original_controller.swift']
  before={p:(ROOT/p).read_bytes()for p in paths};vc=before['ios/App/NativeGameViewController.swift'].decode();actor=before['ios/App/NativeActorAnimation.swift'].decode()
  constructor=function(vc,'    init(server: ServerAddress, settings:')
- methods='\n'.join(function(vc,m).replace('@objc ','').replace('private ','')for m in ['    private func consumeFootWeaponShot(','    private func currentShotRay(','    private func emitWeaponShot(','    @objc private func reload()','    private func cycleWeapon(','    private func sendWeaponSelection('])
+ methods='\n'.join(function(vc,m).replace('@objc ','').replace('private ','')for m in ['    private struct CapturedWeaponShot {','    private func consumeFootWeaponShot(','    private func currentShotRay(','    private func emitWeaponShot(','    @objc private func reload()','    private func cycleWeapon(','    private func sendWeaponSelection('])
  animation=function(actor,'struct NativeWeaponAnimation {')
  harness=before['tests/ui/smoke_native_original_controller.swift'].decode().replace('// ACTUAL_CONSTRUCTOR',constructor).replace('// ACTUAL_METHODS',methods).replace('&&!',' && !')
  with tempfile.TemporaryDirectory(dir=out,prefix='verify-')as temp:
   w=Path(temp);(w/'main.swift').write_text('\n'.join(before['ios/App/'+n+'.swift'].decode()for n in NAMES)+'\n'+animation+'\n'+harness)
-  result=subprocess.run(['xcrun','swiftc','-O','-module-cache-path',str(out/'modules'),str(w/'main.swift'),'-o',str(w/'verify')],capture_output=True,text=True)
+  result=subprocess.run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-O','-module-cache-path',str(out/'modules'),str(w/'main.swift'),'-o',str(w/'verify')],capture_output=True,text=True)
   (out/'compile.log').write_text(result.stdout+result.stderr)
   if result.returncode:print(result.stdout+result.stderr);result.check_returncode()
   result=subprocess.run([str(w/'verify')],capture_output=True,text=True)

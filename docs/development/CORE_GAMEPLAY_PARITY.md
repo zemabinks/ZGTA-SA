@@ -1,5 +1,30 @@
 # Core GTA San Andreas gameplay parity
 
+## Core170–172 — ordinary combat and retained-world integration
+
+Human shots reuse bounded native bullet presentation with distinct source
+ownership and original effect resources. Remote struck metadata feeds the
+existing original-animation controller. Local ordinary fire selects typed
+live foot targets, current vehicle/occupant bounds and loaded collision, with
+source/session cleanup and explicit unknown-world blocking. Presentation
+remains separate from authoritative damage.
+
+The full current physics/audio/transport source chain and both native SDK
+products pass. Controlled Simulator cases cover four normal joins with
+retained resources, compact traffic/bike/NPC lifetimes, and normal-input pistol
+and shotgun fire. Own-fire acceptance includes an authored head report,
+crouched vehicle report, real reload inventory changes and subsequent fire.
+All 62 captures are reviewed; resources/preferences hold and owned processes
+stop. Historical selector, fixture and Apple-runner failures remain recorded
+separately from the passing retry.
+
+This is scoped acceptance, not original-PC or complete-game parity. The NPC
+handoff is partly obscured. Weapon-icon coverage, reload text, crouch contact,
+vehicle health authority, browser/native shot accounting, audible effects and
+physical-device performance remain open. New development must preserve these
+limits rather than treating a passing source gate as retail verification.
+
+
 ## Traffic rider falls and NPC continuity
 
 Compact motorcycle riders now retain original fall phases, completed down

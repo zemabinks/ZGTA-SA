@@ -19,6 +19,7 @@ private final class PacketOwner {
     // ACTUAL_PACKET
 }
 private final class SceneOwner {
+    let weaponFlashes=NativeWeaponFlash(),humanShots=NativeHumanShots()
     var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
     var remoteServerTimeOffsetMilliseconds:Double?
     var support:[String:SIMD3<Float>]=[:]
@@ -72,6 +73,15 @@ private struct KernelReference:Decodable {
 @main private enum Main {
     static func main(){do{try run()}catch{fputs("FAIL \(error)\n",stderr);exit(1)}}
     static func run()throws {
+        let retired=SceneOwner()
+        let packet=NativeHumanShots.Packet(["from":"gone","w":31,"o":[0,0,1.3],"h":[0,4,1.3],"ht":0])!
+        _=retired.humanShots.receive(packet,footAppearance:true,at:1)
+        retired.weaponFlashes.fire(identity:"gone",weapon:31,left:false,twin:false,at:1)
+        retired.weaponFlashes.fire(identity:"own",weapon:31,left:false,twin:false,at:1)
+        retired.remotePlayers=[]
+        try check(retired.humanShots.queued("gone")==0,"roster removal retains queued shot from retired actor")
+        try check(!retired.weaponFlashes.visible(identity:"gone",weapon:31,left:false,at:1.01),"roster removal retains retired actor flash")
+        try check(retired.weaponFlashes.visible(identity:"own",weapon:31,left:false,at:1.01),"remote roster removal retires local holder")
         var schedules:[String:[SIMD3<Float>]]=[:]
         for hz in [20,30,60,120] {
             let owner=ControllerOwner(),renderer=owner.renderer!

@@ -44,6 +44,7 @@ final class NativeVehicleRig {
         let hub:String?,node:String?,extra:Int?
     }
     struct DrawDefinition:Decodable {let node:Int,start:Int,count:Int;let materialVisible:Bool;let lens:Int,texture:Int,litTexture:Int;let alphaTest:Double;let paint:Int?,color:[Double]?;let glass:Bool?,opacity:Double?
+        let materialTransparent:Bool?,materialSide:Int?,materialBlending:Int?,meshAdditive:Bool?
         var transparent:Bool{glass == true || (opacity ?? 1)<1 || alphaTest>0}
     }
     struct DamageJoint:Decodable {let part:Int,node:Int,rest:[Double],hinge:[Double]}

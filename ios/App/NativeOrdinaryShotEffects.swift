@@ -16,6 +16,8 @@ final class NativeOrdinaryShotEffects {
     var eye:V?
     var waterLevel:((V)->Double?)?
     var struck:((V,V,Double)->Contact?)?
+    var shellFloor:((V,Double)->Double?)?
+    private var minigunShell=false
     private let random:()->Double
     init(random:@escaping()->Double={Double.random(in:0..<1)}) {
         self.random=random;tracers=NativeShotTracers(random:random)
@@ -34,7 +36,35 @@ final class NativeOrdinaryShotEffects {
         return V(channel(color.x),channel(color.y),channel(color.z))
     }
     func clear(){tracers.clear()}
-    func shot(_ event:NativeOrdinaryShot.Event) {
+    func blood(at position:V,direction:V,count:Int=8) {
+        guard count>0,let particles,particles.has("prt_blood")else{return}
+        for _ in 0..<count {
+            let size=0.7+0.3*random()
+            particles.spawn("prt_blood",at:position,velocity:direction*1.5,
+                options:.init(jitter:1,tint:Self.linear(V(0.5,0,0)),mult:.init(size:size,life:0.8)))
+        }
+    }
+    func casing(weapon:Int,at muzzle:V,direction:V) {
+        let back:Double,size:Double
+        switch weapon {
+        case 22,23,24,34:back=0.2;size=0.25
+        case 25,26,27:back=0.3;size=0.45
+        case 28,29,32:back=0.2;size=0.3
+        case 30,31,38:back=0.65;size=0.25
+        default:return
+        }
+        if weapon==38 {minigunShell.toggle();if minigunShell{return}}
+        let horizontal=hypot(direction.x,direction.y)
+        var velocity=horizontal>0 ? V(direction.y/horizontal,-direction.x/horizontal,0):.zero
+        velocity.z=0.4+1.2*random()
+        let position=muzzle-direction*back
+        guard let particles,particles.has("prt_gunshell"),
+              eye.map({simd_distance_squared($0,position)<=100}) ?? true else{return}
+        let tint=Self.linear(weapon==25 || weapon==27 ? V(0.6,0.1,0.1):V(repeating:0.5))
+        particles.spawn("prt_gunshell",at:position,velocity:velocity,
+            options:.init(tint:tint,mult:.init(size:size),floor:shellFloor?(position,4)))
+    }
+    func shot(_ event:NativeOrdinaryShot.Event,gunsmoke:Bool=true) {
         tracers.shot(from:event.origin,to:event.end)
         let offset=event.end-event.origin,length=simd_length(offset)
         let direction=length>0 ? offset/length:.zero
@@ -45,13 +75,7 @@ final class NativeOrdinaryShotEffects {
         }
         switch event.impact {
         case .some(.person):
-            if let particles,particles.has("prt_blood") {
-                for _ in 0..<8 {
-                    let size=0.7+0.3*random()
-                    particles.spawn("prt_blood",at:event.end,velocity:-direction*1.5,
-                        options:.init(jitter:1,tint:Self.linear(V(0.5,0,0)),mult:.init(size:size,life:0.8)))
-                }
-            }
+            blood(at:event.end,direction:-direction,count:event.piece == 9 ? 16:8)
         case .some(.car),.some(.world):
             let distance=eye.map{simd_distance_squared($0,event.end)} ?? 0
             if distance<=22500 {
@@ -67,7 +91,7 @@ final class NativeOrdinaryShotEffects {
             }
         case .none:break
         }
-        particles?.play("gunsmoke",at:event.origin)
+        if gunsmoke {particles?.play("gunsmoke",at:event.origin)}
     }
     private func hit(at position:V,normal:V,style:Style) {
         // The original generic-FX path is available only with its definitions.
