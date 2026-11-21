@@ -214,7 +214,7 @@ final class Peer {
 }
 final class Actions {
  var inventoryConnection:String?,pending:[(Bool?)->Void]=[]
- func perform(_ name:String,completion:@escaping(Bool?)->Void){pending.append(completion)}
+ func perform(_ name:String,reportSuccess:Bool=true,completion:@escaping(Bool?)->Void){pending.append(completion)}
  func setConnectionReady(_ ready:Bool){}
  func refresh(){}
 }

@@ -920,10 +920,18 @@ class LocalGame {
     if (!Number.isInteger(message.w) || message.w < 0 || message.w > 46 ||
         !point(message.o) || !point(message.h) || !position ||
         peer.player.passive) return reject('Invalid shot or player cannot attack.');
+    let ordinary=null;
+    if(message.rays!==undefined){
+      if(!peer.ordinaryShotGroupsEnabled || !peer.inventoryEnabled || !acknowledged ||
+          !(ordinary=weaponInventory.ordinaryGroups(message.w,message.rays)))return reject('Invalid grouped ordinary shot.');
+      if(ordinary.groups.some(group=>Math.hypot(group.o[0]-position.x,group.o[1]-position.y,group.o[2]-position.z)>15))
+        return reject('Grouped shot origin is invalid.');
+    }
     if (Math.hypot(message.o[0] - position.x, message.o[1] - position.y,
       message.o[2] - position.z) > 15 ||
       Math.hypot(message.h[0] - message.o[0], message.h[1] - message.o[1],
-        message.h[2] - message.o[2]) > 200) return reject('Shot origin or range is invalid.');
+        message.h[2] - message.o[2]) > (ordinary?weaponInventory.ordinaryRange(message.w,true)+0.05:200))
+      return reject('Shot origin or range is invalid.');
     const ray=message.h.map((n,i)=>n-message.o[i]),length=Math.hypot(...ray);
     if (AREA_EFFECTS[message.w] && (length<0.000001 ||
         Math.hypot(message.o[0]-position.x,message.o[1]-position.y,message.o[2]-position.z-0.9)>3.5)) return reject('Stream origin is invalid.');
@@ -936,7 +944,14 @@ class LocalGame {
       const record={sequence:message.s ?? null,weapon:message.w,at:now,origin:[...message.o],
         direction:ray.map(n=>n/Math.max(0.000001,length)),hit:[...message.h],
         dimension:peer.player.insideHome || null,used:false,areaTargets:new Set()};
-      records.push(record);
+      if(ordinary){
+        for(const group of ordinary.groups){
+          const way=group.h.map((n,i)=>n-group.o[i]),size=Math.hypot(...way);
+          records.push({...record,origin:group.o,direction:way.map(n=>n/Math.max(0.000001,size)),hit:group.h,
+            used:group.ht!==1,ordinary:true,ordinaryTarget:group.id,ordinaryPiece:group.bp,
+            ordinaryDamage:Math.min(1000,ordinary.damage*group.n)});
+        }
+      }else records.push(record);
       peer.acceptedShots=records.filter(record=>now-record.at<=2000).slice(-128);
       if (message.w===42) this.applyExtinguisher(peer,record,now);
       this.save();
@@ -950,13 +965,22 @@ class LocalGame {
       const result = this.projectiles.launch(String(peer.player.number),message.w,message.o,direction);
       if (!result.ok) this.note(peer.player,result.reason);
     }
-    const shot = {t: 'shot', from: String(peer.player.number), w: message.w,
-      o: message.o, h: message.h, ht: Number.isInteger(message.ht) ?
-        Math.max(0, Math.min(10, message.ht)) : 0};
-    if (typeof message.id === 'string' && message.id.length <= 64) shot.id = message.id;
-    if (Number.isInteger(message.bp)) shot.bp = message.bp;
-    for (const other of this.peers) if (other !== peer && other.ready &&
-      (other.player.insideHome || null) === (peer.player.insideHome || null)) other.send(shot);
+    for(const group of ordinary?.groups || [message]){
+      const shot = {t: 'shot', from: String(peer.player.number), w: message.w,
+        o: group.o, h: group.h, ht: Number.isInteger(group.ht) ?
+          Math.max(0, Math.min(10, group.ht)) : 0};
+      if (typeof group.id === 'string' && group.id.length <= 64) shot.id = group.id;
+      if (Number.isInteger(group.bp)) shot.bp = group.bp;
+      if(ordinary){if(group.n>1)shot.n=group.n;if(group.wh!==undefined)shot.wh=group.wh;}
+      for (const other of this.peers) if (other !== peer && other.ready &&
+        (other.player.insideHome || null) === (peer.player.insideHome || null)) other.send(shot);
+    }
+    if(ordinary)for(const group of ordinary.groups)if(group.ht===1)
+      this.handleHit(peer,{t:'hit',to:group.id,w:message.w,c:message.c,s:message.s});
+    // Every batch claim is settled at this emission, including a blocked,
+    // protected or out-of-dimension target. It cannot become a later hit.
+    if(ordinary)for(const record of peer.acceptedShots || [])
+      if(record.ordinary&&record.sequence===message.s)record.used=true;
     if (peer.inventoryEnabled) reply(true);
   }
 
@@ -972,8 +996,8 @@ class LocalGame {
         (peer.player.insideHome || null) !== (target.player.insideHome || null)) return;
     const weapon = peer.inventoryEnabled && Number.isInteger(message.w) ? message.w : Date.now() - (peer.lastShotAt || 0) <= 2000 ? peer.lastWeapon :
       Number.isInteger(peer.state?.weapon) ? peer.state.weapon : 0;
-    const area=AREA_EFFECTS[weapon],damage=area ? area.damage:WEAPON_DAMAGE[weapon];
-    if (!area && !damage) return;
+    const area=AREA_EFFECTS[weapon],baseDamage=area ? area.damage:WEAPON_DAMAGE[weapon];
+    if (!area && !baseDamage) return;
     const distance = Math.hypot(from.x - to.x, from.y - to.y);
     const gun = weapon >= 22;
     const melee = weapon >= 0 && weapon <= 15;
@@ -984,8 +1008,10 @@ class LocalGame {
     const now = Date.now();
     const authorized = peer.inventoryEnabled && gun ? [...(peer.acceptedShots || [])].reverse().find(record=>
       !record.used && record.weapon===weapon && now-record.at>=0 && now-record.at<=(area ? AREA_EVIDENCE_MS:2000) &&
+      (record.ordinaryTarget===undefined || record.ordinaryTarget===message.to) &&
       (message.s===undefined ? record.sequence===null:record.sequence===message.s)) : null;
     if (peer.inventoryEnabled && gun && !authorized) return;
+    const damage=authorized?.ordinaryDamage ?? baseDamage;
     if (area) {
       if (!peer.inventoryEnabled || !authorized) return;
       const inventory=weaponInventory.ensure(peer.player,now),centre=[to.x,to.y,to.z+0.9];
@@ -1010,7 +1036,8 @@ class LocalGame {
     if (!area && !worldCollision.lineOfSight([from.x,from.y,from.z+(melee ? 1:1.35)],
       [to.x,to.y,to.z+(melee ? meleeHeight:1.15)])) return;
     const range = peer.inventoryEnabled && gun ?
-      Math.min(200,weaponInventory.catalog.items.find(item => item.id === weapon)?.stats?.range || 90) : gun ? 90 : 4;
+      (authorized?.ordinary?weaponInventory.ordinaryRange(weapon):Math.min(200,weaponInventory.catalog.items.find(item => item.id === weapon)?.stats?.range || 90)) : gun ? 90 : 4;
+    if(authorized?.ordinary&&Math.hypot(...authorized.hit.map((v,i)=>v-authorized.origin[i]))>range+0.05)return;
     if (!area && (distance > range ||
         (gun && !authorized && (now - (peer.lastShotAt || 0) > 2000 || peer.lastWeapon !== weapon)) ||
         (gun && (!(authorized?.hit || peer.lastShotHit) || Math.hypot((authorized?.hit || peer.lastShotHit)[0] - to.x,
@@ -1019,7 +1046,7 @@ class LocalGame {
     if (authorized && !area) authorized.used=true;
     peer.lastHitAt = now;
     const victim = target.player;
-    const beforeHealth=victim.health;
+    const beforeHealth=victim.health,beforeArmour=victim.armour;
     const defenderWeapon=target.inventoryEnabled ? weaponInventory.ensure(victim).selected:target.state?.weapon;
     const parried=parriesMelee(weapon,defenderWeapon,target.state,from,to);
     if (!parried) {
@@ -1032,6 +1059,10 @@ class LocalGame {
     const feedback=target.healthAckEnabled ? {fromAt:[from.x,from.y,from.z],beforeHealth,parried,
       hitAck:{connection:target.inventoryConnection,sequence:target.hitSequence=(target.hitSequence || 0)+1}}:{};
     target.send({t: 'hit', from: String(peer.player.number), w: weapon, d: damage,...feedback});
+    if(authorized?.ordinary&&(victim.health<beforeHealth||victim.armour<beforeArmour))
+      peer.send({t:'struck',c:peer.inventoryConnection,s:authorized.sequence,from:String(peer.player.number),
+        w:weapon,ht:1,id:message.to,o:authorized.origin,h:authorized.hit,
+        ...(authorized.ordinaryPiece===undefined?{}:{bp:authorized.ordinaryPiece})});
     this.setWanted(peer.player, Math.max(1, peer.player.wanted + 1));
     if (victim.health === 0) {
       victim.deaths = money(victim.deaths + 1);
@@ -1053,14 +1084,16 @@ class LocalGame {
     const weapon=peer.inventoryEnabled&&Number.isInteger(message.w)?message.w:
       now-(peer.lastShotAt||0)<=2000?peer.lastWeapon:peer.state?.weapon;
     const gun=weapon>=22,melee=Number.isInteger(weapon)&&weapon>=0&&weapon<=15,area=AREA_EFFECTS[weapon];
-    const damage=area?area.damage:WEAPON_DAMAGE[weapon];if(!damage||(!gun&&!melee))return;
+    const baseDamage=area?area.damage:WEAPON_DAMAGE[weapon];if(!baseDamage||(!gun&&!melee))return;
     const origin=[from.x,from.y,from.z+(melee?1:1.35)],centre=actor.position.map((v,i)=>v+(i===2?1:0));
     if(!worldCollision.lineOfSight(origin,centre))return;
     if(peer.inventoryEnabled&&!gun&&weaponInventory.ensure(peer.player).selected!==weapon)return;
     const authorized=peer.inventoryEnabled&&gun?[...(peer.acceptedShots||[])].reverse().find(record=>
       !record.used&&record.weapon===weapon&&now-record.at>=0&&now-record.at<=(area?AREA_EVIDENCE_MS:2000)&&
+      (record.ordinaryTarget===undefined||record.ordinaryTarget===message.to)&&
       (message.s===undefined?record.sequence===null:record.sequence===message.s)):null;
     if(peer.inventoryEnabled&&gun&&!authorized)return;
+    const damage=authorized?.ordinaryDamage??baseDamage;
     if(area){
       if(!authorized||!peer.inventoryEnabled||authorized.dimension!==null)return;
       const inventory=weaponInventory.ensure(peer.player,now);
@@ -1073,7 +1106,8 @@ class LocalGame {
       if(now-(times.get(message.to)??-Infinity)<AREA_HIT_MS||!worldCollision.lineOfSight(authorized.origin,centre))return;
       times.set(message.to,now);
     }else{
-      const range=gun?Math.min(200,weaponInventory.catalog.items.find(item=>item.id===weapon)?.stats?.range||90):4;
+      const range=gun?(authorized?.ordinary?weaponInventory.ordinaryRange(weapon):Math.min(200,weaponInventory.catalog.items.find(item=>item.id===weapon)?.stats?.range||90)):4;
+      if(authorized?.ordinary&&Math.hypot(...authorized.hit.map((v,i)=>v-authorized.origin[i]))>range+0.05)return;
       if(Math.hypot(from.x-actor.position[0],from.y-actor.position[1],from.z-actor.position[2])>range)return;
       const hit=authorized?.hit||peer.lastShotHit;
       if(gun&&(!authorized&&(now-(peer.lastShotAt||0)>2000||peer.lastWeapon!==weapon)||
@@ -3302,6 +3336,7 @@ class LocalGame {
       if (peer.inventoryAckEnabled && message.healthAck===1) {
         peer.healthAckEnabled=true;peer.processedHealthSequence ??= 0;
       }
+      if(!wasReady&&peer.inventoryAckEnabled&&message.ordinaryShots===1)peer.ordinaryShotGroupsEnabled=true;
       if(peer.inventoryAckEnabled&&message.couplingAck===1&&this.coupling?.enabled){
         peer.couplingAckEnabled=true;peer.processedCouplingSequence ??=0;
       }
@@ -3317,6 +3352,7 @@ class LocalGame {
         zombies: false, traffic: 0, peds: peer.populationEnabled?1:0, party: 0,
         ...(peer.populationEnabled?{paths:this.population.graph.crc32,npcProtocol:38}:{}),
         ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {}),
+        ...(peer.ordinaryShotGroupsEnabled?{ordinaryShots:1}:{}),
         ...(placement?{positionAck:1,placement:placement.placement}:{}),
         ...(browserPlacement?{browserRecovery:1,browserPlacement}:{}),
         ...(peer.couplingAckEnabled?{couplingAck:1}:{})});

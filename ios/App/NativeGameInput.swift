@@ -35,7 +35,14 @@ struct NativeControllerInputGate {
 /// Preserve ordinary low-frame-rate elapsed time. A suspension/clock jump is
 /// a discontinuity, rather than a gigantic movement command on resumption.
 struct NativeGameFrameClock {
-    struct Frame { let delta: Double; let steps: [Double]; let discontinuity: Bool }
+    struct Frame {
+        let delta: Double
+        let steps: [Double]
+        let discontinuity: Bool
+        /// A delayed foreground frame does not invalidate UIKit/key events.
+        /// Application focus and modal ownership have their own reset paths.
+        var invalidatesInput = false
+    }
     private var previous: Double?
     mutating func reset() { previous = nil }
     mutating func advance(timestamp: Double, active: Bool) -> Frame {
@@ -44,7 +51,7 @@ struct NativeGameFrameClock {
         self.previous = timestamp
         let elapsed = timestamp - previous
         guard elapsed > 0, elapsed <= 0.5 else {
-            return Frame(delta: 0, steps: [], discontinuity: elapsed < 0 || elapsed > 0.5)
+            return Frame(delta: 0, steps: [], discontinuity: elapsed < 0 || elapsed > 0.5, invalidatesInput: elapsed < 0)
         }
         let count = max(1, Int(ceil(elapsed / (1.0 / 60.0) - 1e-8)))
         return Frame(delta: elapsed, steps: Array(repeating: elapsed / Double(count), count: count), discontinuity: false)

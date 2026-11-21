@@ -310,7 +310,7 @@ import Darwin
         try check(retiredVoices.count==1 && retiredVoices[0].key=="minigun:rider" && !retiredVoices[0].held && !retiredVoices[0].tail,"display reset stops the actual held sound without a delayed tail")
         try check(local.remoteGunAudio.advance(delta:1).isEmpty,"retired held sound cannot emit a later tail")
         try check(!local.weaponFlashes.visible(identity:"own",weapon:38,left:false,at:10.01),"display reset clears live flash timer")
-        try check(local.localShotVehicles.isEmpty && local.localShotVehiclesAt == -.infinity && local.localShotVehicleSource==nil,"display reset retires old posed vehicle target namespace")
+        try check(local.localShotVehicles.isEmpty && local.localShotVehicleSource==nil,"display reset retires old posed vehicle target namespace")
         UIApplication.shared.applicationState = .inactive;local.now=10.1
         try rejected(local.successfulDraw().2)
         UIApplication.shared.applicationState = .active;local.now=13;local.resetDisplayClock();local.now=13.03

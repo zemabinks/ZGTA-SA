@@ -7,6 +7,7 @@ _ZGTA_ROOT = _zgta_Path(__file__).resolve().parents[2]
 if str(_ZGTA_ROOT) not in _zgta_sys.path: _zgta_sys.path.insert(0, str(_ZGTA_ROOT))
 
 import http.client
+import hashlib
 import importlib.util
 import json
 import os
@@ -14,10 +15,12 @@ from pathlib import Path
 import shutil
 import socket
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -72,6 +75,19 @@ def main():
         state = root / 'local-only/selfhost'
         state.mkdir()
         (state / 'client-catalog.json').write_text('{"vehicles":[],"homes":[]}')
+        # An authored one-pixel PNG, not game artwork. Exercise the actual
+        # logical icon route through the complete host's ordinary access gates.
+        def png_chunk(kind, data):
+            return struct.pack('>I',len(data))+kind+data+struct.pack('>I',zlib.crc32(kind+data)&0xffffffff)
+        icon=(b'\x89PNG\r\n\x1a\n'+png_chunk(b'IHDR',struct.pack('>IIBBBBB',1,1,8,6,0,0,0))+
+              png_chunk(b'IDAT',zlib.compress(bytes([0,17,53,211,128])))+png_chunk(b'IEND',b''))
+        icons=root/'local-only/native-weapon-icons';icons.mkdir()
+        icon_file=icons/'25.png';icon_file.write_bytes(icon)
+        digest=hashlib.sha256(icon).hexdigest()
+        resources=root/'local-only/resources-v1';resources.mkdir()
+        (resources/'catalog.json').write_text(json.dumps({'manifest':{'schema':1,'profile':'zgta-prepared-v1',
+            'contentID':digest,'resources':[{'path':'reference/weapons/25.png','bytes':len(icon),'sha256':digest,'required':False}]},
+            'files':{digest:{'path':str(icon_file),'bytes':len(icon)}}}))
         subprocess.run([sys.executable, str(root / 'host.py'), 'doctor'], check=True)
         environment = dict(os.environ, ZGTA_BROWSER_TASK_POLICY_PLAN='', ZGTA_CONNECTED='1', ZGTA_JOIN_CODE='stale-shell-code',
                            ZGTA_SOURCE_URL='https://source.example/my-fork')
@@ -115,8 +131,12 @@ def main():
             assert code == 200 and b'Synthetic test world' in body
             assert b'https://source.example/my-fork' in body and b'/local-gameplay.js' in body
             assert headers['Cross-Origin-Embedder-Policy'] == 'require-corp'
+            code, headers, body = request(number, '/reference/weapons/25.png')
+            assert code==200 and headers['Content-Type']=='image/png' and body==icon
             assert request(number, '/api/local/status', headers={'Host':'unlisted.example'})[0] == 421
             assert request(number, '/api/local/status', headers={'Origin':'https://another.example'})[0] == 403
+            assert request(number, '/reference/weapons/25.png', headers={'Host':'unlisted.example'})[0] == 421
+            assert request(number, '/reference/weapons/25.png', headers={'Origin':'https://another.example'})[0] == 403
         finally:
             stop(child)
         number, child = start(['--host','public.example'])
@@ -134,12 +154,14 @@ def main():
             assert len(original) >= 12 and stat.S_IMODE(key.stat().st_mode) == 0o600
             headers = {'Host':'lan.example'}
             assert request(number, '/api/auth/me', headers=headers)[0] == 401
+            assert request(number, '/reference/weapons/25.png', headers=headers)[0] == 401
             wrong = dict(headers, **{'Content-Type':'application/json'})
             assert request(number, '/api/local/join', 'POST', '{"code":"wrong"}', wrong)[0] == 403
             code, joined, _ = request(number, '/api/local/join', 'POST', json.dumps({'code':original}), wrong)
             assert code == 200
             headers['Cookie'] = joined['Set-Cookie'].split(';')[0]
             assert request(number, '/api/auth/me', headers=headers)[0] == 200
+            assert request(number, '/reference/weapons/25.png', headers=headers)[2] == icon
             # A loopback reverse proxy must not silently bypass its configured code.
             assert request(number, '/api/auth/me', headers={'X-Forwarded-For':'192.0.2.10'})[0] == 401
             assert key.read_text().strip() == original
@@ -160,7 +182,7 @@ def main():
             pass
         else:
             raise AssertionError('Import must reject symlinks')
-    print('PASS fresh host: guest play, stale-mode isolation, source link, LAN code, Host/Origin gates and private asset import')
+    print('PASS fresh host: guest play, stale-mode isolation, source link, prepared icon bytes/type, LAN code, Host/Origin/icon gates and private asset import')
 
 
 if __name__ == '__main__':

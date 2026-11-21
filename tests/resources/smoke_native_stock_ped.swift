@@ -162,12 +162,17 @@ final class StockPedTests {
             require(!value.plan.model.draws.isEmpty && !value.plan.skeleton.bones.isEmpty,"Original model lacks a real skeletal/material plan")
             require(value.resourceBytes<=64*1024*1024,"Original model exceeds prepared-family bound")
             do{try value.plan.skeleton.encodedSKN1().write(to:self.out.appendingPathComponent("owner-"+item.name+".skn.bin"))}catch{fatalError("Private skeleton evidence write: \(error)")}
-            if let device=self.device{self.checkOwnerUpload(value,device:device)}
+            if let device=self.device{self.checkOwnerUpload(value,device:device,referenceSkeleton:URL(fileURLWithPath:item.skeleton))}
             self.latest=value;DispatchQueue.main.async{self.ownerNext()}
         }
     }catch{fatalError("Original owner setup: \(error)")}}
-    func checkOwnerUpload(_ value:NativeStockPedLoader.Prepared,device:MTLDevice){do{
-        let uploaded=try NativeRenderWarePedModel.Uploaded(plan:value.plan,device:device)
+    func checkOwnerUpload(_ value:NativeStockPedLoader.Prepared,device:MTLDevice,referenceSkeleton:URL){do{
+        guard let expected=NativeSkeletalActor(data:try Data(contentsOf:referenceSkeleton),vertexCount:value.plan.skeleton.vertices.count,device:device)else{
+            fatalError("Original prepared-family reference skeleton is invalid")
+        }
+        let uploaded=try NativeRenderWarePedModel.Uploaded(plan:value.plan,device:device,validateActor:{actor in
+            require(actor.matchesRig(expected),"Original full rig/skin order differs from its prepared actor family")
+        })
         require(uploaded.actor.vertexCount==value.plan.skeleton.vertices.count,"Original actor GPU skin vertex count mismatch")
         require(uploaded.resources.textures.count==value.plan.model.textures.count,"Original material GPU image count mismatch")
         for (source,image)in zip(value.plan.model.textures,uploaded.resources.textures){

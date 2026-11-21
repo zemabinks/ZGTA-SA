@@ -22,6 +22,9 @@ private final class QueryCarrier {
     var passiveCameraRay:NativePassiveCameraTrace.Ray?
     init(_ manager:NativeGroundVehicle){groundVehicle=manager}
     func loadCollision(name:String){requestedCells.insert(name)}
+    // Appearance loading is observed separately from the real body/query test.
+    var sharpRequests=0
+    func loadWorldSharpIfNeeded(){sharpRequests+=1}
     func query(_ origin:SIMD3<Float>,_ direction:SIMD3<Float>,_ distance:Float,vehiclePolicy:Bool=true)->Float? {
         cameraRay(from:origin,direction:direction,distance:distance,originalVehiclePolicy:vehiclePolicy)
     }
@@ -182,6 +185,7 @@ private func lifecycle(_ output:URL)throws {
     try require(carrier.passiveCameraRay?.bodyKind=="kinematic-position","passive query records actual body kind")
     _ = carrier.query(SIMD3(374,10,1),SIMD3(1,0,0),3)
     try require(carrier.passiveCameraRay?.result=="unavailable","passive query distinguishes missing coverage from a solid hit")
+    try require(carrier.sharpRequests>0,"actual query retains original surface-detail admission")
     carrier.passiveCameraTrace=nil
     _ = try finish(recording)
 }

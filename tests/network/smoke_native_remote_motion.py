@@ -19,7 +19,7 @@ def main():
     paths=[ROOT/'ios/App'/(n+'.swift')for n in names]
     paths += [Path(__file__).resolve(),Path(__file__).with_suffix('.swift')]
     paths += [ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientPedestrians']]
-    shot_sources=[ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeHumanShots','NativeWeaponFlash']]
+    shot_sources=[ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeHumanShots','NativeWeaponFlash','NativeShotOwners']]
     paths += shot_sources
     if args.owned_reference:paths.append(args.owned_reference.resolve())
     frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths}
@@ -29,8 +29,8 @@ def main():
     common+='\n'+block(actor,'struct NativePedestrianMotion {')
     common+='\n'+'\n'.join(block(melee,n)for n in ['struct NativeMeleeProbe {','struct NativeMeleeEvent {','enum NativeMeleeTargeting {'])
     packet=block(network,'    private func updateRows(').replace('ProcessInfo.processInfo.systemUptime','receiptTime')
-    fields=renderer[renderer.index('    var remotePlayers: [RemotePlayer]'):renderer.index('    var remoteVehicles: [RemoteVehicle]')]
-    scene=fields+'\n'+'\n'.join(block(renderer,n)for n in ['    private static func remoteAppearanceIsFoot(','    private func resetRemoteFootPresentation()','    private func recordRemoteFootPackets()','    func advanceRemoteFootPresentation('])
+    fields=renderer[renderer.index('    var remotePlayers: [RemotePlayer]'):renderer.index('    var presentedRemotePlayers: [RemotePlayer]')]+'\n'+block(renderer,'    var presentedRemotePlayers: [RemotePlayer]')
+    scene=fields+'\n'+block(renderer,'    private func recordLocalShotPlayerOwners()')+'\n'+'\n'.join(block(renderer,n)for n in ['    private static func remoteAppearanceIsFoot(','    private func resetRemoteFootPresentation()','    private func recordRemoteFootPackets()','    func advanceRemoteFootPresentation('])
     # UIKit/Metal/attachment seams are explicit spies. Packet codec, scene
     # admission, frame sampling and target factories are literal source.
     draw=next(line.strip()for line in renderer.splitlines()if line.strip().startswith('let footPosition=remoteSupportPosition(player) ?? player.position'))

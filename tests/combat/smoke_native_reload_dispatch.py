@@ -40,10 +40,10 @@ final class Renderer {
 final class Audio {var reloads=0,cancels=0;func reload(weapon:Int){reloads+=1};func cancelReload(){cancels+=1}}
 final class DispatchGameplay {
     let actualOffline=NativeGameplayClient(server:ServerAddress("http://127.0.0.1:1")!)
-    var rejectInline=false,calls=0,pending:[(Bool?)->Void]=[]
-    func perform(_ action:String,completion:@escaping(Bool?)->Void){
-        calls+=1
-        if rejectInline {actualOffline.perform(action,completion:completion)}
+    var rejectInline=false,calls=0,pending:[(Bool?)->Void]=[],successReports:[Bool]=[]
+    func perform(_ action:String,reportSuccess:Bool=true,completion:@escaping(Bool?)->Void){
+        calls+=1;successReports.append(reportSuccess)
+        if rejectInline {actualOffline.perform(action,reportSuccess:reportSuccess,completion:completion)}
         else {pending.append(completion)}
     }
     func complete(_ result:Bool?){let callback=pending.removeFirst();callback(result)}
@@ -80,6 +80,7 @@ final class Harness {
 
         let deferred=Harness();deferred.baseline();deferred.reload();deferred.reload()
         check(deferred.gameplay.calls==1 && deferred.renderer!.starts==1 && deferred.audio.reloads==1,"Pending reload must present and submit only once")
+        check(deferred.gameplay.successReports==[false],"Owned reload HUD emitted an unowned persistent success toast")
         check(deferred.weapons.reloading && !deferred.weapons.canFire,"Pending reload did not block further rounds")
         deferred.gameplay.complete(false)
         check(!deferred.weapons.reloading && deferred.weapons.canFire && deferred.renderer!.cancels==1,"Delayed definitive rejection did not roll back reload")

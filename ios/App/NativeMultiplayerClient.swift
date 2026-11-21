@@ -381,6 +381,7 @@ final class NativeMultiplayerClient {
     var onOriginalGuns: ((Any,Bool)->Void)?
     var onAuthenticationRequired: (()->Void)?
     var onOriginalShot: (([String:Any])->Void)?
+    var onAcceptedStrike: (([String:Any])->Void)?
     var onOriginalRecord: ((UInt8,Data)->Void)?
     var onAmbientPedestrianConfiguration:((Double,String?)->Void)?
     var onAmbientPedestrianEvent:((NativeAmbientPedestrianProtocol.Event,Double,Double)->Void)?
@@ -487,6 +488,7 @@ final class NativeMultiplayerClient {
     var onIncomingHit:((NativeIncomingHit)->Void)?
     var onRespawn: (() -> Void)?
     private(set) var couplingAcknowledgements=false
+    private(set) var ordinaryShotGroupsEnabled=false
     private(set) var couplingRevision:Int?
     private(set) var couplingLinks:[NativeCouplingLink]=[]
     private var couplingIssued=0,couplingProcessed=0
@@ -608,7 +610,7 @@ final class NativeMultiplayerClient {
             }
             parts.scheme=server.url.scheme=="https" ? "wss":"ws"
             guard let value=parts.url else { failTransport(generation:generation,reason:"INVALID MULTIPLAYER ADDRESS");return }
-            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1,"npcProtocol":38]
+            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1,"npcProtocol":38,"ordinaryShots":1]
         case .originalWorld(let build,let deviceID):
             do {
                 let originalURL=try NativeOriginalWorldProtocol.liveURL(deviceID:deviceID)
@@ -644,6 +646,7 @@ final class NativeMultiplayerClient {
         deliveredRespawnSequence=0
         deliveredHitRevision=nil;deliveredHitSequence=nil
         couplingAcknowledgements=false;couplingRevision=nil;couplingLinks=[]
+        ordinaryShotGroupsEnabled=false
         couplingIssued=0;couplingProcessed=0;pendingCouplings.removeAll()
         vehicleSeats.reset()
         onInventoryConnection?(nil)
@@ -924,9 +927,31 @@ final class NativeMultiplayerClient {
             if sent{shots+=1}
             return sent
         }
-        // Existing SA-MP and acknowledged self-host adapters accept a single
-        // emission/ticket. Keep that authority boundary until a separately
-        // negotiated multi-target policy exists; do not spend per pellet.
+        if ordinaryShotGroupsEnabled,legacy==nil {
+            guard isReady,let task=socket,health>0,!passive,let ticket,
+                  ticket.connection==inventoryConnection,let first=packets.first,
+                  let origin=first["o"],let end=first["h"],shotSequence.claim(ticket) else{return false}
+            let groups=packets.map{packet -> [String:Any] in
+                var group=packet;group["t"]=nil;group["w"]=nil;return group
+            }
+            let message:[String:Any]=["t":"shot","w":weapon,"s":ticket.sequence,"c":ticket.connection,
+                                      "o":origin,"h":end,"rays":groups]
+            guard let data=try? JSONSerialization.data(withJSONObject:message),let text=String(data:data,encoding:.utf8)else{
+                requestInventoryResync();return false
+            }
+            shots+=1
+            task.send(.string(text)){[weak self]error in
+                DispatchQueue.main.async{
+                    guard let self,self.socket === task,self.inventoryConnection==ticket.connection else{return}
+                    if let error{self.failTransport(generation:self.transportGeneration,reason:error.localizedDescription)}
+                }
+            }
+            // The negotiated server settles all target groups with this one
+            // emission. A follow-up legacy hit would duplicate its authority.
+            return true
+        }
+        // Existing SA-MP and older self-host adapters retain one compatible
+        // target claim per emission until they negotiate grouped authority.
         guard let first=claims.first else{return false}
         return sendWeaponShot(weapon:weapon,from:SIMD3<Float>(first.origin),to:SIMD3<Float>(first.end),
             player:first.kind==1 ? first.target?.id:nil,ticket:ticket,
@@ -1487,6 +1512,10 @@ final class NativeMultiplayerClient {
             // owner as the original-world adapter, with no duplicate sound.
             if let onOriginalShot {onOriginalShot(message)}
             else if let weapon = message["w"] as? Int {onWeaponSound?(weapon)}
+        case "struck":
+            guard isReady,ordinaryShotGroupsEnabled,message["c"]as?String==inventoryConnection,
+                  let sequence=NativePlacementSession.integer(message["s"]),sequence>0 else{return}
+            onAcceptedStrike?(message)
         case "inventory":
             if let state = message["state"] as? [String: Any], let ack = NativeInventoryAcknowledgement(state),
                ack.connection == inventoryConnection, NativeConnectionRecovery.validInventory(state) {
@@ -1514,6 +1543,7 @@ final class NativeMultiplayerClient {
             }
             if freshHello {
                 couplingAcknowledgements=NativeHealthPrediction.integer(message["couplingAck"])==1
+                ordinaryShotGroupsEnabled=NativeHealthPrediction.integer(message["ordinaryShots"])==1
                 announcedInventoryConnection=nonce;onInventoryConnection?(nonce)
             }
             guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}

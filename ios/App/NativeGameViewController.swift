@@ -408,6 +408,7 @@ final class NativeGameViewController: UIViewController {
         }
         network.onWeaponSound = { [weak self] weapon in self?.audio.shot(weapon:weapon) }
         network.onOriginalShot = {[weak self] shot in self?.renderer?.receiveOriginalShot(shot)}
+        network.onAcceptedStrike = {[weak self] strike in self?.renderer?.receiveAcceptedStrike(strike)}
         renderer?.onSpatialWeaponShot = {[weak self] weapon,position in self?.audio.shot(weapon:weapon,at:position)}
         renderer?.onRemoteGunAudio = {[weak self] event in self?.audio.remoteGun(event)}
         renderer?.onBulletPass = {[weak self] event in
@@ -1559,6 +1560,7 @@ final class NativeGameViewController: UIViewController {
     private func setAiming(_ value: Bool) {
         aiming = value && usingPistol && !usingMelee && currentVehicle == nil && renderer?.canMaintainFootAim == true
         renderer?.aiming = aiming
+        aimButton.isSelected = aiming
         gameHUD.setAiming(aiming, scoped: weapons.selected == 34)
         aimButton.backgroundColor = UIColor.black.withAlphaComponent(aiming ? 0.7 : 0.3)
     }
@@ -1587,7 +1589,7 @@ final class NativeGameViewController: UIViewController {
         let requestID=weapons.beginReloadRequest()
         let connection=network.inventoryConnection
         var dispatchReturned=false,synchronouslyRejected=false
-        gameplay.perform("weapon.reload") { [weak self] result in
+        gameplay.perform("weapon.reload",reportSuccess:false) { [weak self] result in
             guard let self else{return}
             guard self.network.inventoryConnection==connection else{return}
             self.weapons.finishReloadRequest(id:requestID,succeeded:result)
@@ -1603,7 +1605,6 @@ final class NativeGameViewController: UIViewController {
         renderer?.fireWeapon(clip: renderer?.crouching == true ? clips.crouchReload : clips.reload, duration: 1.8)
         audio.reload(weapon: weapons.selected)
         updateWeaponHUD()
-        status.text = "RELOADING \(weapons.current.name.uppercased())"
     }
 
     @objc private func attack() {
@@ -2037,7 +2038,12 @@ final class NativeGameViewController: UIViewController {
             }
         }
         let timing = frameClock.advance(timestamp: link.timestamp, active: active)
-        if timing.discontinuity { resetControls();renderer?.rebaseLegacyObjectClock() }
+        if timing.discontinuity {
+            // A foreground render hitch skips simulation debt, but cannot
+            // synthesize releases for a held stick/key or the touch aim latch.
+            if timing.invalidatesInput { resetControls() }
+            renderer?.rebaseLegacyObjectClock()
+        }
         let delta = Float(timing.delta)
         stepOriginalGameplay(timing.steps)
         weapons.tick()

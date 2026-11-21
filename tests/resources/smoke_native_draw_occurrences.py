@@ -113,8 +113,9 @@ private struct VehicleDrawContext: Equatable { let marker: Int }
 private struct TransparentVehicleDraw {}
 // Draw-local shot staging is declared alongside the occurrence queue but is
 // not populated/evaluated by this ownership carrier. Geometry has separate
-// actual-source gates; these two declarations are opaque type boundaries.
+// actual-source gates; these declarations are opaque type boundaries.
 private struct LocalShotVehicleFrame {}
+private struct LocalShotOccupantFrame {}
 private enum NativeLocalShots { struct Occupant {} }
 private struct Observation {
     let name: String, position: SIMD3<Float>, angle: Float, pitch: Float

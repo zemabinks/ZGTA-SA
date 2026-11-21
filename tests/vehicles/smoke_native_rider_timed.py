@@ -159,7 +159,7 @@ final class RendererCarrier {
 ''' + declarations + r'''
     let remoteGunAudio=NativeRemoteGunAudio(),weaponFlashes=NativeWeaponFlash()
     var onRemoteGunAudio:((NativeRemoteGunAudio.Event)->Void)?
-    var localShotVehicles=[42],localShotVehiclesAt:Double=1,localShotVehicleSource:String?="old-source"
+    var localShotVehicles=[42],localShotVehicleSource:String?="old-source"
     var now:Double=0
     let view=View();var renderClock=RenderClock()
     var remoteServerTimeOffsetMilliseconds:Double?=1

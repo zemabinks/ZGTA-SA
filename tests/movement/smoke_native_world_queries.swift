@@ -16,6 +16,10 @@ final class QueryFixture {
     var activeDetails:Set<String>=["c119"]
     var collisionRequests=NativeCollisionRequests(),desiredPhysicsCells=Set<String>(),requested=Set<String>()
     func loadCollision(name:String){requested.insert(name)}
+    // Explicit appearance boundary: the actual query still requests original
+    // surface detail, while this carrier exercises real Rapier geometry only.
+    var sharpRequests=0
+    func loadWorldSharpIfNeeded(){sharpRequests+=1}
     func query(_ start:WorldVector,_ way:WorldVector,_ distance:Float)->NativeWorldRay.Result {
         worldRay(from:start,direction:way,distance:distance,groups:0xffff0083)
     }
@@ -44,6 +48,7 @@ final class QueryFixture {
     if case .unavailable(let at)=scene.query(start,way,2){check(abs(at-1)<0.0001,"Missing cell stops camera at its boundary")}
     else{fatalError("Missing geometry must not be a clear ray")}
     check(scene.requested.contains("c120"),"Renderer requests missing ray geometry")
+    check(scene.sharpRequests==3,"Actual query retains original surface-detail admission")
     let cameraTable=try! Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
     let follow=try! NativeGameCamera(data:cameraTable)
     follow.setDirection(heading:Float.pi/2,pitch:0)
@@ -85,10 +90,16 @@ final class QueryFixture {
     let waiting=NativeWeaponEffects();var trails=0
     waiting.onTrail={_,_,_ in trails += 1};waiting.geometryAvailable={_,_,_ in false}
     waiting.launch(weapon:35,from:WorldVector(0,0,10),direction:way);waiting.advance(delta:0.2)
-    check(waiting.projectiles[0].position==WorldVector(0,0,10) && waiting.projectiles[0].age==0 && trails==0,"Missing geometry freezes prediction without fake impacts/trails")
+    check(waiting.projectiles[0].position==WorldVector(0,0,10) && abs(waiting.projectiles[0].age-0.2)<0.0001 && trails==0,"Missing geometry holds motion while the existing lifetime policy advances without fake impacts/trails")
     waiting.geometryAvailable={_,_,_ in true};waiting.advance(delta:0.2)
     check(abs(waiting.projectiles[0].position.x-13)<0.0001 && trails==12,"Prediction resumes without catch-up through missing walls")
     waiting.advance(delta:1.0);check(trails==12,"Suspension does not run a giant projectile step")
+    let expiring=NativeWeaponEffects();var blockedBlasts=0,blockedTrails=0
+    expiring.geometryAvailable={_,_,_ in false}
+    expiring.onDetonation={_ in blockedBlasts+=1};expiring.onTrail={_,_,_ in blockedTrails+=1}
+    expiring.launch(weapon:35,from:WorldVector(0,0,10),direction:way)
+    for _ in 0..<360 {expiring.advance(delta:1.0/60)}
+    check(expiring.projectiles.isEmpty && blockedBlasts==0 && blockedTrails==0,"Blocked prediction expires without inventing a blast or retaining an immortal projectile")
     let malformed:[[String:Any]]=[
         ["id":"p-1","weapon":16,"position":[0,0,10],"velocity":[1,0,0]],
         ["id":"p-1","weapon":16,"position":[0,0,10],"velocity":[1,0,0]],

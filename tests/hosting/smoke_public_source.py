@@ -11,6 +11,8 @@ import subprocess
 import sys
 import tempfile
 import importlib.util
+import contextlib
+import io
 
 CHECK = Path(__file__).resolve().parents[2] / 'tests/hosting/check_public_source.py'
 
@@ -31,6 +33,29 @@ def main():
                  'native-audio/vendor/libvorbis-1.3.7/recording.c',
                  'native-audio/tests/original-track.bin', 'local-only/native-audio/source-stamp.json']:
         assert not guard.allowed(name), name
+    with tempfile.TemporaryDirectory(prefix='zgta-release-nested-server-') as temporary:
+        root = Path(temporary)
+        (root / 'README.md').write_text('# Authored source fixture\n')
+        server = root / 'server/population'
+        server.mkdir(parents=True)
+        (server / 'tasks.js').write_text('module.exports = {};\n')
+        found = {path.relative_to(root).as_posix() for path in guard.source_files(root)}
+        assert 'server/population/tasks.js' in found, 'Directory audit skipped nested server source'
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            assert guard.audit(root, directory=True) == 0
+            hidden = server / 'hidden.js'
+            hidden.write_bytes(b'authored binary sentinel\x00')
+            assert guard.audit(root, directory=True) == 1, 'Nested binary source escaped release guard'
+            hidden.unlink()
+            private = server / 'players.json'
+            private.write_text('{}')
+            assert guard.audit(root, directory=True) == 1, 'Nested private file escaped release guard'
+            private.unlink()
+            outside = root / 'outside.js'
+            outside.write_text('module.exports = {};\n')
+            linked = server / 'linked.js'
+            linked.symlink_to(outside)
+            assert guard.audit(root, directory=True) == 1, 'Nested symbolic link escaped release guard'
     with tempfile.TemporaryDirectory(prefix='zgta-release-history-') as temporary:
         root = Path(temporary)
 

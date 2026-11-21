@@ -1,5 +1,89 @@
 # Core gameplay audit journal
 
+## Core176–177 — scoped input, resource and flight acceptance
+
+Positive foreground render hitches retain held input and touch aim while
+skipping excess simulation time. Clock reversal and existing focus/modal
+ownership loss still clear controls. Successful reloads use their owned HUD and
+animation feedback without leaving a generic progress message after completion.
+
+Core176 passes both SDK products, the full physics/audio/transport source chain,
+four normal resource-preserving joins, six grouped ordinary-shot markers and a
+separate scoped far-target case. The latter confirms the original distant actor,
+source delivery, ammunition, damage and retained touch aim. All 26 selected
+captures are reviewed. The older Core173 far-target failure remains recorded;
+it is not relabeled by this newer case. Scope captures also demonstrate exposed
+world strips outside the shortened HUD mask; that presentation gap remains open
+in this verified build.
+
+Native setup prepares source-resolution weapon icons before indexing. Repeated
+preparation verifies current definition/TXD and output identities before reuse;
+changed or corrupt output fails without replacing the retained generation. Ten
+authored tests pass. Persistent installed icon-package updates remain unverified.
+
+An isolated, explicitly supplemental pedestrian identity admits the user's
+original Maccer model without mislabeling it as a retail IDE entry. Genuine
+collision inventory regeneration, complete native rig admission, original
+material/GPU checks and normal original-model drawing pass in the unchanged
+Core176 app. The normal four-join case retains resources and settings. Selected
+captures confirm original artwork; resources and supplemental local configuration
+are not distributed in this source repository.
+
+Separate normal-input jetpack cases cover short forward takeoffs and a stronger
+vertical-thrust, held-brake, descent and landing sequence. The stronger case has
+airborne packets during braking/descent and sampled landing headings without a
+half-turn. Post-case samples also show a steady
+airborne interval during each held brake. All 32 selected flight stills across
+the two cases are reviewed. These samples do not rule out subframe animation
+faults or establish original-PC flight timing. The first case's nominal hover
+and descent phases were grounded, so that case alone does not verify them.
+
+Standing/crouched feet remain visually questionable. Old contact log records
+were truncated; a separate read-only debugger attempt failed to decode its array
+and detached cleanly. No incomplete measurement supplies a guessed height fix.
+Vehicle hierarchy timing, full vehicle-health authority, browser/native combat
+accounting, continuous animation, device performance and original-PC fidelity
+remain open. No complete-game or 1:1 claim is made.
+
+## Core173–175 — combat ownership and original HUD resource support
+
+The independent server negotiates grouped ordinary shots with compatible
+native clients. One firing marker spends one cartridge and sequence; each
+admitted target group settles once. Player damage uses the server's catalog,
+world/life/coverage checks and accepted strike metadata. Vehicle hit reports
+still do not supply complete vehicle-health authority. Older browser and
+legacy adapters retain their own accounting and protocol limits.
+
+Vehicle queries refresh admitted bodies and nominal tyres through the shared
+read-only transform producers. Actor/registry lifetimes, resource identity and
+compact-vehicle promotion fence completed geometry. A shot query never advances
+physics or animation. Model-local hierarchy/visibility and human manually
+followed poses remain tied to their last completed presentation phase.
+
+The HUD clears superseded weapon images, rejects stale source completions and
+reuses loaded requests. An optional local converter prepares original HUD
+sprites at their source resolution and adds them to the prepared resource
+index. It requires the user's original files; those files are excluded from
+this repository. Preparing a resource is separate from verifying its use in
+the running app and after a persistent resource update.
+
+Both Core175 SDK products and the complete current physics, audio and
+transport regression chain pass. Normal Simulator acceptance covers four
+retained-resource joins, walking, Taxi driving and entry/exit. A separate
+normal-input firing case accepts six pistol/shotgun emissions, server-owned
+ammunition, an authored target hit and an original vehicle-hull report. The 21
+selected passing-case captures are reviewed; checked resources and preferences
+are preserved and owned test processes stop. The earlier firing fixture failure
+remains recorded separately from the unchanged-app passing retry.
+
+Original pistol and shotgun HUD artwork is visible through the controlled
+resource HTTP route. Persistent icon-package update acceptance is still open.
+The earlier scoped far-target case also remains failed: no final distant hit
+or stock-model draw was accepted. Source-only range tests do not establish
+that App behavior. Crouch contact, complete vehicle authority, browser/native
+accounting, physical-device performance and original-PC fidelity remain open.
+No complete-game or 1:1 claim is made.
+
 ## Core170–172 — ordinary combat and retained-world integration
 
 Human shots reuse bounded native bullet presentation with distinct source

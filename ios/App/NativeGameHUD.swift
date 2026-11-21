@@ -386,11 +386,16 @@ final class NativeGameHUD: UIView {
     let vehicle = NativeBitmapLabel()
     private let stats = UIView()
     private let aim = NativeAimHUDView()
-    private var weaponRequestID = 0
+    private var weaponIconSourceKey:String?
+    private var weaponIconRequest:NativeResourceTask?
+    private var weaponIconToken=UUID()
+    private var weaponIconRetryAt:TimeInterval=0
     private var wantedLevel = 0
     private var currentCash: Int?
     private let cashChange = NativeBitmapLabel()
     private var cashChangeTimer: Timer?
+
+    deinit {weaponIconRequest?.cancel()}
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -493,12 +498,34 @@ final class NativeGameHUD: UIView {
         let minutes = Int(hour * 60) % 1440
         clock.text = String(format: "%02d:%02d", minutes / 60, minutes % 60)
     }
+    private func weaponIconSource(server:ServerAddress,weapon:Int)->String {
+        let binding=NativeResourceStore.shared.runtimeBinding
+        return [server.display,binding.generation.uuidString,binding.mode.rawValue,
+            binding.contentID ?? "",binding.developmentOrigin ?? "",binding.playable ? "ready":"unverified",String(weapon)].joined(separator:"|")
+    }
     func loadWeaponIcon(server: ServerAddress, weapon id: Int) {
-        weaponRequestID = id
-        NativeResourceTransport.dataTask(with: server.path("reference/weapons/\(id).png")) { [weak self] data, response, _ in
-            guard (response as? HTTPURLResponse)?.statusCode == 200, let data, let image = UIImage(data: data) else { return }
-            DispatchQueue.main.async { if self?.weaponRequestID == id { self?.weaponIcon.image = image } }
-        }.resume()
+        let key=weaponIconSource(server:server,weapon:id)
+        if weaponIconSourceKey != key {
+            weaponIconRequest?.cancel();weaponIconRequest=nil
+            weaponIconToken=UUID();weaponIconSourceKey=key;weaponIconRetryAt=0
+            weaponIcon.image=nil
+        }
+        // Inventory ACKs and ammunition changes do not create another request
+        // for an already loaded or in-flight image of the same source/weapon.
+        guard weaponIconRequest==nil,weaponIcon.image==nil,
+              ProcessInfo.processInfo.systemUptime>=weaponIconRetryAt else{return}
+        let token=UUID();weaponIconToken=token
+        let request=NativeResourceTransport.dataTask(with:server.path("reference/weapons/\(id).png")){[weak self]data,response,error in
+            let image=error==nil && (response as? HTTPURLResponse)?.statusCode==200 ? data.flatMap{UIImage(data:$0)}:nil
+            DispatchQueue.main.async {
+                guard let self,self.weaponIconToken==token,self.weaponIconSourceKey==key,
+                      self.weaponIconSource(server:server,weapon:id)==key else{return}
+                self.weaponIconRequest=nil
+                self.weaponIcon.image=image
+                self.weaponIconRetryAt=image==nil ? ProcessInfo.processInfo.systemUptime+2:.infinity
+            }
+        }
+        weaponIconRequest=request;request.resume()
     }
     func loadFont(server: ServerAddress) { NativeHUDResources.shared.load(server: server) }
     func setAiming(_ on: Bool, scoped: Bool = false) {

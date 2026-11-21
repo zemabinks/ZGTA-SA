@@ -34,7 +34,7 @@ final class NativeMultiplayerClient {
 final class NativeGameplayClient {
  let server:ServerAddress;var calls=0,state:[String:Any]=[:]
  init(server:ServerAddress){self.server=server}
- func perform(_ action:String,payload:[String:Any]=[:],completion:((Bool?)->Void)?=nil){calls+=1;completion?(false)}
+ func perform(_ action:String,payload:[String:Any]=[:],reportSuccess:Bool=true,completion:((Bool?)->Void)?=nil){calls+=1;completion?(false)}
 }
 final class NativeVehicleRadio {let server:ServerAddress;init(server:ServerAddress){self.server=server}}
 final class NativeGameAudio {

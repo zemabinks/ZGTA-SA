@@ -4,7 +4,7 @@ import simd
 // No asset/HTTP/Metal/physics fixture: only the pure task controllers and real
 // camera run. UI, source admission and unused CLP/ledge geometry are explicit spies.
 final class UIColor { static let black=UIColor();func withAlphaComponent(_ alpha:Double)->UIColor{self} }
-final class Button {var backgroundColor:UIColor?}
+final class Button {var backgroundColor:UIColor?;var isSelected=false}
 final class HUD {
     var aiming=false,scoped=false,changes=0
     func setAiming(_ value:Bool,scoped:Bool){aiming=value;self.scoped=value && scoped;changes+=1}
@@ -138,14 +138,14 @@ if historicalFlight {
 for hz in [15,30,60,120] {for task in ["swim","chute","climb"] {for owner in ["touch","controller","keyboard"] {for weapon in [22,34] {
     let r=try Renderer(),g=Owner(r);r.equippedWeapon=weapon;g.weapons.selected=weapon
     if owner=="touch"{g.toggleAim()}else{g.poll(held:owner=="controller",keyboardHeld:owner=="keyboard")}
-    check(g.aiming && r.aiming && g.gameHUD.aiming,"Fresh legitimate aim failed")
+    check(g.aiming && r.aiming && g.gameHUD.aiming && g.aimButton.isSelected,"Fresh legitimate aim failed")
     for _ in 0..<hz{_=r.render(step:1.0/Double(hz))}
     check(r.gameCameraFrame!.hidesPlayer==(weapon==34),"Authored camera setup did not select expected scope")
     var cancellations=0
     let callback=r.onFootAimCancelled
     r.onFootAimCancelled={cancellations+=1;callback?()}
     r.enter(task)
-    check(!g.aiming && !r.aiming && !g.gameHUD.aiming && !g.gameHUD.scoped,"Accepted \(task) failed to retire existing \(owner) aim")
+    check(!g.aiming && !r.aiming && !g.gameHUD.aiming && !g.gameHUD.scoped && !g.aimButton.isSelected,"Accepted \(task) failed to retire existing \(owner) aim")
     check(cancellations==1,"Task cancellation must deliver exactly once")
     check(!r.render(step:1.0/Double(hz)).hidesPlayer,"Task kept scoped render camera")
     r.enter(task);check(cancellations==1,"Repeat task/no-latch emitted duplicate cancellation")

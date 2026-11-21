@@ -94,6 +94,8 @@ def setup(args):
             ('tools/assets/prepare_native_weapon_flashes.py',),
             ('tools/assets/prepare_native_skeletons.py', '--all', '--archive-all-blocks'),
             ('tools/assets/prepare_native_hud.py',), ('tools/assets/prepare_native_weapons.py',),
+            ('tools/assets/prepare_native_weapon_icons.py', '--catalog', 'local-only/site/game/native/weapons.json',
+             '--game', 'local-only/site/game', '--if-needed'),
             ('tools/assets/prepare_native_audio.py',), ('tools/assets/prepare_native_contact_audio.js',),
             ('tools/assets/prepare_native_environment.py',), ('tools/assets/prepare_native_atmosphere.py',),
             ('tools/assets/prepare_native_water_waves.py',), ('tools/assets/prepare_native_camera.py',),
