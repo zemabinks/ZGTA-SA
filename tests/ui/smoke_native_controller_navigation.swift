@@ -62,6 +62,7 @@ final class Harness:UIViewController {
     var controllerGate=NativeControllerInputGate(),previousPad=NativeGameBindings.Pad()
     weak var menuControllerPad:GCExtendedGamepad?;var controllerMenuEdge=NativeReleaseEdge(pressed:true)
     let weaponCycle=NativeWeaponCycleQueue();var inputWasAvailable=false
+    var trafficVehicleEntry=NativeTrafficVehicleEntry()
     var heldKeys:Set<HID>=[],legacyKeys=0,legacyAxes=SIMD2<Float>.zero,legacySpecialKeys=0,legacyCrouchUntil:Double=0
     var touchMeleeGuard=false,run=false,gasPressed=false,brakePressed=false,handbrakePressed=false,flightBrakePressed=false
     var hornPressed=false,bunnyHopPressed=false,nozzleUpPressed=false,nozzleDownPressed=false,firePressed=false,autoReloadWeapon:Int?
@@ -126,6 +127,7 @@ if expectedHistorical {
         let (h,p)=setup();h.context.mode=mode;h.network.isReady=false;_ = h.poll();p.buttonMenu.isPressed=true;_ = h.poll()
         check(h.events==[.pause],"offline navigation is independent of movement context")
     }
+    do {let (h,p)=setup();_=h.trafficVehicleEntry.request(17,at:100);h.resetControls();check(h.trafficVehicleEntry.pending==nil,"Input boundary retained old materialization request");_ = p}
     // Gameplay release-to-rearm remains strict after source/connection replacement.
     for mode in [NativeGameBindings.Mode.foot,.vehicle("car"),.swim,.jetpack,.parachute,.climb] {
         let (h,p)=setup();h.context.mode=mode

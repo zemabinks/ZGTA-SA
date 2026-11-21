@@ -13,23 +13,29 @@ packaged public iPhone release. Users must supply their own supported game files
 | Development resources | Mac-hosted resources and reusable local caches | Broader installation and repair coverage |
 | Independent multiplayer | Guest access, shared players, vehicles and gameplay systems | Complete server systems and cross-client consistency |
 | Pedestrians | Server-owned population, original character resources, navigation, animation tasks and nearby contacts | Original density, social behavior, full events and AI |
-| Traffic and police | Supporting vehicle, navigation and gameplay foundations | Complete integrated simulation and original behavior |
+| Traffic and police | Typed traffic records, original road/vehicle presentation, optional seated actors and bounded nearby contacts | Original simulation, authority, density, police and complete behavior |
 | SA-MP/open.mp | Separate experimental compatibility adapter | Full server, extension and content compatibility |
 | Original browser service | Separate account/protocol integration | Complete world and gameplay interoperability |
 
 ## Latest verified source
 
-The current update adds separate NPC activity and waiting animation ownership,
-model-bound optional activity metadata and local actor lifetimes. Actor reuse
-retires old animation, ground-smoothing and nearby collision ownership while
-preserving server target identities.
+Compact traffic now has separate native record/scene ownership, original road
+prediction and vehicle presentation, bounded nearby contacts and materialization
+requests. Optional owner-provided metadata selects original seated characters.
+Source/session cleanup, graph and metadata retries, predicted lane presentation
+and passenger camera filtering have corresponding regressions.
 
-Selected source checks, Simulator/device compilation and controlled Simulator
-gameplay checks pass. These checks do not establish physical-device performance,
-exact animation timing or universal multiplayer compatibility. An intermittent
-missing pedestrian draw remains under investigation. Complete original-game
-parity has not been verified. See the
-[pedestrian implementation scope](research/gameplay/CORE_AMBIENT_PEDESTRIANS_158.md#npc-activities-waiting-and-local-lifetimes).
+Both unsigned native builds, the selected current source regression set and
+controlled retained-resource Simulator cases pass. Source acceptance combines
+unchanged earlier results with rerun affected sections; failed attempts remain
+recorded. Reviewed captures show original characters, Taxi/Infernus presentation
+and a seated passenger's healthy, dead and restored states. This does not prove
+complete animation quality, physical-iPhone performance or original-PC parity.
+
+Original traffic AI, ownership transfer/jacking, astride falls, driver gun/look/
+voice behavior and general traffic combat remain incomplete. The previously
+reported intermittent pedestrian draw still lacks a confirmed cause. See the
+[traffic implementation scope](research/gameplay/CORE_AMBIENT_TRAFFIC.md).
 
 ## Development priorities
 

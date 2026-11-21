@@ -18,6 +18,7 @@ ROOT=Path(__file__).resolve().parents[2]
 NAMES=['SwiftRapierWorld','NativeGroundVehicle','NativeOtherVehicles','NativeUnattendedVehicle',
        'NativeVehicleDamage','NativeVehicleDamageController','NativeVehicleDynamics','NativeVehicleForces',
        'NativeBikeDynamics','NativeFlightDynamics','NativeVehicleBuoyancy','NativeTrainDynamics','NativeVehicleCoupling']
+NAMES += [n for n in ['NativeAmbientPedestrianProtocol', 'NativeAmbientPedestrianPaths', 'NativeAmbientTrafficProtocol', 'NativeAmbientTrafficRoads', 'NativeAmbientTraffic', 'NativeAmbientTrafficMotion', 'NativeAmbientTrafficPresentation', 'NativeAmbientTrafficScene'] if n not in NAMES]
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)

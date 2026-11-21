@@ -3,7 +3,7 @@
 
 No game archive, imported model tables, graphics context or physics library is
 required. --prepare-only writes/checks inputs without invoking any compiler.
-An optional historical renderer must fail the first remote-aircraft assertion.
+An optional historical renderer must fail its explicitly selected witness.
 """
 
 import sys as _zgta_sys
@@ -17,6 +17,7 @@ import argparse,hashlib,json,os,platform,subprocess
 ROOT=Path(__file__).resolve().parents[2]
 HELPERS=['NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift',
          'NativeRemoteSuspension.swift','NativeRemoteBikeAnimation.swift']
+HELPERS += ['NativeAmbientPedestrianProtocol.swift', 'NativeAmbientPedestrianPaths.swift', 'NativeAmbientTrafficProtocol.swift', 'NativeAmbientTrafficRoads.swift', 'NativeAmbientTraffic.swift', 'NativeAmbientTrafficMotion.swift', 'NativeAmbientTrafficPresentation.swift', 'NativeAmbientTrafficScene.swift']
 METHOD='    private func vehicleRigFrame('
 STRUCTS=['OwnVehicleDrawSnapshot','ParkedVehicleDrawSnapshot','VehicleDrawContext']
 
@@ -142,14 +143,14 @@ def prepare(destination,renderer_source,helpers,test_source,fixtures):
 def execute(destination):
     environment=os.environ.copy();environment.pop('SDKROOT',None)
     executable=destination/'verify'
-    command=['xcrun','--sdk','macosx','swiftc','-parse-as-library','-whole-module-optimization',
+    command=['xcrun','--sdk','macosx','swiftc','-parse-as-library','-j','1','-whole-module-optimization','-num-threads','1',
              '-target',platform.machine()+'-apple-macosx13.0','-module-cache-path',str(destination/'modules')]
     command += [str(destination/name)for name in HELPERS]
     command += [str(destination/'RendererHarness.swift'),str(destination/'PresentationGate.swift'),'-o',str(executable)]
-    compiled=subprocess.run(command,env=environment,capture_output=True,text=True)
+    compiled=subprocess.run(command,env=environment,capture_output=True,text=True,timeout=240)
     (destination/'compile.log').write_text(compiled.stdout+compiled.stderr)
     if compiled.returncode:return dict(compileExitCode=compiled.returncode,status='COMPILE FAIL')
-    result=subprocess.run([str(executable),str(destination/'fixtures.json')],capture_output=True,text=True)
+    result=subprocess.run([str(executable),str(destination/'fixtures.json')],capture_output=True,text=True,timeout=60)
     (destination/'run.log').write_text(result.stdout+result.stderr)
     return dict(compileExitCode=0,exitCode=result.returncode,output=result.stdout+result.stderr,
                 status='PASS'if result.returncode==0 else'FAIL')
@@ -159,6 +160,7 @@ def main():
     parser.add_argument('--prepare-only',action='store_true')
     parser.add_argument('--out',type=Path,default=ROOT/'local-only/research/vehicle-presentation-122')
     parser.add_argument('--historical-root',type=Path)
+    parser.add_argument('--historical-witness',choices=['remote-aircraft','compact-health','compact-rotor'],default='remote-aircraft')
     args=parser.parse_args();out=args.out.resolve();out.mkdir(parents=True,exist_ok=True)
     paths=[ROOT/'ios/App'/name for name in HELPERS]+[ROOT/'ios/App/NativeWorldRenderer.swift',
              ROOT/'tests/vehicles/smoke_native_vehicle_presentation.swift',Path(__file__).resolve()]
@@ -185,7 +187,9 @@ def main():
         report['status']='PASS'if report['current']['status']=='PASS'else'FAIL'
         if args.historical_root:
             report['historical']=execute(out/'historical')
-            rejected=report['historical'].get('compileExitCode')==0 and report['historical'].get('exitCode')!=0 and 'remote helicopter presentation default' in report['historical'].get('output','')
+            witness={'remote-aircraft':'remote helicopter presentation default','compact-health':'compact health alone invented scorched materials','compact-rotor':'compact heli rotor default'}[args.historical_witness]
+            report['historicalWitness']=witness
+            rejected=report['historical'].get('compileExitCode')==0 and report['historical'].get('exitCode')!=0 and witness in report['historical'].get('output','')
             report['historicalRejectedForExpectedReason']=rejected
             if not rejected:report['status']='FAIL'
     report['sourceUnchanged']=all(Path(name).read_bytes()==data for name,data in snapshot.items())

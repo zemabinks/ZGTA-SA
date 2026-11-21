@@ -370,6 +370,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var identity:String?
         var ownFoot:Bool
         var canopySamples:[NativeFlightAnimation.Canopy?] = []
+        var trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil
     }
     /// A draw occurrence owns its source, even when another body has the same
     /// model and position. None of these render identities grants body control.
@@ -389,6 +390,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             case own(OwnVehicleDrawSnapshot)
             case remote(RemotePlayer)
             case parked(RemoteVehicle,ParkedVehicleDrawSnapshot?)
+            case traffic(NativeAmbientTrafficScene.Frame)
             case carriage(speed:Float)
         }
         let source:Source,token:String,appearanceCode:String
@@ -397,6 +399,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var player:RemotePlayer? {if case .remote(let value)=source{return value};return nil}
         var parked:RemoteVehicle? {if case .parked(let value,_)=source{return value};return nil}
         var parkedPhysical:ParkedVehicleDrawSnapshot? {if case .parked(_,let value)=source{return value};return nil}
+        var traffic:NativeAmbientTrafficScene.Frame? {if case .traffic(let value)=source{return value};return nil}
         var isCarriage:Bool {if case .carriage=source{return true};return false}
         var carriageSpeed:Float {if case .carriage(let value)=source{return value};return 0}
     }
@@ -900,10 +903,26 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var ambientPathTask:NativeResourceTask?
     private var ambientPathToken=UUID()
     private var ambientPathSource:String?
+    private var ambientPathRetryAfter:Double=0
     private var ambientAnimations:[UInt16:(identity:String,animation:NativeAmbientPedestrianAnimation)]=[:]
     private var ambientGround:[UInt16:(identity:String,z:Double,time:Double)]=[:]
     private var ambientBodies:NativeAmbientPedestrianBodies?
     private(set) var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
+    private let ambientTraffic=NativeAmbientTrafficScene()
+    private var ambientTrafficBodies:NativeAmbientTrafficBodies?
+    private var ambientRoadTask:NativeResourceTask?
+    private var ambientRoadToken=UUID()
+    private var ambientRoadRetryAfter:Double=0
+    private(set) var presentedAmbientTraffic:[NativeAmbientTrafficScene.Frame]=[]
+    private var trafficOccupantCatalog:(source:String,value:NativeTrafficOccupants.Catalog)?
+    private var trafficOccupantTask:NativeResourceTask?
+    private var trafficOccupantToken=UUID()
+    private var trafficOccupantSource:String?
+    private var trafficOccupantRetryAfter:Double=0
+    private var trafficGangs:[NativeTrafficOccupants.Gang]=[]
+    private var trafficOccupantSeats:[NativeTrafficOccupants.Seat]=[]
+    private var trafficOccupantAnimations:[String:(identity:String,value:NativeRiderAnimation)]=[:]
+    private var trafficOccupantDrawn:[String:String]=[:]
     var remotePlayers: [RemotePlayer] = [] { didSet {
         recordRemoteAnimationPackets()
         recordRemoteFootPackets()
@@ -1064,6 +1083,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             self.synchronizeLegacyStockSource()
             self.invalidatePedAtlasSourceIfChanged()
             self.reloadAmbientPedestrianSourceIfChanged()
+            self.reloadAmbientTrafficSourceIfChanged()
             self.loadNearby()
             _ = self.actorSelection.invalidateSource(self.fixedCJSourceIdentity())
             if self.fixedCJ?.invalidateIfSourceChanged()==true,self.needsFixedCJ{self.ensureFixedCJ()}
@@ -1073,7 +1093,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         groundVehicle?.onCouplingStep = {[weak self] _ in self?.updateVehicleCoupling()}
         groundVehicle?.onOtherCollidersChanged = {[weak self] in
             guard let self else{return}
-            self.character?.otherColliders=(self.groundVehicle?.otherColliders ?? []).union(self.ambientBodies?.colliders ?? [])
+            self.character?.otherColliders=(self.groundVehicle?.otherColliders ?? []).union(self.ambientBodies?.colliders ?? []).union(self.ambientTrafficBodies?.colliders ?? [])
         }
         character?.onPress = {[weak self] presses in
             for press in presses {
@@ -1115,7 +1135,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         gameCamera.trace = { [weak self] origin,direction,distance in
             guard let self else{return nil}
-            return self.cameraRay(from:origin,direction:direction,distance:distance,originalVehiclePolicy:self.driving)
+            return self.cameraRay(from:origin,direction:direction,distance:distance,originalVehiclePolicy:self.driving && !self.isPassenger)
         }
         gameCamera.unavailableDistance = { [weak self] origin,direction,distance in
             guard let self,let vehicle=self.groundVehicle else {return 0}
@@ -1816,7 +1836,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         groundVehicle.synchronizeOtherVehicles(order.compactMap{poses[$0]},excluding:isPassenger ? nil:currentVehicleID,near:camera,
             promoteNear:driving && groundVehicle.active ? vehicleWirePosition:nil,delta:delta,wetness:Double(roadWetness))
-        character?.otherColliders = groundVehicle.otherColliders.union(ambientBodies?.colliders ?? [])
+        character?.otherColliders = groundVehicle.otherColliders.union(ambientBodies?.colliders ?? []).union(ambientTrafficBodies?.colliders ?? [])
     }
 
     private func synchronizeMovingSupport() {
@@ -2352,7 +2372,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     private func cameraRay(from origin:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,originalVehiclePolicy:Bool)->Float? {
-        let groups: UInt32 = self.driving ? 0xffff0083 : 0xffff0001
+        let groups: UInt32 = self.driving && !self.isPassenger ? 0xffff0083 : 0xffff0001
         var excluded = self.driving ? self.groundVehicle?.chassisColliders ?? [] : Set<UInt64>()
         if self.isPassenger,let id=self.currentVehicleID{excluded.formUnion(self.groundVehicle?.otherVehicleColliders(id:id) ?? [])}
         let ownExcludedCount=excluded.count
@@ -2527,6 +2547,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         let forward=SIMD3(matrix.columns.1.x,matrix.columns.1.y,matrix.columns.1.z)
         return .init(vehicle:vehicle,transform:matrix,speed:simd_dot(velocity,forward),velocity:velocity,angularVelocity:spin)
+    }
+    func registeredVehicleReadyForEntry(_ vehicle:RemoteVehicle)->Bool {
+        let model=String(vehicle.code.split(separator:".").first ?? "")
+        guard let name=vehicleModels[model]else{return false}
+        loadActor(name)
+        guard vehicleRigs[name] != nil,vehicleRigMeshes[name] != nil,
+              let rider=riderDefinitions?.models[model],rider.seats.first?.position != nil else{return false}
+        return groundVehicle?.supports(model)==true
     }
     func availablePassengerSeat(vehicle:RemoteVehicle)->Int? {
         let model=String(vehicle.code.split(separator:".").first ?? "")
@@ -2835,6 +2863,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         discardOwnedVehicle()
         groundVehicle?.clearOtherVehicles()
         remotePlayers=[];remoteVehicles=[]
+        resetAmbientTrafficSession()
         synchronizeProjectiles([])
         clearMultiplayerPresentation()
         personalFlight.wear(false);hasParachute=false
@@ -3072,10 +3101,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     var server: ServerAddress? {didSet{
-        if oldValue != server {synchronizeCollisionResourceSource();synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();reloadAmbientPedestrianSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
+        if oldValue != server {synchronizeCollisionResourceSource();synchronizeLegacyStockSource();invalidatePedAtlasSourceIfChanged();reloadAmbientPedestrianSourceIfChanged();reloadAmbientTrafficSourceIfChanged();actorSelection.cancel();fixedCJ?.reset();fixedCJ=nil;if needsFixedCJ{ensureFixedCJ()}}
     }}
 
-    deinit {ambientPathTask?.cancel();for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
+    deinit {ambientRoadTask?.cancel();ambientPathTask?.cancel();for task in legacyStockMetadataTasks.values{task.cancel()};for task in legacyTextureTasks.values{task.cancel()};worldSharpIndexTask?.cancel();worldSharpTicket?.cancel();pedAtlasLoader.cancelAll();if let fixedCJObserver{NativeResourceStore.shared.removeObserver(fixedCJObserver)}}
     private var needsFixedCJ:Bool {
         localSkin==0 || pendingLocalSkin==0 || pendingLegacySkin==0 || remotePlayers.contains(where:{$0.skin==0})
     }
@@ -3090,17 +3119,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ambientPedestrians.reset();configureAmbientPedestrians(level:level,paths:hash)
     }
     func configureAmbientPedestrians(level:Double,paths:String?) {
+        let previousHash=ambientPedestrians.pathsHash
         let needed=ambientPedestrians.configure(level:level,paths:paths)
         guard ambientPedestrians.level>0,let hash=ambientPedestrians.pathsHash else {
             ambientPathToken=UUID();ambientPathTask?.cancel();ambientPathTask=nil;ambientPathSource=nil
+            ambientPathRetryAfter=0
             presentedAmbientPedestrians=[];ambientAnimations.removeAll();ambientGround.removeAll();ambientBodies?.removeAll();return
         }
         let source=fixedCJSourceIdentity()
         guard needed || source != ambientPathSource else{return}
         // Repeated hello does not replace a live load for the same resource.
-        if ambientPathTask != nil,ambientPathSource==source,paths==nil{return}
+        if ambientPathTask != nil,ambientPathSource==source,previousHash==hash{return}
+        let now=ProcessInfo.processInfo.systemUptime
+        if ambientPathSource==source,previousHash==hash,now<ambientPathRetryAfter{return}
         ambientPathToken=UUID();let token=ambientPathToken
         ambientPathTask?.cancel();ambientPathTask=nil;ambientPathSource=source
+        ambientPathRetryAfter=now+5
         presentedAmbientPedestrians=[];ambientAnimations.removeAll();ambientGround.removeAll()
         ambientBodies?.removeAll()
         guard let server else{return}
@@ -3116,8 +3150,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 guard let self,self.ambientPathToken==token,self.fixedCJSourceIdentity()==source,
                       self.ambientPedestrians.pathsHash==hash else{return}
                 self.ambientPathTask=nil
-                if let graph{_ = self.ambientPedestrians.install(graph)}
-                else{self.onStatus?("PEDESTRIAN PATHS UNAVAILABLE OR DIFFERENT FROM SERVER")}
+                if let graph,self.ambientPedestrians.install(graph){self.ambientPathRetryAfter=0}
+                else{
+                    self.ambientPathRetryAfter=ProcessInfo.processInfo.systemUptime+5
+                    self.onStatus?("PEDESTRIAN PATHS UNAVAILABLE OR DIFFERENT FROM SERVER")
+                }
             }
         }
         ambientPathTask=request;request.resume()
@@ -3126,6 +3163,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ambientPedestrians.receive(event,serverNow:serverNow,received:received)
     }
     func advanceAmbientPedestrians(at time:Double,active:Bool) {
+        // A transient graph transfer/verification failure must not disable
+        // population for the remainder of this connection. Retry only while
+        // active, with one request and a monotonic backoff. Source changes and
+        // disable still cancel their old callback through the existing token.
+        if active,server != nil,ambientPedestrians.level>0,ambientPedestrians.graph==nil,
+           ambientPathTask==nil,time>=ambientPathRetryAfter {
+            configureAmbientPedestrians(level:ambientPedestrians.level,paths:nil)
+        }
         var rates:[UInt16:Double]=[:]
         let frames=ambientPedestrians.frames(at:time,near:SIMD3<Double>(camera),active:active,turningRate:{skin in
             if let value=rates[skin]{return value}
@@ -3152,7 +3197,136 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         if ambientBodies==nil,let world=groundVehicle?.world{ambientBodies=NativeAmbientPedestrianBodies(world:world)}
         ambientBodies?.synchronize(presentedAmbientPedestrians,near:camera,enabled:active && !driving)
-        character?.otherColliders=(groundVehicle?.otherColliders ?? []).union(ambientBodies?.colliders ?? [])
+        character?.otherColliders=(groundVehicle?.otherColliders ?? []).union(ambientBodies?.colliders ?? []).union(ambientTrafficBodies?.colliders ?? [])
+    }
+    private func resetAmbientTrafficSession() {
+        ambientRoadToken=UUID();ambientRoadTask?.cancel();ambientRoadTask=nil
+        ambientRoadRetryAfter=0;ambientTraffic.reset();presentedAmbientTraffic=[]
+        ambientTrafficBodies?.removeAll()
+        cancelTrafficOccupantLoad()
+        trafficGangs=[];trafficOccupantSeats=[];trafficOccupantAnimations=[:];trafficOccupantDrawn=[:]
+    }
+    private func cancelTrafficOccupantLoad() {
+        trafficOccupantToken=UUID();trafficOccupantTask?.cancel();trafficOccupantTask=nil
+        trafficOccupantSource=nil;trafficOccupantRetryAfter=0
+    }
+    private func loadTrafficOccupantsIfNeeded() {
+        guard ambientTraffic.traffic.level>0,let server else{return}
+        let source=fixedCJSourceIdentity(),now=ProcessInfo.processInfo.systemUptime
+        if let pendingSource=trafficOccupantSource,pendingSource != source{cancelTrafficOccupantLoad()}
+        guard trafficOccupantCatalog?.source != source else{return}
+        if trafficOccupantSource==source {
+            if trafficOccupantTask != nil || now<trafficOccupantRetryAfter{return}
+        }
+        cancelTrafficOccupantLoad();trafficOccupantSource=source
+        let token=trafficOccupantToken;trafficOccupantRetryAfter=now+5
+        let task=NativeResourceTransport.boundedDataTask(with:server.path("game/native/traffic-occupants.json"),maximumBytes:65536) { [weak self] data,response,_ in
+            let catalog=(response as?HTTPURLResponse)?.statusCode==200 ? data.flatMap{try? NativeTrafficOccupants.Catalog(data:$0)}:nil
+            DispatchQueue.main.async { [weak self] in
+                guard let self,self.trafficOccupantToken==token,self.fixedCJSourceIdentity()==source else{return}
+                self.trafficOccupantTask=nil
+                if let catalog{self.trafficOccupantCatalog=(source,catalog);self.trafficOccupantRetryAfter=0}
+                else{self.trafficOccupantRetryAfter=ProcessInfo.processInfo.systemUptime+5}
+            }
+        }
+        trafficOccupantTask=task;task.resume()
+    }
+    func receiveTrafficCrews(_ packet:[String:Any]) {
+        guard packet["t"]as?String=="gangs"else{return}
+        trafficGangs=NativeTrafficOccupants.gangs(rows:packet["g"]) ?? []
+    }
+    /// Passive submission receipt only. Typed draw provenance prevents a human
+    /// ID resembling an occupant target from producing an occupant receipt.
+    /// Current-seat pruning bounds storage; unchanged draws do not log again.
+    private func recordTrafficOccupantDraw(_ seat:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool),model:String,kind:String,asset:ObjectIdentifier) {
+        let key="c\(seat.id).\(seat.seat)",token="\(seat.generation):\(seat.skin):\(seat.dead):\(model):\(kind):\(asset)"
+        guard trafficOccupantDrawn[key] != token else{return};trafficOccupantDrawn[key]=token
+        stockPedLogger.info("Submitted traffic occupant id \(seat.id,privacy:.public) seat \(seat.seat,privacy:.public) skin \(seat.skin,privacy:.public) generation \(seat.generation,privacy:.public) dead \(seat.dead ? 1:0,privacy:.public) model \(model,privacy:.public) resource \(kind,privacy:.public)")
+    }
+    private func reloadAmbientTrafficSourceIfChanged() {
+        guard let source=ambientTraffic.source,source != fixedCJSourceIdentity()else{return}
+        let level=ambientTraffic.traffic.level,hash=ambientTraffic.traffic.roadsHash
+        ambientTraffic.reset();configureAmbientTraffic(level:level,roads:hash)
+    }
+    func configureAmbientTraffic(level:Double,roads:String?) {
+        let previousHash=ambientTraffic.traffic.roadsHash,previousSource=ambientTraffic.source
+        let source=fixedCJSourceIdentity()
+        let needed=ambientTraffic.configure(level:level,roads:roads,source:source)
+        guard ambientTraffic.traffic.level>0,let hash=ambientTraffic.traffic.roadsHash else {
+            ambientRoadToken=UUID();ambientRoadTask?.cancel();ambientRoadTask=nil
+            ambientRoadRetryAfter=0;presentedAmbientTraffic=[];ambientTrafficBodies?.removeAll()
+            cancelTrafficOccupantLoad();trafficOccupantSeats=[];trafficOccupantAnimations=[:];return
+        }
+        guard needed else{return}
+        let same=previousHash==hash && previousSource==source
+        if same,ambientRoadTask != nil{return}
+        if same,ProcessInfo.processInfo.systemUptime<ambientRoadRetryAfter{return}
+        ambientRoadToken=UUID();let token=ambientRoadToken
+        ambientRoadTask?.cancel();ambientRoadTask=nil;ambientRoadRetryAfter=ProcessInfo.processInfo.systemUptime+5
+        presentedAmbientTraffic=[];ambientTrafficBodies?.removeAll()
+        guard let server else{return}
+        var parts=URLComponents(url:server.path("game/world/roads.bin"),resolvingAgainstBaseURL:false)
+        parts?.queryItems=[URLQueryItem(name:"v",value:hash)]
+        guard let url=parts?.url else{return}
+        let task=NativeResourceTransport.boundedDataTask(with:url,maximumBytes:NativeAmbientTrafficRoads.maximumBytes){[weak self]data,response,error in
+            let graph:NativeAmbientTrafficRoads?
+            if error==nil,(response as? HTTPURLResponse)?.statusCode==200,let data{graph=try? NativeAmbientTrafficRoads(data:data,expectedCRC:hash)}
+            else{graph=nil}
+            DispatchQueue.main.async{[weak self]in
+                guard let self,self.ambientRoadToken==token,self.fixedCJSourceIdentity()==source,
+                      self.ambientTraffic.traffic.roadsHash==hash else{return}
+                self.ambientRoadTask=nil
+                if let graph,self.ambientTraffic.install(graph){self.ambientRoadRetryAfter=0}
+                else{self.ambientRoadRetryAfter=ProcessInfo.processInfo.systemUptime+5;self.onStatus?("TRAFFIC ROADS UNAVAILABLE OR DIFFERENT FROM SERVER")}
+            }
+        }
+        ambientRoadTask=task;task.resume()
+    }
+    func receiveAmbientTraffic(_ event:NativeAmbientTrafficProtocol.Event,serverNow:Double,received:Double) {
+        ambientTraffic.receive(event,serverNow:serverNow,received:received)
+    }
+    func advanceAmbientTraffic(at time:Double,active:Bool) {
+        if active{loadTrafficOccupantsIfNeeded()}
+        if active,server != nil,ambientTraffic.traffic.level>0,ambientTraffic.traffic.graph==nil,
+           ambientRoadTask==nil,time>=ambientRoadRetryAfter{configureAmbientTraffic(level:ambientTraffic.traffic.level,roads:nil)}
+        presentedAmbientTraffic=ambientTraffic.frames(at:time,near:SIMD3<Double>(camera),active:active,
+            promoted:Set(remoteVehicles.compactMap(\.trafficSourceID)),length:{[weak self]model in
+                guard let self,let name=self.vehicleModels[String(model)]else{return nil}
+                self.loadActor(name)
+                guard self.vehicleRigs[name] != nil,self.vehicleRigMeshes[name] != nil else{return nil}
+                return self.groundVehicle?.modelLength(String(model))
+            },ray:collision.map{collision in {origin,maximum in
+                collision.raycast(from:SIMD3<Float>(origin),direction:SIMD3(0,0,-1),distance:Float(maximum)).map{Double($0.distance)}
+            }})
+        synchronizeAmbientTrafficContacts(active:active)
+        updateTrafficOccupantSeats()
+    }
+    private func updateTrafficOccupantSeats() {
+        guard let catalog=trafficOccupantCatalog,catalog.source==fixedCJSourceIdentity()else{trafficOccupantSeats=[];return}
+        let vehicles=presentedAmbientTraffic.map{frame -> NativeTrafficOccupants.Vehicle in
+            let definition=riderDefinitions?.models[String(frame.identity.model)]
+            return .init(id:frame.identity.id,generation:frame.generation,model:frame.identity.model,
+                flags:frame.flags,count:frame.crewCount,deadSeats:frame.deadSeats,
+                // Scene frames have already passed actual vehicle-rig/mesh
+                // readiness. Missing rider metadata must still consume rank.
+                distance:simd_distance(frame.body.position,SIMD3<Double>(camera)),built:true,thrown:false,
+                seatSides:definition?.seats.map(\.side) ?? [])
+        }
+        trafficOccupantSeats=NativeTrafficOccupants.seats(vehicles:vehicles,catalog:catalog.value,gangs:trafficGangs)
+    }
+    private func synchronizeAmbientTrafficContacts(active:Bool) {
+        if ambientTrafficBodies==nil,let world=groundVehicle?.world{ambientTrafficBodies=NativeAmbientTrafficBodies(world:world)}
+        let snapshots=presentedAmbientTraffic.map{NativeAmbientTrafficBodies.Snapshot(id:$0.identity.id,generation:$0.generation,model:$0.identity.model,
+            position:$0.body.position,heading:$0.body.heading,pitch:$0.body.pitch)}
+        ambientTrafficBodies?.synchronize(snapshots,near:camera,enabled:active,shapes:{[weak self]model in
+            self?.groundVehicle?.chassisShapes(model)?.map{.init(kind:$0.kind,centre:$0.centre,halfExtents:$0.halfExtents,radius:$0.radius,
+                friction:$0.friction,restitution:$0.restitution,piece:$0.piece)}
+        })
+        character?.otherColliders=(groundVehicle?.otherColliders ?? []).union(ambientBodies?.colliders ?? []).union(ambientTrafficBodies?.colliders ?? [])
+    }
+    private func ambientTrafficDrawContext(name:String,frame:NativeAmbientTrafficScene.Frame)->VehicleDrawContext {
+        .init(source:.traffic(frame),token:"traffic:\(frame.identity.id):\(frame.generation):\(name)",appearanceCode:frame.code,
+            roll:0,origin:vehicleModelOrigin(frame.code),exactTransform:nil,heldDoorID:nil)
     }
     private func ensureFixedCJ(force:Bool=false) {
         guard let server else{return}
@@ -3224,6 +3398,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // can schedule replacement coupling/support metadata.
         vehicleCouplingMetadataToken=UUID();vehicleTreadsMetadataToken=UUID()
         loadLegacyStockCatalogs()
+        loadTrafficOccupantsIfNeeded()
         NativeResourceTransport.dataTask(with:server.path("game/native/weapons.json")) { [weak self] data,response,_ in
             guard (response as? HTTPURLResponse)?.statusCode==200,let data,
                   let catalog=try? NativeWeaponMuzzle.Catalog(data:data) else{return}
@@ -3912,6 +4087,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         for actor in presentedAmbientPedestrians {
             if let name=pedModels[String(actor.skin)]{names.insert(name)}
+        }
+        for seat in trafficOccupantSeats {
+            if let name=pedModels[String(seat.skin)]{names.insert(name)}
         }
         let ids=Set(names.compactMap{stockPedIDs[$0]})
         stockPedRuntime?.setDemand(ids)
@@ -4893,8 +5071,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return false
         }
     }
-    private func encodeNativeVehicle(frame:NativeVehicleRig.Frame,textures:NativeVehicleTextures,name:String,mesh:Mesh,
-                                     uniforms:Uniforms,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder) {
+    @discardableResult private func encodeNativeVehicle(frame:NativeVehicleRig.Frame,textures:NativeVehicleTextures,name:String,mesh:Mesh,
+                                     uniforms:Uniforms,matrix:simd_float4x4,encoder:MTLRenderCommandEncoder)->Bool {
+        var drawn=false
         for part in frame.draws {
             guard bindVehicleTextures(textures,name:name,slot:part.texture,encoder:encoder)else{break}
             var current=uniforms;current.viewProjection=matrix*part.transform
@@ -4905,7 +5084,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             encoder.setFragmentBytes(&material,length:MemoryLayout<SIMD4<Float>>.stride,index:2)
             encoder.setFragmentBytes(&paint,length:MemoryLayout<SIMD4<Float>>.stride,index:3)
             encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
+            drawn=true
         }
+        return drawn
     }
     private func encodeTransparentVehicles(_ packets:[TransparentVehicleDraw],encoder:MTLRenderCommandEncoder) {
         // Archived transparent vehicle materials retain depthWrite=true. Phase
@@ -4967,9 +5148,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // co-located players with the same skin. No position key is needed.
         var actorOverrides: [ActorPoseOverride] = []
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
-                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = []) {
+                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil) {
             let occurrence = actorOverrides.count
-            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples))
+            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples,trafficOccupant:trafficOccupant))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil,occurrence))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
@@ -5251,6 +5432,34 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for (id,cached) in remoteFootAnimations where !sampledRemoteFootIDs.contains(id) {
             cached.1.resetDisplayClock()
         }
+        let trafficSeatIDs=Set(trafficOccupantSeats.map(\.targetID))
+        trafficOccupantAnimations=trafficOccupantAnimations.filter{trafficSeatIDs.contains($0.key)}
+        trafficOccupantDrawn=trafficOccupantDrawn.filter{trafficSeatIDs.contains($0.key)}
+        for seat in trafficOccupantSeats {
+            guard let car=presentedAmbientTraffic.first(where:{$0.identity.id==seat.id && $0.generation==seat.generation}),
+                  let definition=riderDefinitions?.models[String(seat.model)],definition.seats.indices.contains(seat.index),
+                  let anchor=definition.seats[seat.index].position,let name=pedModels[String(seat.skin)]else{continue}
+            // The original astride death path detaches a falling actor. Until
+            // that owner is ported, never render a live rider for a dead seat.
+            guard !definition.astride || !seat.dead else{continue}
+            loadActor(name)
+            guard let actor=skeletalActors[name],let library=skeletalLibrary else{continue}
+            let identity="\(fixedCJSourceIdentity()):\(seat.generation):\(seat.model):\(seat.skin):\(ObjectIdentifier(actor))"
+            let animator:NativeRiderAnimation
+            if let old=trafficOccupantAnimations[seat.targetID],old.identity==identity{animator=old.value}
+            else {
+                animator=NativeRiderAnimation(duration:{ [weak self] in self?.skeletalLibrary?.duration(of:$0) })
+                trafficOccupantAnimations[seat.targetID]=(identity,animator)
+            }
+            let input=NativeRiderAnimation.Input(speed:car.speed,steer:car.body.steering,dead:seat.dead)
+            let pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:definition.configuration(seat:seat.index),input:input),
+                library:library,figurePosition:anchor,figureTurn:Float(definition.seats[seat.index].turn ?? 0))
+            let position=SIMD3<Float>(car.body.position)
+            let transform=Self.translation(position) * Self.rotationZ(Float(-car.body.heading)) * Self.rotationX(Float(car.body.pitch)) *
+                Self.translation(SIMD3(0,0,vehicleModelOrigin(car.code)))
+            appendPed(name,position,Float(car.body.heading),0,"",0,0,pose:pose,transform:transform,original:true,identity:seat.targetID,
+                trafficOccupant:(seat.id,seat.generation,seat.index,seat.skin,seat.dead))
+        }
         let drivenVehicleIDs = Set(remotePlayers.compactMap(\.vehicleID))
         for projectile in weaponEffects.projectiles {
             let direction = atan2(projectile.velocity.x,projectile.velocity.y)
@@ -5258,6 +5467,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             modelInstances.append((projectile.model,projectile.position,direction,pitch,"",0,0,nil,nil))
         }
         var parkedTrainCandidates:[RemoteVehicle] = []
+        for traffic in presentedAmbientTraffic {
+            guard let name=vehicleModels[String(traffic.identity.model)]else{continue}
+            let context=ambientTrafficDrawContext(name:name,frame:traffic)
+            modelInstances.append((name,SIMD3<Float>(traffic.body.position),Float(traffic.body.heading),Float(traffic.body.pitch),"",0,0,context,nil))
+        }
         for source in remoteVehicles where (isPassenger || source.id != currentVehicleID) && !drivenVehicleIDs.contains(source.id) {
             let vehicle=predictedVehicle(source)
             guard simd_distance(vehicle.position,camera)<130,let name=actorName(code:vehicle.code) else{continue}
@@ -5335,12 +5549,14 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                            locomotion: locomotion, locomotionElapsed: locomotionTime, looping: loops)
             } }
             let pose = queued?.pose ?? sampledPose
+            var actorDrawSubmitted=false
             if let customPed {
                 guard let pose,let pipelines=fixedPlayer?.gpu.pipelines ?? legacyPedPipelines else{continue}
                 var overrides=NativeRenderWareModel.DrawOverrides();overrides.tint.w=opacity
                 let environment=NativeRenderWarePedModel.Environment(fogColor:uniforms.fogColor,fogSettings:uniforms.fogSettings)
                 do {for index in customPed.plan.model.draws.indices {
                     try customPed.encode(drawIndex:index,pose:pose,encoder:encoder,pipelines:pipelines,viewProjection:matrix,worldTransform:transform,overrides:overrides,environment:environment)
+                    actorDrawSubmitted=true
                 }
                     if customPed === originalPed,let id=stockPedIDs[name],stockPedDrawn.insert(id).inserted {
                         stockPedLogger.info("Encoded original pedestrian \(name,privacy:.public) id \(id,privacy:.public)")
@@ -5371,6 +5587,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 guard count>=0,offset>=0,count<=mesh.indexCount,offset<=mesh.indexCount-count else{throw NativePedTextureArrays.Failure.indexBuffer}
                 if let native {try native.encode(indices:mesh.indices,encoder:encoder,queue:queue,range:offset..<offset+count)}
                 else{encoder.drawIndexedPrimitives(type:.triangle,indexCount:count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:offset*4)}
+                if count>0{actorDrawSubmitted=true}
             }
             do {
                 if native==nil{encoder.setFragmentTexture(mesh.atlas,index:0)}
@@ -5400,8 +5617,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                 }}))
                         }
                     }
+                    var trafficDrawn=false
                     if let nativeTextures {
-                        encodeNativeVehicle(frame:frame,textures:nativeTextures,name:name,mesh:mesh,uniforms:uniforms,matrix:matrix*transform,encoder:encoder)
+                        trafficDrawn=encodeNativeVehicle(frame:frame,textures:nativeTextures,name:name,mesh:mesh,uniforms:uniforms,matrix:matrix*transform,encoder:encoder)
                     }else{for part in frame.draws {
                         uniforms.viewProjection=matrix*transform*part.transform
                         var material=SIMD4<Float>(part.layerOverride,part.emissive ? 1:0,part.scorched ? 0.14:1,part.alphaTest)
@@ -5414,6 +5632,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         }
                         encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
                     }}
+                    if nativeTextures==nil{trafficDrawn = !frame.draws.isEmpty}
+                    if trafficDrawn,let traffic=context.traffic{ambientTraffic.didPresent(traffic.identity.id,generation:traffic.generation)}
                     if let vehicleMaskPipeline {
                         encoder.setRenderPipelineState(vehicleMaskPipeline)
                         for (node,mask) in vehicleWaterMasks[name] ?? [] {
@@ -5447,6 +5667,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 clearPedAtlas(name);actorRetryAfter[name]=Date().addingTimeInterval(2)
                 pedAtlasError(name,"NATIVE PED TEXTURE DRAW FAILED: \(name)");continue
             }
+            }
+            if actorDrawSubmitted,let occupant=queued?.trafficOccupant,let actor=skeletalActors[name] {
+                let kind=customPed==nil ? "converted":customPed === originalPed ? "stock":fixedPlayer != nil ? "fixed-cj":"custom"
+                recordTrafficOccupantDraw(occupant,model:name,kind:kind,asset:ObjectIdentifier(actor))
             }
             let heldWeapon = NativeWeaponAttachment.selectedWeapon(weapon,swimming:false,
                 jetpackFlying:queued?.identity == "own" && personalFlight.flying,
@@ -5608,14 +5832,22 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var input=own?.input ?? NativeVehicleRig.Input()
         input.appearanceCode=context.appearanceCode
         if own==nil {
-            let speed=Double(context.isCarriage ? context.carriageSpeed:player?.speed ?? 0)
-            input.steering=Double(player?.steer ?? 0)
+            let speed=context.traffic?.speed ?? Double(context.isCarriage ? context.carriageSpeed:player?.speed ?? 0)
+            input.steering=context.traffic?.body.steering ?? Double(player?.steer ?? 0)
             var spins=vehicleRigSpins[token] ?? .zero
             let front=rig.document.joints.bike?.hubs["front"]?.radius ?? 0.36
             let rear=rig.document.joints.bike?.hubs["rear"]?.radius ?? 0.36
             spins -= SIMD2(speed*delta/front,speed*delta/rear);vehicleRigSpins[token]=spins
             input.frontSpin=spins.x;input.rearSpin=spins.y
-            if player != nil {
+            if let traffic=context.traffic {
+                input.frontSpin=traffic.body.wheelPhase*0.36/front
+                input.rearSpin=traffic.body.wheelPhase*0.36/rear
+            }
+            if context.traffic != nil {
+                // Compact pose calls omit rotor options. Applicable geometry
+                // uses the original helper's heli/other defaults.
+                input.rotor=rig.document.kind=="heli" ? 0.22:0.18
+            }else if player != nil {
                 if rig.document.kind=="heli" {input.rotor=0.22}
                 else if rig.document.kind=="plane" {input.rotor=0.18}
             }
@@ -5643,7 +5875,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 input.doorAngles=damage.doors.indices.map{decoded.open[$0] ? damage.doors[$0].open:damage.doors[$0].closed}
                 input.doorAxes=damage.doors.map(\.axis)
             }
-            input.scorched=(player?.vehicleHealth ?? parked?.health ?? 1000)<=0
+            // Compact health controls its own effects; zero alone does not
+            // request burnt materials. Returned built-object appearance still
+            // needs its separate registered/compact ownership handoff.
+            input.scorched=context.traffic==nil && Double(player?.vehicleHealth ?? parked?.health ?? 1000)<=0
             input.lights=(player?.lights ?? false) && !input.scorched
             // Existing physical suspension, including working/hydraulic owners,
             // takes priority. Remote projection changes wheel locals only.

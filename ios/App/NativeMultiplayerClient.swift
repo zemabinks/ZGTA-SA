@@ -130,6 +130,9 @@ struct RemoteVehicle {
     var damage = ""
     var work = 0
     var driverID:String?
+    /// Original browser registered rows may originate from compact traffic.
+    /// This is a numeric identity, independent of the arbitrary string ID.
+    var trafficSourceID:UInt16?
 
     init?(row: [Any]) {
         guard row.count >= 7, let id = row[0] as? String,
@@ -148,6 +151,10 @@ struct RemoteVehicle {
         damage = row.count > 10 ? row[10] as? String ?? "" : ""
         work = row.count > 16 ? (row[16] as? NSNumber)?.intValue ?? 0 : 0
         driverID = row.count>11 ? (row[11] as? String).flatMap{NativeVehicleSeatSession.validID($0) ? $0:nil}:nil
+        if row.count>14,let value=row[14]as?NSNumber,CFGetTypeID(value) != CFBooleanGetTypeID() {
+            let n=value.doubleValue
+            if n.isFinite,n.rounded(.towardZero)==n,(0...65535).contains(n){trafficSourceID=UInt16(n)}
+        }
     }
 }
 
@@ -377,6 +384,8 @@ final class NativeMultiplayerClient {
     var onOriginalRecord: ((UInt8,Data)->Void)?
     var onAmbientPedestrianConfiguration:((Double,String?)->Void)?
     var onAmbientPedestrianEvent:((NativeAmbientPedestrianProtocol.Event,Double,Double)->Void)?
+    var onAmbientTrafficConfiguration:((Double,String?)->Void)?
+    var onAmbientTrafficEvent:((NativeAmbientTrafficProtocol.Event,Double,Double)->Void)?
     private var ambientBinaryEnabled=false
     var onOriginalCommand: (([String:Any])->Void)?
     var onOriginalVehicleHit: (([String:Any])->Void)?
@@ -629,6 +638,7 @@ final class NativeMultiplayerClient {
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         originalStream.clear();originalHeard=nil;originalDeathSent=false;originalRespawnRequested=nil;originalLatestPosition=nil
         ambientBinaryEnabled=false;onAmbientPedestrianConfiguration?(0,nil)
+        onAmbientTrafficConfiguration?(0,nil)
         originalVitals.cancelPendingFatal();originalFrozen=false;originalRespawnWasDead=false
         healthPrediction.disconnect()
         deliveredRespawnSequence=0
@@ -1221,6 +1231,11 @@ final class NativeMultiplayerClient {
                 if let event=try? NativeAmbientPedestrianProtocol.decode(tag:tag,payload:payload,nowServerMilliseconds:now) {
                     onAmbientPedestrianEvent?(event,now,clock())
                 }
+                guard transportGeneration==generation,socket != nil else{return}
+                if let event=try? NativeAmbientTrafficProtocol.decode(tag:tag,payload:payload,nowServerMilliseconds:now) {
+                    onAmbientTrafficEvent?(event,now,clock())
+                }
+                guard transportGeneration==generation,socket != nil else{return}
                 onOriginalRecord?(tag,payload)
             }
         }
@@ -1244,6 +1259,9 @@ final class NativeMultiplayerClient {
             }
             ambientBinaryEnabled=true
             onAmbientPedestrianConfiguration?((message["peds"]as?NSNumber)?.doubleValue ?? 0,message["paths"]as?String)
+            guard transportGeneration==generation,socket != nil else{return true}
+            onAmbientTrafficConfiguration?((message["traffic"]as?NSNumber)?.doubleValue ?? 0,message["roads"]as?String)
+            guard transportGeneration==generation,socket != nil else{return true}
             originalFrozen=false
             if let life=message["life"] as? [Any],life.count==2,
                let hp=NativeOriginalWorldCommands.number(life[0]),let ap=NativeOriginalWorldCommands.number(life[1]) {
@@ -1274,6 +1292,10 @@ final class NativeMultiplayerClient {
             if let orders=message["orders"] as? [[String:Any]] {
                 for order in orders.prefix(128) {handle(order,generation:generation);if transportGeneration != generation || socket==nil{return true}}
             }
+            if let level=message["traffic"]as?NSNumber {
+                onAmbientTrafficConfiguration?(level.doubleValue,message["roads"]as?String)
+                guard transportGeneration==generation,socket != nil else{return true}
+            }
             if let name=message["you"] as? String,!name.isEmpty {localName=name}
             if let amount=message["cash"] as? NSNumber,amount.doubleValue.isFinite {cash=amount.intValue}
             if let heard=NativeHealthPrediction.integer(message["heard"]) {originalHeard=max(originalHeard ?? 0,heard)}
@@ -1292,6 +1314,12 @@ final class NativeMultiplayerClient {
                 recovery.received(.world,generation:generation,now:clock());publishState()
             } else {recovery.received(generation:generation,now:clock())}
             originalWho();onOriginalCommand?(message);return true
+        case "peds","traffic":
+            if ambientBinaryEnabled,let level=message["level"]as?NSNumber {
+                if message["t"]as?String=="traffic"{onAmbientTrafficConfiguration?(level.doubleValue,message["roads"]as?String)}
+                else{onAmbientPedestrianConfiguration?(level.doubleValue,message["paths"]as?String)}
+            }
+            return true
         case "shot":
             if let weapon=message["w"] as? Int {onWeaponSound?(weapon)};onOriginalShot?(message);return true
         case "hit":
@@ -1390,6 +1418,13 @@ final class NativeMultiplayerClient {
                                 self.onAmbientPedestrianEvent?(event,now,self.clock())
                             }
                         }
+                        guard self.socket === task,self.transportGeneration==generation else{return}
+                        if let events=try? NativeAmbientTrafficProtocol.decodeMessage(data,nowServerMilliseconds:now) {
+                            for event in events {
+                                guard self.socket === task,self.transportGeneration==generation else{break}
+                                self.onAmbientTrafficEvent?(event,now,self.clock())
+                            }
+                        }
                     }
                     guard self.socket === task, self.transportGeneration == generation else { return }
                     self.receive()
@@ -1406,6 +1441,12 @@ final class NativeMultiplayerClient {
             if ambientBinaryEnabled,let level=message["level"]as?NSNumber {
                 onAmbientPedestrianConfiguration?(level.doubleValue,message["paths"]as?String)
             }
+        case "traffic":
+            if ambientBinaryEnabled,let level=message["level"]as?NSNumber {
+                onAmbientTrafficConfiguration?(level.doubleValue,message["roads"]as?String)
+            }
+        case "gangs":
+            if ambientBinaryEnabled{onOriginalCommand?(message)}
         case "pong":
             if let echoed = (message["c"] as? NSNumber)?.doubleValue, echoed.isFinite,
                let time = (message["s"] as? NSNumber)?.doubleValue, time.isFinite {
@@ -1454,6 +1495,8 @@ final class NativeMultiplayerClient {
             ambientBinaryEnabled=NativePlacementSession.integer(message["npcProtocol"])==38
             if ambientBinaryEnabled {
                 onAmbientPedestrianConfiguration?((message["peds"]as?NSNumber)?.doubleValue ?? 0,message["paths"]as?String)
+                guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
+                onAmbientTrafficConfiguration?((message["traffic"]as?NSNumber)?.doubleValue ?? 0,message["roads"]as?String)
             }
             if case .place(let transaction)=placement {
                 guard applyPlacement(transaction,generation:generation,task:task)else{return}
@@ -1501,6 +1544,10 @@ final class NativeMultiplayerClient {
                   message["cars"] is [[Any]], message["vehicles"] is [[Any]],
                   message["chat"] is [[Any]], let amount = (message["cash"] as? NSNumber)?.doubleValue,
                   amount.isFinite else { return }
+            if ambientBinaryEnabled,let level=message["traffic"]as?NSNumber {
+                onAmbientTrafficConfiguration?(level.doubleValue,message["roads"]as?String)
+                guard transportGeneration==generation,socket != nil else{return}
+            }
             localName = (message["you"] as? String) ?? localName
             cash = (message["cash"] as? Int) ?? cash
             if let rows = message["chat"] as? [[Any]] { receiveChat(rows) }
@@ -1573,6 +1620,13 @@ final class NativeMultiplayerClient {
                 if vehicles[vehicle.id]==nil {vehicleOrder.append(vehicle.id)}
                 vehicles[vehicle.id] = vehicle
                 onVehicles?(orderedVehicles)
+                // This is an explicit original-server seating command, not an
+                // independent-server inventory/seat acknowledgement.
+                if usesOriginalWorldProtocol,message["t"]as?String=="spawned",
+                   let flag=message["in"]as?NSNumber,CFGetTypeID(flag)==CFBooleanGetTypeID(),flag.boolValue,
+                   transportGeneration==generation,socket != nil {
+                    onEnter?(vehicle.id,true)
+                }
             }
         case "vgone":
             if let id = message["id"] as? String {

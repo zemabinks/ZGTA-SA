@@ -543,6 +543,8 @@ final class NativeGroundVehicle {
         return SwiftRapierWorld.rapierToGTA(SIMD3<Float>(feet))
     }
     func modelOrigin(_ model: String) -> Float? { definitions[model].map { Float($0.configuration.origin) } }
+    func modelLength(_ model:String)->Double? {definitions[model]?.length}
+    func chassisShapes(_ model:UInt16)->[Definition.Shape]? {definitions[String(model)]?.chassis}
     /// Query another peer's existing chassis without acquiring or parking it.
     func passengerExitPosition(id:String,model:String,wanted:SIMD3<Float>?,seat:SIMD3<Double>?,side:Int,
                               below:(SIMD3<Double>,Double)throws->Double?,

@@ -230,6 +230,9 @@ final class Controller {
  let originalEffects=Effects()
  var previousAudioPosition:Float?,originalExitToken:Int?,lastNetwork=0,lastGameplay=0
  var acceptsHeldInput=true,usingPistol=true,magazine=4,reserve=30,inputResets=0
+ // Actual pending materialization owner; resource/server readiness is outside
+ // this audio carrier, but accepted entry must retire the pending request.
+ var trafficVehicleEntry=NativeTrafficVehicleEntry()
  func updateWeaponHUD(){}
  func updateRadioControl(){}
  func updateAuxiliaryControls(){}
@@ -252,8 +255,9 @@ let unchanged=controller();begin(unchanged);unchanged.weapons.onChange?();unchan
 check(Sink.played==["143_11","143_12"],"same-selection snapshot or input/menu reset canceled legitimate reload")
 for hp in [100,0]{let c=controller();begin(c);c.network.onVitals?(hp,0);drain()
  check(Sink.played.count==(hp>0 ? 2:1),"actual vitals callback canceled living reload or retained dead reload")}
-for accepted in [false,true]{let c=controller();begin(c);c.network.onEnter?("car",accepted);drain()
- check(Sink.played.count==(accepted ? 1:2),"driver denial/acceptance owner boundary")}
+for accepted in [false,true]{let c=controller();_=c.trafficVehicleEntry.request(17,at:100);begin(c);c.network.onEnter?("car",accepted);drain()
+ check(Sink.played.count==(accepted ? 1:2),"driver denial/acceptance owner boundary")
+ check(accepted ? c.trafficVehicleEntry.pending==nil:c.trafficVehicleEntry.pending?.trafficID==17,"accepted/denied entry materialization lifetime")}
 for admitted in [false,true]{let c=controller();c.renderer!.passengerOK=admitted;begin(c)
  c.network.onPassengerEnter?("car",1,true);drain()
  check(Sink.played.count==(admitted ? 1:2),"passenger resource denial/acceptance owner boundary")}
@@ -340,6 +344,7 @@ def main():
     args = parser.parse_args()
     inputs = {name: (ROOT / name).read_bytes() for name in [
         'ios/App/NativeGameAudio.swift', 'ios/App/NativeAudioEnvelope.swift',
+        'ios/App/NativeTrafficVehicleEntry.swift',
         'ios/App/NativeGameViewController.swift', 'tests/audio/smoke_native_reload_audio.py']}
     source = inputs['ios/App/NativeGameAudio.swift'].decode()
     vc = inputs['ios/App/NativeGameViewController.swift'].decode()
@@ -364,9 +369,9 @@ def main():
             entry = work / 'main.swift'
             entry.write_text(carrier(text, envelope, vc=vc, historical=historical))
             binary = work / 'verify'
-            build = subprocess.run(['xcrun', 'swiftc', '-whole-module-optimization', '-Onone',
+            build = subprocess.run(['xcrun', 'swiftc', '-j', '1', '-whole-module-optimization', '-Onone',
                 '-num-threads', '1', '-module-cache-path', str(OUT / 'modules'),
-                str(entry), '-o', str(binary)], text=True, capture_output=True, timeout=900)
+                str(ROOT/'ios/App/NativeTrafficVehicleEntry.swift'),str(entry), '-o', str(binary)], text=True, capture_output=True, timeout=900)
             (OUT / (mode + '-build.log')).write_text(build.stdout + build.stderr)
             build.check_returncode()
             run = subprocess.run([str(binary)], text=True, capture_output=True, timeout=30)

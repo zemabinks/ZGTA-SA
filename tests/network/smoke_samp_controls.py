@@ -17,7 +17,7 @@ ROOT=Path(__file__).resolve().parents[2]
 BASE='zgta-openmp-qa:1.6.7.3218-files'
 NAMES=['NativeConnectionRecovery','ServerAddress','NativeInventoryPrediction','NativeShotTargeting',
        'NativeStreamShotClaims','NativeSAMPGameplayCommands','NativeOriginalWorldProtocol','NativeOriginalWorldCommands',
-       'NativeOriginalWorldVitals','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeMultiplayerClient','NativeSAMPSkinCatalog',
+       'NativeOriginalWorldVitals','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeMultiplayerClient','NativeSAMPSkinCatalog',
        'NativeSAMPProtocol','NativeSAMPVehicleCoordinates','NativeSAMPClient','NativeSAMPWorldConnection','NativeSAMPInput']
 
 def run(args,**kwargs):return subprocess.run(args,check=True,**kwargs)
