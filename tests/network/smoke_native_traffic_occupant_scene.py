@@ -14,7 +14,7 @@ def main():
     os.setpriority(os.PRIO_PROCESS,0,15)
     out=ROOT/'local-only/research/traffic-occupant-scene-166'/str(time.time_ns());out.mkdir(parents=True)
     names=['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientTrafficProtocol','NativeAmbientTrafficRoads',
-           'NativeAmbientTraffic','NativeAmbientTrafficMotion','NativeAmbientTrafficPresentation','NativeAmbientTrafficScene','NativeRiderAnimation','NativeTrafficOccupants']
+           'NativeAmbientTraffic','NativeAmbientTrafficMotion','NativeAmbientTrafficPresentation','NativeAmbientTrafficScene','NativeRiderAnimation','NativeTrafficOccupants','NativeTrafficRiderRetention']
     files=[ROOT/'ios/App'/(n+'.swift')for n in names];renderer=ROOT/'ios/App/NativeWorldRenderer.swift';fixture=Path(__file__).with_suffix('.swift')
     inputs=[*files,renderer,fixture,Path(__file__).resolve()]+([args.previous_renderer]if args.previous_renderer else[]);hashes={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in inputs}
     report=dict(status='RUNNING',sourceHashes=hashes,scope=__doc__)

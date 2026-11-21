@@ -12,7 +12,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--historical-renderer',type=Path);args=p.parse_args()
     os.setpriority(os.PRIO_PROCESS,0,15)
     out=ROOT/'local-only/research/traffic-session-165'/str(time.time_ns());out.mkdir(parents=True)
-    names=['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientTrafficProtocol','NativeAmbientTrafficRoads','NativeAmbientTraffic','NativeAmbientTrafficMotion','NativeAmbientTrafficPresentation','NativeAmbientTrafficScene']
+    names=['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientTrafficProtocol','NativeAmbientTrafficRoads','NativeAmbientTraffic','NativeAmbientTrafficMotion','NativeAmbientTrafficPresentation','NativeAmbientTrafficScene','NativeTrafficRiderRetention']
     files=[ROOT/'ios/App'/(n+'.swift')for n in names]
     renderer=ROOT/'ios/App/NativeWorldRenderer.swift';test=Path(__file__).with_suffix('.swift')
     inputs=[*files,renderer,test,Path(__file__).resolve()]+([args.historical_renderer.resolve()]if args.historical_renderer else[])
@@ -28,7 +28,9 @@ def main():
             source=path.read_text();reset=block(source,'    func resetMultiplayerSession()')
             needle='    private func resetAmbientTrafficSession()'
             if needle in source:
-                helper=block(source,needle);dispatch=next(line for line in reset.splitlines()if line.strip()=='resetAmbientTrafficSession()')
+                helper=block(source,needle)
+                if '    private func resetTrafficRiderOwners()'in source:helper+='\n'+block(source,'    private func resetTrafficRiderOwners()')
+                dispatch=next(line for line in reset.splitlines()if line.strip()=='resetAmbientTrafficSession()')
             else:
                 helper='';dispatch=next(line for line in reset.splitlines()if line.strip()=='configureAmbientTraffic(level:0,roads:nil)')
             harness=test.read_text().replace('// ACTUAL_RESET_HELPER',helper).replace('// ACTUAL_RESET_DISPATCH',dispatch)

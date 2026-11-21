@@ -24,9 +24,19 @@ def main():
             ground=re.search(r'let identity=("[^"\n]+"),point=frame.position',renderer).group(1)
             carrier=directory/'Keys.swift';carrier.write_text('import Foundation\nfunc animationKey(_ npc:NativeAmbientPedestrians.Frame,name:String)->String{return '+animation+'}\nfunc groundKey(_ frame:NativeAmbientPedestrians.Frame)->String{return '+ground+'}\n')
             if label=='candidate':
-                assert 'generation:frame.generation,waitingLinkKind:frame.waitingLinkKind)'in renderer,'Ground projection dropped the local lifetime/context'
+                # Compile the actual ground-frame projection, rather than an
+                # exact argument substring that rejects added context fields.
+                begin=renderer.index('return .init(id:frame.id,skin:frame.skin,seed:frame.seed,flags:frame.flags,position:SIMD3(point.x,point.y,z),')
+                cursor=renderer.index('(',begin);depth=1;cursor+=1
+                while depth:
+                    if renderer[cursor]=='(':depth+=1
+                    elif renderer[cursor]==')':depth-=1
+                    cursor+=1
+                with carrier.open('a')as file:
+                    file.write('func projectGround(_ frame:NativeAmbientPedestrians.Frame,z:Double)->NativeAmbientPedestrians.Frame{let point=frame.position;'+renderer[begin:cursor]+'}\n')
             row=dict(name=label,sourceHashes=frozen);report['results'].append(row);save()
             command=['xcrun','swiftc','-parse-as-library','-Onone','-whole-module-optimization','-j','1','-num-threads','1','-module-cache-path',str(directory/'modules'),*map(str,paths[:3]),str(carrier),str(Path(__file__).with_suffix('.swift')),'-o',str(directory/'gate')]
+            if label=='candidate':command[2:2]=['-D','CHECK_GROUND_CONTEXT']
             with(directory/'compile.log').open('x')as log:r=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=180)
             row['compileExit']=r.returncode;assert r.returncode==0,(directory/'compile.log').read_text()[-6000:]
             r=subprocess.run([str(directory/'gate')],capture_output=True,text=True,timeout=60)

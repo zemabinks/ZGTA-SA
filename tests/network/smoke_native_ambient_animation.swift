@@ -79,6 +79,22 @@ import simd
             _=npc.update(at:10.2,active:true,snapshot:snapshot);snapshot.flags=0
             check(has(npc.update(at:10.22,active:true,snapshot:snapshot),"ped/getup_front"),"Face-down get-up orientation lost")
         }
+        do {
+            let npc=owner();var snapshot=NativeAmbientPedestrianAnimation.Snapshot(flags:1,state:state())
+            _=npc.update(at:10,active:true,snapshot:snapshot)
+            npc.acceptRider(lying:true)
+            let arrived=npc.update(at:10.01,active:true,snapshot:snapshot)!
+            check(npc.animator.dead,"Lying handoff lost authoritative down state")
+            check(arrived.blends.contains{$0.clip=="ped/floor_hit" && $0.time>=1 && $0.weight>0},"Lying rider replayed upright death animation")
+            snapshot.flags=0
+            check(has(npc.update(at:10.03,active:true,snapshot:snapshot),"ped/getup"),"Lying arrival could not recover after server down cleared")
+        }
+        do {
+            let npc=owner();var snapshot=NativeAmbientPedestrianAnimation.Snapshot(flags:1,state:state())
+            _=npc.update(at:10,active:true,snapshot:snapshot)
+            npc.acceptRider(lying:false);snapshot.flags=0
+            check(has(npc.update(at:10.1,active:true,snapshot:snapshot),"ped/getup"),"Upright handoff erased existing NPC recovery transition")
+        }
         let side=NativeAmbientPedestrianAnimation.incomingSide
         check(side(.pi/2,0)==0,"North front")
         check(side(0,0)==3,"East/right converted to left")

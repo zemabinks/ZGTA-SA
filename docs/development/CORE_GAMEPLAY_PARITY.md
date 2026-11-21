@@ -1,5 +1,21 @@
 # Core GTA San Andreas gameplay parity
 
+## Traffic rider falls and NPC continuity
+
+Compact motorcycle riders now retain original fall phases, completed down
+poses and compatible-model animation ownership. Detached drivers and retained
+passengers have separate lifetimes. Completed drivers can hand their pose to
+an existing server NPC while preserving authoritative state and actor identity.
+
+Both SDK builds, the current uninterrupted source regression chain and normal
+four-join plus controlled bike/NPC Simulator cases pass. All 41 captures are
+reviewed; visible fall/retention/expiry/removal has scoped acceptance. The NPC
+handoff has an actual draw receipt but is partly obscured in its capture.
+Selected archived-policy and original-resource endpoint comparisons do not
+establish retail gameplay fidelity. Registered passenger transfer, broader
+traffic AI/physics, quality-dependent budgets, gun/look/voice behavior and
+unobstructed handoff visuals remain open.
+
 ## Core156/157 — current metadata and coherent remote feet
 
 Core156 admits scene metadata only for the current resource source and latest

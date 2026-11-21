@@ -92,11 +92,17 @@ def carrier(renderer, historical=None):
     passenger_enter = block(renderer, '    @discardableResult func enterPassenger(')
     passenger_reset = next(line for line in passenger_enter.splitlines() if 'vehicleExitSerial &+= 1' in line)
     # Fail closed on a moved/extra consumer or changed fallback ownership.
-    traffic = block(draw, '        for seat in trafficOccupantSeats {')
-    assert traffic.count('animator.update(interval:riderPoseInterval,') == 1
+    traffic = block(draw, '        for seat in NativeTrafficOccupants.followOrder(trafficOccupantSeats) {')
+    assert traffic.count('owner.update(interval:riderPoseInterval,') == 1
     assert traffic.count('.update(interval:riderPoseInterval,') == 1
-    assert draw.replace(traffic, '', 1).count('.update(interval:riderPoseInterval,') == 9
-    assert draw.count('.update(interval:riderPoseInterval,') == 10
+    detached = block(draw, '        for entry in trafficRiderRetention.detached {')
+    assert detached.count('owner.update(interval:riderPoseInterval,') == 1
+    human_draw=draw.replace(traffic,'',1).replace(detached,'',1)
+    assert human_draw.count('.update(interval:riderPoseInterval,') == 9
+    assert draw.count('.update(interval:riderPoseInterval,') == 11
+    traffic_owner=(ROOT/'ios/App/NativeTrafficRiderActor.swift').read_text()
+    assert traffic_owner.count('animator.update(interval:interval,') == 1
+    assert traffic_owner.count('fall.update(delta:delta)') == 1
     foot_clocked = 'animator.update(at:riderTime,' in draw
     assert foot_clocked,'Remote foot retains its independently owned timestamp adapter'
     assert draw.count('.update(delta:riderDelta,') == 0

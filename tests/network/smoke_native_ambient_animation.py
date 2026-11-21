@@ -33,7 +33,9 @@ def main():
     (out/'Common.swift').write_text(common)
     source=paths[7].read_text();renderer=paths[8].read_text()
     assert 'animation:NativeAmbientPedestrianAnimation' in renderer
-    assert 'let snapshot=NativeAmbientPedestrianAnimation.Snapshot(position:npc.position,heading:npc.heading,' in renderer
+    assert 'var drawPosition=npc.position,drawHeading=npc.heading' in renderer
+    assert 'let snapshot=NativeAmbientPedestrianAnimation.Snapshot(position:drawPosition,heading:drawHeading,' in renderer
+    assert 'guard ambientPedestrians.acceptRider(id:npc.id,generation:npc.generation,' in renderer
     assert 'speed:hypot(npc.velocity.x,npc.velocity.y),flags:npc.flags,state:npc.state,' in renderer
     assert 'life:npc.dead ? 0:100' not in renderer,'NPCs must not acquire human-health heuristics'
     tests=paths[10].read_text();extra=[]

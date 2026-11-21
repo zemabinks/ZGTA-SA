@@ -43,6 +43,12 @@ import simd
         // methods have their separate composed-loader gate.
         var trafficGangs=[1],trafficOccupantSeats=[1],trafficOccupantAnimations=["old":1]
         var trafficOccupantDrawn=["old":"old"]
+        var trafficRiderOwners=["old":1]
+        let trafficRiderRetention=NativeTrafficRiderRetention<Int>()
+        var trafficPedestrianArrivals=["old":1],trafficRiderDestinations=[UInt64(1):"old"]
+        var trafficRiderClaimed:Set<String>=["old"]
+        init(){trafficRiderRetention.detach(id:17,generation:9,owner:1);trafficRiderRetention.retainPassenger(id:17,generation:9,seat:1,owner:2)}
+
         var occupantLoadCancellations=0
         func cancelTrafficOccupantLoad(){occupantLoadCancellations+=1}
         func configureAmbientTraffic(level:Double,roads:String?){_=ambientTraffic.configure(level:level,roads:roads,source:"same-assets")}
@@ -65,7 +71,9 @@ import simd
         try check(scene.traffic.actors.isEmpty,"Old traffic actor survived reconnect")
         try check(scene.traffic.graph==nil && scene.traffic.plates.isEmpty && scene.traffic.roadsHash==nil,"New connection retained old traffic graph or plates")
         try check(scene.source==nil && renderer.presentedAmbientTraffic.isEmpty && renderer.ambientTrafficBodies!.clears==1,"Old scene/source/contact owner survived reset")
-        try check(renderer.trafficGangs.isEmpty && renderer.trafficOccupantSeats.isEmpty && renderer.trafficOccupantAnimations.isEmpty && renderer.trafficOccupantDrawn.isEmpty && renderer.occupantLoadCancellations==1,"Old traffic occupant owner survived reset")
+        try check(renderer.trafficGangs.isEmpty && renderer.trafficOccupantSeats.isEmpty && renderer.trafficRiderOwners.isEmpty && renderer.trafficOccupantDrawn.isEmpty && renderer.occupantLoadCancellations==1,"Old traffic occupant owner survived reset")
+        try check(renderer.trafficRiderRetention.detached.isEmpty && renderer.trafficRiderRetention.passengers.isEmpty && !renderer.trafficRiderRetention.isThrown(id:17,generation:9),"Detached driver/tombstone survived full reset")
+        try check(renderer.trafficPedestrianArrivals.isEmpty && renderer.trafficRiderDestinations.isEmpty && renderer.trafficRiderClaimed.isEmpty,"NPC handoff relation survived full reset")
         renderer.configureAmbientTraffic(level:1,roads:graph.crc32)
         receive(scene);try check(scene.pendingCount==2,"Pending graph sample setup")
         let task=Task(),token=renderer.ambientRoadToken;renderer.ambientRoadTask=task

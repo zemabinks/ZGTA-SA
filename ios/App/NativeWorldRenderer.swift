@@ -371,6 +371,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var ownFoot:Bool
         var canopySamples:[NativeFlightAnimation.Canopy?] = []
         var trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil
+        var trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil
     }
     /// A draw occurrence owns its source, even when another body has the same
     /// model and position. None of these render identities grants body control.
@@ -927,7 +928,18 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var trafficOccupantRetryAfter:Double=0
     private var trafficGangs:[NativeTrafficOccupants.Gang]=[]
     private var trafficOccupantSeats:[NativeTrafficOccupants.Seat]=[]
-    private var trafficOccupantAnimations:[String:(identity:String,value:NativeRiderAnimation)]=[:]
+    private var trafficRiderOwners:[String:NativeTrafficRiderActor]=[:]
+    private let trafficRiderRetention=NativeTrafficRiderRetention<NativeTrafficRiderActor>()
+    private struct TrafficPedestrianArrival {
+        let serial:UInt64,destination:NativeTrafficRiderHandoff.Destination
+        let actor:NativeSkeletalActor,pose:NativeSkeletalActor.Pose
+        let feet:SIMD3<Double>,heading:Double
+        var acceptedAt:Double?,shown=false
+    }
+    private var trafficPedestrianArrivals:[NativeTrafficRiderHandoff.Destination:TrafficPedestrianArrival]=[:]
+    private var trafficRiderDestinations:[UInt64:NativeTrafficRiderHandoff.Destination]=[:]
+    private var trafficRiderClaimed:Set<NativeTrafficRiderHandoff.Destination>=[]
+
     private var trafficOccupantDrawn:[String:String]=[:]
     var remotePlayers: [RemotePlayer] = [] { didSet {
         recordRemoteAnimationPackets()
@@ -3199,7 +3211,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             ambientGround[frame.id]=(identity,z,time)
             return .init(id:frame.id,skin:frame.skin,seed:frame.seed,flags:frame.flags,position:SIMD3(point.x,point.y,z),
                 velocity:frame.velocity,heading:frame.heading,state:frame.state,
-                generation:frame.generation,waitingLinkKind:frame.waitingLinkKind)
+                generation:frame.generation,admittedAt:frame.admittedAt,waitingLinkKind:frame.waitingLinkKind)
         }
         if ambientBodies==nil,let world=groundVehicle?.world{ambientBodies=NativeAmbientPedestrianBodies(world:world)}
         ambientBodies?.synchronize(presentedAmbientPedestrians,near:camera,enabled:active && !driving)
@@ -3210,7 +3222,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         ambientRoadRetryAfter=0;ambientTraffic.reset();presentedAmbientTraffic=[]
         ambientTrafficBodies?.removeAll()
         cancelTrafficOccupantLoad()
-        trafficGangs=[];trafficOccupantSeats=[];trafficOccupantAnimations=[:];trafficOccupantDrawn=[:]
+        trafficGangs=[];trafficOccupantSeats=[];resetTrafficRiderOwners();trafficOccupantDrawn=[:]
+    }
+    private func resetTrafficRiderOwners() {
+        trafficRiderOwners.removeAll();trafficRiderRetention.reset()
+        trafficPedestrianArrivals.removeAll();trafficRiderDestinations.removeAll();trafficRiderClaimed.removeAll()
     }
     private func cancelTrafficOccupantLoad() {
         trafficOccupantToken=UUID();trafficOccupantTask?.cancel();trafficOccupantTask=nil
@@ -3258,10 +3274,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         let previousHash=ambientTraffic.traffic.roadsHash,previousSource=ambientTraffic.source
         let source=fixedCJSourceIdentity()
         let needed=ambientTraffic.configure(level:level,roads:roads,source:source)
+        if previousSource != source || previousHash != ambientTraffic.traffic.roadsHash{resetTrafficRiderOwners()}
         guard ambientTraffic.traffic.level>0,let hash=ambientTraffic.traffic.roadsHash else {
             ambientRoadToken=UUID();ambientRoadTask?.cancel();ambientRoadTask=nil
             ambientRoadRetryAfter=0;presentedAmbientTraffic=[];ambientTrafficBodies?.removeAll()
-            cancelTrafficOccupantLoad();trafficOccupantSeats=[];trafficOccupantAnimations=[:];return
+            cancelTrafficOccupantLoad();trafficOccupantSeats=[];resetTrafficRiderOwners();return
         }
         guard needed else{return}
         let same=previousHash==hash && previousSource==source
@@ -3305,6 +3322,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 collision.raycast(from:SIMD3<Float>(origin),direction:SIMD3(0,0,-1),distance:Float(maximum)).map{Double($0.distance)}
             }})
         synchronizeAmbientTrafficContacts(active:active)
+        trafficRiderRetention.synchronize(generations:ambientTraffic.traffic.actors.mapValues(\.generation),
+            promoted:Set(remoteVehicles.compactMap(\.trafficSourceID)),
+            admitted:active ? Set(presentedAmbientTraffic.map{$0.identity.id}):nil)
         updateTrafficOccupantSeats()
     }
     private func updateTrafficOccupantSeats() {
@@ -3315,7 +3335,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 flags:frame.flags,count:frame.crewCount,deadSeats:frame.deadSeats,
                 // Scene frames have already passed actual vehicle-rig/mesh
                 // readiness. Missing rider metadata must still consume rank.
-                distance:simd_distance(frame.body.position,SIMD3<Double>(camera)),built:true,thrown:false,
+                distance:simd_distance(frame.body.position,SIMD3<Double>(camera)),built:true,
+                thrown:trafficRiderRetention.isThrown(id:frame.identity.id,generation:frame.generation),
                 seatSides:definition?.seats.map(\.side) ?? [])
         }
         trafficOccupantSeats=NativeTrafficOccupants.seats(vehicles:vehicles,catalog:catalog.value,gangs:trafficGangs)
@@ -4097,6 +4118,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         for seat in trafficOccupantSeats {
             if let name=pedModels[String(seat.skin)]{names.insert(name)}
         }
+        for entry in trafficRiderRetention.detached {names.insert(entry.owner.name)}
+        for entry in trafficRiderRetention.passengers {names.insert(entry.owner.name)}
         let ids=Set(names.compactMap{stockPedIDs[$0]})
         stockPedRuntime?.setDemand(ids)
         let now=ProcessInfo.processInfo.systemUptime
@@ -5154,9 +5177,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         // co-located players with the same skin. No position key is needed.
         var actorOverrides: [ActorPoseOverride] = []
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
-                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil) {
+                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil,trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil) {
             let occurrence = actorOverrides.count
-            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples,trafficOccupant:trafficOccupant))
+            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples,trafficOccupant:trafficOccupant,trafficArrival:trafficArrival))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil,occurrence))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
@@ -5415,6 +5438,55 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(player.code)))
             appendPed(ped,player.position,player.heading,0,"",0,0,pose:pose,transform:car,original:true)
         }
+        for arrival in trafficPedestrianArrivals.values where arrival.shown {
+            trafficRiderRetention.complete(arrival.serial)
+            trafficRiderDestinations[arrival.serial]=nil
+        }
+        trafficRiderClaimed=trafficRiderClaimed.filter{ambientPedestrians.contains(id:$0.id,generation:$0.generation)}
+        // Previously detached drivers advance once, before current seat
+        // work can detach another. They retain their own frozen model matrix.
+        trafficRiderRetention.advance(delta:riderDelta)
+        for retained in trafficRiderRetention.passengers {
+            let owner=retained.owner
+            guard let current=skeletalActors[owner.name],owner.bindCompatible(current),let output=owner.heldOutput else{continue}
+            let position=SIMD3(output.model.columns.3.x,output.model.columns.3.y,output.model.columns.3.z)
+            appendPed(owner.name,position,0,0,"",0,0,pose:output.pose,transform:output.model,original:true,
+                identity:owner.seat.targetID,
+                trafficOccupant:(owner.seat.id,owner.seat.generation,owner.seat.index,owner.seat.skin,owner.seat.dead || owner.falling))
+        }
+        var trafficFallFrames:[UInt64:NativeTrafficRiderActor.Output]=[:]
+        for entry in trafficRiderRetention.detached {
+            let owner=entry.owner
+            guard let current=skeletalActors[owner.name],owner.bindCompatible(current),
+                  let output=owner.update(interval:riderPoseInterval,model:matrix_identity_float4x4,
+                    origin:0,input:.init(dead:true))else{continue}
+            trafficFallFrames[entry.serial]=output
+            let position=SIMD3(output.model.columns.3.x,output.model.columns.3.y,output.model.columns.3.z)
+            appendPed(owner.name,position,0,0,"",0,0,pose:output.pose,transform:output.model,original:true,
+                identity:"fallen:\(owner.seat.targetID):\(entry.serial)",
+                trafficOccupant:(owner.seat.id,owner.seat.generation,owner.seat.index,owner.seat.skin,true))
+        }
+        let detachedSerials=Set(trafficRiderRetention.detached.map(\.serial))
+        trafficPedestrianArrivals=trafficPedestrianArrivals.filter{key,value in
+            ambientPedestrians.contains(id:key.id,generation:key.generation) && (detachedSerials.contains(value.serial) ||
+                value.acceptedAt.map{riderTime-$0<0.25} == true)
+        }
+        trafficRiderDestinations=trafficRiderDestinations.filter{detachedSerials.contains($0.key) && ambientPedestrians.contains(id:$0.value.id,generation:$0.value.generation)}
+        let handoffSources=trafficRiderRetention.detached.compactMap{entry -> NativeTrafficRiderHandoff.Source? in
+            guard let feet=trafficFallFrames[entry.serial]?.feet else{return nil}
+            return .init(serial:entry.serial,skin:entry.owner.seat.skin,feet:SIMD3<Double>(feet.position))
+        }
+        let matches=NativeTrafficRiderHandoff.match(sources:handoffSources,candidates:presentedAmbientPedestrians.filter{!trafficRiderClaimed.contains(.init(id:$0.id,generation:$0.generation))}.map{
+            .init(destination:.init(id:$0.id,generation:$0.generation),skin:Int($0.skin),position:$0.position,admittedAt:$0.admittedAt)
+        },now:riderTime,assigned:trafficRiderDestinations)
+        for (serial,destination) in matches where trafficRiderDestinations[serial]==nil {
+            guard let entry=trafficRiderRetention.detached.first(where:{$0.serial==serial}),
+                  let output=trafficFallFrames[serial],let feet=output.feet else{continue}
+            trafficRiderDestinations[serial]=destination
+            trafficRiderClaimed.insert(destination)
+            trafficPedestrianArrivals[destination] = .init(serial:serial,destination:destination,
+                actor:entry.owner.actor,pose:output.pose,feet:SIMD3<Double>(feet.position),heading:Double(feet.heading))
+        }
         for npc in presentedAmbientPedestrians {
             guard let name=pedModels[String(npc.skin)]else{continue}
             loadActor(name)
@@ -5425,46 +5497,68 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 animator=NativeAmbientPedestrianAnimation(library:library,style:definitions.style(model:legacyPedStyles[name] ?? name,library:library),weapons:footWeaponDefinitions)
                 ambientAnimations[npc.id]=(identity,animator)
             }
-            let snapshot=NativeAmbientPedestrianAnimation.Snapshot(position:npc.position,heading:npc.heading,
+            let destination=NativeTrafficRiderHandoff.Destination(id:npc.id,generation:npc.generation)
+            var arrival=trafficPedestrianArrivals[destination]
+            var drawPosition=npc.position,drawHeading=npc.heading
+            if var pending=arrival,pending.acceptedAt==nil {
+                guard pending.actor === actor || pending.actor.matchesRig(actor) else{continue}
+                guard ambientPedestrians.acceptRider(id:npc.id,generation:npc.generation,
+                    feet:pending.feet,heading:pending.heading,at:riderTime)else{continue}
+                animator.acceptRider(lying:npc.flags&9 != 0)
+                pending.acceptedAt=riderTime;arrival=pending;trafficPedestrianArrivals[destination]=pending
+                drawPosition=pending.feet;drawHeading=pending.heading
+                ambientGround[npc.id]=("\(npc.skin):\(npc.seed):\(npc.generation)",pending.feet.z,riderTime)
+            }
+            let snapshot=NativeAmbientPedestrianAnimation.Snapshot(position:drawPosition,heading:drawHeading,
                 speed:hypot(npc.velocity.x,npc.velocity.y),flags:npc.flags,state:npc.state,
                 id:npc.id,seed:npc.seed,femaleActivity:sampSkinCatalog?.femaleActivity(forModel:legacyPedStyles[name] ?? name,sourceIdentity:fixedCJSourceIdentity()) ?? false,
                 waitingLinkKind:npc.waitingLinkKind)
             guard let frame=animator.update(at:riderTime,active:UIApplication.shared.applicationState == .active && view.window != nil,snapshot:snapshot)else{continue}
+            let transition=arrival?.acceptedAt.map{Float(min(1,max(0,(riderTime-$0)/0.25)))} ?? 1
             let pose=actor.originalPose(blends:frame.blends,library:library,aim:frame.aim,hiddenBones:frame.hiddenBones,
+                previous:transition<1 ? arrival?.pose:nil,transition:transition,
                 figurePitch:frame.figurePitch,figureRoll:frame.figureRoll,legBend:frame.legBend)
-            appendPed(name,SIMD3<Float>(npc.position),Float(npc.heading),0,"",0,frame.handWeaponVisible && !npc.down ? Int(npc.state?.weapon ?? 0):0,
-                pose:pose,original:true,identity:npc.targetID)
+            appendPed(name,SIMD3<Float>(drawPosition),Float(drawHeading),0,"",0,frame.handWeaponVisible && !npc.down ? Int(npc.state?.weapon ?? 0):0,
+                pose:pose,original:true,identity:npc.targetID,
+                trafficArrival:arrival.map{($0.serial,npc.id,npc.generation)})
         }
         for (id,cached) in remoteFootAnimations where !sampledRemoteFootIDs.contains(id) {
             cached.1.resetDisplayClock()
         }
         let trafficSeatIDs=Set(trafficOccupantSeats.map(\.targetID))
-        trafficOccupantAnimations=trafficOccupantAnimations.filter{trafficSeatIDs.contains($0.key)}
-        trafficOccupantDrawn=trafficOccupantDrawn.filter{trafficSeatIDs.contains($0.key)}
-        for seat in trafficOccupantSeats {
-            guard let car=presentedAmbientTraffic.first(where:{$0.identity.id==seat.id && $0.generation==seat.generation}),
+        trafficRiderOwners=trafficRiderOwners.filter{trafficSeatIDs.contains($0.key)}
+        let retainedTrafficTargets=trafficSeatIDs.union(trafficRiderRetention.detached.map{$0.owner.seat.targetID}).union(trafficRiderRetention.passengers.map{$0.owner.seat.targetID})
+        trafficOccupantDrawn=trafficOccupantDrawn.filter{retainedTrafficTargets.contains($0.key)}
+        for seat in NativeTrafficOccupants.followOrder(trafficOccupantSeats) {
+            guard !trafficRiderRetention.isThrown(id:seat.id,generation:seat.generation),
+                  let car=presentedAmbientTraffic.first(where:{$0.identity.id==seat.id && $0.generation==seat.generation}),
                   let definition=riderDefinitions?.models[String(seat.model)],definition.seats.indices.contains(seat.index),
-                  let anchor=definition.seats[seat.index].position,let name=pedModels[String(seat.skin)]else{continue}
-            // The original astride death path detaches a falling actor. Until
-            // that owner is ported, never render a live rider for a dead seat.
-            guard !definition.astride || !seat.dead else{continue}
+                  definition.seats[seat.index].position != nil,let name=pedModels[String(seat.skin)]else{continue}
             loadActor(name)
             guard let actor=skeletalActors[name],let library=skeletalLibrary else{continue}
-            let identity="\(fixedCJSourceIdentity()):\(seat.generation):\(seat.model):\(seat.skin):\(ObjectIdentifier(actor))"
-            let animator:NativeRiderAnimation
-            if let old=trafficOccupantAnimations[seat.targetID],old.identity==identity{animator=old.value}
+            let identity="\(fixedCJSourceIdentity()):\(seat.generation):\(seat.model):\(seat.skin)"
+            let owner:NativeTrafficRiderActor
+            if let old=trafficRiderOwners[seat.targetID],old.identity==identity,old.bindCompatible(actor){owner=old}
             else {
-                animator=NativeRiderAnimation(duration:{ [weak self] in self?.skeletalLibrary?.duration(of:$0) })
-                trafficOccupantAnimations[seat.targetID]=(identity,animator)
+                owner=NativeTrafficRiderActor(identity:identity,name:name,seat:seat,actor:actor,definition:definition,library:library)
+                trafficRiderOwners[seat.targetID]=owner
             }
-            let input=NativeRiderAnimation.Input(speed:car.speed,steer:car.body.steering,dead:seat.dead)
-            let pose=actor.riderPose(frame:animator.update(interval:riderPoseInterval,configuration:definition.configuration(seat:seat.index),input:input),
-                library:library,figurePosition:anchor,figureTurn:Float(definition.seats[seat.index].turn ?? 0))
             let position=SIMD3<Float>(car.body.position)
             let transform=Self.translation(position) * Self.rotationZ(Float(-car.body.heading)) * Self.rotationX(Float(car.body.pitch)) *
                 Self.translation(SIMD3(0,0,vehicleModelOrigin(car.code)))
-            appendPed(name,position,Float(car.body.heading),0,"",0,0,pose:pose,transform:transform,original:true,identity:seat.targetID,
-                trafficOccupant:(seat.id,seat.generation,seat.index,seat.skin,seat.dead))
+            guard let output=owner.update(interval:riderPoseInterval,model:transform,origin:vehicleModelOrigin(car.code),
+                input:.init(speed:car.speed,steer:car.body.steering,dead:seat.dead))else{continue}
+            appendPed(name,position,Float(car.body.heading),0,"",0,0,pose:output.pose,transform:output.model,original:true,identity:seat.targetID,
+                trafficOccupant:(seat.id,seat.generation,seat.index,seat.skin,seat.dead || owner.falling))
+            if seat.index==0,owner.falling {
+                trafficRiderRetention.detach(id:seat.id,generation:seat.generation,owner:owner)
+                for other in trafficOccupantSeats where other.id==seat.id && other.generation==seat.generation && other.index>0 {
+                    guard let passenger=trafficRiderOwners[other.targetID],passenger.heldOutput != nil else{continue}
+                    trafficRiderRetention.retainPassenger(id:seat.id,generation:seat.generation,seat:other.index,owner:passenger)
+                    trafficRiderOwners[other.targetID]=nil
+                }
+                trafficRiderOwners[seat.targetID]=nil
+            }
         }
         let drivenVehicleIDs = Set(remotePlayers.compactMap(\.vehicleID))
         for projectile in weaponEffects.projectiles {
@@ -5677,6 +5771,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if actorDrawSubmitted,let occupant=queued?.trafficOccupant,let actor=skeletalActors[name] {
                 let kind=customPed==nil ? "converted":customPed === originalPed ? "stock":fixedPlayer != nil ? "fixed-cj":"custom"
                 recordTrafficOccupantDraw(occupant,model:name,kind:kind,asset:ObjectIdentifier(actor))
+            }
+            if actorDrawSubmitted,let receipt=queued?.trafficArrival {
+                let key=NativeTrafficRiderHandoff.Destination(id:receipt.id,generation:receipt.generation)
+                if trafficPedestrianArrivals[key]?.serial==receipt.serial,trafficPedestrianArrivals[key]?.shown==false {
+                    trafficPedestrianArrivals[key]?.shown=true
+                    stockPedLogger.info("Submitted fallen traffic rider as NPC id \(receipt.id,privacy:.public) generation \(receipt.generation,privacy:.public) serial \(receipt.serial,privacy:.public)")
+                }
             }
             let heldWeapon = NativeWeaponAttachment.selectedWeapon(weapon,swimming:false,
                 jetpackFlying:queued?.identity == "own" && personalFlight.flying,

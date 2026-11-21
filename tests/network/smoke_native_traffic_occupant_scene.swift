@@ -7,6 +7,7 @@ private final class Renderer {
     var trafficOccupantCatalog:(source:String,value:NativeTrafficOccupants.Catalog)?
     var trafficGangs:[NativeTrafficOccupants.Gang]=[]
     var trafficOccupantSeats:[NativeTrafficOccupants.Seat]=[]
+    let trafficRiderRetention=NativeTrafficRiderRetention<Int>()
     var riderDefinitions:NativeRiderDefinitions?
     var presentedAmbientTraffic:[NativeAmbientTrafficScene.Frame]=[]
     func fixedCJSourceIdentity()->String{source}
@@ -66,5 +67,15 @@ private final class Renderer {
         renderer.presentedAmbientTraffic=(0..<7).map{frame(id:UInt16($0),model:$0<6 ? 401:400,distance:Double($0))}
         renderer.updateTrafficOccupantSeats()
         try check(renderer.trafficOccupantSeats.isEmpty,"Missing rider metadata reopened a nearer built vehicle rank")
+        renderer.presentedAmbientTraffic=[frame(count:3)];renderer.updateTrafficOccupantSeats()
+        try check(renderer.trafficOccupantSeats.count==3,"Fresh current car failed seat admission")
+        renderer.trafficRiderRetention.detach(id:3,generation:10,owner:1);renderer.updateTrafficOccupantSeats()
+        try check(renderer.trafficOccupantSeats.isEmpty,"Fallen driver recreated current car occupants")
+        renderer.trafficRiderRetention.complete(renderer.trafficRiderRetention.detached[0].serial);renderer.updateTrafficOccupantSeats()
+        try check(renderer.trafficOccupantSeats.isEmpty,"Completed driver handoff cleared car tombstone")
+        renderer.trafficRiderRetention.synchronize(generations:[3:11]);renderer.presentedAmbientTraffic=[frame(generation:11,count:3)]
+        renderer.updateTrafficOccupantSeats()
+        try check(renderer.trafficOccupantSeats.count==3 && renderer.trafficOccupantSeats.allSatisfy{$0.generation==11},"New car lifetime inherited thrown state")
+
     }
 }

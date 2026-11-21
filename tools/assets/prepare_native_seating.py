@@ -28,6 +28,9 @@ def main():
             prefix = 'wf' if astride=='wayfarer' else astride
             clips = {key:f'{astride}/{prefix}_{value}' for key,value in
                      [('sit','ride'),('still','still'),('left','left'),('right','right'),('forward','fwd'),('backward','back'),('passenger','passenger')]}
+            # This candidate is optional. The native animation library admits
+            # it only when that family's original hit clip actually exists.
+            clips['hit'] = f'{astride}/{prefix}_hit'
             if row.get('type') == 'bicycle':
                 clips.update({role:f'{astride}/{prefix}_{role}' for role in ['pedal','sprint','bunnyhop']})
         else:
