@@ -658,7 +658,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         preload(names+["138_2","138_4","138_6","138_8","138_10","138_11","138_17","138_19","138_20","138_24","138_26","39_3","39_66"])
     }
 
-    func updateRemoteVehicles(_ players:[RemotePlayer],ear:SIMD3<Float>,forward:SIMD3<Float>,top:(String)->Double?) {
+    func updateRemoteVehicles(_ players:[RemotePlayer],traffic:[NativeVehicleAudioSpatial.Source]=[],ear:SIMD3<Float>,forward:SIMD3<Float>,top:(String)->Double?) {
         guard !suspended else{return}
         typealias D=NativeVehicleAudioDynamics
         typealias S=NativeVehicleAudioSpatial
@@ -666,10 +666,14 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         vehicleLoops.listener(position:listener,forward:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(forward)))
         let catalogue=S.Catalogue(road:Set(road.keys.compactMap(Int.init)),aircraft:Set(aircraft.keys.compactMap(Int.init)),
             boats:Set(boats.keys.compactMap(Int.init)),special:Set(special.keys.compactMap(Int.init)),trains:Set(trains.keys.compactMap(Int.init)))
-        let driving=players.filter{!$0.code.hasPrefix("s")}
-        let candidates=driving.compactMap { player -> S.Candidate? in
+        let sources=players.filter{!$0.code.hasPrefix("s")}.compactMap{player -> S.Source? in
             guard let model=Int(player.code.split(separator:".").first ?? "") else{return nil}
-            return .init(id:player.id,model:model,position:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(player.position)),speed:Double(player.speed))
+            return .init(identity:.player(player.id),model:model,gtaPosition:player.position,
+                heading:Double(player.heading),pitch:Double(player.pitch),roll:Double(player.roll),
+                speed:Double(player.speed),health:Double(player.vehicleHealth),horn:player.horn&1 != 0,siren:player.horn&2 != 0)
+        }+traffic
+        let candidates=sources.map{source in
+            S.Candidate(id:source.id,model:source.model,position:SIMD3<Double>(SwiftRapierWorld.gtaToRapier(source.gtaPosition)),speed:source.speed)
         }
         let selected=S.select(candidates,listener:listener,catalogue:catalogue),ids=Set(selected.map{$0.candidate.id})
         for id in Array(remoteEngines.keys) where !ids.contains(id) {
@@ -680,15 +684,15 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
         let now=ProcessInfo.processInfo.systemUptime
         for selected in selected {
             let candidate=selected.candidate,key=String(candidate.model),prefix="remote:"+candidate.id
-            guard let player=driving.first(where:{$0.id==candidate.id}) else{continue}
+            guard let source=sources.first(where:{$0.id==candidate.id}) else{continue}
             if remoteEngines[candidate.id]?.model != candidate.model {
                 vehicleLoops.apply(.init(layers:[]),prefix:prefix);vehicleLoops.apply(.init(layers:[]),prefix:"far:"+candidate.id)
                 remoteEngines[candidate.id]=RemoteEngine(model:candidate.model,time:now);preloadVehicle(candidate.model)
             }
             let state=remoteEngines[candidate.id]!,delta=max(0,now-state.time);state.time=now
-            let y=simd_quatd(angle:-Double(player.heading),axis:SIMD3(0,1,0))
-            let x=simd_quatd(angle:Double(player.pitch),axis:SIMD3(1,0,0))
-            let z=simd_quatd(angle:-Double(player.roll),axis:SIMD3(0,0,1)),q=y*x*z
+            let y=simd_quatd(angle:-source.heading,axis:SIMD3(0,1,0))
+            let x=simd_quatd(angle:source.pitch,axis:SIMD3(1,0,0))
+            let z=simd_quatd(angle:-source.roll,axis:SIMD3(0,0,1)),q=y*x*z
             let vertical=q.act(SIMD3<Double>(0,1,0)),ahead=q.act(SIMD3<Double>(0,0,-1)),right=q.act(SIMD3<Double>(1,0,0))
             let offset=candidate.position-listener,distance=selected.distance,speed=candidate.speed
             let behind=distance>0.001 ? (simd_dot(offset,ahead)/distance+1)/2:0.5
@@ -706,7 +710,7 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
                 specialKind=type
                 var input=D.SpecialInput();input.share=abs(speed)/max(maximum,1);input.up=vertical.y;input.nose=ahead.y;input.side=right.y
                 layers=state.special.update(delta:delta,kind:type,bank:bank.intValue,input:input)
-                if player.horn&1 != 0,row.count>3,let horn=row[2] as? NSNumber,horn.intValue>=0 {
+                if source.horn,row.count>3,let horn=row[2] as? NSNumber,horn.intValue>=0 {
                     let rate=(row[3] as? NSNumber)?.doubleValue ?? 1
                     layers.append(.init(name:"horn",sound:"74_\(horn.intValue)",rate:rate==0 ? 1:rate,gain:0.9))
                 }
@@ -719,10 +723,10 @@ final class NativeGameAudio: NSObject, AVAudioPlayerDelegate {
             } else if let row=road[key],row.count>=6 {
                 layers=state.road.update(delta:delta,model:candidate.model,share:share,bank:row[1].intValue,
                     pitch:row[2].doubleValue==0 ? 1:row[2].doubleValue,gainDB:row[3].doubleValue)
-                if let layer=D.sputter(model:candidate.model,health:Double(player.vehicleHealth),speedShare:share,roadEnabled:true) {layers.append(layer)}
-                if player.horn&2 != 0,let sample=sirens[player.horn&1 != 0 ? "yelp":"wail"] {
+                if let layer=D.sputter(model:candidate.model,health:source.health,speedShare:share,roadEnabled:true) {layers.append(layer)}
+                if source.siren,let sample=sirens[source.horn ? "yelp":"wail"] {
                     layers.append(.init(name:"siren",sound:sample,rate:1,gain:0.9))
-                } else if player.horn&1 != 0,row[4].intValue>=0 {
+                } else if source.horn,row[4].intValue>=0 {
                     layers.append(.init(name:"horn",sound:"74_\(row[4].intValue)",rate:row[5].doubleValue==0 ? 1:row[5].doubleValue,gain:0.9))
                 }
             }

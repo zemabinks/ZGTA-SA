@@ -27,7 +27,7 @@ final class PresentationClock {
         for column in 0..<4 {for row in 0..<4 {try close(a[column][row],b[column][row],message)}}
     }
     static func main(){
-        do {try run();print("PASS authored vehicle presentation: \(checks) checks; literal renderer, remote aircraft defaults, explicit source precedence, parked phase, owner clocks and retained cap")}
+        do {try run();print("PASS authored vehicle presentation: \(checks) checks; literal renderer, remote aircraft defaults, explicit source precedence, compact lamps, parked phase, owner clocks and retained cap")}
         catch {fputs("FAIL \(error)\n",stderr);exit(1)}
     }
     static func run()throws {
@@ -178,5 +178,34 @@ final class PresentationClock {
             try close(host.vehicleRigStates["compact-rotor"]!.rotorSpin,expected,"compact \(kind) rotor default")
             try matrix(frame.matrices[1],rotorMatrix(expected),"compact applicable rotor matrix")
         }
+        func lens(_ frame:NativeVehicleRig.Frame,_ first:Int)->NativeVehicleRig.Draw {
+            frame.draws.first{$0.start<=first && first<$0.start+$0.count}!
+        }
+        let lampHost=H();lampHost.gameHour=23
+        var lampVehicle=traffic(0,phase:0,steer:0,health:1000)
+        let nightFrame=draw(lampHost,"car",context(.traffic(lampVehicle),"lamp-night"),40)
+        try check(lens(nightFrame,3).emissive && lens(nightFrame,3).layerOverride==1,"compact nighttime headlamp")
+        try check(lens(nightFrame,6).emissive && lens(nightFrame,6).layerOverride==2,"compact nighttime rear lamp")
+        lampHost.gameHour=12
+        let dayFrame=draw(lampHost,"car",context(.traffic(lampVehicle),"lamp-day"),41)
+        try check(!lens(dayFrame,3).emissive && !lens(dayFrame,6).emissive,"compact daytime lamps remained on")
+        lampVehicle.braking=true
+        let brakeFrame=draw(lampHost,"car",context(.traffic(lampVehicle),"lamp-brake"),42)
+        try check(!lens(brakeFrame,3).emissive && lens(brakeFrame,6).emissive,"compact secondary lamp was not rear-only")
+        lampVehicle.braking=false;lampHost.roadWetness=0.5
+        let rainFrame=draw(lampHost,"car",context(.traffic(lampVehicle),"lamp-weather"),43)
+        try check(lens(rainFrame,3).emissive && lens(rainFrame,6).emissive,"compact weather scalar not consumed by renderer")
+        var explicitLamp=NativeVehicleRig.Input();explicitLamp.lights=false;explicitLamp.braking=true
+        let explicitSource=context(.own(.init(input:explicitLamp,doors:nil,wheelOffsets:[:],wheelAngles:[],speed:0,steering:0,rearSteering:0,fallbackSteering:0)),"lamp-explicit")
+        let explicitFrame=draw(lampHost,"car",explicitSource,44)
+        try check(!lens(explicitFrame,3).emissive && lens(explicitFrame,6).emissive,"compact lamps overrode explicit own input")
+        var remoteLamp=H.RemotePlayer(id:"lamp-human");remoteLamp.lights=false
+        let remoteDark=draw(lampHost,"car",context(.remote(remoteLamp),"lamp-remote-dark"),45)
+        try check(!lens(remoteDark,3).emissive && !lens(remoteDark,6).emissive,"compact weather leaked into remote lights")
+        remoteLamp.lights=true
+        let remoteBright=draw(lampHost,"car",context(.remote(remoteLamp),"lamp-remote-bright"),46)
+        try check(lens(remoteBright,3).emissive && lens(remoteBright,6).emissive,"compact lamps replaced remote command")
+        let parkedDark=draw(lampHost,"car",context(.parked(H.RemoteVehicle(),nil),"lamp-parked"),47)
+        try check(!lens(parkedDark,3).emissive && !lens(parkedDark,6).emissive,"compact weather leaked into parked lights")
     }
 }

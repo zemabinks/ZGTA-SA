@@ -2215,7 +2215,7 @@ final class NativeGameViewController: UIViewController {
                                 throttle: forward, health: renderer.vehicleHealth, delta: delta,
                                 snapshot:renderer.nativeVehicleAudioSnapshot,hull:renderer.takeVehicleHullAudio(),ear:renderer.audioEar)
             audio.horn(model:currentVehicle.flatMap {Int($0.code.split(separator:".").first ?? "")},active:renderer.vehicleHorn,siren:renderer.vehicleSiren)
-            audio.updateRemoteVehicles(network.orderedPlayers,ear:renderer.audioEar,forward:renderer.audioForward,
+            audio.updateRemoteVehicles(network.orderedPlayers,traffic:renderer.trafficVehicleAudioSources,ear:renderer.audioEar,forward:renderer.audioForward,
                                        top:{renderer.remoteVehicleAudioTop($0)})
             audio.updateContacts(delta:Double(delta))
             audio.updateFlightPacks(renderer.flightAudioVoices,delta:Double(delta))

@@ -30,6 +30,23 @@ struct NativeAmbientTrafficPresentation {
     typealias DownRay=(_ origin:SIMD3<Double>,_ maximum:Double)->Double?
     enum Failure:Error{case invalidInput}
     var state=State()
+    /// Compact traffic uses the game clock and its own stable dawn/dusk
+    /// offset, independently of actor flags and the sky's night blend.
+    static func mainLamps(hour:Double,id:UInt16,weatherShare:Double)->Bool {
+        guard hour.isFinite,weatherShare.isFinite else{return false}
+        let whole=floor(hour).truncatingRemainder(dividingBy:24)
+        let minute=hour.truncatingRemainder(dividingBy:1)*60
+        let seed=Double(7919*Int(id))
+        if whole>=21 || whole<6 || (whole==20 && minute>seed.truncatingRemainder(dividingBy:64)) ||
+            (whole==6 && minute<seed.truncatingRemainder(dividingBy:64)){return true}
+        return weatherShare>seed/50000
+    }
+    /// Both values come from one selected motion sample. Reverse/stationary
+    /// traffic deliberately uses signed speeds rather than magnitudes.
+    static func brakeLamps(speed:Double,wanted:Double)->Bool {
+        guard speed.isFinite,wanted.isFinite else{return false}
+        return wanted<speed-0.2 || (speed<0.2 && wanted<0.2)
+    }
     private func clamp(_ value:Double,_ lower:Double,_ upper:Double)->Double{min(upper,max(lower,value))}
     private func sign(_ value:Double)->Double{value>0 ? 1:value<0 ? -1:0}
     private func wrap(_ value:Double)->Double{atan2(sin(value),cos(value))}

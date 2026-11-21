@@ -820,6 +820,12 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var nativeVehicleAudioSnapshot:NativeGroundVehicle.AudioSnapshot? {groundVehicle?.audioSnapshot()}
     func takeVehicleHullAudio()->NativeGroundVehicle.HullAudio? {groundVehicle?.takeHullAudio()}
     var audioEar:SIMD3<Float> {legacyCameraSample?.active == true ? legacyCameraSample!.pose.eye:gameCameraFrame?.source ?? camera}
+    var trafficVehicleAudioSources:[NativeVehicleAudioSpatial.Source] {
+        NativeVehicleAudioSpatial.trafficSources(presentedAmbientTraffic.map{
+            .init(id:$0.identity.id,model:$0.identity.model,gtaPosition:SIMD3<Float>($0.body.position),
+                heading:$0.body.heading,pitch:$0.body.pitch,speed:$0.speed,flags:$0.flags,built:true,shown:true)
+        },listener:audioEar)
+    }
     var audioForward:SIMD3<Float> {legacyCameraSample?.active == true ? simd_normalize(legacyCameraSample!.pose.target-legacyCameraSample!.pose.eye):gameCameraFrame.map{simd_normalize($0.target-$0.source)} ?? aimDirection}
     func remoteVehicleAudioTop(_ model:String)->Double? {groundVehicle?.remoteAudioTop(model:model)}
     var nativeAircraftNozzle: Float? { groundVehicle?.aircraftNozzle }
@@ -5879,7 +5885,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             // request burnt materials. Returned built-object appearance still
             // needs its separate registered/compact ownership handoff.
             input.scorched=context.traffic==nil && Double(player?.vehicleHealth ?? parked?.health ?? 1000)<=0
-            input.lights=(player?.lights ?? false) && !input.scorched
+            if let traffic=context.traffic {
+                input.lights=NativeAmbientTrafficPresentation.mainLamps(hour:Double(gameHour),id:traffic.identity.id,weatherShare:Double(roadWetness))
+                input.braking=traffic.braking
+            }else{input.lights=(player?.lights ?? false) && !input.scorched}
             // Existing physical suspension, including working/hydraulic owners,
             // takes priority. Remote projection changes wheel locals only.
             if input.offsets.isEmpty, !context.isCarriage, simd_distance(position,camera)<120,

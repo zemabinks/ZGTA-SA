@@ -4,6 +4,51 @@ import simd
 /// Original module1061 remote selection and Web Audio's inverse/equalpower
 /// spatial model. Coordinates are Rapier/Three Y-up throughout this helper.
 enum NativeVehicleAudioSpatial {
+    /// Scene sound emitters have explicit provenance. A compact car never
+    /// needs a synthetic player or a player-roster entry to make sound.
+    enum SourceIdentity:Hashable {
+        case player(String)
+        case traffic(UInt16)
+        var token:String {
+            switch self {
+            case .player(let id):return "player:\(id)"
+            case .traffic(let id):return "traffic:\(id)"
+            }
+        }
+    }
+    struct Source {
+        let identity:SourceIdentity,model:Int
+        let gtaPosition:SIMD3<Float>
+        let heading:Double,pitch:Double,roll:Double,speed:Double,health:Double
+        let horn:Bool,siren:Bool
+        var id:String{identity.token}
+    }
+    struct Traffic {
+        let id:UInt16,model:UInt16
+        let gtaPosition:SIMD3<Float>
+        let heading:Double,pitch:Double,speed:Double
+        let flags:UInt8,built:Bool,shown:Bool
+    }
+    /// Near candidates use stable distance order; the separate far siren
+    /// allowance follows actor insertion order. The common voice selector
+    /// still applies supported-model/range checks and its overall five cap.
+    static func trafficSources(_ traffic:[Traffic],listener:SIMD3<Float>)->[Source] {
+        guard listener.x.isFinite,listener.y.isFinite,listener.z.isFinite else{return []}
+        let available=traffic.enumerated().compactMap{index,car -> (Int,Traffic,Double)? in
+            guard car.built,car.shown,car.gtaPosition.x.isFinite,car.gtaPosition.y.isFinite,car.gtaPosition.z.isFinite,
+                  car.speed.isFinite,car.heading.isFinite,car.pitch.isFinite else{return nil}
+            return(index,car,simd_distance(SIMD3<Double>(car.gtaPosition),SIMD3<Double>(listener)))
+        }
+        let near=available.filter{$0.2<45}.sorted{$0.2==$1.2 ? $0.0<$1.0:$0.2<$1.2}.prefix(4)
+        let far=available.filter{$0.2>=45 && $0.2<150 && $0.1.flags&2 != 0}.prefix(2)
+        func source(_ row:(Int,Traffic,Double),far:Bool)->Source {
+            let car=row.1
+            return .init(identity:.traffic(car.id),model:Int(car.model),gtaPosition:car.gtaPosition,
+                heading:car.heading,pitch:car.pitch,roll:0,speed:car.speed,health:1000,
+                horn:!far && car.flags&8 != 0,siren:car.flags&2 != 0)
+        }
+        return near.map{source($0,far:false)}+far.map{source($0,far:true)}
+    }
     /// AudioParam.setTargetAtTime: each new target preserves the current curve
     /// value, then approaches the target with the supplied time constant.
     struct VectorParameter {
