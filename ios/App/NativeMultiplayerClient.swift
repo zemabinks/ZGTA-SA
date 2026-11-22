@@ -112,7 +112,7 @@ struct RemotePlayer {
     var packetReceivedAt:Double = 0
     var packetClockMilliseconds:Double = 0
     var latencyMilliseconds:Float = 0
-    var life = 100
+    var life:Double = 100
     var armour = 0
     var swimState:Int { let base=action&63;return (10...16).contains(base) ? base-9:0 }
     var burning:Bool {action&64 != 0}
@@ -1761,9 +1761,11 @@ final class NativeMultiplayerClient {
                 return (id,seat)
             }()
             let wireAnimation = row.count > 41 ? row[41] as? String ?? "" : ""
+            let lifeColumn=driving ? 43:18
+            let life=row.count>lifeColumn ? min(100,NativeOriginalWorldCommands.number(row[lifeColumn]) ?? 100):100
             let mappedAnimation = NativePedestrianMotion.clip(forWire: wireAnimation,
                 weapon: row.count > 27 ? (row[27] as? NSNumber)?.intValue ?? 0 : 0,
-                health: row.count > 18 && !driving ? (row[18] as? NSNumber)?.intValue ?? 100 : 100)
+                health: !driving && life<=0 ? 0:100)
             let animation = !wireAnimation.isEmpty && ["idle_stance","gun_stand"].contains(mappedAnimation) ? wireAnimation : mappedAnimation
             let action = row.count > 32 ? ((row[32] as? NSNumber)?.intValue ?? 0) & 63 : 0
             let swimClips = ["swim_tread","swim_breast","swim_crawl","swim_dive_under","swim_under","swim_glide","swim_jumpout"]
@@ -1807,7 +1809,7 @@ final class NativeMultiplayerClient {
                                        packetReceivedAt:ProcessInfo.processInfo.systemUptime,
                                        packetClockMilliseconds:row.count>16 ? (row[16] as? NSNumber)?.doubleValue ?? 0:0,
                                        latencyMilliseconds:row.count>23 ? (row[23] as? NSNumber)?.floatValue ?? 0:0,
-                                       life:driving ? (row.count>43 ? (row[43] as? NSNumber)?.intValue ?? 100:100):(row.count>18 ? (row[18] as? NSNumber)?.intValue ?? 100:100),
+                                       life:life,
                                        armour:row.count>30 ? (row[30] as? NSNumber)?.intValue ?? 0:0)
             if let vehicleID, var vehicle = vehicles[vehicleID] {
                 vehicle.position = SIMD3(x, y, z)

@@ -17,6 +17,7 @@ import Foundation
 import simd
 final class FrameCarrier {
  var events:[String]=[],deferredWorldSurfaces:[Int]=[],deferredVehicleSurfaces:[Int]?,receivedVehicles:[Int]=[],particleDrawDelta:Double=0
+ var vehicleThermalHot:[String:(position:SIMD3<Double>,time:Double)]=["old":(.zero,0)]
  let depth=1
  final class Encoder{func setDepthStencilState(_ depth:Int){}}
  func drawWorldMeshes(matrix:simd_float4x4,encoder:Encoder){events.append("world-solid");deferredWorldSurfaces=[11]}
@@ -30,7 +31,7 @@ final class FrameCarrier {
  ACTUAL_FRAME
  }
 }
-let frame=FrameCarrier();frame.run();precondition(frame.events==["world-solid","actor-solid","legacy-solid","surface-pass"]);precondition(frame.receivedVehicles==[5] && frame.deferredVehicleSurfaces==nil && frame.deferredWorldSurfaces.isEmpty)
+let frame=FrameCarrier();frame.run();precondition(frame.vehicleThermalHot.isEmpty);precondition(frame.events==["world-solid","actor-solid","legacy-solid","surface-pass"]);precondition(frame.receivedVehicles==[5] && frame.deferredVehicleSurfaces==nil && frame.deferredWorldSurfaces.isEmpty)
 let standalone=FrameCarrier();standalone.drawActors(encoder:FrameCarrier.Encoder(),matrix:matrix_identity_float4x4);precondition(standalone.receivedVehicles==[5] && standalone.events==["actor-solid","standalone-vehicle"])
 print("PASS actual frame phase placement and standalone/deferred actor publication")
 '''.replace('ACTUAL_FRAME',renderer[start:end]).replace('ACTUAL_ACTOR_PUBLICATION',renderer[actor_start:actor_end])

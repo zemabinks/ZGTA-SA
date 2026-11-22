@@ -44,6 +44,7 @@ private final class Carrier {
     var nativeBikeLean:Float=0,nativeBicycleCrank:Float=0,nativeRotorTurning:Float=0,nativeAircraftNozzle:Float?
     var nativeLandingGearUp=false,vehicleLights=false
     var particleEffects:NativeParticleEffects?
+    var particleDrawDelta=1.0/60
     var vehicleThermalStates=[String:NativeVehicleThermalEffects.State]()
     var vehicleThermalHot=[String:(position:SIMD3<Double>,time:Double)]()
     var remoteBikeFrames=[String:NativeRemoteBikeAnimation.Frame]()
@@ -57,6 +58,17 @@ private final class Carrier {
     private var ownVehicleWheelClocks:[Double]{groundVehicle?.wheelAnglesDouble ?? []}
     private var pendingVehicleSnapshot:Bool?
     // ACTUAL_PED_APPEND
+    private func appendFoot(_ player:RemotePlayer,at footPosition:SIMD3<Float>) {
+        guard Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) else{return}
+        let name="authored-ped",riderTime=1.0,handWeapon=0
+        let pose:NativeSkeletalActor.Pose?=nil,flight:NativeFlightAnimation.Frame?=nil
+        let original=true,canopySamples:[NativeFlightAnimation.Canopy?]=[]
+        // ACTUAL_REMOTE_FOOT_APPEND
+    }
+    private func submitPed(_ index:Int,submitted actorDrawSubmitted:Bool) {
+        let queued=nextPedOverride(index),position=modelInstances[index].1
+        // ACTUAL_ACTOR_FIRE
+    }
     private func nextPedOverride(_ index:Int)->ActorPoseOverride? {
         let occurrence=modelInstances[index].8
         // ACTUAL_PED_TAKE
@@ -292,6 +304,32 @@ private final class Carrier {
         check(visible.allSatisfy{simd_distance($0.position,SIMD3(Double(thermalAt.x),Double(thermalAt.y),Double(thermalAt.z)))<1e-8},"Selected rendered body supplies thermal world point")
         check(visible.allSatisfy{$0.velocity==SIMD3(3,4,5)},"Selected remote velocity reaches thermal particles")
         check(thermal.vehicleThermalHot[token] != nil && thermal.vehicleThermalStates[token] != nil,"Thermal state remains bound to the selected occurrence")
+        let fire=Carrier()
+        let system:[String:Any]=["length":0,"emitters":[["texture":"sentinel","infos":["emrate":["rate":[[0,120.0]]],"emlife":["life":[[0,1.0]]]]]]]
+        fire.particleEffects=try! NativeParticleEffects(data:JSONSerialization.data(withJSONObject:["systems":["fire":system]]),textures:["sentinel"],random:{0.37})
+        // A real RemotePlayer's code is immutable; construct a foot occurrence
+        // from the existing authored driver without changing packet semantics.
+        func burningFoot(_ id:String,_ life:Double)->RemotePlayer {
+            var p=RemotePlayer(id:id,name:id,position:SIMD3(900,900,900),code:"s7",heading:0,pitch:0,roll:0,speed:0,steer:0,skin:7,animation:"idle_stance",animationStarted:0,weapon:0,vehicleID:nil)
+            p.action=64;p.life=life;return p
+        }
+        let displayed=SIMD3<Float>(12,-23,34)
+        fire.appendFoot(burningFoot("own",0.5),at:displayed)
+        fire.appendFoot(burningFoot("other",0),at:displayed)
+        fire.appendPed("authored-ped",displayed,0,0,"",0,0,identity:"own",ownFoot:true)
+        check(fire.modelInstances.count==3,"Two remote occurrences and one explicit own occurrence remain separate")
+        fire.submitPed(0,submitted:false)
+        check(fire.particleEffects!.shown.isEmpty,"No geometry submission means no remote flame burst")
+        fire.submitPed(0,submitted:true)
+        check(fire.particleEffects!.shown.count==2 && fire.particleEffects!.shown.allSatisfy{$0.position==SIMD3<Double>(displayed)+SIMD3(0,0,1)},"Fractionally alive remote flames use submitted display feet in GTA Z-up")
+        fire.submitPed(1,submitted:true)
+        check(fire.particleEffects!.shown.count==4 && fire.particleEffects!.shown.suffix(2).allSatisfy{$0.position==SIMD3<Double>(displayed)+SIMD3(0,0,0.1)},"Coincident dead occurrence retains its own low flame origin")
+        fire.submitPed(2,submitted:true)
+        check(fire.particleEffects!.shown.count==4,"Explicit own occurrence does not duplicate its existing own-fire emitter")
+        var riding=burningFoot("passenger",100);riding.ridingVehicleID="car"
+        fire.appendFoot(riding,at:displayed);fire.appendFoot(a,at:displayed)
+        check(fire.modelInstances.count==3,"Passenger and driver never enter remote foot fire path")
+        check(NativeOriginalWorldEffects.actorFireOrigin(atFeet:SIMD3(Float.nan,0,0),dead:false)==nil,"Invalid root rejected before particle publication")
         return checks
     }
 }

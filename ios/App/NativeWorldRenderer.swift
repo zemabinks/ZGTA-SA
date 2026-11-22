@@ -384,6 +384,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var flight:NativeFlightAnimation.Frame?
         var identity:String?
         var ownFoot:Bool
+        var actorFire:Bool = false
+        var actorDead:Bool = false
         var canopySamples:[NativeFlightAnimation.Canopy?] = []
         var trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil
         var trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil
@@ -5294,6 +5296,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         encoder.setDepthStencilState(depth)
         drawWorldMeshes(matrix: matrix,encoder: encoder)
         particleDrawDelta=Double(delta)
+        // Gameplay runs after this draw. Only this frame's submitted vehicle
+        // occurrences may contribute heat, including when none remain.
+        vehicleThermalHot.removeAll(keepingCapacity:true)
         deferredVehicleSurfaces=[]
         drawActors(encoder: encoder,matrix: matrix)
         let transparentVehicles=deferredVehicleSurfaces ?? [];deferredVehicleSurfaces=nil
@@ -5771,9 +5776,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         var nextShotVehicles:[LocalShotVehicleFrame]=[]
         var nextShotOccupants:[String:[LocalShotOccupantFrame]]=[:]
         func appendPed(_ name:String,_ at:SIMD3<Float>,_ heading:Float,_ pitch:Float,_ clip:String,_ elapsed:Double,_ weapon:Int,
-                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil,trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil,shotSeat:(car:String,target:String)? = nil) {
+                       pose:NativeSkeletalActor.Pose? = nil,transform:simd_float4x4? = nil,original:Bool = false,flight:NativeFlightAnimation.Frame? = nil,identity:String? = nil,ownFoot:Bool = false,actorFire:Bool = false,actorDead:Bool = false,canopySamples:[NativeFlightAnimation.Canopy?] = [],trafficOccupant:(id:UInt16,generation:UInt64,seat:Int,skin:Int,dead:Bool)? = nil,trafficArrival:(serial:UInt64,id:UInt16,generation:UInt64)? = nil,shotSeat:(car:String,target:String)? = nil) {
             let occurrence = actorOverrides.count
-            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,canopySamples:canopySamples,trafficOccupant:trafficOccupant,trafficArrival:trafficArrival,shotSeat:shotSeat))
+            actorOverrides.append(.init(pose:pose,transform:transform,original:original,flight:flight,identity:identity,ownFoot:ownFoot,actorFire:actorFire,actorDead:actorDead,canopySamples:canopySamples,trafficOccupant:trafficOccupant,trafficArrival:trafficArrival,shotSeat:shotSeat))
             modelInstances.append((name,at,heading,pitch,clip,elapsed,weapon,nil,occurrence))
         }
         if driving,isPassenger,!legacySpectating,let seat=passengerSeat,let frame=passengerFrame,
@@ -5989,7 +5994,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     }
                 }
                 if (10...16).contains(player.action & 63) || (20...25).contains(player.action & 63) { handWeapon=0 }
-                appendPed(name,footPosition,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id,canopySamples:canopySamples)
+                appendPed(name,footPosition,player.heading,player.pitch,player.animation,riderTime-player.animationStarted,handWeapon,pose:pose,original:original,flight:flight,identity:player.id,actorFire:player.burning,actorDead:player.life<=0,canopySamples:canopySamples)
                 continue
             }
             let context=remoteVehicleDrawContext(name:name,player:player)
@@ -6441,6 +6446,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 recordOwnFootContact(model:name,actor:customPed?.actor ?? actor,pose:pose,transform:transform,at:riderTime)
             }
 #endif
+            if actorDrawSubmitted,queued?.actorFire==true,
+               let origin=NativeOriginalWorldEffects.actorFireOrigin(atFeet:position,dead:queued?.actorDead==true) {
+                particleEffects?.burst("fire",at:origin,delta:particleDrawDelta)
+            }
             if actorDrawSubmitted,let occupant=queued?.trafficOccupant,let actor=skeletalActors[name] {
                 let kind=customPed==nil ? "converted":customPed === originalPed ? "stock":fixedPlayer != nil ? "fixed-cj":"custom"
                 recordTrafficOccupantDraw(occupant,model:name,kind:kind,asset:ObjectIdentifier(actor))

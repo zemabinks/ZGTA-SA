@@ -25,6 +25,9 @@ def main():
     fixture=fixture.replace('// ACTUAL_GAMEPLAY',block(controller,'    private func stepOriginalGameplay('))
     cache=next(line.strip()for line in renderer.splitlines()if 'vehicleThermalHot[context.token]='in line)
     fixture=fixture.replace('// ACTUAL_CACHE_PUBLICATION',cache)
+    start=renderer.index('        particleDrawDelta=Double(delta)',renderer.index('    func draw(in view: MTKView)'))
+    end=renderer.index('        drawActors(',start)
+    fixture=fixture.replace('// ACTUAL_DRAW_BOUNDARY',renderer[start:end])
     assert '// ACTUAL_'not in fixture
     report=dict(status='RUNNING',startedAt=time.time(),sourceHashes=frozen,results=[],oneHeavyJob=True,scope='Actual complete thermal/particle/weapon/effect/vitals owners, literal renderer getter/cache publication and GameVC step. Authored cache/network/UI carriers. Not GPU, live multiplayer or original retail.')
     def save():(out/'report.json').write_text(json.dumps(report,indent=2)+'\n')
