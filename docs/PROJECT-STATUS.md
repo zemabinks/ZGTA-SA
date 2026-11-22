@@ -19,41 +19,50 @@ packaged public iPhone release. Users must supply their own supported game files
 
 ## Latest verified source
 
-Population preparation can optionally derive zone settings from an owner-supplied
-classic main.scm. A bounded typed parser admits only a statically verified literal
-configuration block, without running or reconstructing campaign missions. Zone
-keys, shared settings, short bounds and lookup follow the primary source-level
-references; original executable behavior is not established by those references.
-Original-derived tables stay local and the original v1 output remains unchanged.
-Authored miniature-script/lookup/CLI tests and independent local static comparison
-pass. Original density and model-group activation remain separate requirements.
+Native application build189 and independent server changes throughCore191 form
+the latest verified source batch.
 
-Pedestrian retention now uses the same distance as publication and local spawn
-counts. An invisible outer ring can no longer occupy shared capacity indefinitely;
-another nearby observer still preserves the exact actor. The previous source
-reproduces the stall. Authored boundary/lifetime tests and two real loopback
-WebSocket scenarios pass, including streamout, replacement and disconnect.
-Their pavement and geometry are authored boundaries, not a rendered world test.
+Native pedestrian pose time now follows observation boundaries. New hit/down
+states begin at receipt rather than inheriting the preceding display interval;
+fractional intervals retain their ownership without advancing twice. Rider
+handoffs reset that clock. Persistent head visibility also applies at stream-in,
+and a late first death cause can correct the existing clip without resetting its
+phase or the later get-up orientation. Authored backend-packet/native-controller
+checks cover fixed and irregular display schedules, late and split observations,
+repeated metadata, invalid clocks and lying rider handoffs. These are independent
+contracts, not original executable timings.
 
-Accepted ordinary shot body parts now reach the pedestrian reaction state and
-supplemental packet. Later claims cannot replace the accepted ticket metadata.
-Unrepresentable legacy/absent pieces retain the old torso fallback. Damage,
-ammunition and range/visibility authority remain unchanged. The previous source
-loses admitted head metadata; current actual handler/task/packet checks pass.
-Actual backend-produced bytes also pass through the complete native decoder and
-common animation owner at several display rates, including its existing terminal
-head visibility result. This uses authored clips, catalog, graph and transport/
-geometry boundaries; it does not establish rendered rig or retail accuracy.
+Both native SDK builds and the complete selected regression chain pass. The
+verified native bundle completes a normal Simulator join, scoped NPC lifecycle
+observation and menu/resource restoration; saved captures were reviewed. The
+private scene uses owner-supplied original model/world resources with explicit
+scripted idle/streaming and an owned acknowledged shooter. It does not establish
+native aiming, full ambient AI, physical-device behavior, audible output,
+continuous animation fidelity or retail parity. Existing installed resources and
+meaningful settings survive the update and normal test flow.
 
-The full Core187 selected physics/audio/transport regression chain passes. The
-Core188 metadata change passes its affected handler and native pipeline checks.
-All native product inputs retain the accepted Core182 SDK/App sources. No new
-App/SDK, rendered-world, physical-device or retail acceptance is inferred. Full vehicle damage
-authority, original population density/groups, complete NPC/traffic/police AI,
-external-server coverage and exhaustive core gameplay parity remain incomplete.
-Only independently authored source and qualified implementation notes are public;
-original resources, derived data, measurements, captures and private ancestry stay
-local.
+The optional archived-policy test carrier now supports the current controller
+interface and persistent visibility. An independent authored contract exercises
+that optional path in the default regression chain, including delayed death
+correction and recovery. The old carrier fails compilation as expected. Authored
+rows are identified separately from real archived observations; compilation of
+this path does not turn those authored rows into an original-game comparison.
+
+Authoritative NPC movement also settles before flee, gunshot, injury and death
+events. Panic expiry splits the running/walking interval at its deadline;
+repeated or backward clock samples cannot replay motion. Hit clearance and range
+checks observe the settled target. The old source reproduces event, deadline,
+shared-actor, clock and stale melee-range failures. Analytical task/producer and
+actual backend handler checks pass with authored pavement/geometry boundaries,
+alongside retained lifetime, body-part, protocol and complete selected checks.
+The existing catch-up cap and independent movement parameters remain explicit.
+
+These changes improve independently implemented core correctness. Complete
+original NPC/traffic/police AI, density/model-group policy, cumulative vehicle
+damage authority, external-server coverage, full original resource/runtime
+support and comprehensive original-game comparisons remain open. Only independent
+source and qualified notes are public; original resources, derived data,
+measurements, captures and private ancestry remain local.
 
 ## Development priorities
 

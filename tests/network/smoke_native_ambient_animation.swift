@@ -52,8 +52,11 @@ import simd
             let npc=owner();var snapshot=NativeAmbientPedestrianAnimation.Snapshot(state:state())
             _=npc.update(at:10,active:true,snapshot:snapshot)
             snapshot.state=state(hits:1)
-            let hit=npc.update(at:10.1,active:true,snapshot:snapshot)
+            let observed=npc.update(at:10.1,active:true,snapshot:snapshot)
+            check(!has(observed,"ped/hit_walk"),"New hit pose advanced before its observation")
+            let hit=npc.update(at:10.1+1.0/120,active:true,snapshot:snapshot)
             check(has(hit,"ped/hit_walk"),"NPC melee response lost fixed reaction damage25")
+            check(abs(hit!.blends.first{$0.clip=="ped/hit_walk"}!.time-1.0/120)<1e-8,"First hit pose tick was backdated or delayed")
             check(!npc.animator.stunned,"NPC forwarded human stun ownership")
             let before=hit!.blends.first{$0.clip=="ped/hit_walk"}!.time
             let repeated=npc.update(at:10.2,active:true,snapshot:snapshot)
@@ -70,7 +73,8 @@ import simd
             _=npc.update(at:10,active:true,snapshot:snapshot);snapshot.state=state(hits:0)
             check(!has(npc.update(at:10.1,active:true,snapshot:snapshot),"ped/hit_walk"),"Zero wrap reacted")
             snapshot.state=state(hits:1)
-            check(has(npc.update(at:10.2,active:true,snapshot:snapshot),"ped/hit_walk"),"Counter after zero wrap was lost")
+            check(!has(npc.update(at:10.2,active:true,snapshot:snapshot),"ped/hit_walk"),"Counter after zero wrap backdated its new pose")
+            check(has(npc.update(at:10.2+1.0/120,active:true,snapshot:snapshot),"ped/hit_walk"),"Counter after zero wrap was lost")
         }
         do {
             let npc=owner();var snapshot=NativeAmbientPedestrianAnimation.Snapshot(flags:1,state:state(hits:1,weapon:25))

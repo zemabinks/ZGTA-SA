@@ -22,12 +22,15 @@ final class NativeAmbientPedestrianAnimation {
     private let weapons:[Int:NativeFootWeaponAnimation]
     private var displayTime:Double?
     private var displayRemainder:Double = 0
+    private var displayConsumedRemainder:Double = 0
+    private var displaySnapshot:Snapshot?
     private var displayFrame:NativeFootAnimation.Frame?
     private var ratio:Double = 0
     private var hits:UInt8?
     private var hitUntil = -Double.infinity
     private var wasDown = false
     private var faceDown = false
+    private var pendingDeathCause=false
     private var arrivalLying = false
     private var activity=NativeAmbientPedestrianActivity()
     private var waiting=NativeAmbientPedestrianWaiting()
@@ -40,12 +43,13 @@ final class NativeAmbientPedestrianAnimation {
         self.weapons=weapons;walkStyle=style.walk
         duration={library.duration(of:$0)}
     }
-    func resetDisplayClock(){displayTime=nil;displayRemainder=0}
+    func resetDisplayClock(){displayTime=nil;displayRemainder=0;displayConsumedRemainder=0;displaySnapshot=nil}
     /// Existing server flags still choose down/recovery. A lying arrival skips
     /// replaying the fall from upright after its vehicle animation completed.
     func acceptRider(lying:Bool) {
+        resetDisplayClock()
         arrivalLying=lying
-        if lying{wasDown=false;animator.revive()}
+        if lying{wasDown=false;pendingDeathCause=false;animator.revive()}
     }
 
     func update(at time:Double,active:Bool,snapshot:Snapshot)->NativeFootAnimation.Frame? {
@@ -55,21 +59,38 @@ final class NativeAmbientPedestrianAnimation {
         let elapsed=displayTime.map{time-$0} ?? 0
         displayTime=time
         let accepted=elapsed.isFinite && elapsed>=0 && elapsed<=0.5
-        if !accepted{displayRemainder=0}
+        if !accepted{displayRemainder=0;displayConsumedRemainder=0}
         let interval=accepted ? elapsed:0,step=1.0/120,total=interval+displayRemainder
         let count=max(0,min(60,Int(floor(total/step+1e-9))))
         displayRemainder=max(0,total-Double(count)*step)
-        // Observe authoritative task edges immediately, then advance pose on
-        // one fixed clock. Fractional display time is retained rather than
-        // changing blend integration with the rendering rate.
-        var final=advance(delta:0,now:time*1000,snapshot:snapshot)
+        // Elapsed time belongs to the preceding observation. Applying a new
+        // hit/down state first would backdate its animation by one display
+        // frame. Observe the current task immediately after that interval.
         var travel=SIMD2<Double>.zero,steps:[String]=[]
-        if count>0 {
-            for index in 1...count {
-                let frame=advance(delta:step,now:(time-total+Double(index)*step)*1000,snapshot:snapshot)
-                travel+=frame.travel;steps+=frame.steps;final=frame
+        if let previous=displaySnapshot {
+            if count>0 {
+                let consumed=displayConsumedRemainder
+                for index in 1...count {
+                    let delta=index==1 ? max(0,step-consumed):step
+                    let frame=advance(delta:delta,now:(time-total+Double(index)*step)*1000,snapshot:previous)
+                    travel+=frame.travel;steps+=frame.steps
+                }
+                displayConsumedRemainder=0
+            }
+            if previous.flags != snapshot.flags || previous.state != snapshot.state || previous.waitingLinkKind != snapshot.waitingLinkKind {
+                // Close the old task at the exact observation boundary. Keep
+                // the fixed grid and remember this consumed fraction so the
+                // next step cannot integrate it again.
+                let tail=max(0,displayRemainder-displayConsumedRemainder)
+                if tail>0 {
+                    let frame=advance(delta:tail,now:time*1000,snapshot:previous)
+                    travel+=frame.travel;steps+=frame.steps
+                }
+                displayConsumedRemainder=displayRemainder
             }
         }
+        var final=advance(delta:0,now:time*1000,snapshot:snapshot)
+        travel+=final.travel;steps+=final.steps;displaySnapshot=snapshot
         final.travel=travel;final.steps=steps;displayFrame=final;return final
     }
     private func heldFrame()->NativeFootAnimation.Frame? {
@@ -80,13 +101,17 @@ final class NativeAmbientPedestrianAnimation {
     private func advance(delta:Double,now:Double,snapshot:Snapshot)->NativeFootAnimation.Frame {
         let down=snapshot.down
         let state=snapshot.state
+        let previousHits=hits
+        let newCause=state.map{$0.hitCounter != 0 && (previousHits==nil || previousHits != $0.hitCounter)} ?? false
         // A first observation establishes a baseline. Counter zero denotes no
         // new reaction, including the31->0 wrap. NPC responses deliberately do
         // not forward the reaction helper's human input-stun result.
         if let state {
-            if let previous=hits,previous != state.hitCounter,state.hitCounter != 0 {
-                if snapshot.flags&8 != 0,state.hitPiece==9,
-                   [UInt8(24),25,26,27,30,31,33,34,38].contains(state.hitWeapon){animator.loseHead()}
+            // This is persistent visibility, including first observation and
+            // counter wrap, rather than a fresh-hit animation event.
+            if !animator.lostHead,snapshot.flags&8 != 0,state.hitPiece==9,
+               [UInt8(24),25,26,27,30,31,33,34,38].contains(state.hitWeapon){animator.loseHead()}
+            if previousHits != nil,newCause {
                 if !down,state.hitWeapon != 49,state.hitWeapon != 51 {
                     let reaction=NativePedestrianReaction.reaction(.init(weapon:Int(state.hitWeapon),
                         side:Self.incomingSide(wireFrom:state.hitFromWire,nativeHeading:snapshot.heading),
@@ -100,6 +125,7 @@ final class NativeAmbientPedestrianAnimation {
         }
         if down && !wasDown {
             animator.rest(cut:true)
+            pendingDeathCause = !arrivalLying && (state==nil || state?.hitCounter==0 || (previousHits != nil && !newCause))
             let kind:String
             if let state,state.hitCounter != 0 {
                 kind=Self.deathKind(weapon:state.hitWeapon==51 ? 16:Int(state.hitWeapon),
@@ -108,7 +134,14 @@ final class NativeAmbientPedestrianAnimation {
             faceDown=kind=="koSkidFront" || kind=="floorHitF"
             animator.die(kind,fallen:arrivalLying)
             arrivalLying=false
+        }else if down,wasDown,pendingDeathCause,newCause,let state {
+            let kind=Self.deathKind(weapon:state.hitWeapon==51 ? 16:Int(state.hitWeapon),
+                side:Self.incomingSide(wireFrom:state.hitFromWire,nativeHeading:snapshot.heading))
+            faceDown=kind=="koSkidFront" || kind=="floorHitF"
+            animator.die(kind,correctExisting:true)
+            pendingDeathCause=false
         }else if !down && wasDown {
+            pendingDeathCause=false
             animator.revive()
             _=animator.act(faceDown ? "ped/getup_front":"ped/getup",cut:true,once:true)
         }

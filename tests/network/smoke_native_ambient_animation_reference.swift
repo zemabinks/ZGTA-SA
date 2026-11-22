@@ -12,13 +12,18 @@ final class NPCFootSpy {
     struct Input {var position=SIMD3<Double>.zero;var heading=0.0,ratio=0.0;var crouch=false,guarding=false;var gun:GunAim?}
     struct Frame {var travel=SIMD2<Double>.zero;var steps:[String]=[],shots:[Bool]=[],shot=false,canopySamples:[Bool]=[]}
     var calls:[[String:Any]]=[]
+    var lostHead=false
     var walkSpeed=1.0,runSpeed=2.0
     init(library:NativeSkeletalAnimationLibrary,style:NativeFootAnimationStyle,random:()->Double){}
     func flinch(_ kind:String,stun:Bool=false){calls.append(["method":"flinch","kind":kind,"stun":stun])}
-    func loseHead(){calls.append(["method":"loseHead"])}
+    func loseHead(){lostHead=true;calls.append(["method":"loseHead"])}
     func rest(cut:Bool=false){calls.append(["method":"rest","cut":cut])}
-    func die(_ kind:String,fallen:Bool=false){calls.append(["method":"die","kind":kind,"fallen":fallen])}
-    func revive(){calls.append(["method":"revive"])}
+    func die(_ kind:String,fallen:Bool=false,correctExisting:Bool=false){
+        var call:[String:Any] = ["method":"die","kind":kind,"fallen":fallen]
+        if correctExisting{call["correctExisting"]=true}
+        calls.append(call)
+    }
+    func revive(){lostHead=false;calls.append(["method":"revive"])}
     @discardableResult func act(_ clip:String,loop:Bool=false,rooted:Bool=false,cut:Bool=false,once:Bool=false)->Bool {
         calls.append(["method":"act","kind":clip.replacingOccurrences(of:"ped/",with:""),"cut":cut,"once":once]);return true
     }
@@ -38,7 +43,9 @@ final class NPCFootSpy {
         switch method {
         case "flinch":value["stun"]=false
         case "rest":value["cut"]=raw["restEnabled"] as! Bool
-        case "die":value["fallen"]=raw["arriveLying"] as! Bool
+        case "die":
+            value["fallen"]=raw["arriveLying"] as! Bool
+            if let correction=raw["correctExisting"] as?Bool,correction{value["correctExisting"]=true}
         case "act":value["cut"]=raw["actCut"] as! Bool;value["once"]=raw["actOnce"] as! Bool
         default:break
         }
@@ -82,12 +89,17 @@ final class NPCFootSpy {
                     let until=(row["expectedHitUntilAfterMS"] as? NSNumber)?.doubleValue ?? -.infinity
                     check(npc.hitUntil==until,name+" hit cooldown")
                 }
+                if let lostHead=row["expectedLostHeadAfter"] as?Bool {
+                    check(npc.animator.lostHead==lostHead,name+" persistent head visibility")
+                }
                 steps+=1
             }
             cases+=1
         }
+        let authored=root["referenceKind"] as?String == "authored-contract"
+        let scope=authored ? "Authored contract rows through the actual optional policy carrier and independent controller; explicit common-controller spy. No archived, animation, rendering or retail comparison." : "Actual independent policy source with renamed/mock common-controller type and test-accessible task fields; compared to captured archived dispatch/J/Q/X calls. Excludes voice/effects, thrown/runover/arrive-lying, direct unguarded Q, animation/rendered/retail acceptance."
         let report:[String:Any]=["status":"PASS","checks":checks,"cases":cases,"steps":steps,"excluded":excluded,
-            "scope":"Actual independent policy source with renamed/mock common-controller type and test-accessible task fields; compared to captured archived dispatch/J/Q/X calls. Excludes voice/effects, thrown/runover/arrive-lying, direct unguarded Q, animation/rendered/retail acceptance."]
+            "referenceKind":authored ? "authored-contract":"archived-observation","scope":scope]
         print(String(data:try JSONSerialization.data(withJSONObject:report,options:[.prettyPrinted,.sortedKeys]),encoding:.utf8)!)
     }
 }
