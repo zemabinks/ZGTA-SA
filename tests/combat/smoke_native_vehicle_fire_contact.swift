@@ -10,6 +10,10 @@ final class Renderer {
     let weaponEffects=NativeWeaponEffects()
     var camera=SIMD3<Float>.zero
     var vehicleThermalHot:[String:(position:SIMD3<Double>,time:Double)]=[:]
+    var particleDrawDelta=0.0,deferredVehicleSurfaces:[Int]?=[]
+    func beginDraw(delta:Float) {
+        // ACTUAL_DRAW_BOUNDARY
+    }
     var swimming=false,underwater=false,hasOriginalWorldGas=false,burning=false
     func setOriginalActorEffects(burning:Bool,coughing:Bool){self.burning=burning}
     // ACTUAL_GETTER
@@ -17,10 +21,10 @@ final class Renderer {
         let context=(token:token,unused:0)
         // ACTUAL_CACHE_PUBLICATION
     }
-    func renderCondition(health:Double,burning:Bool,engine:SIMD3<Double> = SIMD3(0,0,1),now:Double=ProcessInfo.processInfo.systemUptime) {
+    func renderCondition(health:Double,burning:Bool,engine:SIMD3<Double> = SIMD3(0,0,1),now:Double=ProcessInfo.processInfo.systemUptime,token:String="parked:taxi") {
         var state=NativeVehicleThermalEffects.State()
         let emissions=NativeVehicleThermalEffects.sample(.init(model:420,kind:"car",health:health,burning:burning,engine:engine,transform:matrix_identity_double4x4,velocity:.zero,delta:1.0/60),state:&state)
-        publish(emissions,now:now)
+        publish(emissions,now:now,token:token)
     }
 }
 final class Network {
@@ -68,7 +72,13 @@ do {
     r.renderCondition(health:249,burning:false);check(r.vehicleThermalHot.isEmpty && !r.hasOriginalWorldFire,"submerged physical burning suppression remains authoritative")
     r.renderCondition(health:249,burning:true,engine:SIMD3(30,0,1));check(!r.hasOriginalWorldFire,"far occurrence cannot ignite actor")
     r.renderCondition(health:249,burning:true,now:ProcessInfo.processInfo.systemUptime-1);check(!r.hasOriginalWorldFire,"no stale heat after culling")
-    r.renderCondition(health:249,burning:true);r.vehicleThermalHot.removeAll();check(!r.hasOriginalWorldFire,"cache clear leaves no old world fire")
+    r.renderCondition(health:249,burning:true);r.beginDraw(delta:1.0/144);check(!r.hasOriginalWorldFire,"actual next draw with no submitted vehicle retires preceding heat")
+    r.renderCondition(health:249,burning:true,token:"unused")
+    r.beginDraw(delta:1.0/15)
+    r.renderCondition(health:249,burning:true,token:"visible")
+    check(r.vehicleThermalHot.count==1 && r.vehicleThermalHot["visible"] != nil,"new draw contains only its submitted occurrence")
+    r.renderCondition(health:1000,burning:false,token:"visible")
+    check(!r.hasOriginalWorldFire,"repair after frame replacement removes current heat")
     r.weaponEffects.groundHeight={_,_,_ in 0};r.weaponEffects.receiveBlast(weapon:18,position:SIMD3(0,0,0))
     check(r.hasOriginalWorldFire,"existing weapon-fire fallback retained without vehicle heat")
 }

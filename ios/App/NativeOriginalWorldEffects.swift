@@ -3,9 +3,15 @@ import Foundation
 /// Actor fire/cough timers from the archived browser controller. These own
 /// effects only; each emitted fractional hit still passes through vitals.
 final class NativeOriginalWorldEffects {
+    /// Use the submitted actor occurrence's displayed feet, rather than its
+    /// latest packet or another co-located actor's pose. GTA uses Z-up here.
+    static func actorFireOrigin(atFeet feet:SIMD3<Float>,dead:Bool)->SIMD3<Double>? {
+        guard (0..<3).allSatisfy({feet[$0].isFinite}) else{return nil}
+        return SIMD3<Double>(feet)+SIMD3(0,0,dead ? 0.1:1)
+    }
     /// A rendered vehicle heat point touches the actor's body centre, in GTA
-    /// Z-up coordinates. The short cache bridges draw and fixed gameplay
-    /// updates; it cannot keep an invisible or repaired vehicle hot forever.
+    /// Z-up coordinates. The current draw replaces its heat points; the short
+    /// age guard also rejects a stalled renderer or reversed clock.
     /// This is a contact query only. The original-world controller remains the
     /// sole owner of actor ignition and fractional fire damage.
     static func vehicleFireTouches(atFeet feet:SIMD3<Float>,point:SIMD3<Double>,

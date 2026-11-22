@@ -20,7 +20,7 @@ def main():
     renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
     network=(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
     source=(ROOT/'tests/vehicles/smoke_native_vehicle_identity.swift').read_text()
-    names=['NativeVehicleThermalEffects.swift','NativeParticleEffects.swift','NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift','NativeRemoteBikeAnimation.swift','NativeRemoteSuspension.swift']
+    names=['NativeOriginalWorldEffects.swift','NativeVehicleThermalEffects.swift','NativeParticleEffects.swift','NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift','NativeRemoteBikeAnimation.swift','NativeRemoteSuspension.swift']
     names += ['NativeAmbientPedestrianProtocol.swift', 'NativeAmbientPedestrianPaths.swift', 'NativeAmbientTrafficProtocol.swift', 'NativeAmbientTrafficRoads.swift', 'NativeAmbientTraffic.swift', 'NativeAmbientTrafficMotion.swift', 'NativeAmbientTrafficPresentation.swift', 'NativeAmbientTrafficScene.swift']
     files=[ROOT/'ios/App'/x for x in names]+[ROOT/'ios/App/NativeWorldRenderer.swift',ROOT/'ios/App/NativeMultiplayerClient.swift',ROOT/'tests/vehicles/smoke_native_vehicle_identity.swift',Path(__file__)]
     hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in files}
@@ -41,6 +41,9 @@ def main():
     b=renderer.index('\n            if let exact=queued?.transform',a)
     source=source.replace('// ACTUAL_INSTANCE_TRANSFORM',renderer[a:b])
     source=source.replace('// ACTUAL_PED_APPEND','private '+block(renderer,'        func appendPed(').strip())
+    foot=next(x.strip()for x in renderer.splitlines()if 'appendPed(name,footPosition,player.heading' in x)
+    source=source.replace('// ACTUAL_REMOTE_FOOT_APPEND',foot)
+    source=source.replace('// ACTUAL_ACTOR_FIRE',block(renderer,'            if actorDrawSubmitted,queued?.actorFire==true,'))
     a=renderer.index('            let queued = occurrence.map',renderer.index('    private func drawActors('))
     b=renderer.index('\n            let mesh = ',a)
     source=source.replace('// ACTUAL_PED_TAKE',renderer[a:b])

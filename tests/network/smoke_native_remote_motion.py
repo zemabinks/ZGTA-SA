@@ -20,6 +20,7 @@ def main():
     paths += [Path(__file__).resolve(),Path(__file__).with_suffix('.swift')]
     paths += [ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientPedestrianProtocol','NativeAmbientPedestrianPaths','NativeAmbientPedestrians']]
     shot_sources=[ROOT/'ios/App'/f'{n}.swift'for n in ['NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeHumanShots','NativeWeaponFlash','NativeShotOwners']]
+    shot_sources.append(ROOT/'ios/App/NativeOriginalWorldCommands.swift')
     paths += shot_sources
     if args.owned_reference:paths.append(args.owned_reference.resolve())
     frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths}

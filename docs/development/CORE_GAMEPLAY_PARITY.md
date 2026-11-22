@@ -1,5 +1,66 @@
 # Core GTA San Andreas gameplay parity
 
+## Core201 remote actor life, fire and frame heat
+
+Native build 201 is the latest verified source batch.
+
+Remote actor life preserves finite fractions and its protocol upper bound;
+booleans, strings and nonfinite values use the existing default. Foot animation
+uses the same alive state. The legacy adapter explicitly converts its existing
+integer health. Vehicle health and local/server damage authority stay separate.
+
+Remote foot flames enter the existing data-driven particle owner only after
+the actual occurrence submits geometry, using its displayed feet and alive/dead
+height. Co-located bodies keep separate state. Drivers, passengers and explicit
+own-body occurrences do not gain this emitter. Vehicle heat points are replaced
+at each draw boundary; an absent occurrence cannot linger until the age limit.
+
+The actual old row decoder reproduces sixteen discrepancies across twenty-six
+controlled selected-admission records. Its small positive life values can select
+death. A separate actual old draw-boundary witness retains a removed heat point.
+Current actual-owner health, contact, occurrence, movement and connection tests
+pass. The first private driver used an incorrect connection-test filename;
+that failure is retained, with a corrected passing follow-up. The first full
+chain stopped at an older draw-plan carrier missing the heat-cache storage used
+by the actual frame statements. That failed run is retained. The corrected
+carrier includes the real storage and asserts retirement of its old point.
+All 269 native inputs remain unchanged, so the existing verified SDK products
+are reused by exact input identity. Both SDK products pass against those inputs. The full current physics/audio/transport
+chain passes in one uninterrupted run with 1,569 frozen inputs.
+
+Five Simulator cases exercise normal touch gameplay, original-protocol traffic
+entry/re-entry, actual vehicle ignition/repair, separated remote fire on/off,
+and restoration. A distinct private menu-constructor overlay selects the existing
+loopback original-world adapter. The independent server provides an explicit
+original inventory baseline from its production inventory. Normal production
+teleport and vehicle-condition messages control the engine-contact scenario;
+ordinary browser peer movement/action messages control the remote flame case.
+The observer is placed at a separately supported nearby point. A stale private
+stock-provider configuration path is corrected, with exact existing catalogs
+verified and successful native HTTP replies recorded. This establishes the
+catalog routes, not complete raw-model conversion or rendering coverage.
+All five UI cases pass. The primary acceptance script then fails at an inherited
+selfhost-only walking/parked exit predicate. That raw failure is preserved.
+A separate checker verifies the original adapter's explicit exit messages and
+all remaining guards against the unchanged records. The first remote-clear
+capture leaves the character outside the view. Three additional UI cases reuse
+the exact same private app, with normal camera orbits before and after clearing
+the peer's fire flag, to establish a visible extinguished remote body. Their
+separate acceptance and saved captures are checked after shutdown.
+Saved captures are reviewed after owned apps and services close. The normal SDK
+app is restored and verified; installed resources and preferences remain intact.
+
+This controlled entry product is separate from the normal public sign-in flow
+and an authenticated original-site session. The observer is protocol-only;
+SDK compilation is not physical iPhone acceptance. Remote fire contagion still
+needs the complete protection/ghost and presented-life filters. Per-character
+spatial burning audio, precise fire scale/blending, traffic handling/contact,
+world materials, complete NPC/police behavior, external servers, original-PC
+comparison and physical-device performance remain open. These are selected
+archived-browser compatibility corrections, not verified retail equivalence.
+No story campaign or1:1claim. Original resources, raw private evidence and
+private Git ancestry stay local.
+
 ## Core200 vehicle fire contact
 
 Native build 200 is the latest verified source batch.
