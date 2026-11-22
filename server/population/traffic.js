@@ -171,7 +171,9 @@ class Traffic {
    [o.length??1,o.width??1].every(n=>Number.isFinite(n)&&n>0&&n<=200)&&
    (o.centre===undefined||(Array.isArray(o.centre)&&o.centre.length===2&&o.centre.every(Number.isFinite)))&&
    (o.direction===undefined||(Array.isArray(o.direction)&&o.direction.length===2&&o.direction.every(Number.isFinite))));
-  if(this.previousTime!==null&&now<this.previousTime){this.previousTime=now;this.remainder=0;return;}
+  // A wall-clock adjustment cannot rewind a shared physical sample or erase
+  // its unconsumed fraction. The rebound would otherwise integrate it again.
+  now=Math.max(now,this.previousTime??now);
   if(this.previousTime!==null)this.remainder+=Math.min(0.5,(now-this.previousTime)/1000);this.previousTime=now;
   while(this.remainder+1e-10>=0.05){this.remainder=Math.max(0,this.remainder-0.05);this.#step(now-this.remainder*1000,obstacles);}
   for(const actor of this.actors.values()){

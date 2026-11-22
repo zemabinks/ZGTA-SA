@@ -1,5 +1,52 @@
 # Ambient traffic
 
+## Core192–193 HUD resource and shared traffic clocks
+
+Native application build192 and independent server changes throughCore193 form
+the latest verified source batch.
+
+Original font/sprite batches and radar requests now belong to bounded, cancellable source epochs.
+Late responses cannot overwrite a newer join, an A/B/A return or a changed
+resource admission at the same address. A batch becomes ready after decoding;
+transient failures retry with capped backoff through the existing visible HUD
+update. Successful resources stay cached. No additional polling timer or gameplay
+parameter is introduced. Three executed previous-source witnesses reproduce the
+old request failures; 84 authored owner/binding checks cover lifetime, transport
+bounds, decode decisions, backoff and reentry with explicit test boundaries.
+
+Both native SDK builds pass. The complete selected Core193 physics, audio and
+transport regression chain passes with every frozen input held. Normal Simulator
+joining, movement, pause/resume and resource/menu restoration complete with the
+same verified native product and current independent backend. The private asset
+provider deliberately returns one HTTP503 for an original font and the radar;
+actual subsequent requests recover both original files, and closed captures were
+reviewed. Installed resources and meaningful settings remain intact. This is a
+scoped Simulator test, not a hardware, continuous-frame, audio or retail-fidelity
+measurement. The first private HUD fixture omitted the separate weapon-icon
+route, so it is not accepted as a weapon-icon recovery test. The same native
+binary displays that original icon in the independently reviewed traffic scene.
+Original traffic entry, driving, exit and reentry reach the current server, with
+a protocol-only observer receiving the shared state sequence. A controlled
+roadblock, supported observer placement and one obstructed initial driver view
+remain explicit boundaries; complete chase-camera and rider-pose fidelity are
+not established. The earlier validation-driver selection error remains recorded as
+an intentionally aborted incomplete run; it is not counted as a current pass.
+
+The shared traffic clock also retains its physical sample and pending fixed-step
+fraction across backward timestamps. Repeated observations cannot rewind that
+sample or replay movement when time catches up. The previous manager fails the
+new source requirement. Current task/packet checks cover fractional intervals,
+clock rebound, cadence, wire-clock wrap, catch-up and invalid clocks; retained
+traffic routes, obstacles, spawn admission and lifetime checks pass. Existing
+independent speed/AI policy and the catch-up cap remain explicit. This does not
+establish complete cross-client wall-clock correction or original traffic AI.
+
+Original NPC/traffic/police behavior, density/model-group rules, coordinated
+traffic signals, cumulative vehicle damage authority, full external-server and
+resource/runtime coverage and comprehensive original-game comparisons remain
+open. Only independently written source and qualified notes are public. Original
+resources, derived data, measurements, recordings and private ancestry stay local.
+
 ## Core180–183 scoped authoritative traffic
 
 An opt-in independent-server road population now uses verified prepared road

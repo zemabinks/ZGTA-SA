@@ -2270,6 +2270,10 @@ final class NativeGameViewController: UIViewController {
         }
         if link.timestamp - lastHUD > 0.1, let renderer {
             lastHUD = link.timestamp
+            // Successful/current loads stay cached; only failed or replaced
+            // static HUD resources start another bounded request batch.
+            gameHUD.loadFont(server:server)
+            gameHUD.radar.loadMap(server:server)
             status.expireIfNeeded()
             gameHUD.radar.position = SIMD2(renderer.position.x, renderer.position.y)
             gameHUD.radar.heading = renderer.direction
