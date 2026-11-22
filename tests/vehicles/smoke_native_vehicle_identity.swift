@@ -58,6 +58,13 @@ private final class Carrier {
     private var ownVehicleWheelClocks:[Double]{groundVehicle?.wheelAnglesDouble ?? []}
     private var pendingVehicleSnapshot:Bool?
     // ACTUAL_PED_APPEND
+    private struct NPCPoseFrame {let handWeaponVisible:Bool}
+    private struct NPCArrival {let serial:UInt64}
+    private func appendNPC(_ npc:NativeAmbientPedestrians.Frame,at drawPosition:SIMD3<Double>) {
+        let name="authored-ped",drawHeading=npc.heading,frame=NPCPoseFrame(handWeaponVisible:true)
+        let pose:NativeSkeletalActor.Pose?=nil,arrival:NPCArrival?=nil
+        // ACTUAL_NPC_APPEND
+    }
     private func appendFoot(_ player:RemotePlayer,at footPosition:SIMD3<Float>) {
         guard Self.remoteAppearanceIsFoot(code:player.code,ridingVehicleID:player.ridingVehicleID) else{return}
         let name="authored-ped",riderTime=1.0,handWeapon=0
@@ -329,7 +336,29 @@ private final class Carrier {
         var riding=burningFoot("passenger",100);riding.ridingVehicleID="car"
         fire.appendFoot(riding,at:displayed);fire.appendFoot(a,at:displayed)
         check(fire.modelInstances.count==3,"Passenger and driver never enter remote foot fire path")
-        check(NativeOriginalWorldEffects.actorFireOrigin(atFeet:SIMD3(Float.nan,0,0),dead:false)==nil,"Invalid root rejected before particle publication")
+        check(NativeOriginalWorldEffects.actorFireOrigin(atFeet:SIMD3(Float.nan,0,0),lowered:false)==nil,"Invalid root rejected before particle publication")
+        // NPC state has its own dead/down flags. Real frame, literal append,
+        // occurrence queue and particle owner run; pose input is inert here.
+        for flags in UInt8(0)...UInt8(15) {
+            for burning in [false,true] {
+                let npcFire=Carrier()
+                npcFire.particleEffects=try! NativeParticleEffects(data:JSONSerialization.data(withJSONObject:["systems":["fire":system]]),textures:["sentinel"],random:{0.37})
+                let state=NativeAmbientPedestrianProtocol.State(id:17,mood:0,burning:burning,phone:false,crouching:false,cpr:false,weapon:0,hitWeapon:0,hitCounter:0,hitPiece:0,hitFromWire:0,faceWire:0,foe:0,thrown:0)
+                let npc=NativeAmbientPedestrians.Frame(id:17,skin:7,seed:0,flags:flags,position:SIMD3(900,900,900),velocity:.zero,heading:0,state:state)
+                npcFire.appendNPC(npc,at:SIMD3<Double>(displayed))
+                npcFire.submitPed(0,submitted:false)
+                check(npcFire.particleEffects!.shown.isEmpty,"Unsubmitted NPC occurrence emitted fire")
+                npcFire.submitPed(0,submitted:true)
+                let particles=npcFire.particleEffects!.shown,wanted=burning && flags&8==0
+                check(particles.count==(wanted ? 2:0),"NPC authoritative burning/dead gate")
+                let expected=SIMD3<Double>(displayed)+SIMD3(0,0,flags&1==0 ? 1:0.1)
+                check(particles.allSatisfy{$0.position==expected},"NPC down posture uses displayed feet and remains distinct from death")
+            }
+        }
+        let missingState=NativeAmbientPedestrians.Frame(id:18,skin:7,seed:0,flags:0,position:.zero,velocity:.zero,heading:0,state:nil)
+        let absent=Carrier();absent.particleEffects=try! NativeParticleEffects(data:JSONSerialization.data(withJSONObject:["systems":["fire":system]]),textures:["sentinel"],random:{0.37})
+        absent.appendNPC(missingState,at:SIMD3<Double>(displayed));absent.submitPed(0,submitted:true)
+        check(absent.particleEffects!.shown.isEmpty,"Missing NPC state invented burning")
         return checks
     }
 }

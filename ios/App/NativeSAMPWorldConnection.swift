@@ -155,7 +155,7 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
                 if let vehicle {
                     guard let body=self.nativeVehiclePosition(p.position,model:vehicle.model,heading:p.heading,pitch:p.pitch,roll:p.roll)else{return nil};position=body
                 }else{position=NativeSAMPPedCoordinates.feet(p.position)}
-                return RemotePlayer(id:String(p.id),name:p.name,position:position,code:code,heading:p.heading,pitch:p.pitch,roll:p.roll,speed:speed,steer:0,skin:skin,animation:speed>0.15 ? "run_player/l/1":"idle_stance/l/1",animationStarted:ProcessInfo.processInfo.systemUptime,weapon:p.weapon,vehicleID:p.vehicle.map(String.init),vehicleHealth:vehicle.map{Int(max(0,min(1000,$0.health)))} ?? 1000,movementRatio:min(3,speed/2),velocity:p.velocity,packetReceivedAt:p.receivedAt,life:Double(p.health),armour:p.armour)
+                return RemotePlayer(id:String(p.id),name:p.name,position:position,code:code,heading:p.heading,pitch:p.pitch,roll:p.roll,speed:speed,steer:0,skin:skin,animation:speed>0.15 ? "run_player/l/1":"idle_stance/l/1",animationStarted:ProcessInfo.processInfo.systemUptime,weapon:p.weapon,vehicleID:p.vehicle.map(String.init),vehicleHealth:vehicle.map{Int(max(0,min(1000,$0.health)))} ?? 1000,movementRatio:min(3,speed/2),velocity:p.velocity,packetReceivedAt:p.receivedAt,life:Double(p.health),armour:Double(p.armour))
             };self.onPlayers?(rows)
         }
         client.onVehicles = { [weak self] values in

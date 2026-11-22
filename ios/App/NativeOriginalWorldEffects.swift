@@ -5,9 +5,11 @@ import Foundation
 final class NativeOriginalWorldEffects {
     /// Use the submitted actor occurrence's displayed feet, rather than its
     /// latest packet or another co-located actor's pose. GTA uses Z-up here.
-    static func actorFireOrigin(atFeet feet:SIMD3<Float>,dead:Bool)->SIMD3<Double>? {
+    /// Human death and authoritative NPC down posture lower this origin;
+    /// dead NPCs are excluded by their separate caller before emission.
+    static func actorFireOrigin(atFeet feet:SIMD3<Float>,lowered:Bool)->SIMD3<Double>? {
         guard (0..<3).allSatisfy({feet[$0].isFinite}) else{return nil}
-        return SIMD3<Double>(feet)+SIMD3(0,0,dead ? 0.1:1)
+        return SIMD3<Double>(feet)+SIMD3(0,0,lowered ? 0.1:1)
     }
     /// A rendered vehicle heat point touches the actor's body centre, in GTA
     /// Z-up coordinates. The current draw replaces its heat points; the short
