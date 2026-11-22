@@ -130,7 +130,7 @@ final class NativeUnattendedVehicle {
             damage.record(intensity:intensity,piece:0,point:V(current.position)-normal*extent,normal:normal,building:normal.y>0.7)
         }
         let frame=NativeVehicleDamage.Body(position:reference.position+up*definition.configuration.origin,right:right,forward:forward,up:up,move:velocity/50,turn:spin/50)
-        damage.process(body:frame,ticks:50*delta,random:random)
+        damage.process(body:frame,ticks:50*delta,drowning:car?.buoyancy?.drowning ?? false,random:random)
         for event in damage.events where event.type=="sparks" {onSparks?(event,frame)}
         damage.events.removeAll()
         if definition.configuration.kind=="car" || definition.configuration.kind=="trailer",let output {

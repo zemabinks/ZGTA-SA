@@ -30,6 +30,9 @@ final class NativeVehicleBuoyancy {
     private(set) var rudder=0.0,gas=0.0,immersion=0.0
     var lost:Bool { dead || upsideDown }
     var hasBoat:Bool { parameters != nil }
+    /// Boat/seaplane onWater means afloat. Only the existing non-boat
+    /// buoyancy branch reports the sinking state used by engine damage.
+    var drowning:Bool { parameters == nil && onWater }
     init?(table:NativeVehicleDynamics.Table,minimum:V,maximum:V,parameters:Parameters?) {
         self.table=table;self.parameters=parameters;boundsMin=minimum;boundsMax=maximum
         seaplane=table.model==460;hover=table.model==539;boat=parameters != nil && !seaplane

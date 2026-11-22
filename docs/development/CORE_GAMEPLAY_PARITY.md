@@ -1,5 +1,39 @@
 # Core GTA San Andreas gameplay parity
 
+## Core198 submerged vehicle fire state
+
+Native build198 is the latest verified source batch.
+
+The existing non-boat buoyancy drowning state now reaches the driven and parked
+damage owners. Submerged owners suppress both their logical burning state and
+fire clock. Emerging starts a fresh burn interval; conditions and repairs retain
+the physical environment. Boat/seaplane floating flags remain separate. No force
+equations, water thresholds, damage amount or multiplayer authority rules change.
+
+Two preceding-source runtime failures and60current authored checks pass through
+the complete real driven/parked/damage/force/Rapier owners. Equal-duration
+15/30/60/120Hz inputs, condition/repair/emergence transitions and boat/seaplane
+force classification are covered. The isolated exact five-file proposal also
+passes the retained685appearance,35health and67condition checks; the retained
+89parked phase gate passes on current integrated source.
+
+Both SDK products and the complete current physics/audio/transport chain pass.
+Three normal Simulator cases verify entry, driving, foot exit, reentry, disconnect
+and preservation of resources/preferences without reimport. Saved captures were
+reviewed after all owned apps and services closed. The second observer is
+protocol-only and the retained bumper view limits camera/rider conclusions.
+The private Simulator product targets this Mac's x86_64 architecture; the unsigned
+device product targets arm64. Public build defaults are unchanged. The new
+runtime gate needs the prebuilt host physics archive and --with-physics; default
+portable CI skips that additional runtime gate.
+This fixes a state/clock defect; native engine-fire rendering is still missing.
+The generic undamaged traffic scene cannot visually verify the new water/fire
+transitions. Traffic ride height, prior tilted-car observations, contact/camera
+fidelity, full vehicle-family water behavior, original retail measurements,
+external-server coverage and physical-device performance remain open. No story
+campaign is included. Original resources, private evidence and private Git ancestry
+remain local.
+
 ## Core197 full appearance and physical lifetime
 
 Native build197 is the latest verified source batch.
