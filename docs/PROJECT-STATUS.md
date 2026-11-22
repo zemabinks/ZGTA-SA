@@ -1,5 +1,40 @@
 # ZGTA:SA project status
 
+## Core194–195 HUD recovery and parked vehicle condition
+
+Native build195 is the latest verified source batch. Position and working-part
+observations no longer reset pending parked damage, door motion or fire-clock
+state. Genuine condition updates and authority handoffs remain effective.
+Changed punctures reach the existing car/bike force solver at the next step.
+Existing force equations and physics steps are unchanged.
+
+Idle HUD updates also call the existing weapon-icon retry owner. A failed icon
+can recover without another weapon/inventory event. A normal Core194 UIKit/Metal
+case recovers the original font, radar and fist icon after real transient failures;
+closed images show the recovered HUD after normal input and pause/resume.
+
+Validation includes three preceding-source vehicle failures, 67 actual owner
+checks, 89 retained parked handoff checks, both Core195 SDK products and the full
+current physics/audio/transport chain. The private acceptance binary targets
+this Mac's x86_64 Simulator; the unsigned device binary targets arm64. The public
+build script retains its existing architecture defaults.
+
+A normal Core195 Simulator traffic case covers source-admitted original traffic,
+registered driver permission, reverse/park, foot exit, reentry and disconnect
+release. A protocol-only observer receives consistent transitions. Saved images
+are reviewed after cleanup. The controlled roadblock, acknowledged observer
+placement and retained bumper preference limit that scene; it does not verify
+full camera/rider fidelity or ambient AI. Installed resources/preferences are
+preserved and all owned test services close. No asset reimport is required.
+
+The additional parked runtime test requires the existing host physics archive
+and `--with-physics`; default portable CI does not execute that additional case.
+Original retail comparisons, full cumulative damage acknowledgements, parked
+explosion delivery, complete camera/contact/AI behavior, external-server coverage
+and physical-device performance remain open. Original resources, private
+measurements/captures and private Git history stay local. No story campaign is
+included.
+
 This is an independently developed native iOS client and multiplayer server.
 It is unfinished. Public source does not include original game resources or a
 packaged public iPhone release. Users must supply their own supported game files.
@@ -20,7 +55,7 @@ packaged public iPhone release. Users must supply their own supported game files
 ## Latest verified source
 
 Native application build192 and independent server changes throughCore193 form
-the latest verified source batch.
+an earlier verified source batch.
 
 Original font/sprite batches and radar requests now belong to bounded, cancellable source epochs.
 Late responses cannot overwrite a newer join, an A/B/A return or a changed

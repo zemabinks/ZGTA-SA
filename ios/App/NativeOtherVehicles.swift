@@ -167,6 +167,8 @@ final class NativeOtherVehicles {
             if let old=entries[source.id],old.model != model{remove(source.id)}
             if let entry=entries[source.id]{
                 let changed = !rawEqual(entry.lastRaw,source)
+                let conditionChanged = entry.lastRaw.health != source.health || entry.lastRaw.damage != source.damage
+                let relinquished = entry.rig != nil && (source.occupied || source.kept || source.foreignAI)
                 entry.source=source
                 // Release local simulation before applying the authoritative
                 // occupied pose. Demoting afterwards overwrote that target
@@ -174,12 +176,18 @@ final class NativeOtherVehicles {
                 // then never supplied another changed packet to correct it.
                 if entry.rig != nil && (source.occupied || source.kept || source.foreignAI) { entry.hauled=false;demote(entry) }
                 if changed {
-                    entry.health=source.health;entry.damage=source.damage;entry.work=source.work
+                    entry.work=source.work
+                    // A pose, working-part or ownership observation does not
+                    // acknowledge local damage. Preserve its timers, doors
+                    // and tyres until condition changes or authority transfers.
+                    if conditionChanged || relinquished {
+                        entry.health=source.health;entry.damage=source.damage
+                    }
                     if let rig=entry.rig {
-                        // Authoritative updates refresh damage but never drag
-                        // an actively simulated parked body to its echoed pose.
-                        rig.damage.load(health:Double(source.health),text:source.damage);rig.damage.events.removeAll()
-                        rig.car?.setTyres(rig.damage.wheels);rig.bike?.setTyres(rig.damage.wheels)
+                        if conditionChanged {
+                            rig.damage.load(health:Double(source.health),text:source.damage);rig.damage.events.removeAll()
+                            rig.car?.setTyres(rig.damage.wheels);rig.bike?.setTyres(rig.damage.wheels)
+                        }
                     } else {
                         entry.target=Self.pose(source)
                         entry.floorAligned=false
