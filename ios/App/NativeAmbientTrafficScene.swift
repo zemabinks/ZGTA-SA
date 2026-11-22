@@ -13,6 +13,7 @@ final class NativeAmbientTrafficScene {
         let speed:Double,health:Double
         let flags:UInt8,crewCount:UInt8?,deadSeats:UInt8,plate:String?
         var braking=false
+        var velocity=SIMD3<Double>.zero
         var code:String{"\(identity.model).\(identity.first).\(identity.second).0."}
     }
     private struct Pending {let event:Wire.Event,now:Double,received:Double}
@@ -103,7 +104,8 @@ final class NativeAmbientTrafficScene {
                 speed:sample.sample.speed,health:actor.health,flags:actor.flags,
                 crewCount:actor.crewCount,deadSeats:actor.deadSeats,plate:traffic.plates[id],
                 braking:NativeAmbientTrafficPresentation.brakeLamps(speed:sample.sample.speed,
-                    wanted:sample.sample.road?.wanted ?? sample.sample.loose?.wanted ?? 0)))
+                    wanted:sample.sample.road?.wanted ?? sample.sample.loose?.wanted ?? 0),
+                velocity:SIMD3(direction.x*sample.sample.speed,direction.y*sample.sample.speed,0)))
         }
         return result
     }

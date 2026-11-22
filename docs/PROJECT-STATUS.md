@@ -1,5 +1,48 @@
 # ZGTA:SA project status
 
+## Core199 vehicle thermal presentation
+
+Native build199 is the latest verified source batch.
+
+Normal vehicle rig draws now send engine attachment positions and actual draw
+matrices to the existing original-resource particle engine. Overheat, electric
+overheat, car/motorcycle fire, boat attachments and aircraft smoke use the
+existing systems; aircraft large fire retains its selected visible clock.
+Driven and promoted parked owners supply their existing burning state, including
+drowning suppression. Passive replicas retain their health presentation policy;
+compact road traffic requests overheat only. Physics, damage and multiplayer
+authority are unchanged. Missing optional systems have no custom sprite fallback.
+
+The unchanged selected archived helper and named-system effect methods cover212
+controlled authored cases. The complete actual policy, rig decoder and particle
+pool pass17782checks against those records. Actual rig callsite75checks,
+presentation and99connection/reset checks pass. The RC smoke tint uses linear
+color conversion. Earlier failures remain recorded with their actual outcomes.
+
+Both native SDK products pass against269fixed App/build inputs. The complete
+current physics/audio/transport chain passes in one uninterrupted run against
+1563frozen inputs. Four actual Simulator cases verify normal entry, driving,
+foot exit, reentry, disconnect and preservation of resources/preferences. A
+registered Taxi receives ordinary production condition updates500/249/1000;
+saved captures show gray smoke, orange fire and their removal after repair.
+Original effect-resource HTTP consumption is recorded separately from preflight.
+All17saved captures were reviewed after owned apps and services closed.
+
+Visibility does not establish faithful fire appearance: the near-camera orange
+billboards/glow occupy much of the screen. Scale, blending and original GPU/
+retail appearance remain unaccepted. No arbitrary size retune was inferred from
+the images. The observer is protocol-only; the retained bumper view also limits
+camera/rider conclusions. The private Simulator product targets this Mac's
+x86_64 architecture; the unsigned device product targets arm64. Public build
+defaults are unchanged. No physical-device performance claim is made.
+
+Character contact with vehicle fire and burning remote actors remains missing.
+Original PC offscreen heat timing, ownership transfer, effect cancellation,
+aircraft status eligibility, complete family rendering, traffic ride height,
+prior tilted-car contacts, purple untextured geometry, external-server coverage
+and original retail comparisons remain open. No campaign work is included.
+Original resources, private evidence and private Git ancestry remain local.
+
 ## Core198 submerged vehicle fire state
 
 Native build198 is the latest verified source batch.

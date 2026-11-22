@@ -36,6 +36,9 @@ final class NativeOtherVehicles {
         let offsets:[Double]
         let rotor:Double
         let gearUp:Bool
+        /// Nil for kinematic replicas, which have no local damage/force owner.
+        var burning:Bool?=nil
+        var velocity=SIMD3<Float>.zero
     }
     private final class Entry {
         let id:String,model:String
@@ -406,7 +409,8 @@ final class NativeOtherVehicles {
         return .init(physicalPose:entry.pose,position:SwiftRapierWorld.rapierToGTA(SIMD3<Float>(entry.pose.position)),heading:Float(-e.heading),pitch:Float(e.pitch),roll:Float(-e.roll),
             transform:NativeGroundVehicle.transform(position:entry.pose.position,rotation:entry.pose.rotation,origin:entry.definition.configuration.origin),
             health:entry.health,damage:entry.damage,work:entry.work,dynamic:entry.rig != nil,frontSpin:entry.rig?.frontSpin ?? entry.frontSpin,rearSpin:entry.rig?.rearSpin ?? entry.rearSpin,offsets:offsets,
-            rotor:entry.rig?.rotor ?? entry.rotor,gearUp:entry.rig?.gearUp ?? entry.gearUp)
+            rotor:entry.rig?.rotor ?? entry.rotor,gearUp:entry.rig?.gearUp ?? entry.gearUp,
+            burning:entry.rig?.damage.burning,velocity:entry.bodyID.flatMap{world.bodyState($0)}.map{SwiftRapierWorld.rapierToGTA($0.linearVelocity)} ?? .zero)
     }
     func movePacket(_ id:String)->[String:Any]? {
         guard let entry=entries[id] else{return nil}
