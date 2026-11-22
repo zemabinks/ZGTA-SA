@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+'use strict';
+const assert=require('node:assert/strict'),path=require('node:path');
+const {Traffic}=require(process.argv[2]?path.resolve(process.argv[2]):'../../server/population/traffic');
+const {TrafficRoads}=require('../../server/population/traffic_roads'),{crc32}=require('../../server/population/pedestrian_paths'),{square}=require('./traffic_fixture');
+const bytes=square(),graph=new TrafficRoads(bytes,crc32(bytes));let checks=0;
+const check=(v,message)=>{assert(v,message);checks++;};
+const make=options=>new Traffic({graph,models:[{id:410,length:4,width:2,colors:[[2,3]],centre:[1,2]}],ground:()=>13,clear:()=>true,random:()=>.1,maximum:1,perObserver:1,...options});
+let calls=0;const blocked=make({clear:()=>{calls++;return false;}});blocked.tick(0,[[0,0,13]]);
+check(blocked.actors.size===0,'Traffic spawned inside static geometry without consulting spawn clearance');
+check(calls>0,'Spawn admission never called the actual static clearance boundary');
+const rays=[],open=make({clear:(from,to)=>{rays.push({from,to});return true;}});open.tick(0,[[0,0,13]]);
+check(open.actors.size===1&&rays.length===3,'A clear body did not receive its three spawn-clearance rays');
+check(rays.every(r=>Math.abs(Math.hypot(r.to[0]-r.from[0],r.to[1]-r.from[1])-4)<1e-9),'Spawn checked an empty movement segment instead of the vehicle body');
+const midpoint=[0,1].map(i=>rays.reduce((n,r)=>n+(r.from[i]+r.to[i])/2,0)/rays.length);
+check(Math.hypot(midpoint[0]-41,midpoint[1]-26)<1e-9,'Spawn clearance ignored the model-origin offset or heading');
+const ground=p=>13+.1*(p[1]-24)+.15*(p[0]-40);let slopeRays=0;
+const slope=make({ground,clear:(from,to)=>{slopeRays++;return Math.abs(from[2]-ground(from)-.8)<1e-9&&Math.abs(to[2]-ground(to)-.8)<1e-9;}});slope.tick(0,[[0,0,13]]);
+check(slope.actors.size===1&&slopeRays===3,'Spawn rays rejected a supported slope by using one flat ground height');
+const unsupported=make({ground:p=>Number.isInteger(p[0])&&Number.isInteger(p[1])?13:null});unsupported.tick(0,[[0,0,13]]);
+check(unsupported.actors.size===0,'A supported road centre admitted an unsupported body edge');
+const alternative=make({clear:(from,to)=>from[0]<30&&to[0]<30});alternative.tick(0,[[0,0,13]]);
+check(alternative.actors.size===1&&[...alternative.actors.values()][0].pose.position[0]<30,'Blocked candidate prevented admission on another clear road');
+let disabledQueries=0;const disabled=make({maximum:0,perObserver:0,clear:()=>{disabledQueries++;return true;}});disabled.tick(0,[[0,0,13]]);
+check(disabled.actors.size===0&&disabledQueries===0,'Disabled population performed spawn geometry work');
+console.log('PASS traffic static spawn clearance '+checks+' checks; authored roads/rays, no volumetric vehicle collision, App or retail acceptance');

@@ -3,7 +3,8 @@
 // Disposable original-protocol service fixture. No original backend, account,
 // credential or game assets are copied into this test.
 const http=require('node:http'),crypto=require('node:crypto'),assert=require('node:assert/strict'),{spawn}=require('node:child_process');
-let child,done=false,connections=0,checks=0;const peers=[];let originalFlow=false,reconnected=false,strictDefault=false,negotiatedDefault=false;
+const pedestrianWire=require('../../server/population/pedestrian_protocol');
+let child,done=false,connections=0,checks=0;const peers=[];let originalFlow=false,reconnected=false,strictDefault=false,negotiatedDefault=false,trafficOnly=false,invalidTraffic=false,reentrantTraffic=false;
 function check(value,message){checks++;assert(value,message)}
 function frame(tag,p){return Buffer.concat([p.length<128?Buffer.from([tag,p.length]):Buffer.from([tag,(p.length&127)|128,p.length>>7]),p])}
 const u16=n=>{let b=Buffer.alloc(2);b.writeUInt16BE(n);return b},u32=n=>{let b=Buffer.alloc(4);b.writeUInt32BE(n>>>0);return b},i32=n=>{let b=Buffer.alloc(4);b.writeInt32BE(n);return b},i16=n=>{let b=Buffer.alloc(2);b.writeInt16BE(n);return b};
@@ -30,6 +31,22 @@ function traffic(){
 }
 function received(p,m){
  if(m.t==='hi'){
+  if(p.index===9){
+   check(m.trafficProtocol===38,'Configuration callback phase did not request supported channel');reentrantTraffic=true;p.baseline=true;
+   send(p,{t:'hello',inventoryAck:1,inventoryConnection:'traffic-reentrant-00000000',trafficProtocol:38,traffic:1,roads:'1234abcd',life:[100,0],spot:[200,300,10,0]});return;
+  }
+  if(p.index===7||p.index===8){
+   check(m.trafficProtocol===38&&m.inventoryAck===1,'Independent traffic capability request');
+   const nonce=p.index===7?'traffic-only-000000000000':'traffic-invalid-000000000';p.baseline=true;
+   send(p,{t:'hello',inventoryAck:1,inventoryConnection:nonce,trafficProtocol:p.index===7?38:true,traffic:1,roads:'1234abcd',life:[100,0]});
+   send(p,traffic(),true);send(p,{t:'inventory',state:{revision:0,selected:0,weapons:[],ack:{connection:nonce,processedShot:0}}});
+   if(p.index===7){
+    send(p,{t:'peds',level:1,paths:'1234abcd'});
+    send(p,pedestrianWire.free([{id:201,skin:7,flags:0,seed:1,position:[1,2,3],goal:[4,5],speed:1,desiredSpeed:1}],Date.now()),true);
+   }
+   send(p,{t:'all',you:'Independent traffic peer',cash:0,cars:[],vehicles:[],chat:[]});
+   if(p.index===8)invalidTraffic=true;return;
+  }
   if(p.index===6){
    check(m.inventoryAck===1&&m.npcProtocol===38,'Default inventory/population capabilities');
    const nonce='traffic-peer-000000000000';p.baseline=true;
@@ -53,6 +70,14 @@ function received(p,m){
  }
  if(m.t==='ping'){send(p,{t:'pong',c:m.c,s:Date.now()});return}
  if(m.t==='board')return;
+ if(p.index===7){
+  if(m.t==='me')return;
+  check(m.t==='tcar'&&m.id===17&&m.why==='door','Independent materialization request shape');trafficOnly=true;
+  send(p,{t:'hello',inventoryAck:1,inventoryConnection:'traffic-only-000000000000',trafficProtocol:0,traffic:0,life:[100,0]});
+  send(p,traffic(),true);
+  send(p,{t:'note',text:'TRAFFIC MATERIALIZATION REQUEST SEEN'});return;
+ }
+ if(p.index===8){check(m.t==='me','Unnegotiated traffic client requested authority');return;}
  if(p.index===6){check(m.t==='me','Unexpected negotiated-default gameplay request');return}
  check(p.baseline,'No gameplay before hello/world/guns baseline');
  check(!('inventoryAck'in m)&&!('nativeInventory'in m),'No hidden ACK in original data');
@@ -97,9 +122,9 @@ function received(p,m){
  throw Error('Unexpected original packet '+JSON.stringify(m));
 }
 const server=http.createServer();server.on('upgrade',(req,s)=>{
- const p={s,index:++connections,url:req.url,baseline:false,shots:0,melee:0,guns:0,exits:0,chat:0,deaths:0,respawns:0};peers.push(p);check(connections<=6,'Bounded test connections');
+ const p={s,index:++connections,url:req.url,baseline:false,shots:0,melee:0,guns:0,exits:0,chat:0,deaths:0,respawns:0};peers.push(p);check(connections<=9,'Bounded test connections');
  s.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+crypto.createHash('sha1').update(req.headers['sec-websocket-key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64')+'\r\n\r\n');
  let pending=Buffer.alloc(0);s.on('data',chunk=>{pending=Buffer.concat([pending,chunk]);while(pending.length>=2){let length=pending[1]&127,start=2;if(length===126){if(pending.length<4)return;length=pending.readUInt16BE(2);start=4}if(length===127)throw Error('Unexpected large fixture packet');const masked=!!(pending[1]&128),mask=masked?pending.subarray(start,start+4):null;if(masked)start+=4;if(pending.length<start+length)return;const opcode=pending[0]&15,payload=Buffer.from(pending.subarray(start,start+length));pending=pending.subarray(start+length);if(masked)for(let i=0;i<length;i++)payload[i]^=mask[i%4];if(opcode===1)received(p,JSON.parse(payload));else if(opcode===8){s.end();return}}});s.on('error',()=>{});
 });
-server.listen(0,'127.0.0.1',()=>{child=spawn(process.argv[2],['http://127.0.0.1:'+server.address().port],{stdio:'inherit'});child.on('exit',(code,signal)=>{if(code!==0)console.error('Swift original fixture failed:',{code,signal});done=true;for(const p of peers)p.s.destroy();server.close();check(code===0,'Actual Swift client success');check(connections===6&&originalFlow&&reconnected&&strictDefault&&negotiatedDefault,'All isolation/join phases');console.log('PASS original/default protocol actual URLSession WebSocket fixture:',checks,'server checks')})});
+server.listen(0,'127.0.0.1',()=>{child=spawn(process.argv[2],['http://127.0.0.1:'+server.address().port],{stdio:'inherit'});child.on('exit',(code,signal)=>{if(code!==0)console.error('Swift original fixture failed:',{code,signal});done=true;for(const p of peers)p.s.destroy();server.close();check(code===0,'Actual Swift client success');check(connections===9&&originalFlow&&reconnected&&strictDefault&&negotiatedDefault&&trafficOnly&&invalidTraffic&&reentrantTraffic,'All isolation/join phases');console.log('PASS original/default protocol actual URLSession WebSocket fixture:',checks,'server checks')})});
 setTimeout(()=>{if(!done){child?.kill();for(const p of peers)p.s.destroy();server.close();throw Error('Original wire fixture timeout')}},25000).unref();

@@ -29,6 +29,7 @@ jobs:
       - run: node tests/resources/smoke_native_weapon_icon_http.js
       - run: python3 tests/resources/test_pedestrian_paths.py
       - run: python3 tests/resources/test_population_selection.py
+      - run: python3 tests/resources/test_population_tables.py
       - run: python3 tests/resources/test_native_population_profiles.py
       - run: python3 tests/resources/test_traffic_occupants.py
       - run: node tests/server/smoke_population_paths.js
@@ -36,6 +37,14 @@ jobs:
       - run: node tests/server/smoke_population_tasks.js
       - run: node tests/server/smoke_population_routes.js
       - run: node tests/server/smoke_population_backend.js
+      - run: node tests/server/smoke_traffic_roads.js
+      - run: node tests/server/smoke_traffic_tasks.js
+      - run: node tests/server/smoke_traffic_spawn_clearance.js
+      - run: node tests/server/smoke_traffic_observation.js
+      - run: python3 tests/ui/test_xctest_outcome.py
+      - run: python3 tests/resources/test_traffic_population.py
+      - run: node tests/server/smoke_traffic_loader.js
+      - run: node tests/server/smoke_traffic_backend.js
       - run: node tests/server/smoke_discord.js
       - run: node tests/combat/smoke_inventory_ack.js
       - run: node tests/combat/smoke_ordinary_shot_groups.js
@@ -71,4 +80,4 @@ jobs:
         with:
           node-version: '22'
       - run: python3 -m pip install Pillow==11.3.0
-      - run: python3 tests/core/smoke_core_179.py
+      - run: python3 tests/core/smoke_core_182.py

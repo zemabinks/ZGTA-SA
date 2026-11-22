@@ -504,6 +504,14 @@ class LocalGame {
         clear:(from,to)=>worldCollision.lineOfSight(from.map((v,i)=>v+(i===2?0.9:0)),to.map((v,i)=>v+(i===2?0.9:0)))
       });}catch(error){console.error('Original pedestrian population unavailable:',error.message);}
     }
+    this.traffic=null;
+    if(fs.existsSync(path.join(__dirname,'local-only/selfhost/traffic.json'))){
+      try{this.traffic=require('./server/population/load_traffic')(__dirname,{
+        ground:point=>{const value=worldCollision.height(point[0],point[1],point[2]+2,5);return worldCollision.lastQueryComplete?value:null;},
+        clear:(from,to)=>worldCollision.lineOfSight(from,to),
+        reserved:()=>new Set([...this.vehicles.values()].filter(v=>v.trafficOrigin).map(v=>v.trafficOrigin.id)),
+      });}catch(error){console.error('Prepared road traffic unavailable:',error.message);}
+    }
     this.lastPoliceTick = 0;
     this.lastTurfTick = 0;
     this.territories = Object.fromEntries(TURFS.map(id => [id, null]));
@@ -1785,6 +1793,34 @@ class LocalGame {
     if(this.vehicles.get(vehicle.id)!==vehicle)return;
     for(const peer of this.peers)if(peer.ready&&!peer.player.insideHome)
       peer.send({t:'veh',v:vehicle.row.slice()});
+  }
+
+  materializeTraffic(peer,id,why) {
+    const now=Date.now(),state=peer.state;
+    if(!this.traffic||!peer.trafficEnabled||why!=='door'||!Number.isInteger(id)||id<0||id>65534||
+       !this.peers.has(peer)||peer.closed||!peer.ready||peer.player.health<=0||peer.player.insideHome||
+       !this.onFoot(peer)||state.driving===true||!this.validVehiclePose(state)||now-peer.lastSeen>10000||
+       peer.positionAckEnabled&&!this.placement.matches(peer,state.placement))return false;
+    const position=[state.x,state.y,state.z];
+    const previous=[...this.vehicles.values()].find(v=>v.trafficOrigin?.id===id);
+    if(previous){
+      if(Math.hypot(...position.map((v,i)=>v-previous.row[3+i]))>8)return false;
+      this.publishVehicle(previous);return true;
+    }
+    if([...this.vehicles.values()].filter(v=>v.trafficOrigin).length>=64)return false;
+    const actor=this.traffic.promotable(peer,id,position,now),pose=actor&&this.traffic.poseAt(actor,now);if(!actor||!pose)return false;
+    const registered='traffic-'+id+'-'+actor.generation;
+    if(this.vehicles.has(registered))return false;
+    // Compact body translation and registered wire rows both use the model's
+    // ground anchor. Mesh/model origin is added by the native car owner once.
+    const row=[registered,'Traffic',`${actor.model.id}.${actor.colors[0]}.${actor.colors[1]}.0.`,
+      ...pose.position.map(value=>rounded(value)),rounded(-pose.heading),0,0,actor.health,'',null,null,null,id,null,0];
+    const vehicle={id:registered,row,trafficOrigin:{id,generation:actor.generation},lastTrafficObserved:now};
+    if(!this.traffic.retire(id,actor.generation))return false;
+    this.vehicles.set(registered,vehicle);
+    // The registry identity reaches each socket before compact removal. No
+    // enter ACK or local driving permission is fabricated by this transfer.
+    this.publishVehicle(vehicle);this.publishTraffic(now,false);return true;
   }
 
   releaseVehicleClaim(claim,{publish=true,removeActor=false}={}) {
@@ -3328,6 +3364,8 @@ class LocalGame {
       if(!peer.positionAckEnabled&&!peer.browserRecoveryEnabled)peer.player.insideHome = null;
       peer.inventoryEnabled = peer.inventoryEnabled || message.nativeInventory === true;
       peer.populationEnabled=!!this.population&&(!peer.inventoryEnabled||message.npcProtocol===38);
+      peer.trafficEnabled=!!this.traffic&&(!peer.inventoryEnabled||message.trafficProtocol===38);
+      if(!peer.trafficEnabled)this.traffic?.forget(peer);
       if (peer.inventoryEnabled && message.inventoryAck===1) {
         peer.inventoryAckEnabled=true;
         peer.inventoryConnection ||= crypto.randomBytes(18).toString('base64url');
@@ -3349,8 +3387,9 @@ class LocalGame {
         weather: 0, account: true, admin: false, rank: 'player',
         spot: placement?.spot || (browserPlacement?this.browserPlacement.state(peer).target.spot:[1480, -1738, 13, 0]),
         life: [peer.player.health, peer.player.armour],...this.healthState(peer), out: [1480, -1738],
-        zombies: false, traffic: 0, peds: peer.populationEnabled?1:0, party: 0,
+        zombies: false, traffic: peer.trafficEnabled?1:0, peds: peer.populationEnabled?1:0, party: 0,
         ...(peer.populationEnabled?{paths:this.population.graph.crc32,npcProtocol:38}:{}),
+        ...(peer.trafficEnabled?{roads:this.traffic.graph.crc32,trafficProtocol:38}:{}),
         ...(peer.inventoryAckEnabled ? {inventoryAck:1,inventoryConnection:peer.inventoryConnection}: {}),
         ...(peer.ordinaryShotGroupsEnabled?{ordinaryShots:1}:{}),
         ...(placement?{positionAck:1,placement:placement.placement}:{}),
@@ -3571,6 +3610,10 @@ class LocalGame {
       return peer.send({t: message.t, v: message.v,
         ...(Number.isSafeInteger(message.request)&&message.request>0?{request:message.request}:{}),
         ok: this.requestVehicleEntry(peer,message.v)});
+    }
+    if(message.t==='tcar'){
+      if(!this.materializeTraffic(peer,message.id,message.why))peer.send({t:'note',text:'This traffic vehicle is no longer available nearby.'});
+      return;
     }
     if (message.t === 'who' && Array.isArray(message.ids))
       return peer.send({t: 'cars', c: [...this.peers].filter(p => p !== peer &&
@@ -3852,6 +3895,34 @@ class LocalGame {
     this.mechanicTick();
     this.publishPlayerRows();
     this.publishPopulation(Date.now(),true);
+    this.publishTraffic(Date.now(),true);
+  }
+
+  publishTraffic(now,advance) {
+    if(!this.traffic)return;
+    const position=peer=>peer.ready&&!peer.closed&&peer.state&&now-peer.lastSeen<10000&&!peer.player.insideHome&&
+      [peer.state.x,peer.state.y,peer.state.z].every(Number.isFinite)?[peer.state.x,peer.state.y,peer.state.z]:null;
+    const observers=[...this.peers].map(position).filter(Boolean).slice(0,256);
+    if(advance){
+      const vehicleObstacle=(code,at,heading)=>({position:at,...(this.traffic.dimensionsFor(Number(String(code||'').split('.')[0]))||{length:5,width:2}),
+        direction:[-Math.sin(finite(heading)),Math.cos(finite(heading))]});
+      const obstacles=[...this.vehicles.values()].map(v=>vehicleObstacle(v.row[2],v.row.slice(3,6),v.row[6]));
+      for(const peer of this.peers){const at=position(peer);if(at)obstacles.push(peer.state.driving?
+        vehicleObstacle(peer.state.car,at,finite(peer.state.heading,finite(peer.state.h))):{position:at,length:1,width:0.7});}
+      for(const actor of this.population?.actors.values()||[])if(actor.health>0)obstacles.push({position:actor.position,length:0.7,width:0.7});
+      this.traffic.tick(now,observers,obstacles.slice(0,4096));
+      for(const vehicle of this.vehicles.values())if(vehicle.trafficOrigin){
+        if(observers.some(p=>Math.hypot(...p.map((v,i)=>v-vehicle.row[3+i]))<150))vehicle.lastTrafficObserved=now;
+        if(now-vehicle.lastTrafficObserved>60000&&!this.vehicleClaim(vehicle)&&
+           ![...this.passengerClaims.values()].some(c=>c.vehicle===vehicle)){
+          this.deleteVehicle(vehicle.id);
+          for(const peer of this.peers)if(peer.ready)peer.send({t:'vgone',id:vehicle.id});
+        }
+      }
+    }
+    for(const peer of this.peers)if(peer.ready&&peer.trafficEnabled&&typeof peer.sendBinary==='function'){
+      for(const packet of this.traffic.packets(peer,position(peer),now))peer.sendBinary(packet);
+    }
   }
 
   publishPopulation(now,advance) {
@@ -3875,6 +3946,7 @@ class LocalGame {
 
   remove(peer) {
     this.population?.forget(peer);
+    this.traffic?.forget(peer);
     this.terminalVehicleReports.delete(peer);
     if (!this.peers.delete(peer)) return;
     for (const p of this.peers) if (p.ready) p.send({t: 'gone', id: String(peer.player.number)});
@@ -3919,7 +3991,7 @@ class Peer {
   }
 
   sendBinary(data) {
-    if(this.closed||!this.populationEnabled||!Buffer.isBuffer(data)||data.length>65535)return;
+    if(this.closed||(!this.populationEnabled&&!this.trafficEnabled)||!Buffer.isBuffer(data)||data.length>65535)return;
     const header=data.length<126?Buffer.from([0x82,data.length]):Buffer.from([0x82,126,data.length>>8,data.length&255]);
     if(this.socket.writable&&this.socket.writableLength<1024*1024)this.socket.write(Buffer.concat([header,data]));
   }

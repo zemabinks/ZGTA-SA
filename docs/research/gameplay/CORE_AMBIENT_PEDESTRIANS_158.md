@@ -1,5 +1,41 @@
 # Shared ambient pedestrians — Core158
 
+## Core183 original population resources — decoder foundation
+
+The local preparation command now decodes `pedgrp.dat`, `cargrp.dat`,
+`popcycle.dat`, `info.zon` and `map.zon` from an owner's extracted game folder.
+It retains group order, repeated names, raw population bytes and zone geometry.
+The lookup helper addresses the two-hour table buckets explicitly by population
+type and week part. Model resolution uses a complete IDE identity index before
+the pedestrian/vehicle group capacities; a missing mesh subset must not shift
+group identities. Resource admission and actual runtime population remain separate.
+
+```sh
+python3 tools/assets/prepare_population_tables.py \
+  --game-dir /path/to/your/extracted-game \
+  --output local-only/population-tables.json
+python3 tests/resources/test_population_tables.py
+```
+
+The output contains original-derived data and must remain local. Identical
+preparation reuses the existing file; changed output requires a new destination
+and never replaces original inputs or an existing unrelated file. Outputs inside
+this repository are restricted to ignored `local-only/`; the prior unrestricted
+preparer fails the authored refusal witness. Fifteen
+authored tests pass. The retained original corpus separately decodes all groups,
+cycle rows and zones; this is data-format validation, not retail execution.
+
+The format reference is the community's source reconstruction of
+[population loading](https://github.com/gta-reversed/gta-reversed/blob/master/source/game_sa/Population.cpp),
+[cycle addressing](https://github.com/gta-reversed/gta-reversed/blob/master/source/game_sa/PopCycle.cpp)
+and [zone fields](https://github.com/gta-reversed/gta-reversed/blob/master/source/game_sa/ZoneInfo.h).
+That project includes refactors and bug-fix variants, so these references do not
+establish exact original executable behavior. The decoder preserves source values
+without silently normalizing weights or assigning a population type to a zone.
+Original zone-type initialization, complete model admission, weather/density
+policy, server activation, native consumption and visible population acceptance
+remain open. The current independent population still uses its existing profile.
+
 The independent server can now own a bounded civilian population on verified
 original pavement paths. Native clients receive separate typed NPC records,
 load the matching original character resources, predict the announced goals,

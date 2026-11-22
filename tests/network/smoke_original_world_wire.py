@@ -12,7 +12,7 @@ ROOT=Path(__file__).resolve().parents[2]
 NAMES=['ServerAddress','NativeConnectionRecovery','NativeInventoryPrediction','NativeOriginalWorldArsenal','NativeWeaponState','NativeShotTargeting','NativeStreamShotClaims','NativeSAMPProtocol','NativeSAMPGameplayCommands','NativeOriginalWorldProtocol','NativeOriginalWorldCommands','NativeOriginalWorldVitals','NativeOriginalWorldEffects','NativeSAMPLocalVitals','NativeAmbientPedestrianProtocol','NativeAmbientTrafficProtocol','NativeOrdinaryShot','NativeLocalShots','NativeLocalShotPackets','NativeMultiplayerClient']
 def main():
  out=ROOT/'local-only/research/original-world-wire';out.mkdir(parents=True,exist_ok=True)
- paths=['ios/App/'+n+'.swift'for n in NAMES]+['ios/App/NativeActorAnimation.swift','tests/network/smoke_original_world_wire.py','tests/network/smoke_original_world_wire.js','tests/network/smoke_original_world_wire.swift']
+ paths=['ios/App/'+n+'.swift'for n in NAMES]+['ios/App/NativeActorAnimation.swift','tests/network/smoke_original_world_wire.py','tests/network/smoke_original_world_wire.js','tests/network/smoke_original_world_wire.swift','server/population/pedestrian_protocol.js']
  before={p:(ROOT/p).read_bytes()for p in paths}
  with tempfile.TemporaryDirectory(dir=out,prefix='verify-')as temp:
   w=Path(temp);actor=before['ios/App/NativeActorAnimation.swift'].decode();motion=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]

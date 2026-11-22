@@ -388,6 +388,9 @@ final class NativeMultiplayerClient {
     var onAmbientTrafficConfiguration:((Double,String?)->Void)?
     var onAmbientTrafficEvent:((NativeAmbientTrafficProtocol.Event,Double,Double)->Void)?
     private var ambientBinaryEnabled=false
+    private var selfhostTrafficEnabled=false
+    private var selfhostPedestriansEnabled=false
+    var canRequestTrafficVehicle:Bool {usesOriginalWorldProtocol || selfhostTrafficEnabled}
     var onOriginalCommand: (([String:Any])->Void)?
     var onOriginalVehicleHit: (([String:Any])->Void)?
     var onOriginalHit: ((NativeOriginalWorldVitals.Hit)->Void)?
@@ -610,7 +613,7 @@ final class NativeMultiplayerClient {
             }
             parts.scheme=server.url.scheme=="https" ? "wss":"ws"
             guard let value=parts.url else { failTransport(generation:generation,reason:"INVALID MULTIPLAYER ADDRESS");return }
-            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1,"npcProtocol":38,"ordinaryShots":1]
+            url=value;hello=["t":"hi","nativeInventory":true,"inventoryAck":1,"healthAck":1,"couplingAck":1,"positionAck":1,"npcProtocol":38,"trafficProtocol":38,"ordinaryShots":1]
         case .originalWorld(let build,let deviceID):
             do {
                 let originalURL=try NativeOriginalWorldProtocol.liveURL(deviceID:deviceID)
@@ -639,7 +642,7 @@ final class NativeMultiplayerClient {
         placementSession.reset()
         shotSequence.reset(); streamShotClaims.reset(); announcedInventoryConnection = nil
         originalStream.clear();originalHeard=nil;originalDeathSent=false;originalRespawnRequested=nil;originalLatestPosition=nil
-        ambientBinaryEnabled=false;onAmbientPedestrianConfiguration?(0,nil)
+        ambientBinaryEnabled=false;selfhostTrafficEnabled=false;selfhostPedestriansEnabled=false;onAmbientPedestrianConfiguration?(0,nil)
         onAmbientTrafficConfiguration?(0,nil)
         originalVitals.cancelPendingFatal();originalFrozen=false;originalRespawnWasDead=false
         healthPrediction.disconnect()
@@ -1195,6 +1198,14 @@ final class NativeMultiplayerClient {
         guard packet["t"] as? String != "hi",packet["t"] as? String != "me" else{return false}
         return sendOriginal(packet)
     }
+    /// A request only materializes the shared car. The existing registered
+    /// vehicle reservation and entry ACK still own permission to drive it.
+    @discardableResult func requestTrafficVehicle(_ id:UInt16)->Bool {
+        guard canRequestTrafficVehicle,isReady,!serverInputBlocked,health>0 else{return false}
+        let packet:[String:Any]=["t":"tcar","id":Int(id),"why":"door"]
+        if usesOriginalWorldProtocol{return sendOriginalCommand(packet)}
+        send(packet);return true
+    }
     private func publishOriginalVitals(){
         health=originalVitals.displayHealth;armour=originalVitals.displayArmour;onVitals?(health,armour)
     }
@@ -1459,7 +1470,7 @@ final class NativeMultiplayerClient {
                     else if self.usesOriginalWorldProtocol {self.receiveOriginalBinary(data,generation:generation)}
                     else if self.ambientBinaryEnabled {
                         let now=Date().timeIntervalSince1970*1000+self.serverTimeOffsetMilliseconds
-                        if let events=try? NativeAmbientPedestrianProtocol.decodeMessage(data,nowServerMilliseconds:now) {
+                        if self.selfhostPedestriansEnabled,let events=try? NativeAmbientPedestrianProtocol.decodeMessage(data,nowServerMilliseconds:now) {
                             for event in events {
                                 guard self.socket === task,self.transportGeneration==generation else{break}
                                 self.onAmbientPedestrianEvent?(event,now,self.clock())
@@ -1485,7 +1496,7 @@ final class NativeMultiplayerClient {
         if usesOriginalWorldProtocol,handleOriginal(message,generation:generation) {return}
         switch message["t"] as? String {
         case "peds":
-            if ambientBinaryEnabled,let level=message["level"]as?NSNumber {
+            if usesOriginalWorldProtocol || selfhostPedestriansEnabled,let level=message["level"]as?NSNumber {
                 onAmbientPedestrianConfiguration?(level.doubleValue,message["paths"]as?String)
             }
         case "traffic":
@@ -1548,12 +1559,17 @@ final class NativeMultiplayerClient {
             }
             guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
             if let time=(message["time"]as?NSNumber)?.doubleValue,time.isFinite {serverTimeOffsetMilliseconds=time-Date().timeIntervalSince1970*1000}
-            ambientBinaryEnabled=NativePlacementSession.integer(message["npcProtocol"])==38
-            if ambientBinaryEnabled {
-                onAmbientPedestrianConfiguration?((message["peds"]as?NSNumber)?.doubleValue ?? 0,message["paths"]as?String)
-                guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
-                onAmbientTrafficConfiguration?((message["traffic"]as?NSNumber)?.doubleValue ?? 0,message["roads"]as?String)
-            }
+            selfhostTrafficEnabled=NativePlacementSession.integer(message["trafficProtocol"])==38
+            selfhostPedestriansEnabled=NativePlacementSession.integer(message["npcProtocol"])==38
+            ambientBinaryEnabled=selfhostPedestriansEnabled || selfhostTrafficEnabled
+            // Duplicate hello packets can revoke a channel. Publish zero to
+            // its scene owner as well as retiring the decoder/command flag.
+            onAmbientPedestrianConfiguration?(selfhostPedestriansEnabled ? (message["peds"]as?NSNumber)?.doubleValue ?? 0:0,
+                                              selfhostPedestriansEnabled ? message["paths"]as?String:nil)
+            guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
+            onAmbientTrafficConfiguration?(ambientBinaryEnabled ? (message["traffic"]as?NSNumber)?.doubleValue ?? 0:0,
+                                          ambientBinaryEnabled ? message["roads"]as?String:nil)
+            guard transportGeneration==generation,socket === task,inventoryConnection==nonce else{return}
             if case .place(let transaction)=placement {
                 guard applyPlacement(transaction,generation:generation,task:task)else{return}
             }else if freshHello,let spot=message["spot"]as?[NSNumber],spot.count>=3 {
