@@ -1,5 +1,55 @@
 # ZGTA:SA project status
 
+## Core200 vehicle fire contact
+
+Native build 200 is the latest verified source batch.
+
+The original-world fire query now recognises fresh rendered vehicle heat points
+at the actor body centre in GTA Z-up coordinates. Smoke cannot ignite an actor.
+Repair or physical burning suppression removes the point. The existing original
+controller owns ignition, fractional damage and water extinguish; vehicle,
+protocol and readiness guards remain intact. Other multiplayer protocols gain
+no local damage authority. Fire duration, damage amount and forces are unchanged.
+
+Two preceding-source runtime failures reproduce the missing query and ignition.
+The focused actual-owner test passes 113 checks, including 36 hot-only records
+from an unchanged selected archived predicate. The default asset-free gate and
+retained original gameplay, reconnect and project/layout checks pass. The first
+authored Swift fixture compilation failure remains recorded with its outcome.
+The initial private test-project build also failed on two relocated installer
+paths; correcting those paths left production sources unchanged.
+
+Both SDK products pass against 269 fixed App/build inputs. The full current
+physics/audio/transport chain passes in one uninterrupted run with 1,566 frozen
+inputs. Four Simulator cases exercise actual gameplay, rendering and protocol
+updates. A distinct private menu-constructor overlay selects the existing
+loopback original-world adapter. Its local server explicitly projects the real
+inventory into the original guns baseline. Ordinary production teleport and
+condition messages place the actor beside the registered engine and apply
+vehicle conditions 500/249/1000. Actual native burning state, player health loss,
+its publication to a protocol observer and clearing after repair are recorded.
+The historical run failed an inherited LAN-only parking-report assertion. A
+separate post-run validator checked the original adapter's explicit exits,
+released foot ownership, re-entry claims and shared roster against the same
+unchanged records. The failed receipt was preserved. Saved captures are reviewed
+only after all owned apps and services close.
+The normal SDK app is then restored and verified; resources/preferences remain
+intact. This controlled entry build is not the normal release payload, the
+public sign-in flow or an authenticated original-site test. The observer is not
+a rendered browser, and neither SDK compilation is a physical iPhone test.
+
+The 200 ms heat-cache cutoff is a local presentation safety policy, not verified
+original frame-buffer lifetime. Per-frame replacement/removal and moving-fire
+contact timing remain open. Remote burning-actor visualization and contagion
+still need their original rendered-pose, life, riding, passive/ghost and lifetime
+rules. The test observer overlaps the local avatar, so these captures cannot establish
+character-pose fidelity; a separate observer position is needed. A visible stock
+asset catalog HTTP 404 also needs route/fixture diagnosis. Near-camera fire
+scale/blending, prior vehicle tilt, traffic ride height,
+world materials, complete NPC/police behavior, external servers, retail comparison
+and physical-device performance remain unverified. No story campaign or 1:1
+claim. Original resources, private evidence and private Git ancestry stay local.
+
 ## Core199 vehicle thermal presentation
 
 Native build199 is the latest verified source batch.

@@ -1624,7 +1624,13 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     private var originalActorBurning=false
     private(set) var originalCoughing=false
-    var hasOriginalWorldFire:Bool{weaponEffects.burning(atFeet:camera)}
+    var hasOriginalWorldFire:Bool {
+        if weaponEffects.burning(atFeet:camera){return true}
+        let now=ProcessInfo.processInfo.systemUptime
+        return vehicleThermalHot.values.contains {
+            NativeOriginalWorldEffects.vehicleFireTouches(atFeet:camera,point:$0.position,sampledAt:$0.time,now:now)
+        }
+    }
     var hasOriginalWorldGas:Bool{weaponEffects.gassed(atFeet:camera)}
     func setOriginalActorEffects(burning:Bool,coughing:Bool){
         originalActorBurning=burning

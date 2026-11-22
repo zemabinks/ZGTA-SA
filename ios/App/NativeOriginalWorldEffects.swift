@@ -3,6 +3,18 @@ import Foundation
 /// Actor fire/cough timers from the archived browser controller. These own
 /// effects only; each emitted fractional hit still passes through vitals.
 final class NativeOriginalWorldEffects {
+    /// A rendered vehicle heat point touches the actor's body centre, in GTA
+    /// Z-up coordinates. The short cache bridges draw and fixed gameplay
+    /// updates; it cannot keep an invisible or repaired vehicle hot forever.
+    /// This is a contact query only. The original-world controller remains the
+    /// sole owner of actor ignition and fractional fire damage.
+    static func vehicleFireTouches(atFeet feet:SIMD3<Float>,point:SIMD3<Double>,
+                                   sampledAt:Double,now:Double)->Bool {
+        guard sampledAt.isFinite,now.isFinite,now>=sampledAt,now-sampledAt<0.2,
+              (0..<3).allSatisfy({feet[$0].isFinite && point[$0].isFinite}) else{return false}
+        let centre=SIMD3<Double>(feet)+SIMD3(0,0,1),offset=point-centre
+        return hypot(hypot(offset.x,offset.y),offset.z)<2
+    }
     struct Damage { let amount: Double; let weapon: Int; let source: String? }
     private var fireRemaining=0.0,fireStrength=0.0,fireElapsed=0.0
     private var gasRemaining=0.0,gasElapsed=0.0,gasVolumePending=false
