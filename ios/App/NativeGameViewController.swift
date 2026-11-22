@@ -2274,6 +2274,7 @@ final class NativeGameViewController: UIViewController {
             // static HUD resources start another bounded request batch.
             gameHUD.loadFont(server:server)
             gameHUD.radar.loadMap(server:server)
+            gameHUD.loadWeaponIcon(server:server,weapon:weapons.selected)
             status.expireIfNeeded()
             gameHUD.radar.position = SIMD2(renderer.position.x, renderer.position.y)
             gameHUD.radar.heading = renderer.direction

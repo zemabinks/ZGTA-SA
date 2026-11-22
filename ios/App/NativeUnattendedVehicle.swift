@@ -90,6 +90,7 @@ final class NativeUnattendedVehicle {
     }
     func beforeStep(delta:Double,wetness:Double=0,held:Bool=false) {
         guard let current=state else{return}
+        car?.setTyres(damage.wheels);bike?.setTyres(damage.wheels)
         speedWas=V(current.linearVelocity)
         let input=Self.controls(velocity:speedWas!,wetness:wetness,held:held,fallen:fallen)
         let state=NativeVehicleDynamics.BodyState(position:V(current.position),rotation:Self.quaternion(current.rotation),linearVelocity:V(current.linearVelocity),angularVelocity:V(current.angularVelocity))
