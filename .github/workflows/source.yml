@@ -32,12 +32,15 @@ jobs:
       - run: python3 tests/resources/test_population_models.py
       - run: node tests/server/smoke_population_loader.js
       - run: python3 tests/resources/test_population_tables.py
+      - run: python3 tests/resources/test_zone_initialization.py
       - run: python3 tests/resources/test_native_population_profiles.py
       - run: python3 tests/resources/test_traffic_occupants.py
       - run: node tests/server/smoke_population_paths.js
       - run: node tests/server/smoke_population_protocol.js
       - run: node tests/server/smoke_population_tasks.js
       - run: node tests/server/smoke_population_routes.js
+      - run: node tests/server/smoke_population_observation.js
+      - run: node tests/server/smoke_population_observation_backend.js
       - run: node tests/server/smoke_population_backend.js
       - run: node tests/server/smoke_traffic_roads.js
       - run: node tests/server/smoke_traffic_tasks.js
@@ -50,6 +53,7 @@ jobs:
       - run: node tests/server/smoke_discord.js
       - run: node tests/combat/smoke_inventory_ack.js
       - run: node tests/combat/smoke_ordinary_shot_groups.js
+      - run: node tests/combat/smoke_population_hit_piece.js
       - run: node tests/combat/smoke_weapon_transport.js
       - run: node tests/combat/smoke_weapon_frame_batches.js
       - run: node tests/combat/smoke_health_ack.js
@@ -83,4 +87,4 @@ jobs:
         with:
           node-version: '22'
       - run: python3 -m pip install Pillow==11.3.0
-      - run: python3 tests/core/smoke_core_185.py
+      - run: python3 tests/core/smoke_core_188.py

@@ -1127,7 +1127,13 @@ class LocalGame {
       if(authorized)authorized.used=true;
     }
     peer.lastHitAt=now;
-    if(this.population.damage(message.to,damage,{weapon,from:[from.x,from.y,from.z],now})){
+    // Use only metadata retained by the accepted ordinary emission. A late
+    // hit claim cannot replace it. Protocol38 has no representation for 1/2;
+    // older/absent pieces keep the previous torso fallback without changing
+    // ammunition, damage, range, visibility or one-use ticket authority.
+    const admittedPiece=authorized?.ordinaryPiece;
+    const piece=Number.isInteger(admittedPiece)&&admittedPiece>=3&&admittedPiece<=9?admittedPiece:3;
+    if(this.population.damage(message.to,damage,{weapon,from:[from.x,from.y,from.z],now,piece})){
       this.setWanted(peer.player,Math.max(1,peer.player.wanted+1));this.publishPopulation(now,false);this.save();
     }
   }

@@ -3,6 +3,7 @@
 const wire=require('./pedestrian_protocol');
 const validPoint=p=>Array.isArray(p)&&p.length===3&&p.every(Number.isFinite)&&p.every(v=>Math.abs(v)<10000);
 const distance=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]));
+const observationRadius=110;
 /** Independent server population tasks on verified original pavements. This
  * implements walking, streamed lifetime, obstacle waits, flee goals, injury
  * and death. Original retail density/zone policy, traffic, police, social and
@@ -89,7 +90,10 @@ class Pedestrians {
   observers=observers.filter(validPoint).slice(0,32);
   const dt=this.lastTime===null?0:Math.max(0,Math.min(0.5,(now-this.lastTime)/1000));this.lastTime=now;
   for(const [id,actor]of this.actors){
-   if(observers.some(point=>distance(point,actor.position)<140))actor.lastSeen=now;
+   // Refresh only lifetimes inside the same distance we publish. An actor
+   // held indefinitely in an invisible outer ring can exhaust shared capacity
+   // and leave the observer's new area empty. Other observers still retain it.
+   if(observers.some(point=>distance(point,actor.position)<observationRadius))actor.lastSeen=now;
    if(now-actor.lastSeen>3000||(actor.deadAt!==null&&now-actor.deadAt>20000)){this.actors.delete(id);continue;}
    this.#advance(actor,dt,now);
   }
@@ -97,13 +101,13 @@ class Pedestrians {
    this.spawnAt=now+250;
    for(const observer of observers){
     if(this.actors.size>=this.maximum)break;
-    const nearby=[...this.actors.values()].filter(actor=>distance(actor.position,observer)<110).length;
+    const nearby=[...this.actors.values()].filter(actor=>distance(actor.position,observer)<observationRadius).length;
     if(nearby<this.perObserver)this.#spawn(observer,now);
    }
   }
  }
  packets(owner,position,now){
-  const visible=validPoint(position)?[...this.actors.values()].filter(actor=>distance(actor.position,position)<110):[];
+  const visible=validPoint(position)?[...this.actors.values()].filter(actor=>distance(actor.position,position)<observationRadius):[];
   const ids=new Set(visible.map(actor=>actor.id)),previous=this.interest.get(owner)||new Set();this.interest.set(owner,ids);
   const removed=[...previous].filter(id=>!ids.has(id)),packets=[];
   if(removed.length)packets.push(wire.gone(removed));
@@ -119,11 +123,12 @@ class Pedestrians {
  }
  forget(owner){this.interest.delete(owner);}
  get(target){if(typeof target!=='string'||!/^p(?:0|[1-9]\d{0,4})$/.test(target))return null;return this.actors.get(Number(target.slice(1)))||null;}
- damage(target,amount,{weapon=0,from,now}={}){
+ damage(target,amount,{weapon=0,from,now,piece=3}={}){
   const actor=this.get(target);
-  if(!actor||actor.health<=0||!Number.isFinite(amount)||amount<=0||amount>1000||!validPoint(from)||!Number.isFinite(now))return false;
+  if(!actor||actor.health<=0||!Number.isFinite(amount)||amount<=0||amount>1000||!validPoint(from)||!Number.isFinite(now)||
+     !Number.isInteger(piece)||piece<3||piece>9)return false;
   actor.health=Math.max(0,actor.health-amount);actor.hitCounter=(actor.hitCounter+1)&31;actor.hitWeapon=weapon;
-  actor.hitPiece=3;actor.hitFromWire=Math.atan2(from[1]-actor.position[1],from[0]-actor.position[0]);
+  actor.hitPiece=piece;actor.hitFromWire=Math.atan2(from[1]-actor.position[1],from[0]-actor.position[0]);
   if(actor.health===0){actor.flags|=9;actor.deadAt=now;actor.speed=0;actor.desiredSpeed=0;actor.goal=actor.position.slice(0,2);}
   else{this.flee(actor,from,now);}
   return true;
