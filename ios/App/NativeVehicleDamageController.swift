@@ -68,7 +68,7 @@ final class NativeVehicleDamageController {
             move:V(value.linearVelocity)/50,turn:V(value.angularVelocity)/50)
     }
     func step(previous:SwiftRapierWorld.BodyState,current:SwiftRapierWorld.BodyState,
-              contacts:[SwiftRapierWorld.ContactForceEvent],chassis:Set<SwiftRapierWorld.ColliderID>,delta:Double) {
+              contacts:[SwiftRapierWorld.ContactForceEvent],chassis:Set<SwiftRapierWorld.ColliderID>,delta:Double,drowning:Bool=false) {
         contactSeen=false
         var collisionOrder:[Int]=[],collisions:[Int:Collision]=[:]
         for contact in contacts {
@@ -109,7 +109,7 @@ final class NativeVehicleDamageController {
         }
         let currentBody=body(current),previousBody=body(previous),impact=state.intensity
         if !collisions.isEmpty {onCollisions?(collisionOrder.compactMap{collisions[$0]},currentBody)}
-        state.process(body:currentBody,ticks:50*delta,random:random)
+        state.process(body:currentBody,ticks:50*delta,drowning:drowning,random:random)
         let q=current.rotation,rotation=simd_quatd(ix:Double(q.imag.x),iy:Double(q.imag.y),iz:Double(q.imag.z),r:Double(q.real))
         state.swing(body:currentBody,previous:.init(move:previousBody.move,turn:previousBody.turn),current:.init(move:currentBody.move,turn:currentBody.turn),
             hinge:{[hinges] index in hinges[index].map{rotation.act($0)}},ticks:50*delta,intensity:impact,random:random)

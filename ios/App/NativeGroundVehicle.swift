@@ -886,7 +886,7 @@ final class NativeGroundVehicle {
             world.step()
             let contacts = world.drainContactForceEvents()
             if let current=world.bodyState(rigid) {
-                damageController?.step(previous:body,current:current,contacts:contacts,chassis:chassisColliders,delta:fixed)
+                damageController?.step(previous:body,current:current,contacts:contacts,chassis:chassisColliders,delta:fixed,drowning:dynamics?.buoyancy?.drowning ?? false)
                 bikeContact=damageController?.contactSeen ?? false
             }
             onContactForces?(contacts,rigid,fixed)

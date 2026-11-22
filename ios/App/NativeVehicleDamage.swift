@@ -54,7 +54,8 @@ final class NativeVehicleDamage {
     private(set) var intensity:Double = 0
     private var contactPiece = 0,contactPoint:V?,contactNormal:V?,contactBuilding = false,contactRhino = false
     var events:[Event] = []
-    var burning:Bool { health < 250 && !wrecked }
+    private(set) var drowning=false
+    var burning:Bool { health < 250 && !wrecked && !drowning }
     init(mass:Double,collisionDamage:Double = 0.5,maxX:Double = 1,flags:Int = 0,model:Int = 0) {
         self.mass = mass;collisionScale = collisionDamage*2000/mass;width = max(0.3,maxX)
         self.flags = flags;self.model = model;special = Self.special[model] != nil
@@ -152,7 +153,8 @@ final class NativeVehicleDamage {
         default:break
         }
     }
-    func process(body:Body,ticks:Double,random:()->Double = {Double.random(in:0..<1)}) {
+    func process(body:Body,ticks:Double,drowning:Bool=false,random:()->Double = {Double.random(in:0..<1)}) {
+        self.drowning=drowning
         let impact = intensity,piece = contactPiece;intensity = 0
         upsideTicks = body.up.y < -0.5 && simd_length_squared(body.move) < 0.0025 && !wrecked && !godly ? upsideTicks+2*ticks : 0
         if upsideTicks > 1000 && health >= 250 { health = 249;warmFire() }
@@ -195,7 +197,7 @@ final class NativeVehicleDamage {
             }
             if health < 250 { warmFire() }
         }
-        if health < 250 && !wrecked {
+        if burning {
             fireTicks += floor(20*ticks)
             if fireTicks > 5000 { events.append(Event(type:"blow")) }
         } else { fireTicks = 0 }
