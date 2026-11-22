@@ -167,7 +167,8 @@ final class NativeOtherVehicles {
             if let old=entries[source.id],old.model != model{remove(source.id)}
             if let entry=entries[source.id]{
                 let changed = !rawEqual(entry.lastRaw,source)
-                let conditionChanged = entry.lastRaw.health != source.health || entry.lastRaw.damage != source.damage
+                let healthChanged = entry.lastRaw.health != source.health
+                let damageChanged = entry.lastRaw.damage != source.damage
                 let relinquished = entry.rig != nil && (source.occupied || source.kept || source.foreignAI)
                 entry.source=source
                 // Release local simulation before applying the authoritative
@@ -180,13 +181,17 @@ final class NativeOtherVehicles {
                     // A pose, working-part or ownership observation does not
                     // acknowledge local damage. Preserve its timers, doors
                     // and tyres until condition changes or authority transfers.
-                    if conditionChanged || relinquished {
-                        entry.health=source.health;entry.damage=source.damage
-                    }
+                    if healthChanged || relinquished { entry.health=source.health }
+                    if damageChanged || relinquished { entry.damage=source.damage }
                     if let rig=entry.rig {
-                        if conditionChanged {
-                            rig.damage.load(health:Double(source.health),text:source.damage);rig.damage.events.removeAll()
+                        if damageChanged {
+                            // An appearance observation does not acknowledge
+                            // pending health. Full appearance loading remains
+                            // separate from a health-only observation.
+                            rig.damage.load(health:healthChanged ? Double(source.health):rig.damage.health,text:source.damage);rig.damage.events.removeAll()
                             rig.car?.setTyres(rig.damage.wheels);rig.bike?.setTyres(rig.damage.wheels)
+                        } else if healthChanged {
+                            rig.damage.observeHealth(Double(source.health))
                         }
                     } else {
                         entry.target=Self.pose(source)

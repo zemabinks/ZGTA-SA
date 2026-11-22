@@ -1,5 +1,41 @@
 # ZGTA:SA project status
 
+## Core196 partial vehicle condition
+
+Native build196 is the latest verified source batch. Health-only observations
+preserve the existing parked damage owner, continuous burn phase, physical doors,
+punctures and independent events. Appearance-only observations preserve pending
+health. Initialization, full appearance snapshots, combined repairs and authority
+transfers retain their separate loading rules. No force equation or physics step
+is changed.
+
+Four preceding-source runtime failures and 35 current authored checks pass with
+the actual native parked/damage/force/Rapier classes. Coverage includes repeated
+15/30/60/120 Hz observations on the fixed 60 Hz damage grid, threshold recovery,
+terminal health, authority transfers and registry lifetimes. The retained 67
+condition checks and 89 parked vehicle handoff checks also pass. Read-only test introspection
+observes real owner state; this is separate from physical contact or rendering.
+
+Both SDK products and the complete current physics/audio/transport chain pass.
+The private acceptance Simulator product targets this Mac's x86_64 architecture;
+the unsigned device product targets arm64. Public build defaults are unchanged.
+A normal Simulator traffic case verifies registered entry, driving, foot exit,
+reentry and disconnect release with a protocol-only observer. Saved images are
+reviewed after cleanup. The authority/input flow passes, while a visible vehicle
+orientation difference remains under investigation; handling/contact fidelity is
+not accepted. This case does not visually verify the new partial-damage effects.
+Controlled roadblock/placement and the retained bumper preference limit camera/rider/AI conclusions. Installed resources
+and preferences remain intact without reimport; owned test services close.
+
+The new runtime gate requires the existing host physics archive and
+`--with-physics`; default portable CI does not run that additional case.
+Full appearance replacements can still reset continuous physical phases.
+Cumulative condition acknowledgements, parked explosion delivery, exact contact,
+original retail timing, full camera/rider/ambient simulation, external-server
+coverage and physical-device performance remain open. No story campaign is
+included. Original resources, private evidence and private Git ancestry remain
+local.
+
 ## Core194–195 HUD recovery and parked vehicle condition
 
 Native build195 is the latest verified source batch. Position and working-part

@@ -274,6 +274,15 @@ final class NativeVehicleDamage {
         return Decoded(looks:values[0..<11].map {$0 >= 3 ? $0-3 : $0},open:values[0..<11].map {$0 >= 3},
             lights:values[11..<15].map {$0 == 1 ? 1 : 0},wheels:values[15..<19].map {$0 == 2 ? 2 : $0 == 1 ? 1 : 0})
     }
+    /// A partial authoritative health observation preserves the existing
+    /// physical parts, pending events and an uninterrupted burning interval.
+    /// Leaving the burning branch retires that interval; initialization and
+    /// full appearance snapshots continue to use load.
+    func observeHealth(_ value:Double) {
+        health = min(1000,max(0,value.isFinite ? value : 1000))
+        if health > 0 && health < 250 && !wrecked { warmFire() }
+        else { fireTicks = 0;fireWarmth = 0 }
+    }
     func load(health:Double,text:String) {
         fix()
         if let decoded = Self.decode(text) {
