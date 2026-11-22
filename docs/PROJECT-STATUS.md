@@ -1,5 +1,37 @@
 # ZGTA:SA project status
 
+## Core197 full appearance and physical lifetime
+
+Native build197 is the latest verified source batch.
+
+A full authoritative appearance observation now replaces logical parts without
+initializing a new physics lifetime. Continuous fire and inverted-body timers,
+pending contacts and queued physical events survive. Door hinge motion survives
+only when the authoritative logical state and appearance are unchanged. A changed
+closed or torn door still takes its authoritative state. Health and full appearance
+remain independently admitted; explicit initialization and repairs retain their rules.
+
+Four preceding-source runtime failures and 685 current authored checks pass
+through the complete parked/damage/force/Rapier owners. Authored profiles and wire
+strings verify retained logical initialization semantics, subsequent physical
+damage and explicit repair. The retained 35 health, 67 condition and 89 parked
+phase gates pass separately. No force equation or simulation step is changed.
+
+Both SDK products and the complete current physics/audio/transport chain pass.
+Three normal Simulator cases verify registered entry, driving, foot exit, reentry
+and disconnect release with a protocol-only observer. Saved images were reviewed
+after closing all owned apps and services. Installed resources and preferences
+remain intact without reimport. The private Simulator product targets this Mac's
+x86_64 architecture; the unsigned device product targets arm64. Public build
+defaults are unchanged. The new runtime gate needs the prebuilt host physics
+archive and --with-physics; default portable CI does not run it. The generic
+traffic scene does not visually verify the new continuous-phase effects or fix
+the retained vehicle tilt. Cumulative acknowledgements, parked explosion delivery,
+water/fire integration, exact contact, original retail timing, physical-device
+performance, full camera/rider/ambient simulation and external-server coverage
+remain separate open items. No story campaign is included. Original resources,
+private evidence and private Git ancestry remain local.
+
 ## Core196 partial vehicle condition
 
 Native build196 is the latest verified source batch. Health-only observations
