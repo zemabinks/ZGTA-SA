@@ -9,6 +9,16 @@ struct NativeHUDFontTable: Decodable {
     let space: Int
 }
 
+// A snapshot also distinguishes source-mode, repair and invalidation changes at
+// the same server address. Keep this UIKit adapter with NativeGameHUD.swift.
+private struct NativeHUDResourceIdentity:Equatable {
+    let server:String
+    let binding:NativeResourceStore.RuntimeBinding
+    static func current(server:ServerAddress)->Self {
+        .init(server:server.display,binding:NativeResourceStore.shared.runtimeBinding)
+    }
+}
+
 final class NativeHUDResources {
     static let shared = NativeHUDResources()
     static let changed = Notification.Name("NativeHUDResourcesChanged")
@@ -18,48 +28,43 @@ final class NativeHUDResources {
     private(set) var table2: NativeHUDFontTable?
     private(set) var sprites: [String: UIImage] = [:]
     private(set) var places: [NativeRadarMarker] = []
-    private var loadedServer: String?
+    private let resourceOwner=NativeHUDAssetOwner<NativeHUDResourceIdentity>()
     private var glyphs: [String: UIImage] = [:]
 
-    func load(server: ServerAddress) {
-        guard loadedServer != server.display else { return }
-        loadedServer = server.display
-        font1 = nil; font2 = nil; table1 = nil; table2 = nil
-        sprites.removeAll(); glyphs.removeAll(); places.removeAll()
-        let group = DispatchGroup(), lock = NSLock()
-        var files: [String: Data] = [:]
-        for name in ["font1-white.png", "font2-white.png", "font-layout.json", "sprites.png", "sprites.json", "places.json"] {
-            group.enter()
-            NativeResourceTransport.dataTask(with: server.path("game/native/hud/\(name)")) { data, response, _ in
-                if (response as? HTTPURLResponse)?.statusCode == 200, let data {
-                    lock.lock(); files[name] = data; lock.unlock()
+    func load(server:ServerAddress) {
+        let identity=NativeHUDResourceIdentity.current(server:server)
+        guard resourceOwner.needsLoad(for:identity)else{return}
+        let changed=resourceOwner.key != identity
+        let names=["font1-white.png","font2-white.png","font-layout.json","sprites.png","sprites.json","places.json"]
+        let requests=Dictionary(uniqueKeysWithValues:names.map{name in
+            (name,NativeHUDAssetOwner<NativeHUDResourceIdentity>.Request(
+                url:server.path("game/native/hud/\(name)"),maximumBytes:name.hasSuffix(".png") ? 16*1024*1024:1024*1024))
+        })
+        let began=resourceOwner.load(key:identity,requests:requests,
+            isCurrent:{NativeHUDResourceIdentity.current(server:server)==identity}){[weak self]files in
+            guard let self else{return false}
+            let font1=files["font1-white.png"].flatMap{UIImage(data:$0)}
+            let font2=files["font2-white.png"].flatMap{UIImage(data:$0)}
+            let fonts=files["font-layout.json"].flatMap{try? JSONDecoder().decode(FontDocument.self,from:$0)}
+            let document=files["sprites.json"].flatMap{try? JSONDecoder().decode(SpriteDocument.self,from:$0)}
+            let image=files["sprites.png"].flatMap{UIImage(data:$0)}?.cgImage
+            let places=files["places.json"].flatMap{try? JSONDecoder().decode(PlaceDocument.self,from:$0)}
+            var sprites:[String:UIImage]=[:]
+            if let document,let image {
+                for (name,box) in document.rectangles where box.count==4 {
+                    if let crop=image.cropping(to:CGRect(x:box[0],y:box[1],width:box[2],height:box[3])){sprites[name]=UIImage(cgImage:crop)}
                 }
-                group.leave()
-            }.resume()
+            }
+            guard NativeHUDResourceIdentity.current(server:server)==identity else{return false}
+            self.font1=font1;self.font2=font2;self.table1=fonts?.font1;self.table2=fonts?.font2
+            self.sprites=sprites;self.glyphs.removeAll()
+            self.places=places?.places.map{NativeRadarMarker(id:$0.id,name:$0.name,position:SIMD2($0.x,$0.y),icon:$0.icon)} ?? []
+            NotificationCenter.default.post(name:Self.changed,object:self)
+            return font1 != nil && font2 != nil && fonts != nil && document != nil && image != nil && places != nil
         }
-        group.notify(queue: .main) { [weak self] in
-            guard let self, self.loadedServer == server.display else { return }
-            self.font1 = files["font1-white.png"].flatMap { UIImage(data: $0) }
-            self.font2 = files["font2-white.png"].flatMap { UIImage(data: $0) }
-            if let data = files["font-layout.json"],
-               let document = try? JSONDecoder().decode(FontDocument.self, from: data) {
-                self.table1 = document.font1; self.table2 = document.font2
-            }
-            if let data = files["sprites.json"],
-               let document = try? JSONDecoder().decode(SpriteDocument.self, from: data),
-               let image = files["sprites.png"].flatMap({ UIImage(data: $0) })?.cgImage {
-                for (name, box) in document.rectangles where box.count == 4 {
-                    if let crop = image.cropping(to: CGRect(x: box[0], y: box[1], width: box[2], height: box[3])) {
-                        self.sprites[name] = UIImage(cgImage: crop)
-                    }
-                }
-            }
-            if let data = files["places.json"],
-               let document = try? JSONDecoder().decode(PlaceDocument.self, from: data) {
-                self.places = document.places.map { NativeRadarMarker(id: $0.id, name: $0.name,
-                    position: SIMD2($0.x, $0.y), icon: $0.icon) }
-            }
-            NotificationCenter.default.post(name: Self.changed, object: self)
+        if began,changed,resourceOwner.key==identity {
+            font1=nil;font2=nil;table1=nil;table2=nil;sprites.removeAll();glyphs.removeAll();places.removeAll()
+            NotificationCenter.default.post(name:Self.changed,object:self)
         }
     }
 
@@ -599,6 +604,7 @@ final class NativeRadarView: UIView {
     var span: CGFloat = 400 { didSet { setNeedsDisplay() } }
     var circular = true { didSet { setNeedsDisplay() } }
     var showWorldMarkers = true { didSet { setNeedsDisplay() } }
+    private let mapOwner=NativeHUDAssetOwner<NativeHUDResourceIdentity>()
     private var observer: NSObjectProtocol?
     override init(frame: CGRect) {
         super.init(frame: frame); isOpaque = false; backgroundColor = .clear
@@ -607,11 +613,17 @@ final class NativeRadarView: UIView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
     deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
-    func loadMap(server: ServerAddress) {
-        NativeResourceTransport.dataTask(with: server.path("tools/map/radar.webp")) { [weak self] data, response, _ in
-            guard (response as? HTTPURLResponse)?.statusCode == 200, let data, let image = UIImage(data: data) else { return }
-            DispatchQueue.main.async { self?.mapImage = image }
-        }.resume()
+    func loadMap(server:ServerAddress) {
+        let identity=NativeHUDResourceIdentity.current(server:server)
+        guard mapOwner.needsLoad(for:identity)else{return}
+        let changed=mapOwner.key != identity
+        let began=mapOwner.load(key:identity,requests:["map":.init(url:server.path("tools/map/radar.webp"),maximumBytes:32*1024*1024)],
+            isCurrent:{NativeHUDResourceIdentity.current(server:server)==identity}){[weak self]files in
+            guard let self,let data=files["map"],let image=UIImage(data:data),
+                  NativeHUDResourceIdentity.current(server:server)==identity else{return false}
+            self.mapImage=image;return true
+        }
+        if began,changed,mapOwner.key==identity{mapImage=nil}
     }
     func updateWorld(state: [String: Any]) {
         var result: [NativeRadarMarker] = NativeHUDResources.shared.places

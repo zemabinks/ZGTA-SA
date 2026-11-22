@@ -19,50 +19,50 @@ packaged public iPhone release. Users must supply their own supported game files
 
 ## Latest verified source
 
-Native application build189 and independent server changes throughCore191 form
+Native application build192 and independent server changes throughCore193 form
 the latest verified source batch.
 
-Native pedestrian pose time now follows observation boundaries. New hit/down
-states begin at receipt rather than inheriting the preceding display interval;
-fractional intervals retain their ownership without advancing twice. Rider
-handoffs reset that clock. Persistent head visibility also applies at stream-in,
-and a late first death cause can correct the existing clip without resetting its
-phase or the later get-up orientation. Authored backend-packet/native-controller
-checks cover fixed and irregular display schedules, late and split observations,
-repeated metadata, invalid clocks and lying rider handoffs. These are independent
-contracts, not original executable timings.
+Original font/sprite batches and radar requests now belong to bounded, cancellable source epochs.
+Late responses cannot overwrite a newer join, an A/B/A return or a changed
+resource admission at the same address. A batch becomes ready after decoding;
+transient failures retry with capped backoff through the existing visible HUD
+update. Successful resources stay cached. No additional polling timer or gameplay
+parameter is introduced. Three executed previous-source witnesses reproduce the
+old request failures; 84 authored owner/binding checks cover lifetime, transport
+bounds, decode decisions, backoff and reentry with explicit test boundaries.
 
-Both native SDK builds and the complete selected regression chain pass. The
-verified native bundle completes a normal Simulator join, scoped NPC lifecycle
-observation and menu/resource restoration; saved captures were reviewed. The
-private scene uses owner-supplied original model/world resources with explicit
-scripted idle/streaming and an owned acknowledged shooter. It does not establish
-native aiming, full ambient AI, physical-device behavior, audible output,
-continuous animation fidelity or retail parity. Existing installed resources and
-meaningful settings survive the update and normal test flow.
+Both native SDK builds pass. The complete selected Core193 physics, audio and
+transport regression chain passes with every frozen input held. Normal Simulator
+joining, movement, pause/resume and resource/menu restoration complete with the
+same verified native product and current independent backend. The private asset
+provider deliberately returns one HTTP503 for an original font and the radar;
+actual subsequent requests recover both original files, and closed captures were
+reviewed. Installed resources and meaningful settings remain intact. This is a
+scoped Simulator test, not a hardware, continuous-frame, audio or retail-fidelity
+measurement. The first private HUD fixture omitted the separate weapon-icon
+route, so it is not accepted as a weapon-icon recovery test. The same native
+binary displays that original icon in the independently reviewed traffic scene.
+Original traffic entry, driving, exit and reentry reach the current server, with
+a protocol-only observer receiving the shared state sequence. A controlled
+roadblock, supported observer placement and one obstructed initial driver view
+remain explicit boundaries; complete chase-camera and rider-pose fidelity are
+not established. The earlier validation-driver selection error remains recorded as
+an intentionally aborted incomplete run; it is not counted as a current pass.
 
-The optional archived-policy test carrier now supports the current controller
-interface and persistent visibility. An independent authored contract exercises
-that optional path in the default regression chain, including delayed death
-correction and recovery. The old carrier fails compilation as expected. Authored
-rows are identified separately from real archived observations; compilation of
-this path does not turn those authored rows into an original-game comparison.
+The shared traffic clock also retains its physical sample and pending fixed-step
+fraction across backward timestamps. Repeated observations cannot rewind that
+sample or replay movement when time catches up. The previous manager fails the
+new source requirement. Current task/packet checks cover fractional intervals,
+clock rebound, cadence, wire-clock wrap, catch-up and invalid clocks; retained
+traffic routes, obstacles, spawn admission and lifetime checks pass. Existing
+independent speed/AI policy and the catch-up cap remain explicit. This does not
+establish complete cross-client wall-clock correction or original traffic AI.
 
-Authoritative NPC movement also settles before flee, gunshot, injury and death
-events. Panic expiry splits the running/walking interval at its deadline;
-repeated or backward clock samples cannot replay motion. Hit clearance and range
-checks observe the settled target. The old source reproduces event, deadline,
-shared-actor, clock and stale melee-range failures. Analytical task/producer and
-actual backend handler checks pass with authored pavement/geometry boundaries,
-alongside retained lifetime, body-part, protocol and complete selected checks.
-The existing catch-up cap and independent movement parameters remain explicit.
-
-These changes improve independently implemented core correctness. Complete
-original NPC/traffic/police AI, density/model-group policy, cumulative vehicle
-damage authority, external-server coverage, full original resource/runtime
-support and comprehensive original-game comparisons remain open. Only independent
-source and qualified notes are public; original resources, derived data,
-measurements, captures and private ancestry remain local.
+Original NPC/traffic/police behavior, density/model-group rules, coordinated
+traffic signals, cumulative vehicle damage authority, full external-server and
+resource/runtime coverage and comprehensive original-game comparisons remain
+open. Only independently written source and qualified notes are public. Original
+resources, derived data, measurements, recordings and private ancestry stay local.
 
 ## Development priorities
 
