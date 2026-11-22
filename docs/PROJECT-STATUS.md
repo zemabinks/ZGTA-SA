@@ -19,38 +19,41 @@ packaged public iPhone release. Users must supply their own supported game files
 
 ## Latest verified source
 
-Registered vehicle rows now publish their authoritative condition consistently.
-Normal, pending and terminal parked reports follow the current registered hull
-only within the same vehicle and driver-claim lifetime. Later collisions cannot
-be reversed by a retained exit snapshot, and a replacement cannot borrow that
-old stand-in. Empty unattended predictions cannot clear accepted damage; actual
-paid repairs still create their correct fresh condition.
+Population preparation can optionally derive zone settings from an owner-supplied
+classic main.scm. A bounded typed parser admits only a statically verified literal
+configuration block, without running or reconstructing campaign missions. Zone
+keys, shared settings, short bounds and lookup follow the primary source-level
+references; original executable behavior is not established by those references.
+Original-derived tables stay local and the original v1 output remains unchanged.
+Authored miniature-script/lookup/CLI tests and independent local static comparison
+pass. Original density and model-group activation remain separate requirements.
 
-Three retained previous-source witnesses fail. Focused handler, real loopback
-HTTP/WebSocket and complete native URLSession receiving cases pass, including
-baseline, queued driving, parking, later motion and replacement. Native product
-inputs remain identical to the accepted Core182 SDK/App. The complete Core184 selected physics/audio/transport source chain passes.
-Core185 resource-specific checks pass separately. No new rendered App, browser,
-hardware or original-retail accuracy is inferred from these transport cases.
+Pedestrian retention now uses the same distance as publication and local spawn
+counts. An invisible outer ring can no longer occupy shared capacity indefinitely;
+another nearby observer still preserves the exact actor. The previous source
+reproduces the stall. Authored boundary/lifetime tests and two real loopback
+WebSocket scenarios pass, including streamout, replacement and disconnect.
+Their pavement and geometry are authored boundaries, not a rendered world test.
 
-NPC population preparation and server admission now require structurally matching
-prepared mesh/atlas-header/skeleton families. Newly generated profiles bind the
-index, navigation and selected family files to source hashes. Explicit model
-selection requires every requested civilian family. Existing owner-local aliases
-remain supported. Authored malformed-family, CLI and actual loader tests pass;
-retained original-resource admission also passes without altering the sources. A separate offline original-world task probe
-also runs the existing independent NPC tasks over original navigation and
-collision; its packets are in memory, without a rendered client.
-These checks do not decode pixels, reconstruct bind poses, sample animations or
-establish a GPU draw. Legacy profiles validate current families without a
-historical source-hash guarantee.
+Accepted ordinary shot body parts now reach the pedestrian reaction state and
+supplemental packet. Later claims cannot replace the accepted ticket metadata.
+Unrepresentable legacy/absent pieces retain the old torso fallback. Damage,
+ammunition and range/visibility authority remain unchanged. The previous source
+loses admitted head metadata; current actual handler/task/packet checks pass.
+Actual backend-produced bytes also pass through the complete native decoder and
+common animation owner at several display rates, including its existing terminal
+head visibility result. This uses authored clips, catalog, graph and transport/
+geometry boundaries; it does not establish rendered rig or retail accuracy.
 
-The cumulative local/server vehicle-damage ledger, full vehicle weapon damage,
-original population groups/zone/time density, client-wide model availability,
-complete NPC/traffic/police AI and retail gameplay accuracy remain incomplete.
-Original assets, derived tables, measurements, recordings and private Git
-ancestry remain local. Only independently authored source and these qualified
-implementation records are published.
+The full Core187 selected physics/audio/transport regression chain passes. The
+Core188 metadata change passes its affected handler and native pipeline checks.
+All native product inputs retain the accepted Core182 SDK/App sources. No new
+App/SDK, rendered-world, physical-device or retail acceptance is inferred. Full vehicle damage
+authority, original population density/groups, complete NPC/traffic/police AI,
+external-server coverage and exhaustive core gameplay parity remain incomplete.
+Only independently authored source and qualified implementation notes are public;
+original resources, derived data, measurements, captures and private ancestry stay
+local.
 
 ## Development priorities
 

@@ -1,5 +1,43 @@
 # Shared ambient pedestrians — Core158
 
+## Core186–188 configuration, lifetimes and hit metadata
+
+Population preparation can optionally derive zone settings from an owner-supplied
+classic main.scm. A bounded typed parser admits only a statically verified literal
+configuration block, without running or reconstructing campaign missions. Zone
+keys, shared settings, short bounds and lookup follow the primary source-level
+references; original executable behavior is not established by those references.
+Original-derived tables stay local and the original v1 output remains unchanged.
+Authored miniature-script/lookup/CLI tests and independent local static comparison
+pass. Original density and model-group activation remain separate requirements.
+
+Pedestrian retention now uses the same distance as publication and local spawn
+counts. An invisible outer ring can no longer occupy shared capacity indefinitely;
+another nearby observer still preserves the exact actor. The previous source
+reproduces the stall. Authored boundary/lifetime tests and two real loopback
+WebSocket scenarios pass, including streamout, replacement and disconnect.
+Their pavement and geometry are authored boundaries, not a rendered world test.
+
+Accepted ordinary shot body parts now reach the pedestrian reaction state and
+supplemental packet. Later claims cannot replace the accepted ticket metadata.
+Unrepresentable legacy/absent pieces retain the old torso fallback. Damage,
+ammunition and range/visibility authority remain unchanged. The previous source
+loses admitted head metadata; current actual handler/task/packet checks pass.
+Actual backend-produced bytes also pass through the complete native decoder and
+common animation owner at several display rates, including its existing terminal
+head visibility result. This uses authored clips, catalog, graph and transport/
+geometry boundaries; it does not establish rendered rig or retail accuracy.
+
+The full Core187 selected physics/audio/transport regression chain passes. The
+Core188 metadata change passes its affected handler and native pipeline checks.
+All native product inputs retain the accepted Core182 SDK/App sources. No new
+App/SDK, rendered-world, physical-device or retail acceptance is inferred. Full vehicle damage
+authority, original population density/groups, complete NPC/traffic/police AI,
+external-server coverage and exhaustive core gameplay parity remain incomplete.
+Only independently authored source and qualified implementation notes are public;
+original resources, derived data, measurements, captures and private ancestry stay
+local.
+
 ## Core185 prepared model admission
 
 Registered vehicle rows now publish their authoritative condition consistently.

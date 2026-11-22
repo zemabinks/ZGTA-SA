@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools.assets.original_population import MAX_TEXT_BYTES, parse_cycle, parse_groups, parse_zones
+from tools.assets.original_zone_initialization import MAX_SCRIPT_BYTES, decode_initialization, compile_zone_settings
 
 SOURCES = ('data/pedgrp.dat', 'data/cargrp.dat', 'data/popcycle.dat', 'data/info.zon', 'data/map.zon')
 
@@ -28,12 +29,12 @@ def source_path(root, name):
     return result
 
 
-def read_source(path):
+def read_source(path, maximum=MAX_TEXT_BYTES):
     with path.open('rb') as stream:
         before = os.fstat(stream.fileno())
-        if not stat.S_ISREG(before.st_mode) or before.st_size > MAX_TEXT_BYTES:
+        if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
             raise ValueError('Population source file size/type')
-        data = stream.read(MAX_TEXT_BYTES + 1)
+        data = stream.read(maximum + 1)
         after = os.fstat(stream.fileno())
     if (len(data) != before.st_size or (before.st_size, before.st_mtime_ns, before.st_ino) !=
             (after.st_size, after.st_mtime_ns, after.st_ino)):
@@ -41,16 +42,20 @@ def read_source(path):
     return data
 
 
-def prepare(game_dir, output):
+def prepare(game_dir, output, initial_scm=None):
     root, output = Path(game_dir).resolve(strict=True), Path(output).absolute()
     destination = output.resolve()
     if destination.is_relative_to(ROOT) and not destination.is_relative_to(ROOT / 'local-only'):
         raise ValueError('Original-derived population data must stay under local-only/ in this repository')
     paths = {name: source_path(root, name) for name in SOURCES}
+    script_name = 'data/script/main.scm'
+    if initial_scm is not None:
+        paths[script_name] = Path(initial_scm).resolve(strict=True)
     if output.resolve() in {p.resolve() for p in paths.values()}:
         raise ValueError('Output cannot replace an original source')
-    raw = {name: read_source(path) for name, path in paths.items()}
-    text = {name: value.decode('utf-8') for name, value in raw.items()}
+    raw = {name: read_source(path, MAX_SCRIPT_BYTES if name == script_name else MAX_TEXT_BYTES)
+           for name, path in paths.items()}
+    text = {name: raw[name].decode('utf-8') for name in SOURCES}
     document = dict(version=1, profile='zgta-original-population-tables-v1',
                     sourceSHA256={name: hashlib.sha256(value).hexdigest() for name, value in raw.items()},
                     pedestrianGroups=parse_groups(text['data/pedgrp.dat'], 'pedestrian'),
@@ -58,8 +63,13 @@ def prepare(game_dir, output):
                     cycleRows=parse_cycle(text['data/popcycle.dat']),
                     navigationZones=parse_zones(text['data/info.zon']),
                     mapZones=parse_zones(text['data/map.zon']))
+    if initial_scm is not None:
+        decoded = decode_initialization(raw[script_name])
+        document.update(version=2, profile='zgta-original-population-tables-v2',
+                        zoneConfiguration=compile_zone_settings(document['navigationZones'], decoded))
     encoded = (json.dumps(document, sort_keys=True, indent=2) + '\n').encode()
-    if any(read_source(paths[name]) != value for name, value in raw.items()):
+    if any(read_source(paths[name], MAX_SCRIPT_BYTES if name == script_name else MAX_TEXT_BYTES) != value
+           for name, value in raw.items()):
         raise ValueError('Population sources changed during preparation')
     if output.exists() or output.is_symlink():
         if output.is_symlink() or not output.is_file() or output.read_bytes() != encoded:
@@ -77,18 +87,24 @@ def prepare(game_dir, output):
         finally:
             temporary.unlink(missing_ok=True)
         reused = False
-    return dict(status='REUSED' if reused else 'PREPARED', output=str(output),
+    report = dict(status='REUSED' if reused else 'PREPARED', output=str(output),
                 sha256=hashlib.sha256(encoded).hexdigest(), pedestrianGroups=57, vehicleGroups=34,
                 cycleRows=480, navigationZones=len(document['navigationZones']), mapZones=len(document['mapZones']),
                 scope='Decoded original tables only; zone population-type assignments, model admission and runtime AI remain separate.')
+    if initial_scm is not None:
+        report.update(zoneInfoKeys=len(document['zoneConfiguration']['byInfoKey']),
+                      literalZoneOperations=document['zoneConfiguration']['literalOperations'],
+                      scope=document['zoneConfiguration']['scope'])
+    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--game-dir', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True, help='Local-only generated JSON; keep original data off GitHub')
+    parser.add_argument('--initial-scm', type=Path, help='Optional owned main.scm: decode static INITIAL zone settings without running the campaign')
     args = parser.parse_args()
-    print(json.dumps(prepare(args.game_dir, args.output), indent=2))
+    print(json.dumps(prepare(args.game_dir, args.output, initial_scm=args.initial_scm), indent=2))
 
 
 if __name__ == '__main__':
