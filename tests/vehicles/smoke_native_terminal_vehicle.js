@@ -88,6 +88,30 @@ async function main(){
  server=http.createServer((req,res)=>game.http(req,res).catch(error=>{res.writeHead(500);res.end(JSON.stringify({error:error.message}));}));server.on('upgrade',(req,socket,head)=>game.upgrade(req,socket,head));
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));port=server.address().port;
  check(![8803,8804,8805,8806,8807,8808,8809].includes(port),'Fixture selected an existing QA port');
+ await scenario('received driver and parked condition agree with the authoritative registry',async()=>{
+  const s=await boarded(645),damage='3434012122110101201';
+  await s.a.wire.sync(drive(s.car,{health:645,damage}));
+  await s.a.wire.sync(drive(s.car,{health:900,damage:''}));
+  const observer=await actor(false),baseline=observer.wire.messages.find(m=>m.t==='all');
+  const driving=baseline.cars.find(row=>row[0]===String(s.a.number));
+  same(driving?.slice(18,20),[645,damage],'Actual observer baseline restored stale driver condition');
+  same(baseline.vehicles.find(row=>row[0]===s.car.id)?.slice(9,11),[645,damage],'Received baseline hulls disagree');
+  const at=observer.wire.messages.length;
+  await parked(s.a,s.car,{health:900,damage:''});
+  const update=await observer.wire.wait(m=>m.t==='cars'&&m.c.some(row=>row[0]===String(s.a.number)&&row[33]),at);
+  const released=update.c.find(row=>row[0]===String(s.a.number));
+  same(released[33].slice(7,9),[645,damage],'Actual observer received a repaired parked stand-in');
+  same(released[35],s.car.id,'Received release lost registered vehicle identity');
+  const hull=await observer.wire.wait(m=>m.t==='veh'&&m.v[0]===s.car.id,at);
+  same(hull.v.slice(9,11),[645,damage],'Actual observer parked hull disagrees with its actor');
+  await s.a.wire.sync(foot());
+ });
+ await scenario('fatal completion cannot clear previously accepted vehicle appearance',async()=>{
+  const s=await boarded(645),damage='3434012122110101201';
+  await s.a.wire.sync(drive(s.car,{health:645,damage}));await fatal(s);await final(s,{damage:''});
+  same(s.car.row.slice(9,11),[0,damage],'Fatal completion discarded authoritative appearance');
+  same(game.row(s.peer)[33].slice(7,9),[0,damage],'Fatal parked stand-in discarded authoritative appearance');
+ });
  await scenario('fatal before parked completion persists exact former driver hull once',async()=>{
   const s=await boarded();await fatal(s);check(game.terminalVehicleReports.has(s.peer),'No bounded terminal completion');await final(s);
   same(s.car.row.slice(3,11),[103,100,20,.1,.2,.3,0,'wrecked'],'Final body state mixed with foot or lost');same(s.a.player.garage[s.slot].health,0,'Fatal release lost garage hull');

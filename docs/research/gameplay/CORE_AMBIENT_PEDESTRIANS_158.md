@@ -1,5 +1,40 @@
 # Shared ambient pedestrians — Core158
 
+## Core185 prepared model admission
+
+Registered vehicle rows now publish their authoritative condition consistently.
+Normal, pending and terminal parked reports follow the current registered hull
+only within the same vehicle and driver-claim lifetime. Later collisions cannot
+be reversed by a retained exit snapshot, and a replacement cannot borrow that
+old stand-in. Empty unattended predictions cannot clear accepted damage; actual
+paid repairs still create their correct fresh condition.
+
+Three retained previous-source witnesses fail. Focused handler, real loopback
+HTTP/WebSocket and complete native URLSession receiving cases pass, including
+baseline, queued driving, parking, later motion and replacement. Native product
+inputs remain identical to the accepted Core182 SDK/App. The complete Core184 selected physics/audio/transport source chain passes.
+Core185 resource-specific checks pass separately. No new rendered App, browser,
+hardware or original-retail accuracy is inferred from these transport cases.
+
+NPC population preparation and server admission now require structurally matching
+prepared mesh/atlas-header/skeleton families. Newly generated profiles bind the
+index, navigation and selected family files to source hashes. Explicit model
+selection requires every requested civilian family. Existing owner-local aliases
+remain supported. Authored malformed-family, CLI and actual loader tests pass;
+retained original-resource admission also passes without altering the sources. A separate offline original-world task probe
+also runs the existing independent NPC tasks over original navigation and
+collision; its packets are in memory, without a rendered client.
+These checks do not decode pixels, reconstruct bind poses, sample animations or
+establish a GPU draw. Legacy profiles validate current families without a
+historical source-hash guarantee.
+
+The cumulative local/server vehicle-damage ledger, full vehicle weapon damage,
+original population groups/zone/time density, client-wide model availability,
+complete NPC/traffic/police AI and retail gameplay accuracy remain incomplete.
+Original assets, derived tables, measurements, recordings and private Git
+ancestry remain local. Only independently authored source and these qualified
+implementation records are published.
+
 ## Core183 original population resources — decoder foundation
 
 The local preparation command now decodes `pedgrp.dat`, `cargrp.dat`,

@@ -472,6 +472,9 @@ class LocalGame {
     // A claim refers to this particular vehicle object and transport peer;
     // neither an account number nor a reused wire ID grants driving rights.
     this.vehicleClaims = new Map();
+    // Bind accepted foot stand-ins to their exact registered vehicle object.
+    // A weak key releases the old proof when the peer replaces its report.
+    this.parkedVehicleReports = new WeakMap();
     this.passengerClaims = new Map(); // transport -> {vehicle incarnation, seat}
     // Death releases occupancy immediately. One final native get-out report
     // may still be in flight behind the acknowledged fatal-health message.
@@ -1886,6 +1889,7 @@ class LocalGame {
     // Reuse the existing16-unit first-driver handoff envelope. The deadline
     // remains the old driver's lastSeen+10s; retries never extend it.
     this.writeVehiclePose(vehicle,parked);
+    this.reconcileParkedVehicleCondition(message,vehicle);
     this.publishVehicle(vehicle);
     return true;
   }
@@ -1933,10 +1937,10 @@ class LocalGame {
       // so its ordinary foot reports include a parked snapshot after entry ACK.
       // That is not a cancellation. Native peers explicitly report their final
       // parked state when cancelling; either client may also send t:exit.
-      const pending=peer.inventoryEnabled ? [...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&
+      const pending=[...this.vehicleClaims.values()].find(claim=>claim.peer===peer&&
         message.vehicle===claim.vehicle.id&&message.car===claim.vehicle.row[2]&&
-        this.validVehiclePose(message.parked)) : null;
-      return {release:current || pending};
+        this.validVehiclePose(message.parked));
+      return {release:current || (peer.inventoryEnabled ? pending : null),parked:pending?.vehicle};
     }
     // The original serializer deliberately omits vehicle for cG.local free-play
     // cars. Such an actor owns no server vehicle and cannot hide/update one.
@@ -1977,6 +1981,13 @@ class LocalGame {
     return true;
   }
 
+  reconcileParkedVehicleCondition(message,vehicle) {
+    if(message.vehicle!==vehicle.id || message.car!==vehicle.row[2] ||
+       !this.validVehiclePose(message.parked))return;
+    this.parkedVehicleReports.set(message,{vehicle,lifetime:vehicle.parkedPublicationLifetime});
+    message.parked={...message.parked,health:vehicle.row[9],damage:vehicle.row[10]};
+  }
+
   saveVehicleGarage(vehicle,force=false) {
     if(vehicle.missionOwner){this.saveMissionVehicle(vehicle,force);return;}
     const entry=vehicle.owner?.garage[vehicle.slot];
@@ -1992,6 +2003,7 @@ class LocalGame {
     if(change.claim) {
       const claim=change.claim,vehicle=claim.vehicle;
       if(peer.player.health<=0) {this.releaseVehicleClaim(claim,{removeActor:claim.driving});return;}
+      if(change.start)vehicle.parkedPublicationLifetime={};
       claim.driving=true;
       vehicle.row[11]=String(peer.player.number);
       // An explicit browser exit supplies the final body pose before the next
@@ -2009,8 +2021,9 @@ class LocalGame {
       const claim=change.release,vehicle=claim.vehicle;
       const parked=message.vehicle===vehicle.id&&message.car===vehicle.row[2] ? message.parked : null;
       if(claim.driving)this.writeVehiclePose(vehicle,this.validVehiclePose(parked) ? parked : claim.exitPose);
+      this.reconcileParkedVehicleCondition(message,vehicle);
       this.releaseVehicleClaim(claim);
-    }
+    }else if(change.parked)this.reconcileParkedVehicleCondition(message,change.parked);
     this.prunePassengerClaims();
   }
 
@@ -2132,7 +2145,9 @@ class LocalGame {
     vehicle.row[6]=rounded(message.h);vehicle.row[7]=rounded(message.p);vehicle.row[8]=rounded(message.r);
     if (Number.isFinite(message.hp)) vehicle.row[9]=Math.min(vehicle.row[9],
       Math.max(0,Math.min(1000,Math.round(message.hp))));
-    if (typeof message.d==='string') vehicle.row[10]=message.d.slice(0,512);
+    // As with an active driver's report, an empty prediction cannot repair
+    // accepted damage. Actual workshop/repair actions own condition resets.
+    if (typeof message.d==='string'&&message.d) vehicle.row[10]=message.d.slice(0,512);
     if (Number.isFinite(message.w)) {
       while (vehicle.row.length<17) vehicle.row.push(null);
       vehicle.row[16]=Math.round(Math.max(0,Math.min(2500,message.w)));
@@ -3780,9 +3795,20 @@ class LocalGame {
     const s = passenger?.active ? this.passengerPose(passenger) : peer.state;
     if (!s || Date.now() - peer.lastSeen > 10000) return null;
     const driving = s.driving === true && typeof s.car === 'string';
-    if(driving && !this.unboundVehicleReport(s) && this.vehicleDriver(this.vehicles.get(s.vehicle))!==peer)return null;
+    const registered=driving&&!this.unboundVehicleReport(s) ? this.vehicles.get(s.vehicle):null;
+    if(driving && !this.unboundVehicleReport(s) && this.vehicleDriver(registered)!==peer)return null;
     const walking = !driving && s.walking === true && Number.isInteger(s.skin);
     if (!driving && !walking) return null;
+    const parkedReport=this.parkedVehicleReports.get(s),parkedOwner=parkedReport?.vehicle;
+    const parkedCurrent=parkedOwner&&this.vehicles.get(parkedOwner.id)===parkedOwner&&
+      parkedReport.lifetime===parkedOwner.parkedPublicationLifetime&&
+      s.vehicle===parkedOwner.id&&s.car===parkedOwner.row[2];
+    // The last accepted foot report may remain visible while another peer
+    // bumps the parked body. Publish its current registry pose/condition, not
+    // the old exit snapshot. A replacement car cannot borrow the old proof.
+    const parked=parkedOwner ? parkedCurrent ? {x:parkedOwner.row[3],y:parkedOwner.row[4],z:parkedOwner.row[5],
+      heading:parkedOwner.row[6],pitch:parkedOwner.row[7],roll:parkedOwner.row[8],
+      health:parkedOwner.row[9],damage:parkedOwner.row[10]}:null:s.parked;
     const point = Array.isArray(s.at) ? s.at : Array.isArray(s.position) ? s.position : null;
     const x = finite(s.x, point ? finite(point[0]) : 1480);
     const y = finite(s.y, point ? finite(point[1]) : -1738);
@@ -3801,8 +3827,9 @@ class LocalGame {
     row[16] = Math.round(finite(s.clock, Date.now()));
     row[17] = typeof s.horn === 'boolean' ? Number(s.horn) : Number.isInteger(s.horn) ? s.horn & 3 : 0;
     row[18] = walking ? peer.player.health :
-      Math.round(Math.max(0, Math.min(1000, finite(s.health, 1000))));
-    row[19] = typeof s.damage === 'string' ? s.damage.slice(0, 512) : '';
+      Math.round(Math.max(0, Math.min(1000, finite(registered?.row[9]??s.health, 1000))));
+    const condition=registered ? registered.row[10]:s.damage;
+    row[19] = typeof condition === 'string' ? condition.slice(0, 512) : '';
     row[20] = rounded(limited(s.wx, 30)); row[21] = rounded(limited(s.wy, 30));
     row[22] = rounded(limited(s.wz, 30));
     row[23] = Math.round(Math.max(0, limited(s.lag, 2000)));
@@ -3819,14 +3846,14 @@ class LocalGame {
     row[31] = driving && Number.isInteger(s.skin) ? s.skin : 0;
     row[32] = Number.isInteger(s.act) ? s.act : 0;
     const riding = walking && passenger?.active ? [passenger.vehicle.id,passenger.seat] : null;
-    row[33] = walking && !riding && typeof s.car === 'string' && s.parked &&
-      typeof s.parked === 'object' ? [s.car.slice(0, 64),
-        rounded(s.parked.x), rounded(s.parked.y), rounded(s.parked.z),
-        rounded(s.parked.heading), rounded(s.parked.pitch), rounded(s.parked.roll),
-        Math.round(finite(s.parked.health, 1000)),
-        typeof s.parked.damage === 'string' ? s.parked.damage.slice(0, 512) : ''] : null;
+    row[33] = walking && !riding && typeof s.car === 'string' && parked &&
+      typeof parked === 'object' ? [s.car.slice(0, 64),
+        rounded(parked.x), rounded(parked.y), rounded(parked.z),
+        rounded(parked.heading), rounded(parked.pitch), rounded(parked.roll),
+        Math.round(finite(parked.health, 1000)),
+        typeof parked.damage === 'string' ? parked.damage.slice(0, 512) : ''] : null;
     row[34] = riding;
-    row[35] = !riding && typeof s.vehicle === 'string' ? s.vehicle.slice(0, 64) : null;
+    row[35] = !riding && (!parkedOwner||parkedCurrent) && typeof s.vehicle === 'string' ? s.vehicle.slice(0, 64) : null;
     row[36] = s.paused ? 1 : 0;
     row[37] = peer.player.number;
     row[38] = walking && !riding && Number.isInteger(s.down) ? s.down : 0;
