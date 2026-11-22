@@ -1090,20 +1090,25 @@ class LocalGame {
   }
 
   handlePedestrianHit(peer,message) {
-    const actor=this.population?.get(message.to),from=this.position(peer.player),now=Date.now();
+    const now=Date.now();
+    const actor=this.population?.get(message.to),from=this.position(peer.player);
     if(!actor||actor.health<=0||!from||peer.player.health<=0||peer.player.passive||peer.player.insideHome)return;
     const weapon=peer.inventoryEnabled&&Number.isInteger(message.w)?message.w:
       now-(peer.lastShotAt||0)<=2000?peer.lastWeapon:peer.state?.weapon;
     const gun=weapon>=22,melee=Number.isInteger(weapon)&&weapon>=0&&weapon<=15,area=AREA_EFFECTS[weapon];
     const baseDamage=area?area.damage:WEAPON_DAMAGE[weapon];if(!baseDamage||(!gun&&!melee))return;
-    const origin=[from.x,from.y,from.z+(melee?1:1.35)],centre=actor.position.map((v,i)=>v+(i===2?1:0));
-    if(!worldCollision.lineOfSight(origin,centre))return;
     if(peer.inventoryEnabled&&!gun&&weaponInventory.ensure(peer.player).selected!==weapon)return;
     const authorized=peer.inventoryEnabled&&gun?[...(peer.acceptedShots||[])].reverse().find(record=>
       !record.used&&record.weapon===weapon&&now-record.at>=0&&now-record.at<=(area?AREA_EVIDENCE_MS:2000)&&
       (record.ordinaryTarget===undefined||record.ordinaryTarget===message.to)&&
       (message.s===undefined?record.sequence===null:record.sequence===message.s)):null;
     if(peer.inventoryEnabled&&gun&&!authorized)return;
+    if(!area&&!(peer.inventoryEnabled&&gun)&&now-(peer.lastHitAt||0)<(gun?90:300))return;
+    // Settle the preceding task before spatial validation and event mutation.
+    // Ordinary gunfire has already reached this same clock via gunshot().
+    this.population?.advanceTo?.(now);
+    const origin=[from.x,from.y,from.z+(melee?1:1.35)],centre=actor.position.map((v,i)=>v+(i===2?1:0));
+    if(!worldCollision.lineOfSight(origin,centre))return;
     const damage=authorized?.ordinaryDamage??baseDamage;
     if(area){
       if(!authorized||!peer.inventoryEnabled||authorized.dimension!==null)return;
@@ -1123,7 +1128,6 @@ class LocalGame {
       const hit=authorized?.hit||peer.lastShotHit;
       if(gun&&(!authorized&&(now-(peer.lastShotAt||0)>2000||peer.lastWeapon!==weapon)||
         !Array.isArray(hit)||Math.hypot(...hit.map((v,i)=>v-actor.position[i]))>8))return;
-      if(!(peer.inventoryEnabled&&gun)&&now-(peer.lastHitAt||0)<(gun?90:300))return;
       if(authorized)authorized.used=true;
     }
     peer.lastHitAt=now;
@@ -1159,11 +1163,13 @@ class LocalGame {
   }
 
   applyBlastHit(target, damage, event) {
+    const populationNow=Date.now();
+    this.population?.advanceTo?.(populationNow);
     const actor=this.population?.get(String(target.id));
     if(actor){
       const centre=actor.position.map((v,i)=>v+(i===2?0.9:0));
       if(event.dimension==null&&worldCollision.lineOfSight(event.position,centre)){
-        this.population.damage(String(target.id),Math.min(1000,Math.max(0,Math.ceil(damage))),{weapon:event.weapon,from:event.position,now:Date.now()});
+        this.population.damage(String(target.id),Math.min(1000,Math.max(0,Math.ceil(damage))),{weapon:event.weapon,from:event.position,now:populationNow});
       }
       return;
     }

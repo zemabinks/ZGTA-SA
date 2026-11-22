@@ -49,14 +49,20 @@ class Pedestrians {
  }
  #advance(actor,dt,now){
   if(actor.health<=0){actor.speed=0;actor.desiredSpeed=0;return;}
-  if(now>=actor.panicUntil&&actor.flags&4){actor.flags&=~4;actor.mood=0;actor.desiredSpeed=1.1;}
   let remaining=dt,iterations=0;
+  const expire=at=>{if(at>=actor.panicUntil&&actor.flags&4){actor.flags&=~4;actor.mood=0;actor.desiredSpeed=1.1;}};
+  expire(now-dt*1000);
   // Bounded server substeps avoid frame-dependent acceleration and route
   // overshoot. Simulation never advances a long disconnected wall-time gap.
   while(remaining>1e-8&&iterations++<64){
-   const step=Math.min(0.05,remaining);
+   const cursor=now-remaining*1000;
+   expire(cursor);
+   // A task deadline belongs inside the interval, rather than at the last
+   // publication. Split it before changing the intended speed.
+   const deadline=actor.flags&4?(actor.panicUntil-cursor)/1000:Infinity;
+   const step=Math.min(0.05,remaining,deadline>0?deadline:remaining);
    const delta=[actor.goal[0]-actor.position[0],actor.goal[1]-actor.position[1]],length=Math.hypot(...delta);
-   if(length<1e-8){actor.previous=actor.node;actor.node=actor.to;if(!this.#route(actor,now<actor.panicUntil?actor.threat:null)){actor.speed=0;break;}continue;}
+   if(length<1e-8){actor.previous=actor.node;actor.node=actor.to;if(!this.#route(actor,cursor<actor.panicUntil?actor.threat:null)){actor.speed=0;break;}continue;}
    const accelerating=Math.min(step,Math.abs(actor.desiredSpeed-actor.speed)/4);
    const acceleration=Math.sign(actor.desiredSpeed-actor.speed)*4;
    const afterAcceleration=actor.speed+acceleration*accelerating;
@@ -84,19 +90,28 @@ class Pedestrians {
    actor.faceWire=Math.atan2(delta[1],delta[0]);
    remaining-=elapsed;
   }
+  expire(now);
+ }
+ advanceTo(now){
+  if(!Number.isFinite(now))throw Error('Population clock');
+  const clock=Math.max(now,this.lastTime??now);
+  const dt=this.lastTime===null?0:Math.min(0.5,(clock-this.lastTime)/1000);
+  this.lastTime=clock;
+  if(dt>0)for(const actor of this.actors.values())this.#advance(actor,dt,clock);
+  return clock;
  }
  tick(now,observers){
   if(!Number.isFinite(now)||!Array.isArray(observers))throw Error('Population clock/observers');
   observers=observers.filter(validPoint).slice(0,32);
-  const dt=this.lastTime===null?0:Math.max(0,Math.min(0.5,(now-this.lastTime)/1000));this.lastTime=now;
+  now=Math.max(now,this.lastTime??now);
   for(const [id,actor]of this.actors){
    // Refresh only lifetimes inside the same distance we publish. An actor
    // held indefinitely in an invisible outer ring can exhaust shared capacity
    // and leave the observer's new area empty. Other observers still retain it.
    if(observers.some(point=>distance(point,actor.position)<observationRadius))actor.lastSeen=now;
    if(now-actor.lastSeen>3000||(actor.deadAt!==null&&now-actor.deadAt>20000)){this.actors.delete(id);continue;}
-   this.#advance(actor,dt,now);
   }
+  this.advanceTo(now);
   if(now>=this.spawnAt&&observers.length){
    this.spawnAt=now+250;
    for(const observer of observers){
@@ -127,19 +142,27 @@ class Pedestrians {
   const actor=this.get(target);
   if(!actor||actor.health<=0||!Number.isFinite(amount)||amount<=0||amount>1000||!validPoint(from)||!Number.isFinite(now)||
      !Number.isInteger(piece)||piece<3||piece>9)return false;
+  now=this.advanceTo(now);
   actor.health=Math.max(0,actor.health-amount);actor.hitCounter=(actor.hitCounter+1)&31;actor.hitWeapon=weapon;
   actor.hitPiece=piece;actor.hitFromWire=Math.atan2(from[1]-actor.position[1],from[0]-actor.position[0]);
   if(actor.health===0){actor.flags|=9;actor.deadAt=now;actor.speed=0;actor.desiredSpeed=0;actor.goal=actor.position.slice(0,2);}
-  else{this.flee(actor,from,now);}
+  else{this.#flee(actor,from,now);}
   return true;
  }
  flee(actor,from,now){
-  if(!actor||actor.health<=0||!validPoint(from)||!Number.isFinite(now))return;
+  if(!actor||this.actors.get(actor.id)!==actor||actor.health<=0||!validPoint(from)||!Number.isFinite(now))return;
+  now=this.advanceTo(now);this.#flee(actor,from,now);
+ }
+ #flee(actor,from,now){
   actor.flags|=4;actor.mood=0;actor.threat=from.slice();actor.panicUntil=Math.max(actor.panicUntil,now+6000);actor.desiredSpeed=3.2;
   // Choose a real graph edge away from the threat. Do not teleport to a node
   // or let clients supply the destination or health.
   if(distance(actor.position,this.graph.point(actor.node))<0.5)this.#route(actor,from);
  }
- gunshot(origin,now){if(!validPoint(origin)||!Number.isFinite(now))return;for(const actor of this.actors.values())if(distance(actor.position,origin)<35)this.flee(actor,origin,now);}
+ gunshot(origin,now){
+  if(!validPoint(origin)||!Number.isFinite(now))return;
+  now=this.advanceTo(now);
+  for(const actor of this.actors.values())if(actor.health>0&&distance(actor.position,origin)<35)this.#flee(actor,origin,now);
+ }
 }
 module.exports={Pedestrians,validPoint};
