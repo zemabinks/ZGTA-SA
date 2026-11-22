@@ -207,6 +207,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var stockPedErrors=Set<Int32>()
     private var stockPedDrawn=Set<Int32>()
     private let stockPedLogger=Logger(subsystem:"com.zema.zgtasa",category:"StockPed")
+    #if DEBUG
+    private var trafficVehicleDrawn=Set<String>()
+    #endif
     private var fixedCJ:NativeCJRuntimeModel?
     private var fixedCJObserver:UUID?
     private var legacyPedStyles:[String:String]=[:]
@@ -3625,6 +3628,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         character?.otherColliders=(groundVehicle?.otherColliders ?? []).union(ambientBodies?.colliders ?? []).union(ambientTrafficBodies?.colliders ?? [])
     }
     private func resetAmbientTrafficSession() {
+        #if DEBUG
+        trafficVehicleDrawn.removeAll()
+        #endif
         ambientRoadToken=UUID();ambientRoadTask?.cancel();ambientRoadTask=nil
         ambientRoadRetryAfter=0;ambientTraffic.reset();presentedAmbientTraffic=[]
         ambientTrafficBodies?.removeAll()
@@ -6374,7 +6380,15 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                         encoder.drawIndexedPrimitives(type:.triangle,indexCount:part.count,indexType:.uint32,indexBuffer:mesh.indices,indexBufferOffset:part.start*4)
                     }}
                     if nativeTextures==nil{trafficDrawn = !frame.draws.isEmpty}
-                    if trafficDrawn,let traffic=context.traffic{ambientTraffic.didPresent(traffic.identity.id,generation:traffic.generation)}
+                    if trafficDrawn,let traffic=context.traffic{
+                        ambientTraffic.didPresent(traffic.identity.id,generation:traffic.generation)
+                        #if DEBUG
+                        let key="\(traffic.identity.id):\(traffic.generation)"
+                        if trafficVehicleDrawn.count<64,trafficVehicleDrawn.insert(key).inserted {
+                            stockPedLogger.info("Submitted traffic vehicle id \(traffic.identity.id,privacy:.public) generation \(traffic.generation,privacy:.public) model \(name,privacy:.public) rig \(rig.document.version,privacy:.public)")
+                        }
+                        #endif
+                    }
                     if let vehicleMaskPipeline {
                         encoder.setRenderPipelineState(vehicleMaskPipeline)
                         for (node,mask) in vehicleWaterMasks[name] ?? [] {

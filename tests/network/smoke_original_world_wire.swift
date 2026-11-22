@@ -58,7 +58,62 @@ func negotiatedDefault(){
   guard state == .ready else{return}
   check(client.inventoryConnection=="traffic-peer-000000000000" && !client.usesClientOwnedWeapons,"Negotiated default lost strict inventory ownership")
   check(levels==[1] && kinds==[4,9,33,36,34,37,6,31,5] && crews==1,"Negotiated default traffic/crew dispatch")
-  client.disconnect();print("PASS original/default protocol actual native WebSocket flow: \(checks) checks");exit(0)
+  check(!client.canRequestTrafficVehicle,"Population-only negotiation granted interactive traffic")
+  client.disconnect();trafficOnly()
+ }
+ client.connect()
+}
+func trafficOnly(){
+ print("WIRE independent traffic-only phase");fflush(stdout)
+ let client=NativeMultiplayerClient(server:server);clients.append(client)
+ var kinds=0,configured=false,revoked=false,requested=false,pedConfigurations=0,pedEvents=0
+ client.onAmbientPedestrianConfiguration={level,_ in if level>0{pedConfigurations+=1}}
+ client.onAmbientPedestrianEvent={_,_,_ in pedEvents+=1}
+ client.onAmbientTrafficConfiguration={level,hash in
+  if level>0{check(level==1&&hash=="1234abcd","Traffic-only graph identity");configured=true}
+  else if configured{revoked=true}
+ }
+ client.onAmbientTrafficEvent={_,_,_ in kinds+=1}
+ client.onConnectionState={state in
+  guard state == .ready,!requested else{return};requested=true
+  check(configured&&kinds==9&&client.canRequestTrafficVehicle,"Independent traffic-only channel not negotiated")
+  check(client.inventoryConnection=="traffic-only-000000000000" && !client.usesClientOwnedWeapons,"Traffic-only hello changed weapon authority")
+  check(client.requestTrafficVehicle(17),"Ready traffic-only client refused materialization request")
+ }
+ client.onStatus={text in
+  guard text=="TRAFFIC MATERIALIZATION REQUEST SEEN"else{return}
+  check(revoked && !client.canRequestTrafficVehicle && kinds==9,"Traffic capability revocation did not retire its old scene configuration")
+  check(pedConfigurations==0&&pedEvents==0,"Traffic-only capability admitted an unnegotiated pedestrian channel")
+  client.disconnect()
+  check(!client.canRequestTrafficVehicle && !client.requestTrafficVehicle(17),"Disconnected session retained interactive traffic authority")
+  invalidTrafficCapability()
+ }
+ client.connect()
+}
+func invalidTrafficCapability(){
+ print("WIRE invalid independent traffic capability phase");fflush(stdout)
+ let client=NativeMultiplayerClient(server:server);clients.append(client)
+ client.onAmbientTrafficConfiguration={level,_ in check(level==0,"Boolean traffic capability enabled traffic")}
+ client.onAmbientTrafficEvent={_,_,_ in fatalError("Boolean capability admitted traffic binary state")}
+ client.onConnectionState={state in
+  guard state == .ready else{return}
+  check(!client.canRequestTrafficVehicle && !client.requestTrafficVehicle(17),"Boolean capability granted materialization authority")
+  client.disconnect();reentrantTrafficConfiguration()
+ }
+ client.connect()
+}
+func reentrantTrafficConfiguration(){
+ print("WIRE traffic configuration callback lifetime phase");fflush(stdout)
+ let client=NativeMultiplayerClient(server:server);clients.append(client)
+ var teleports=0,configurations=0
+ client.onTeleport={_,_ in teleports+=1}
+ client.onAmbientTrafficConfiguration={level,_ in
+  guard level>0 else{return};configurations+=1;client.disconnect()
+  DispatchQueue.main.asyncAfter(deadline:.now()+0.05){
+   check(configurations==1&&teleports==0,"Retired traffic configuration callback applied its old hello teleport")
+   check(!client.isReady && !client.canRequestTrafficVehicle,"Configuration callback revived its retired connection")
+   print("PASS original/default protocol actual native WebSocket flow: \(checks) checks");exit(0)
+  }
  }
  client.connect()
 }

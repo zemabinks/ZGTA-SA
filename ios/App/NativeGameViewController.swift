@@ -777,6 +777,7 @@ final class NativeGameViewController: UIViewController {
         vehicleButton.setTitleColor(.white, for: .normal)
         vehicleButton.titleLabel?.font = .systemFont(ofSize: 18, weight: .black, width: .condensed)
         styleControl(vehicleButton, icon: "Touch_enter_exit", fallback: "car.side.fill", accessibility: "Enter vehicle")
+        vehicleButton.accessibilityIdentifier = "gameplay.vehicle"
         vehicleButton.translatesAutoresizingMaskIntoConstraints = false
         vehicleButton.addTarget(self, action: #selector(toggleVehicle), for: .touchUpInside)
         vehicleButton.isHidden = true
@@ -1812,6 +1813,15 @@ final class NativeGameViewController: UIViewController {
         present(panel, animated: true)
     }
 
+    private var nearbyTrafficVehicleForEntry:NativeAmbientTrafficScene.Frame? {
+        guard network.canRequestTrafficVehicle,let renderer else{return nil}
+        return renderer.presentedAmbientTraffic.filter {
+            simd_distance(SIMD3<Float>($0.body.position),renderer.position)<=8
+        }.min {
+            simd_distance(SIMD3<Float>($0.body.position),renderer.position)<simd_distance(SIMD3<Float>($1.body.position),renderer.position)
+        }
+    }
+
     @objc private func toggleVehicle() {
         guard acceptsHeldInput else{return}
         guard let renderer else { return }
@@ -1824,13 +1834,11 @@ final class NativeGameViewController: UIViewController {
             if renderer.beginVehicleExit(onReady:{[weak self] in self?.completeVehicleExit()}) {return}
             completeVehicleExit();return
         }
-        if network.usesOriginalWorldProtocol,
-           let traffic=renderer.presentedAmbientTraffic.min(by:{simd_distance(SIMD3<Float>($0.body.position),renderer.position)<simd_distance(SIMD3<Float>($1.body.position),renderer.position)}),
-           simd_distance(SIMD3<Float>(traffic.body.position),renderer.position)<=8 {
+        if let traffic=nearbyTrafficVehicleForEntry {
             let distance=network.orderedVehicles.map{simd_distance(renderer.predictedVehicle($0).position,renderer.position)}.min() ?? .infinity
             if simd_distance(SIMD3<Float>(traffic.body.position),renderer.position)<distance {
                 if trafficVehicleEntry.request(traffic.identity.id,at:ProcessInfo.processInfo.systemUptime) {
-                    if network.sendOriginalCommand(["t":"tcar","id":Int(traffic.identity.id),"why":"door"]){status.text="APPROACHING VEHICLE"}
+                    if network.requestTrafficVehicle(traffic.identity.id){status.text="APPROACHING VEHICLE"}
                     else{trafficVehicleEntry.cancel();status.text="VEHICLE REQUEST COULD NOT BE SENT"}
                 }
                 return
@@ -2283,7 +2291,7 @@ final class NativeGameViewController: UIViewController {
                 }
                 vehicleButton.isHidden = !climbing && !dropping && !network.orderedVehicles.map(renderer.predictedVehicle).contains {
                     simd_distance($0.position, renderer.position) <= 8
-                }
+                } && nearbyTrafficVehicleForEntry == nil
             }
         }
         let legacyClient=(network.legacy as?NativeSAMPWorldConnection)?.client
