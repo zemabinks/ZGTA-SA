@@ -184,14 +184,10 @@ final class NativeOtherVehicles {
                     if healthChanged || relinquished { entry.health=source.health }
                     if damageChanged || relinquished { entry.damage=source.damage }
                     if let rig=entry.rig {
+                        if healthChanged { rig.damage.observeHealth(Double(source.health)) }
                         if damageChanged {
-                            // An appearance observation does not acknowledge
-                            // pending health. Full appearance loading remains
-                            // separate from a health-only observation.
-                            rig.damage.load(health:healthChanged ? Double(source.health):rig.damage.health,text:source.damage);rig.damage.events.removeAll()
+                            rig.damage.observeAppearance(source.damage)
                             rig.car?.setTyres(rig.damage.wheels);rig.bike?.setTyres(rig.damage.wheels)
-                        } else if healthChanged {
-                            rig.damage.observeHealth(Double(source.health))
                         }
                     } else {
                         entry.target=Self.pose(source)

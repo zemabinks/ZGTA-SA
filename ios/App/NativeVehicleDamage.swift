@@ -283,6 +283,31 @@ final class NativeVehicleDamage {
         if health > 0 && health < 250 && !wrecked { warmFire() }
         else { fireTicks = 0;fireWarmth = 0 }
     }
+    /// A full authoritative appearance observation replaces logical parts
+    /// silently. It does not initialize a new physics/damage lifetime. Preserve
+    /// continuous timers, contacts and queued physical events; keep hinge motion
+    /// only when the resulting authoritative door state is unchanged.
+    func observeAppearance(_ text:String) {
+        let previousStates=doorStates,previousDoors=doors,previousLooks=looks
+        panels = [Int](repeating:0,count:7);resetDoorStates()
+        lights = [Int](repeating:0,count:4);wheels = [Int](repeating:0,count:4)
+        doors = Self.makeDoors(flags:flags,model:model)
+        var nextLooks = [Int](repeating:0,count:11)
+        if let decoded = Self.decode(text) {
+            nextLooks = decoded.looks
+            for index in nextLooks.indices {
+                let look=nextLooks[index],open=decoded.open[index]
+                if index >= 6 {
+                    if let panel=[6:0,7:1,8:4,9:5,10:6][index] {panels[panel] = look==2 ? 3:look==1 ? 2:0}
+                } else if doorStates[index] != 4 {doorStates[index] = look==2 ? 4:look==1 ? (open ? 3:2):(open ? 1:0)}
+            }
+            lights = decoded.lights;wheels = decoded.wheels
+        }
+        for index in doors.indices where previousStates[index]==doorStates[index] && previousLooks[index]==nextLooks[index] {
+            doors[index] = previousDoors[index]
+        }
+        looks = nextLooks
+    }
     func load(health:Double,text:String) {
         fix()
         if let decoded = Self.decode(text) {
