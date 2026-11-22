@@ -88,8 +88,15 @@ final class NativeVehicleRig {
             guard draws.allSatisfy({$0.start%3==0 && $0.count%3==0 && rects.indices.contains($0.texture) && rects.indices.contains($0.litTexture)}) else{throw Invalid.draw}
         }
     }
-    struct Document:Decodable {let version:Int,id:Int,kind:String,nodes:[Node],draws:[DrawDefinition],joints:Joints,waterMasks:[WaterMask]?;let paint:NativeVehiclePaint.Metadata?;let binarySHA256:String?,atlasSHA256:String?,normalsSHA256:String?,binaryEncoding:String?;let nativeTextures:TextureLayout?}
+    struct AttachmentFrame:Decodable {let name:String,parent:String?,matrix:[Double]}
+    struct Document:Decodable {let version:Int,id:Int,kind:String,nodes:[Node],frames:[AttachmentFrame]?,draws:[DrawDefinition],joints:Joints,waterMasks:[WaterMask]?;let paint:NativeVehiclePaint.Metadata?;let binarySHA256:String?,atlasSHA256:String?,normalsSHA256:String?,binaryEncoding:String?;let nativeTextures:TextureLayout?}
     let document:Document
+    /// The converted frame map stores model-space matrices. Parent names are
+    /// descriptive; composing them again would double the original transform.
+    var enginePosition:V {
+        guard let frame=document.frames?.first(where:{$0.name=="engine"}) else{return .zero}
+        return V(frame.matrix[12],frame.matrix[13],frame.matrix[14])
+    }
     private let vehiclePaint:NativeVehiclePaint?
     private var nodeSortCenters:[Int:SIMD3<Float>]=[:]
     var hasDynamicPaint:Bool{vehiclePaint != nil}
@@ -101,6 +108,11 @@ final class NativeVehicleRig {
                   (node.position+node.rotation+node.scale+node.matrix).allSatisfy(\.isFinite)
               }),document.draws.count<=50_000,document.draws.allSatisfy({document.nodes.indices.contains($0.node)&&(0..<3_000_000).contains($0.start)&&(0..<3_000_000).contains($0.count)&&$0.alphaTest.isFinite&&($0.opacity.map{$0.isFinite && (0...1).contains($0)} ?? true)}),
               (document.waterMasks ?? []).allSatisfy({mask in document.nodes.indices.contains(mask.node)&&mask.positions.count%3==0&&mask.positions.allSatisfy(\.isFinite)&&mask.indices.allSatisfy{Int($0)<mask.positions.count/3}}) else{return nil}
+        if let frames=document.frames {
+            guard frames.count<=4096,Set(frames.map(\.name)).count==frames.count,frames.allSatisfy({frame in
+                frame.name.utf8.count<=256 && frame.matrix.count==16 && frame.matrix.allSatisfy(\.isFinite)
+            })else{return nil}
+        }
         if let working=document.joints.working {
             guard working.turn.isFinite,working.lift.isFinite,working.parts.allSatisfy({part in document.nodes.indices.contains(part.node)&&part.rest.count==4&&part.home.count==3&&(part.rest+part.home).allSatisfy(\.isFinite)}) else{return nil}
         }

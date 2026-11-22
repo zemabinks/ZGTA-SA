@@ -271,6 +271,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var vehicleWaterMasks:[String:[(Int,Mesh)]] = [:]
     private var vehicleRigStates:[String:NativeVehicleRig.State] = [:]
     private var vehicleRigTimes:[String:Double] = [:]
+    private var vehicleThermalStates:[String:NativeVehicleThermalEffects.State] = [:]
+    private var vehicleThermalHot:[String:(position:SIMD3<Double>,time:Double)] = [:]
     private var vehicleRigSpins:[String:SIMD2<Double>] = [:]
     private var vehicleSeats: [String: SIMD3<Float>] = [:]
     private var pedestrianAnchors: [String: [String: [Float]]] = [:]
@@ -1615,7 +1617,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
     var direction: Float { driving ? heading : actorHeading }
     var cameraDirection: Float { gameCameraFrame?.heading ?? heading }
-    var hasNearbyFire: Bool { originalActorBurning || weaponEffects.fires.contains { simd_distance($0.position,camera)<40 } }
+    var hasNearbyFire: Bool {
+        let now=ProcessInfo.processInfo.systemUptime
+        return originalActorBurning || weaponEffects.fires.contains { simd_distance($0.position,camera)<40 } ||
+            vehicleThermalHot.values.contains { now-$0.time<0.2 && simd_distance($0.position,SIMD3<Double>(camera))<40 }
+    }
     private var originalActorBurning=false
     private(set) var originalCoughing=false
     var hasOriginalWorldFire:Bool{weaponEffects.burning(atFeet:camera)}
@@ -3268,6 +3274,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
 
     private func clearMultiplayerPresentation() {
         vehicleRigStates.removeAll();vehicleRigTimes.removeAll();vehicleRigSpins.removeAll()
+        vehicleThermalStates.removeAll();vehicleThermalHot.removeAll()
         remoteRiderPlayback.removeAll();remoteRiderActions.removeAll()
         remoteRiderCapture.removeAll();remoteRiderPrevious.removeAll();remoteRiderAnimations.removeAll()
         remoteFootAnimations.removeAll();remoteBikeAnimations.removeAll()
@@ -6674,12 +6681,51 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         var state=vehicleRigStates[token] ?? .init()
         let frame=rig.pose(input,state:&state,delta:delta);vehicleRigStates[token]=state
+        emitVehicleThermalEffects(rig:rig,context:context,transform:modelTransform,delta:delta,now:now)
         if vehicleRigTimes.count>128 {
             vehicleRigTimes=vehicleRigTimes.filter{now-$0.value<30}
             vehicleRigStates=vehicleRigStates.filter{vehicleRigTimes[$0.key] != nil}
             vehicleRigSpins=vehicleRigSpins.filter{vehicleRigTimes[$0.key] != nil}
+            vehicleThermalStates=vehicleThermalStates.filter{vehicleRigTimes[$0.key] != nil}
+            vehicleThermalHot=vehicleThermalHot.filter{now-$0.value.time<0.2}
         }
         return frame
+    }
+
+    private func emitVehicleThermalEffects(rig:NativeVehicleRig,context:VehicleDrawContext,
+                                           transform:simd_float4x4,delta:Double,now:Double) {
+        guard let effects=particleEffects,!context.isCarriage else{return}
+        let health:Double,burning:Bool,velocity:SIMD3<Double>
+        switch context.source {
+        case .own:
+            guard let owner=groundVehicle,owner.active,let damage=owner.damageController?.state else{return}
+            health=damage.health;burning=damage.burning;velocity=SIMD3<Double>(owner.nativeLinearVelocity)
+        case .parked(let vehicle,_):
+            let physical=groundVehicle?.otherVehicle(vehicle.id)
+            health=Double(physical?.health ?? vehicle.health)
+            burning=physical?.burning ?? (health>0 && health<250)
+            velocity=physical.map{SIMD3<Double>($0.velocity)} ?? .zero
+        case .remote(let player):
+            health=Double(player.vehicleHealth);burning=health>0 && health<250
+            velocity=SIMD3<Double>(player.velocity)
+        case .traffic(let traffic):
+            guard simd_distance(SIMD3<Double>(camera),traffic.body.position)<80 else{return}
+            // Road traffic's source presentation requests overheat only. An
+            // authoritative registered/dynamic handoff owns subsequent fire.
+            health=traffic.health;burning=false
+            velocity=traffic.velocity
+        case .carriage:return
+        }
+        let model=simd_double4x4(columns:(SIMD4<Double>(transform.columns.0),SIMD4<Double>(transform.columns.1),
+            SIMD4<Double>(transform.columns.2),SIMD4<Double>(transform.columns.3)))
+        var state=vehicleThermalStates[context.token] ?? .init()
+        let emissions=NativeVehicleThermalEffects.sample(.init(model:rig.document.id,kind:rig.document.kind,
+            electric:groundVehicle?.electric(String(rig.document.id)) ?? false,health:health,burning:burning,
+            engine:NativeVehicleThermalEffects.point(rig.enginePosition,transform:model),transform:model,
+            velocity:velocity,delta:delta),state:&state)
+        vehicleThermalStates[context.token]=state
+        vehicleThermalHot[context.token]=emissions.first(where:{if case .fire=$0.kind{return true};return false}).map{($0.position,now)}
+        NativeVehicleThermalEffects.render(emissions,into:effects)
     }
 
     private func remoteSuspensionContact(_ ray:NativeRemoteSuspension.Ray)->NativeRemoteSuspension.Contact {

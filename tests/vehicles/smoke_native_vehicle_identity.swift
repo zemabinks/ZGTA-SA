@@ -16,9 +16,13 @@ private struct GroundFixture {
     struct Damage {var state:NativeVehicleDamage}
     struct Other {
         var transform=matrix_identity_float4x4
+        var health=1000,burning:Bool?=nil
+        var velocity=SIMD3<Float>.zero
         var work=0,rotor=0.0,gearUp=false,dynamic=false,frontSpin=0.0,rearSpin=0.0,offsets=[Double]()
     }
     var active=true
+    var nativeLinearVelocity=SIMD3<Float>.zero
+    func electric(_ model:String)->Bool{false}
     var workingRenderValue=0.0,output:Output?,wheelAnglesDouble=[Double](),damageController:Damage?
     var others=[String:Other](),origins=[String:Float]()
     func handlingFlags(_ value:String)->Int{0}
@@ -32,12 +36,16 @@ private final class Carrier {
     var pedModels=["7":"authored-ped"],vehicleModels=["420":"authored-car","522":"authored-bike","530":"authored-work","590":"authored-carriage"]
     var driving=false,isPassenger=false,currentVehicleID:String?,activeVehicleModel="420"
     var localSkin=7,health=100,swimming=false,actionTimeRemaining=1.0,locomotionClip="AUTHORED_OWN_ACTION"
+    var gameHour:Float=12,roadWetness:Float=0
     var camera=SIMD3<Float>(999,999,999),drivingSpeed:Float=0,heading:Float=0.3,vehiclePitch:Float=0.1,steeringInput:Float=0.5
     var groundVehicle:GroundFixture?,nativeVehicleTransform:simd_float4x4?
     struct Wheel {var index:Int,offset:Double}
     var nativeVehicleWheels=[Wheel](),nativeVehicleWheelAngles=[Float](),nativeBikeDrop=[Float]()
     var nativeBikeLean:Float=0,nativeBicycleCrank:Float=0,nativeRotorTurning:Float=0,nativeAircraftNozzle:Float?
     var nativeLandingGearUp=false,vehicleLights=false
+    var particleEffects:NativeParticleEffects?
+    var vehicleThermalStates=[String:NativeVehicleThermalEffects.State]()
+    var vehicleThermalHot=[String:(position:SIMD3<Double>,time:Double)]()
     var remoteBikeFrames=[String:NativeRemoteBikeAnimation.Frame]()
     var remoteSuspensionConfigurations=[Int:NativeRemoteSuspension.Configuration]()
     var riderDoorHolds=[String:[Int:Double]]()
@@ -261,10 +269,29 @@ private final class Carrier {
         check(ownFoot.pose==nil && remoteFoot.pose==nil,"Nil-pose fallback controls are exercised")
         check(fallbackLocomotion("authored-ped",at,queued:ownFoot)==locomotionClip,"Own-foot fallback retains original action locomotion")
         check(fallbackLocomotion("authored-ped",at,queued:remoteFoot)==nil,"Coincident remote fallback cannot inherit own locomotion even with identity text own")
-        check(fallbackLocomotion("authored-ped",at+SIMD3(1,0,0),queued:ownFoot)==nil,"Existing position eligibility still applies to own fallback")
+        check(fallbackLocomotion("authored-ped",at+SIMD3(1,0,0),queued:ownFoot)==locomotionClip,"Current explicit own occurrence retains locomotion across root movement")
+        check(fallbackLocomotion("authored-ped",at+SIMD3(1,0,0),queued:remoteFoot)==nil,"Remote occurrence cannot acquire own locomotion at another root")
+        check(fallbackLocomotion("other-ped",at,queued:ownFoot)==nil,"Own role does not override the selected local model")
         check(!remoteFoot.ownFoot && ownFoot.ownFoot,"Own role explicit per occurrence rather than identity spelling")
         let sampled=NativeSkeletalActor.Pose(sentinel:99)
         check((riderA.pose ?? sampled).sentinel==1 && (riderB.pose ?? sampled).sentinel==2,"Nonnil queued poses retain precedence over fallback sample")
+        // The real renderer callsite must deliver its selected remote car to
+        // the real thermal policy and actual particle pool, without a GPU.
+        let thermal=Carrier()
+        var hot=player("thermal-owner","thermal-car",position:SIMD3(4,5,6),code:"420.1.2.0.")
+        hot.vehicleHealth=249;hot.velocity=SIMD3(3,4,5)
+        thermal.appendRemote(hot)
+        let definitions:[String:Any]=["systems":["fire_car":["length":0,"emitters":[["texture":"authored-fire","infos":["emrate":["rate":[[0,120.0]]],"emlife":["life":[[0,1.0]]]]]]]]]
+        thermal.particleEffects=try! NativeParticleEffects(data:JSONSerialization.data(withJSONObject:definitions),textures:["authored-fire"],random:{0.37})
+        let token=thermal.modelInstances[0].7!.token
+        thermal.vehicleRigTimes[token]=ProcessInfo.processInfo.systemUptime-1.0/30
+        let rendered=thermal.render(0,rig:rig)
+        let visible=thermal.particleEffects!.shown
+        check(!visible.isEmpty,"Actual rig draw reaches real thermal emitter owner")
+        let thermalAt=rendered.0.columns.3
+        check(visible.allSatisfy{simd_distance($0.position,SIMD3(Double(thermalAt.x),Double(thermalAt.y),Double(thermalAt.z)))<1e-8},"Selected rendered body supplies thermal world point")
+        check(visible.allSatisfy{$0.velocity==SIMD3(3,4,5)},"Selected remote velocity reaches thermal particles")
+        check(thermal.vehicleThermalHot[token] != nil && thermal.vehicleThermalStates[token] != nil,"Thermal state remains bound to the selected occurrence")
         return checks
     }
 }

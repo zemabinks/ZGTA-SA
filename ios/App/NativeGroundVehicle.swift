@@ -561,6 +561,7 @@ final class NativeGroundVehicle {
     }
     func modelFlags(_ model:String)->Int {definitions[model]?.configuration.table.modelFlags ?? 0}
     func handlingFlags(_ model:String)->Int {definitions[model]?.configuration.table.flags ?? 0}
+    func electric(_ model:String)->Bool {definitions[model]?.configuration.table.electric ?? false}
     func remoteAudioTop(model:String)->Double? {
         if let value=audioTopCache[model]{return value}
         guard let definition=definitions[model] else{return nil}

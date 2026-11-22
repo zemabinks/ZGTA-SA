@@ -15,7 +15,7 @@ from pathlib import Path
 import argparse,hashlib,json,os,platform,subprocess
 
 ROOT=Path(__file__).resolve().parents[2]
-HELPERS=['NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift',
+HELPERS=['NativeVehicleThermalEffects.swift','NativeParticleEffects.swift','NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift',
          'NativeRemoteSuspension.swift','NativeRemoteBikeAnimation.swift']
 HELPERS += ['NativeAmbientPedestrianProtocol.swift', 'NativeAmbientPedestrianPaths.swift', 'NativeAmbientTrafficProtocol.swift', 'NativeAmbientTrafficRoads.swift', 'NativeAmbientTraffic.swift', 'NativeAmbientTrafficMotion.swift', 'NativeAmbientTrafficPresentation.swift', 'NativeAmbientTrafficScene.swift']
 METHOD='    private func vehicleRigFrame('
@@ -87,6 +87,7 @@ def validate_fixture(value):
 def harness(renderer):
     structures=[declaration(renderer,'    private struct '+name+' {')for name in STRUCTS]
     method=declaration(renderer,METHOD)
+    thermal=declaration(renderer,'    private func emitVehicleThermalEffects(') if '    private func emitVehicleThermalEffects('in renderer else ''
     assert method.count('ProcessInfo.processInfo.systemUptime')==1
     assert 'let player=context.player,parked=context.parked,own=context.own,token=context.token' in method
     # Preserve every method-body byte. Only declaration access changes; the
@@ -100,22 +101,33 @@ final class VehiclePresentationHarness {
     struct RemotePlayer {
         var id:String
         var speed:Float=0,steer:Float=0
+        var velocity=SIMD3<Float>.zero
         var kit:[Float]?=nil
         var vehicleDamage=String(repeating:"0",count:19)
         var vehicleHealth=1000
         var lights=false
     }
     struct RemoteVehicle {
+        var id="authored-parked"
         var damage=String(repeating:"0",count:19)
         var health=1000
     }
     final class GroundCarrier {
+        var active=true,nativeLinearVelocity=SIMD3<Float>.zero
+        struct Damage {let state:NativeVehicleDamage}
+        var damageController:Damage?
+        struct Other {var health=1000,burning:Bool?=nil;var velocity=SIMD3<Float>.zero}
+        func otherVehicle(_ id:String)->Other?{nil}
+        func electric(_ model:String)->Bool{false}
         func handlingFlags(_ model:String)->Int{0}
         func modelFlags(_ model:String)->Int{0}
     }
     var groundVehicle:GroundCarrier?=GroundCarrier()
     var camera=SIMD3<Float>.zero
     var gameHour:Float=12,roadWetness:Float=0
+    var particleEffects:NativeParticleEffects?
+    var vehicleThermalStates=[String:NativeVehicleThermalEffects.State]()
+    var vehicleThermalHot=[String:(position:SIMD3<Double>,time:Double)]()
     var vehicleRigTimes:[String:Double]=[:]
     var vehicleRigSpins:[String:SIMD2<Double>]=[:]
     var vehicleRigStates:[String:NativeVehicleRig.State]=[:]
@@ -127,8 +139,8 @@ final class VehiclePresentationHarness {
     func remoteSuspensionContact(_ ray:NativeRemoteSuspension.Ray)->NativeRemoteSuspension.Contact{
         queryCount+=1;return query(ray)
     }
-'''+ '\n'.join(public_structures)+'\n'+callable_method+'\n}\n'
-    return source,dict(methodSHA256=digest(method.encode()),
+'''+ '\n'.join(public_structures)+'\n'+callable_method+'\n'+thermal+'\n}\n'
+    return source,dict(methodSHA256=digest(method.encode()),thermalMethodSHA256=digest(thermal.encode()) if thermal else None,
                        structureSHA256={name:digest(s.encode())for name,s in zip(STRUCTS,structures)},
                        bodyPreserved=callable_method[callable_method.index('{'):]==method[method.index('{'):])
 

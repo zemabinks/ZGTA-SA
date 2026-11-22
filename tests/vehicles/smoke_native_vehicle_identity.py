@@ -20,7 +20,7 @@ def main():
     renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
     network=(ROOT/'ios/App/NativeMultiplayerClient.swift').read_text()
     source=(ROOT/'tests/vehicles/smoke_native_vehicle_identity.swift').read_text()
-    names=['NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift','NativeRemoteBikeAnimation.swift','NativeRemoteSuspension.swift']
+    names=['NativeVehicleThermalEffects.swift','NativeParticleEffects.swift','NativeVehicleRig.swift','NativeVehiclePaint.swift','NativeVehicleDamage.swift','NativeRemoteBikeAnimation.swift','NativeRemoteSuspension.swift']
     names += ['NativeAmbientPedestrianProtocol.swift', 'NativeAmbientPedestrianPaths.swift', 'NativeAmbientTrafficProtocol.swift', 'NativeAmbientTrafficRoads.swift', 'NativeAmbientTraffic.swift', 'NativeAmbientTrafficMotion.swift', 'NativeAmbientTrafficPresentation.swift', 'NativeAmbientTrafficScene.swift']
     files=[ROOT/'ios/App'/x for x in names]+[ROOT/'ios/App/NativeWorldRenderer.swift',ROOT/'ios/App/NativeMultiplayerClient.swift',ROOT/'tests/vehicles/smoke_native_vehicle_identity.swift',Path(__file__)]
     hashes={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest()for p in files}
@@ -30,7 +30,7 @@ def main():
         '    private func actorName(','    func vehicleModelOrigin(',
         '    private func ownVehicleDrawContext(','    private func remoteVehicleDrawContext(','    private func parkedVehicleDrawContext(',
         '    private func carriageVehicleDrawContext(','    private static func vehicleDrawTransform(','    private static func legacyVehicleWheel(',
-        '    private func vehicleRigFrame(','    private static func translation(','    private static func rotationX(','    private static func rotationY(','    private static func rotationZ(']
+        '    private func emitVehicleThermalEffects(', '    private func vehicleRigFrame(','    private static func translation(','    private static func rotationX(','    private static func rotationY(','    private static func rotationZ(']
     source=source.replace('// ACTUAL_RENDER_CONTEXT','\n'.join(block(renderer,x)for x in markers))
     modelLine=next(x.strip()for x in renderer.splitlines()if 'var modelInstances: [('in x)
     source=source.replace('// ACTUAL_MODEL_INSTANCES','private '+modelLine)
@@ -61,9 +61,10 @@ def main():
     for name in names:p=out/name;p.write_bytes((ROOT/'ios/App'/name).read_bytes());paths.append(p)
     mainfile=out/'main.swift';mainfile.write_text(source)
     with(out/'compile.log').open('w')as log:
-        subprocess.run(['xcrun','swiftc','-j','1','-whole-module-optimization','-Onone','-module-cache-path',str(out/'modules'),*map(str,paths),str(mainfile),'-o',str(out/'verify')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=600)
-    result=subprocess.run([str(out/'verify')],capture_output=True,text=True,check=True,timeout=30)
+        subprocess.run(['xcrun','swiftc','-j','1','-whole-module-optimization','-num-threads','1','-Onone','-module-cache-path',str(out/'modules'),*map(str,paths),str(mainfile),'-o',str(out/'verify')],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=600)
+    result=subprocess.run([str(out/'verify')],capture_output=True,text=True,timeout=30)
     (out/'runtime.log').write_text(result.stdout+result.stderr)
+    result.check_returncode()
     report=json.loads(result.stdout)
     assert all(hashlib.sha256((ROOT/p).read_bytes()).hexdigest()==h for p,h in hashes.items())
     report.update(sourceHashes=hashes,sourceUnchanged=True,originalDataUsed=False,

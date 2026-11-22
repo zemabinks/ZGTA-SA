@@ -19,6 +19,7 @@ final class NativeVehicleDynamics {
         var ratio = 1.0, pulls = 0.0, spool = 0.0
         var submerged = 100.0
         var abs = false
+        var electric = false
 
         init(model: Int, values: [String: Any]) {
             self.model = model
@@ -38,6 +39,7 @@ final class NativeVehicleDynamics {
             ratio = number("ratio", ratio); pulls = number("pulls", pulls); spool = number("spool", spool)
             submerged = number("submerged", submerged)
             abs = values["abs"] as? Bool ?? false
+            electric = values["electric"] as? Bool ?? false
         }
 
         init(model: Int, row: [Any]) {

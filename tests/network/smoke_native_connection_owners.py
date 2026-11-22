@@ -83,6 +83,7 @@ final class Renderer {
  var localShotKindsReported:Set<Int>=[221];var localShotVehicles=[1],localShotVehicleSource:String?="old-world"
  var ordinaryShotKindsReported:Set<UInt8>=[1,2],ordinaryShotDrawReported=true
  var vehicleRigStates=["old":1],vehicleRigTimes=["old":1],vehicleRigSpins=["old":1]
+ var vehicleThermalStates=["old":1],vehicleThermalHot=["old":1]
  var remoteRiderPlayback=["old":1],remoteRiderActions=["old":1],remoteRiderCapture=["old":1],remoteRiderPrevious=["old":1],remoteRiderAnimations=["old":1]
  var remoteFootAnimations=["old":1],remoteBikeAnimations=["old":1],remoteBikeSamples=["old":1],remoteBikeFrames=["old":1]
  var flightCanopyPoses=["own":1],flightCanopyLanded=["own":1],flightAudioVoices=[1]
@@ -164,6 +165,7 @@ queuedPlacement?();check(game.renderer!.pendingExitPlacement==nil && !delayedPla
 check(game.renderer!.remotePlayers.isEmpty && game.renderer!.remoteVehicles.isEmpty && game.renderer!.projectileRows.isEmpty,"old remote/projectile world survives")
 let world=game.renderer!
 check(world.vehicleRigStates.isEmpty && world.vehicleRigTimes.isEmpty && world.vehicleRigSpins.isEmpty,"old vehicle presentation survives new peer")
+check(world.vehicleThermalStates.isEmpty && world.vehicleThermalHot.isEmpty,"old thermal phase/hot owner survives new peer")
 check(world.remoteRiderPlayback.isEmpty && world.remoteRiderActions.isEmpty && world.remoteRiderCapture.isEmpty && world.remoteRiderPrevious.isEmpty && world.remoteRiderAnimations.isEmpty,"same-id rider reused an old session task/pose")
 check(world.passengerSeat==nil && world.passengerFrame==nil && world.passengerAccumulator==0,"new peer retains old passenger authority/frame/timing")
 check(world.remoteFootAnimations.isEmpty && world.remoteBikeAnimations.isEmpty && world.remoteBikeSamples.isEmpty && world.remoteBikeFrames.isEmpty,"same-id remote ped reused old animation samples")
