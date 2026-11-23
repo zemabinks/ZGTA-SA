@@ -5,10 +5,13 @@ import simd
 /// cover query construction, filtering and clearance; retail GTA is unverified.
 final class NativeRapierClimbQueries {
     typealias V=SIMD3<Double>
+    typealias BodyResolver=()->UInt64?
+    typealias ResolverFactory=(UInt64)->BodyResolver?
     let world:SwiftRapierWorld
     var excluded:Set<UInt64>
-    init(world:SwiftRapierWorld,excluded:Set<UInt64>) {
-        self.world=world;self.excluded=excluded
+    private let resolverFactory:ResolverFactory?
+    init(world:SwiftRapierWorld,excluded:Set<UInt64>,resolverFactory:ResolverFactory?=nil) {
+        self.world=world;self.excluded=excluded;self.resolverFactory=resolverFactory
     }
     private func f(_ v:V)->SIMD3<Float>{SIMD3(Float(v.x),Float(v.y),Float(v.z))}
     private func collider(_ value:SwiftRapierWorld.ColliderInfo)->NativeClimbProbe.Collider {
@@ -18,7 +21,13 @@ final class NativeRapierClimbQueries {
             // by body-clearance tests. Keep the nearest-hit query boundary.
             return .init(fixed:false,speed:.infinity,material:value.material,known:false)
         }
-        return .init(fixed:kind == .fixed,speed:simd_length(V(state.linearVelocity)),material:value.material)
+        return .init(fixed:kind == .fixed,speed:simd_length(V(state.linearVelocity)),material:value.material,body:body)
+    }
+    private func frame(_ body:UInt64)->NativeClimbController.CarrierFrame? {
+        guard let state=world.bodyState(body)else{return nil}
+        let q=state.rotation.vector
+        return .init(position:V(state.position),rotation:simd_quatd(vector:SIMD4<Double>(q)),
+                     velocity:V(state.linearVelocity),spin:V(state.angularVelocity)).validated
     }
     func find(feet:V,heading:Double,extended:Bool=true)->NativeClimbController.Ledge? {
         let probe=NativeClimbProbe(ray:{[unowned self] origin,direction,distance,groups in
@@ -36,6 +45,16 @@ final class NativeRapierClimbQueries {
             world.sphereIntersections(center:f(origin),radius:Float(radius),groups:groups,excludingColliders:excluded)
                 .filter{$0.material != 62}.map(collider)
         })
-        return probe.find(feet:feet,heading:heading,extended:extended)
+        guard var ledge=probe.find(feet:feet,heading:heading,extended:extended)else{return nil}
+        if let body=ledge.body,!ledge.fixed {
+            guard let initial=frame(body)else{return nil}
+            // Known scene owners resolve a logical entity's replacement body.
+            // An unregistered carrier keeps exact direct body identity.
+            let resolve:BodyResolver=resolverFactory?(body) ?? {body}
+            ledge.carrier = .init(initial:initial,current:{[weak self]in
+                guard let self,let current=resolve()else{return nil};return self.frame(current)
+            })
+        }
+        return ledge
     }
 }

@@ -340,7 +340,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var jumpHeld=false
     var walkHeld=false
     var isClimbing:Bool {climb != nil}
-    private lazy var climbQueries=character.map {NativeRapierClimbQueries(world:$0.world,excluded:[$0.queries.walker,$0.queries.probe])}
+    private lazy var climbQueries=character.map {
+        NativeRapierClimbQueries(world:$0.world,excluded:[$0.queries.walker,$0.queries.probe],
+            resolverFactory:{[weak self]in self?.climbBodyResolver(for:$0)})
+    }
     private var footAnimationFrame: NativeFootAnimation.Frame?
     private var footAnimationModel = ""
     private var footAirTime: Double = 0
@@ -2678,6 +2681,21 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     }
 
     func letGoOfLedge() {if climb != nil {pendingClimbDrop=true}}
+
+    private func climbBodyResolver(for body:UInt64)->(()->UInt64?)? {
+        if let resolve=groundVehicle?.bodyResolver(for:body){return resolve}
+        guard let scene=legacyCollisionWorld,let entity=scene.entityID(forBody:body)else{return nil}
+        for (id,handles) in legacyCollisionHandles {
+            guard let handle=handles.first(where:{$0.entityID==entity})else{continue}
+            return {[weak self,weak scene]in
+                guard let self,let scene,self.legacyCollisionWorld === scene,
+                      self.legacyCollisionHandles[id]?.contains(handle)==true,
+                      scene.colliderIDs(for:handle) != nil else{return nil}
+                return scene.bodyID(for:handle.entityID)
+            }
+        }
+        return nil
+    }
 
     private func beginClimb(state:NativeCharacterController.Output,extended:Bool)->Bool {
         guard health>0,climb==nil,!driving,!swimController.on,!personalFlight.on,!personalFlight.worn,

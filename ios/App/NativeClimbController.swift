@@ -1,29 +1,77 @@
 import Foundation
 import simd
 
-/// Independently written native candidate. Coordinates are original Rapier
-/// Y-up. Authority is the archived browser implementation, not retail GTA SA.
+/// Independently written native task in Rapier Y-up coordinates. Static phase
+/// timing retains the archived profile. Physical handholds additionally retain
+/// entity-local ownership from the classic source reference; retail is unverified.
 final class NativeClimbController {
     typealias V = SIMD3<Double>
     enum Part:Int {case jump=20,hang=21,pull=22,edge=23,stand=24,vault=25}
     enum End:String {case drop,top,over}
     struct Durations {var jump:Double;var pull:Double;var stand:Double;var vault:Double}
-    struct Ledge {var hold:V;var into:V;var heading:Double;var high:Bool;var vault:Bool;var fixed:Bool=true}
+    struct CarrierFrame {
+        var position:V,rotation:simd_quatd
+        var velocity=V.zero,spin=V.zero
+        var validated:Self? {
+            let q=rotation.vector,magnitude=simd_length_squared(q)
+            guard [position.x,position.y,position.z,velocity.x,velocity.y,velocity.z,
+                   spin.x,spin.y,spin.z,q.x,q.y,q.z,q.w].allSatisfy({$0.isFinite}),
+                  magnitude.isFinite,magnitude>1e-12 else{return nil}
+            var frame=self;frame.rotation=simd_quatd(vector:q/sqrt(magnitude));return frame
+        }
+        var heading:Double {
+            let forward=rotation.act(V(0,0,-1));return atan2(-forward.x,-forward.z)
+        }
+        func pointVelocity(at point:V)->V {velocity+simd_cross(spin,point-position)}
+    }
+    struct Carrier {let initial:CarrierFrame,current:()->CarrierFrame?}
+    struct Ledge {
+        var hold:V;var into:V;var heading:Double;var high:Bool;var vault:Bool;var fixed:Bool=true
+        var body:UInt64?=nil,carrier:Carrier?=nil
+    }
     private(set) var feet:V
     private(set) var part:Part
-    let heading:Double
-    private let ledge:Ledge
+    private(set) var heading:Double
+    private var ledge:Ledge
     private let durations:Durations
-    private let hanging:V,edge:V,standing:V,over:V
+    private let localHold:V?,localHeading:Double?
+    private var carrierFrame:CarrierFrame?,projectionDelta=0.0
+    private var hanging:V {point(-0.4,-1.1)}
+    private var edge:V {point(-0.4,0)}
+    private var standing:V {point(0.15,1)}
+    private var over:V {point(0.5,0)}
     private var elapsed=0.0,unsettled=0.0
     private var displacement=V.zero
     init(ledge:Ledge,feet:V,durations:Durations) {
         self.ledge=ledge;self.feet=feet;self.durations=durations;heading=ledge.heading
         part=ledge.high ? .jump:.edge
-        func point(_ forward:Double,_ vertical:Double)->V {
-            var p=ledge.hold+ledge.into*forward;p.y=ledge.hold.y+vertical-1;return p
-        }
-        hanging=point(-0.4,-1.1);edge=point(-0.4,0);standing=point(0.15,1);over=point(0.5,0)
+        let frame=ledge.carrier?.initial.validated;carrierFrame=frame
+        localHold=frame.map{$0.rotation.conjugate.act(ledge.hold-$0.position)}
+        localHeading=frame.map{ledge.heading-$0.heading}
+    }
+    private func point(_ forward:Double,_ vertical:Double)->V {
+        var p=ledge.hold+ledge.into*forward;p.y=ledge.hold.y+vertical-1
+        if let frame=carrierFrame {p += frame.pointVelocity(at:p)*projectionDelta}
+        return p
+    }
+    private var phasePoint:V {
+        switch part {case .jump,.hang,.pull:return hanging;case .edge,.stand,.vault:return edge}
+    }
+    private func followCarrier(delta:Double)->Bool {
+        guard let carrier=ledge.carrier else{return true}
+        guard let frame=carrier.current()?.validated,let localHold,let localHeading else{return false}
+        let previous=phasePoint
+        carrierFrame=frame;projectionDelta=delta
+        ledge.hold=frame.rotation.act(localHold)+frame.position
+        let desired=localHeading+frame.heading
+        heading += atan2(sin(desired-heading),cos(desired-heading))
+        ledge.into=V(-sin(heading),0,-cos(heading))
+        // Include the current point velocity once. Taking the difference from
+        // the preceding projected target avoids adding both pose travel and
+        // the same carrier velocity again on every physical tick.
+        let change=phasePoint-previous
+        guard [change.x,change.y,change.z].allSatisfy({$0.isFinite})else{return false}
+        feet += change;return true
     }
     private func approach(_ target:V,_ delta:Double)->Bool {
         displacement=target-feet
@@ -37,6 +85,7 @@ final class NativeClimbController {
     func step(delta:Double,pull:Bool,drop:Bool)->End? {
         elapsed += delta
         if drop {return .drop}
+        if !followCarrier(delta:delta) {return .drop}
         switch part {
         case .jump,.hang:
             let close=approach(hanging,delta)
@@ -68,7 +117,7 @@ final class NativeClimbController {
 /// choosing a nearest ray hit. Slow/fixed checks then occur here, after hit.
 struct NativeClimbProbe {
     typealias V=SIMD3<Double>
-    struct Collider {var fixed:Bool;var speed:Double;var material:Int;var known:Bool=true}
+    struct Collider {var fixed:Bool;var speed:Double;var material:Int;var known:Bool=true;var body:UInt64?=nil}
     struct Hit {var distance:Double;var normal:V;var collider:Collider}
     var ray:(V,V,Double,UInt32)->Hit?
     var overlaps:(V,Double,UInt32)->[Collider]
@@ -122,6 +171,6 @@ struct NativeClimbProbe {
         guard free(bodySamples,0.3,behind,inward) else{return nil}
         let vaultSamples:[SIMD2<Double>]=[SIMD2(1.1,-0.2),SIMD2(1.1,0.2),SIMD2(1.1,0.6),SIMD2(0.7,0.6),SIMD2(0.35,0.6),SIMD2(0,0.6)]
         return .init(hold:hold,into:inward,heading:atan2(-inward.x,-inward.z),high:hold.y-(feet.y+1)>=1.4,
-                     vault:hit.collider.fixed && free(vaultSamples,0.26,behind,inward),fixed:hit.collider.fixed)
+                     vault:hit.collider.fixed && free(vaultSamples,0.26,behind,inward),fixed:hit.collider.fixed,body:hit.collider.body)
     }
 }

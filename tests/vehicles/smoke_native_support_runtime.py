@@ -9,24 +9,24 @@ if str(_ZGTA_ROOT) not in _zgta_sys.path: _zgta_sys.path.insert(0, str(_ZGTA_ROO
 from pathlib import Path
 import hashlib,json,os,platform,subprocess,tempfile
 from tests.movement.smoke_native_climb_runtime import function
-from tests.vehicles.smoke_vehicle_coupling import NAMES
+from tests.vehicles.smoke_native_parked_phase import NAMES
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/native-physics/tests/support-runtime'
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
     names=NAMES+['NativeRenderWareCollision','NativeRenderWareCollisionWorld','NativeSAMPObjectSimulationClock','NativeVehicleTread','NativeMovingSupport','NativeVehicleSupportScene','NativeFootLocomotion','NativeHeadingContinuity','NativeCharacterMotor','NativeRapierCharacterQueries','NativeCharacterController']
     subprocess.run(['python3',str(ROOT/'native-physics/source_stamp.py'),'check',str(ROOT/('local-only/native-physics/macos-'+platform.machine()))],check=True)
-    paths=[f'ios/App/{name}.swift' for name in names]+['ios/App/NativeWorldRenderer.swift','tests/vehicles/smoke_native_support_runtime.swift','tests/vehicles/smoke_native_support_runtime.py']
+    paths=[f'ios/App/{name}.swift' for name in names]+['ios/App/NativeWorldRenderer.swift','tests/vehicles/smoke_native_support_runtime.swift','tests/vehicles/smoke_native_support_runtime.py','tests/vehicles/smoke_native_parked_phase.py']
     snapshot={p:(ROOT/p).read_bytes() for p in paths}
     renderer=snapshot['ios/App/NativeWorldRenderer.swift'].decode()
-    methods='\n'.join(function(renderer,marker) for marker in ['private func configureMovingSupport(','private func synchronizeMovingSupport(','private func remoteSupportPosition(','var footWireSupport:'])
+    methods='\n'.join(function(renderer,marker) for marker in ['private func configureMovingSupport(','private func synchronizeMovingSupport(','private func remoteSupportPosition(','var footWireSupport:','private func climbBodyResolver('])
     kinematic_callback=function(renderer,'groundVehicle?.onKinematicStep =')
     with tempfile.TemporaryDirectory(prefix='snapshot-',dir=OUT) as temp:
         work=Path(temp);sources=[]
         for name in names:
             p=work/(name+'.swift');p.write_bytes(snapshot[f'ios/App/{name}.swift']);sources.append(str(p))
         main=work/'main.swift';main.write_text(snapshot['tests/vehicles/smoke_native_support_runtime.swift'].decode().replace('// ACTUAL_CALLBACKS',methods).replace('// ACTUAL_KINEMATIC_CALLBACK',kinematic_callback));sources.append(str(main))
-        compiled=subprocess.run(['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-target',platform.machine()+'-apple-macosx13.0','-module-cache-path',str(OUT/'modules'),'-I',str(ROOT/'native-physics/include'),*sources,'-L',str(ROOT/('local-only/native-physics/macos-'+platform.machine())),'-lzgtasa_native_physics','-framework','Security','-framework','CoreFoundation','-o',str(work/'verify')],capture_output=True,text=True)
+        compiled=subprocess.run(['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-num-threads','1','-j','1','-target',platform.machine()+'-apple-macosx13.0','-module-cache-path',str(OUT/'modules'),'-I',str(ROOT/'native-physics/include'),*sources,'-L',str(ROOT/('local-only/native-physics/macos-'+platform.machine())),'-lzgtasa_native_physics','-framework','Security','-framework','CoreFoundation','-o',str(work/'verify')],capture_output=True,text=True)
         (OUT/'compile.log').write_text(compiled.stdout+compiled.stderr)
         if compiled.returncode:print(compiled.stdout+compiled.stderr);compiled.check_returncode()
         result=subprocess.run([str(work/'verify'),str(ROOT)],capture_output=True,text=True)
