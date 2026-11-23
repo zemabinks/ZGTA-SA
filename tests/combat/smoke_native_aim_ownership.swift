@@ -36,6 +36,7 @@ final class Renderer {
     var lastFootVelocity=SIMD3<Double>.zero,footAirVelocity=SIMD2<Double>.zero
     var footAirTime=0.0,footAirFall=0.0,footAirFell=false,footJumped=false,footLaunchRemaining:Double?
     var pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0,manualAnimation=false
+    var pendingClimbRelease:SIMD3<Double>?
     var skeletalLibrary:ClipLibrary?=ClipLibrary(),footAnimator:Animator?=Animator(),climbQueries:Queries?=Queries()
     var gameCameraFrame:NativeGameCamera.Frame?,camera=SIMD3<Float>.zero,cameraLookDirection:String?
     // Authored display-position boundary; the real fixed coordinator and

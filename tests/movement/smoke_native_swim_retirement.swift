@@ -9,6 +9,7 @@ final class SwimRetirementHarness {
     var lastFootVelocity=SIMD3<Double>.zero
     var actorHeading:Float=0.7,heading:Float=2.4,swimHeadingTarget:Float=2.4,cameraPitch:Float=0.4
     var pendingSprintTap=true,pendingDive=true,pendingSwimJump=true
+    var pendingClimbRelease:SIMD3<Double>?
     var footAirTime=0.0,footAirFall=0.0,footAirFell=false,footJumped=false,footLaunchRemaining:Double?
     var footAirVelocity=SIMD2<Double>.zero,footDeathKind:String?
     var onParachuteUsed:(()->Void)?,onSplash:(()->Void)?,onReloadTaskCancelled:(()->Void)?

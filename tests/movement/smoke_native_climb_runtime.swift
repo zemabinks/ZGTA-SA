@@ -14,6 +14,7 @@ final class ClimbRuntimeHarness {
     let footLocomotion=NativeFootLocomotion(),headingContinuity=NativeHeadingContinuity()
     var climb:NativeClimbController?,climbPhase:NativeClimbController.Part?
     var pendingClimbPull=false,pendingClimbDrop=false,airGrabTicks=0,jumpHeld=false,walkHeld=false
+    var pendingClimbRelease:SIMD3<Double>?
     lazy var climbQueries=character.map{NativeRapierClimbQueries(world:$0.world,excluded:[$0.queries.walker,$0.queries.probe])}
     var health=100,driving=false,crouching=false,manualAnimation=false,aiming=false
     var originalCoughing=false

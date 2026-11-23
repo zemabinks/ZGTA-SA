@@ -22,6 +22,7 @@ final class FixedVelocityHarness {
     var pendingSprintTap=false,pendingDive=false,pendingSwimJump=false
     var acceptedStreamShot=false,pendingNativeJump=0.0
     var pendingClimbPull=false,pendingClimbDrop=false,jumpHeld=false,walkHeld=false,sprintWasHeld=false,vehicleHop=false
+    var pendingClimbRelease:SIMD3<Double>?
     var vehicleWorkingControl:Float=0
     final class OtherVehicleInput {func cancelPendingInput(){}}
     var groundVehicle:OtherVehicleInput?

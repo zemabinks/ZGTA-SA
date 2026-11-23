@@ -58,6 +58,8 @@ private extension ClimbRuntimeHarness {
                 let tap=running && index%20==0,dive=kind=="dive" && index==6
                 h.pendingSprintTap=tap;h.pendingDive=dive
                 let state=NativeCharacterController.Output(feet:SIMD3(1480,0,Float(102-depth)),grounded:false,rising:0,eased:0,propped:false,pressed:[])
+                // Deliberately isolate the outgoing swim method. A completed
+                // tick's receiving foot recovery is outside these rows.
                 h.testWater(delta:dt,state:state,push:1,running:running)
                 rows.append(["delta":dt,"health":h.health,"reset":reset,"depth":activeWater ? depth:NSNull(),"running":running,"tap":tap,"dive":dive,"push":1,
                              "value":h.stamina.value,"counter":h.sprintController.counter,"breath":h.swimController.breath,

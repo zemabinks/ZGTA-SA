@@ -28,7 +28,7 @@ WATER=['private func swimmingMotion(','private func personalFlightMotion(',
 JS=r'''
 const fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');
 const root=process.argv[2],output=process.argv[3],baseline=process.argv[4]==='baseline';
-const load=require(path.join(root,'smoke_vehicle_dynamics')).archivedModules(),src=String(load.factories[19737]);
+const load=require(path.join(root,'tests/vehicles/smoke_vehicle_dynamics')).archivedModules(),src=String(load.factories[19737]);
 const matches={
  prepare:/td\.under&&tr<=0&&\(tr=\.1\)/.exec(src),
  recovery:/ta=(e=>\{tr=Math\.min\(150,tr\+e\*\(V>1\?\.15:\.5\)\)\})/.exec(src),
@@ -55,14 +55,22 @@ for(const scenario of traces.water){
  for(const [i,row]of scenario.frames.entries()){
   if(row.reset){b.reset();sprint.reset();swim.revive();}
   const wasOn=swim.on;let pace=0;
-  if(wasOn&&row.health>0){
+  // These rows invoke only the outgoing swim owner, not the receiving foot
+  // task. Prove certain no-water completion with the actual reference step
+  // before attributing steering/recovery to that owner. The earlier replay
+  // charged it a final recovery pulse even though it had handed this tick off.
+  const finishing=wasOn&&row.depth===null;
+  if(finishing){
+   const result=swim.step(row.delta,{depth:null,grounded:false,heading:0,feet:v([1480,102-scenario.depth,0]),dead:row.health<=0});
+   if(result!=null||swim.on)throw Error('Reference no-water task did not complete');
+  }else if(wasOn&&row.health>0){
    b.prepare(swim.under);
    pace=sprint.control(swim.under?load(34719).xC.under:load(34719).xC.water,row.delta*50,row.tap,row.running,b.value);
    swim.steer({push:row.push,sprint:pace>=1?pace:0,dive:row.dive,pitch:0});
    if(pace<1||swim.under)b.value.rest(50*row.delta*(swim.state===load(19863).xO.BREAST?.25:.5));
   }else if(wasOn)swim.steer({push:row.push,sprint:0,dive:row.dive,pitch:0});
-  if(wasOn)swim.step(row.delta,{depth:row.depth,grounded:false,heading:0,feet:v([1480,102-scenario.depth,0]),dead:row.health<=0});
-  else swim.ashore(row.delta);
+  if(wasOn&&!finishing)swim.step(row.delta,{depth:row.depth,grounded:false,heading:0,feet:v([1480,102-scenario.depth,0]),dead:row.health<=0});
+  else if(!wasOn)swim.ashore(row.delta);
   const label=scenario.name+'/'+i;
   check(row.value,b.current,label+'/budget');check(row.counter,sprint.counter,label+'/counter');
   check(row.breath,swim.breath,label+'/breath');check(row.display,display(swim),label+'/display');
@@ -120,7 +128,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='effort-',dir=output) as temp:
         folder=Path(temp);main=folder/'main.swift';main.write_text(source);exe=folder/'verify'
         physics=['SwiftRapierWorld','NativeCharacterMotor','NativeRapierCharacterQueries','NativeCharacterController','NativeClimbController','NativeRapierClimbQueries']
-        command=['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-Onone','-module-cache-path',str(OUT/'modules'),'-I',str(ROOT/'native-physics/include'),
+        command=['xcrun','swiftc','-parse-as-library','-whole-module-optimization','-Onone','-num-threads','1','-j','1','-module-cache-path',str(OUT/'modules'),'-I',str(ROOT/'native-physics/include'),
                  *[str(ROOT/'ios/App'/f'{name}.swift') for name in physics],str(main),'-L',str(ROOT/f'local-only/native-physics/macos-{platform.machine()}'),'-lzgtasa_native_physics',
                  '-framework','Security','-framework','CoreFoundation','-o',str(exe)]
         result=subprocess.run(command,capture_output=True,text=True);(output/'compile.log').write_text(result.stdout+result.stderr)
@@ -130,7 +138,7 @@ def main():
         result=subprocess.run(['node',str(node),str(ROOT),str(output),'baseline' if args.baseline_renderer else 'current'],capture_output=True,text=True)
         sameOwned=all((ROOT/'ios/App'/f'{name}.swift').read_bytes()==data for name,data in snapshot.items())
         sameMethods=methods((args.baseline_renderer or ROOT/'ios/App/NativeWorldRenderer.swift').read_text())==selected
-        report={'status':'PASS' if result.returncode==0 and sameOwned and sameMethods else 'FAIL','mode':'historical negative' if args.baseline_renderer else 'current',
+        report={'status':'PASS' if result.returncode==0 and sameOwned and sameMethods else 'FAIL','mode':'baseline renderer' if args.baseline_renderer else 'current',
                 'output':result.stdout+result.stderr,'ownedSourcesUnchanged':sameOwned,'selectedRendererMethodsUnchanged':sameMethods,
                 'sourceHashes':{name:hashlib.sha256(value).hexdigest() for name,value in snapshot.items()},
                 'rendererMethodsSHA256':hashlib.sha256('\n'.join(selected).encode()).hexdigest(),

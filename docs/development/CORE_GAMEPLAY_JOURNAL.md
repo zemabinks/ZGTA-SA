@@ -1,3 +1,41 @@
+## Core207: climb release and fixed-tick foot handoff
+
+Build 207 is the latest verified source batch. A finished climb now supplies
+its exit velocity once to the receiving foot physics tick while retaining
+the final held root on the completion tick. Ordinary abort and a missing
+owner clear horizontal motion; the timeout alone has its distinct backward
+impulse. Stand and vault exits retain their separate forward/downward motion.
+An abort no longer inherits generic carrier momentum.
+
+Actual preceding-source checks reproduce the release differences. Current
+native controller, animation, selected Renderer methods and Rapier checks
+cover five release causes, several headings and display rates, with separate
+timeout controls. Existing carrier, jump, fall and hit checks pass. Shared
+test carriers include the new optional release storage. A swim-effort replay
+now observes completion before charging the outgoing task; deliberately
+omitting that completion order is rejected by its unchanged budget checks.
+
+Both fresh SDK products pass and remain byte-identical through subsequent
+test-only corrections. The complete current physics/audio/transport chain
+passes in one uninterrupted run. A normal-SDK Simulator case uses original
+static world collision and ordinary touch controls to hang, let go, land,
+reclimb, pull up and resume foot input. Saved captures are reviewed only after
+all owned apps and services close; installed resources and preferences remain
+intact. A second protocol peer observes the production position publications.
+
+The initial acknowledged server spawn, CPU test inputs and protocol observer
+are explicit fixture boundaries. This is not an actual browser rendering or
+original-PC runtime comparison. Exact retail caller ordering, moving-handhold
+rendering, foot planting, remaining assets, AI and other sandbox systems remain
+open. No physical-device, campaign or 1:1 claim. Original game data, raw
+evidence, community reference source and private Git ancestry stay local.
+
+Historical failures remain separate: an interrupted source run,
+missing optional storage in copied test carriers, moved helper paths and the
+outgoing-swim replay ordering. Those test corrections do not alter native
+gameplay or promote a failed run to acceptance. The successful source result
+is a new uninterrupted run of the final current tests.
+
 ## Core206: entity-relative native climb handholds
 
 Build 206 is the latest verified source batch. An admitted physical handhold

@@ -336,6 +336,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private var climb:NativeClimbController?
     private var climbPhase:NativeClimbController.Part?
     private var pendingClimbPull=false,pendingClimbDrop=false
+    private var pendingClimbRelease:SIMD3<Double>?
     private var airGrabTicks=0
     var jumpHeld=false
     var walkHeld=false
@@ -2377,6 +2378,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                                 intended: NativeCharacterController.Motion,push: Double,running: Bool) -> NativeCharacterController.Motion {
         let depth = character?.supportAfloat == true ? nil:waterSurface(at:state.feet).map { Double($0.height-state.feet.z) }
         if !swimController.on && swimController.enters(depth) {
+            pendingClimbRelease=nil
             let velocity=personalFlight.on ? personalFlight.linearVelocity:lastFootVelocity
             let rising=personalFlight.on ? velocity.y:state.rising
             if personalFlight.chuting && personalFlight.state>=5 {hasParachute=false;onParachuteUsed?()}
@@ -2459,6 +2461,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             cancelFootAimForTask()
         }
         guard personalFlight.on || personalFlight.state==10 else{return nil}
+        pendingClimbRelease=nil
         let ownedFacing=personalFlight.on
         if ownedFacing {headingContinuity.external(personalFlight.chuting ? .parachute:.jetpack)}
         if personalFlight.chuting {stamina.restForLocomotion(ticks:50*delta,ratio:0)}
@@ -2558,6 +2561,11 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         actorHeading = Float(locomotion.heading)
         advanceMelee(meleeFrame,feet:state.feet,ratio:locomotion.ratio,delta:delta)
         var motion = intended
+        // The completion tick still publishes the held root. Consume its
+        // exit velocity only when this ordinary foot task next owns a fixed
+        // tick, never on a display-only frame or by replaying it after gravity.
+        let climbRelease=pendingClimbRelease;pendingClimbRelease=nil
+        if let climbRelease {motion.jump=0;motion.verticalOverride=climbRelease.y}
         let impact=pendingFootHit;pendingFootHit=nil
         if let impact {
             footLaunchRemaining=nil;footJumped=false
@@ -2577,7 +2585,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 }
             } else { footLaunchRemaining = remaining-delta;motion.jump = 0 }
         }
-        let airborne = !state.grounded || jumping || impact != nil
+        let airborne = !state.grounded || jumping || impact != nil || climbRelease != nil
         if airborne,footAirTime>0,footJumped,!footAirFell,state.rising > -10,simd_length(footAirVelocity)>2.5 {
             airGrabTicks += 1
             if airGrabTicks%2==0,beginClimb(state:state,extended:false) {
@@ -2709,6 +2717,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         climb=NativeClimbController(ledge:ledge,feet:feet,durations:.init(jump:jump,pull:pull,stand:stand,vault:vault))
         cancelFootAimForTask()
         climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        pendingClimbRelease=nil
         let cancelledReload=animator.reloading
         cancelWeaponInput();crouching=false;manualAnimation=false;animator.resetMovementTask()
         if cancelledReload {onReloadTaskCancelled?()}
@@ -2751,8 +2760,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         motion.heldFeet=SwiftRapierWorld.rapierToGTA(SIMD3<Float>(task.feet))
         if let end {
             climb=nil;climbPhase=nil
+            pendingClimbRelease=task.releaseVelocity
             footAirTime=end == .over ? 0.35:0;footAirFall=0;footAirFell=false;footJumped=false;footJumpMinimum=0;footLaunchRemaining=nil
-            footAirVelocity=end == .over ? SIMD2(-sin(task.heading),cos(task.heading)):.zero
+            footAirVelocity=task.releaseVelocity.map{SIMD2($0.x,-$0.z)} ?? .zero
         }
         return motion
     }
@@ -3051,7 +3061,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         guard !driving else{return false}
         pendingVehicleSnapshot=nil
         ownCameraVisibility.reset();personalFlight.stop();swimController.stop();swimming=false;underwater=false
-        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0;pendingClimbRelease=nil
         footAnimator?.rest(cut:true);footAnimationFrame=nil;footLaunchRemaining=nil
         character?.setActive(false);characterActive=false;pendingNativeJump=0
         entryOrigin=camera;entryStarted=ProcessInfo.processInfo.systemUptime
@@ -3075,7 +3085,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pendingVehicleSnapshot=snapshot
         let vehicle=applying(snapshot,to:source)
         ownCameraVisibility.reset()
-        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0;pendingClimbRelease=nil
         personalFlight.stop()
         swimController.stop();swimming = false;underwater = false
         footAnimator?.rest(cut:true);footAnimationFrame = nil;footLaunchRemaining = nil
@@ -3238,7 +3248,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         vehicleFallbackRoll = 0
         activeModelOrigin = 0
         pendingVehicleSnapshot=nil
-        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0;pendingClimbRelease=nil
         activeVehicleModel = ""
         activeHandling = nil
         vehicleKind = "car"
@@ -3361,7 +3371,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         pendingFootHit=nil
         ownCameraVisibility.reset()
         pendingVehicleSnapshot=nil
-        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0
+        climb=nil;climbPhase=nil;pendingClimbPull=false;pendingClimbDrop=false;airGrabTicks=0;pendingClimbRelease=nil
         swimController.stop();swimming = false;underwater = false;lastFootVelocity = .zero
         personalFlight.stop();pendingParachuteOpen=false;pendingDive=false;pendingSwimJump=false
         cancelGameplayInput();clearAction();footAnimator?.resetMovementTask()
