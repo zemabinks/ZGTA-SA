@@ -2748,9 +2748,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                 case .vault:_=animator.act("ped/climb_jump_b",rooted:true,cut:true)
                 }
             }
-            if end != nil {
-                if task.part == .stand {_=animator.act("ped/climb_stand_finish",cut:true,once:true)}
-                else if task.part == .vault {_=animator.act("ped/climb_jump2fall",rooted:true,cut:true,once:true)}
+            if let end {
+                if end == .top {_=animator.act("ped/climb_stand_finish",cut:true,once:true)}
+                else if end == .over {_=animator.act("ped/climb_jump2fall",rooted:true,cut:true,once:true)}
                 else {animator.rest()}
             }
             if health<=0,!animator.dead {animator.die()}
