@@ -54,6 +54,7 @@ final class ClimbRuntimeHarness {
     var fixedSteps=0,heldSteps=0,footCalls=0,firstTickCount=0,checks=0,displayFrames=0
     var expectedHeld:SIMD3<Float>?
     var completedFeet:SIMD3<Float>?,completedPart:NativeClimbController.Part?
+    var completionClips:[String]?
     var lastPosePart:NativeClimbController.Part?,lastPoseTime=0.0
     var seen=Set<Int>()
     var carrierBody:UInt64?
@@ -134,11 +135,7 @@ final class ClimbRuntimeHarness {
                 precondition(motion.heldFeet != nil,"Completion tick lost final held feet")
                 let final=SwiftRapierWorld.rapierToGTA(SIMD3<Float>(taskBefore!.feet))
                 precondition(simd_distance(motion.heldFeet!,final)<0.000002,"Completion tick did not publish final controller feet")
-                if taskBefore!.part == .stand || taskBefore!.part == .vault {
-                    let finish=taskBefore!.part == .stand ? "ped/climb_stand_finish":"ped/climb_jump2fall"
-                    precondition(footAnimationFrame!.blends.contains{$0.clip==finish && $0.weight>0},"Completion lost the authored exit clip")
-                    checks += 1
-                }
+                completionClips=footAnimationFrame!.blends.filter{$0.weight>0}.map(\.clip)
                 completedFeet=motion.heldFeet;completedPart=partBefore;checks += 1
             }
             expectedHeld=motion.heldFeet
@@ -174,6 +171,13 @@ final class ClimbRuntimeHarness {
             if harness.fixedSteps>previousSteps {
                 if firstDisplay {precondition(harness.firstTickCount==1);firstDisplay=false}
                 if harness.climb==nil,let final=harness.completedFeet {
+                    // Only these controlled cases successfully finish. An
+                    // abort during stand/vault must not select a finish clip.
+                    if ["stand","vault","pull"].contains(kind) {
+                        let finish=kind=="vault" ? "ped/climb_jump2fall":"ped/climb_stand_finish"
+                        precondition(harness.completionClips?.contains(finish)==true,"Successful completion lost its authored exit clip")
+                        checks += 1
+                    }
                     // A30Hz display frame can contain completion followed by
                     // the legitimate first resumed foot fixed tick.
                     precondition(harness.headingContinuity.owner == .climbing || harness.headingContinuity.owner == .foot)

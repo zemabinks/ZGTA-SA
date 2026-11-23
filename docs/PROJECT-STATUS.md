@@ -1,3 +1,37 @@
+## Core209: successful climb poses follow the completion cause
+
+Build 209 is the latest verified source batch. Only successful top and vault
+completion select their corresponding finish clips. An abort during either
+phase retires the existing action. Held roots, cause-specific release velocity
+and uninterrupted phase timing remain in use.
+
+Actual unchanged owners reproduce twenty wrong finish selections across thirty
+cases. Current first-completion snapshots pass all thirty cases, including ten
+successful controls at five display rates. The shared test carrier captures
+the actual completion clips; successful-case assertions and explicit abort
+controls replace the previous phase-only finish assumption. All six retained
+movement gates pass, and twelve static phase/root traces exactly match the
+accepted preceding build.
+
+Both fresh SDK products and the uninterrupted current physics/audio/transport
+chain pass. A normal-SDK Simulator case climbs at original static geometry.
+The owned server reacts to an actual published stand-phase packet with a
+production equipment grant; normal native removal and reclimb/finish follow.
+The initial acknowledged spawn and reactive grant are explicit test boundaries.
+Saved captures are reviewed after all owned apps and services close, with
+installed resources and preferences preserved. Gear acknowledgements belong
+to the native self connection; the second protocol peer records position and
+action rows.
+
+The outgoing stand packet does not establish the native phase at grant arrival.
+The precise completion-tick pose is a separate CPU check; static app captures
+do not establish every intermediate GPU frame or a later safe landing. The
+pinned community classic-source reference separates abort association removal
+from successful finish selection. Exact original-PC fade/caller timing, grip
+and sole contact, shadows, materials, remaining resources and sandbox systems
+remain open. No rendered-browser, physical-device, campaign or1:1 claim.
+Original resources, raw evidence, reference source and private ancestry stay local.
+
 ## Core208: persistent equipment ownership retires climbing
 
 Build 208 is the latest verified source batch. A jetpack grant now retires
