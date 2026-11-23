@@ -1,3 +1,42 @@
+## Core208: persistent equipment ownership retires climbing
+
+Build 208 is the latest verified source batch. A jetpack grant now retires
+an active climb from persistent equipment state, even when focus/input
+cancellation clears its queued drop. Ordinary cancelled Let go input keeps
+a valid hang; granting then revoking equipment before the physical tick does
+not invent a permanent drop. Normal climb release roots and velocities remain
+in use.
+
+Actual unchanged owners reproduce the missing retirement. Current selected
+native owners, original animation tracks and Rapier checks cover six actual
+climb phases and five display rates, with first-receiving-fixed-tick ownership
+observations. Separate retained release, climb, task-handoff, archived flight
+motion and flight-animation checks pass. A moved helper in the older flight
+replay is corrected without changing its numerical assertions.
+
+Both fresh SDK products and the uninterrupted current physics/audio/transport
+chain pass. A normal-SDK Simulator case uses ordinary touch menus to equip a
+jetpack while hanging at original static geometry, return to grounded control,
+remove the equipment and reclimb, pull up, finish and resume foot input.
+Actual equipment commands and self gear acknowledgements are observed on
+the native connection. A second protocol peer receives position publications. Saved captures are reviewed after every owned app and
+service closes, with installed resources and preferences held.
+
+The exact grant/input-loss ordering is isolated by the CPU regression; the
+normal UI case is not a deterministic reproduction of that race. An authored
+initial acknowledged spawn remains a fixture boundary. Moving-handhold
+rendering, hand/sole placement, shadows, exact original-PC caller timing,
+remaining resources and sandbox systems remain open. No actual browser-renderer,
+physical-device, campaign or1:1 claim. Original data, raw evidence, community
+reference source and private Git ancestry stay local.
+
+The first extended ownership fixture sampled after a whole second,
+allowing some tasks to finish naturally before the observation. That failed
+expectation remains recorded. A carrier observer now samples the first
+receiving physical tick; selected production bodies and ownership assertions
+remain unchanged. The old and current cases run independently. The initial
+moved-helper failure is also retained separately from its passing rerun.
+
 ## Core207: climb release and fixed-tick foot handoff
 
 Build 207 is the latest verified source batch. A finished climb now supplies

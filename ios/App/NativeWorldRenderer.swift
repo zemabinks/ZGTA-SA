@@ -2730,7 +2730,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     private func climbingMotion(delta:Double,state:NativeCharacterController.Output,intended:NativeCharacterController.Motion,
                                 advance:Bool=true)->NativeCharacterController.Motion? {
         guard let task=climb else{return nil}
-        let end=advance ? task.step(delta:delta,pull:jumpHeld || pendingClimbPull,drop:pendingClimbDrop || health<=0):nil
+        // Equipment ownership survives focus/input cancellation. A granted
+        // jetpack must retire the climb even if its queued input pulse cleared.
+        let end=advance ? task.step(delta:delta,pull:jumpHeld || pendingClimbPull,drop:pendingClimbDrop || health<=0 || personalFlight.worn):nil
         pendingClimbPull=false;pendingClimbDrop=false
         actorHeading = -Float(task.heading);headingContinuity.external(.climbing)
         if let animator=footAnimator {

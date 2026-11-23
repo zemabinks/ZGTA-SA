@@ -11,7 +11,7 @@ import subprocess,tempfile
 from tests.movement.smoke_native_foot_animation import SWIFT as FOOT_SWIFT
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
-const fs=require('node:fs'),load=require(process.cwd()+'/smoke_vehicle_dynamics').archivedModules(),api=load(54205),T=load(85339);
+const fs=require('node:fs'),load=require(process.cwd()+'/tests/vehicles/smoke_vehicle_dynamics').archivedModules(),api=load(54205),T=load(85339);
 const vector=a=>new T.Pq0(...a),array=v=>[v.x,v.y,v.z],cases=[];
 for(const kind of ['bare','open','late_open','ground_open','float','fall_fast','jet_ground','jet_air','jet_ceiling','jet_brake','jet_toggle','jet_ground_down']){
  const controller=api.$l(),jet=kind.startsWith('jet'),frames=[],initial={jet,velocity:[3,jet?2:0,-4],rise:kind==='fall_fast'?-34:-12,heading:2.8};
