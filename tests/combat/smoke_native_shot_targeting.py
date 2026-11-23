@@ -14,7 +14,9 @@ ROOT=Path(__file__).resolve().parents[2]
 def main():
  vc=(ROOT/'ios/App/NativeGameViewController.swift').read_text()
  methods='\n'.join(function(vc,marker) for marker in ['private struct CapturedWeaponShot {','private func currentShotRay(','private func emitWeaponShot('])
- source=(ROOT/'tests/combat/smoke_native_shot_targeting.swift').read_text().replace('// ACTUAL_EMISSION_METHODS',methods)
+ renderer=(ROOT/'ios/App/NativeWorldRenderer.swift').read_text()
+ admission=(function(renderer,'var nonPassiveRemotePlayers:')+'\n'+function(renderer,'var livingRemotePlayers:')).replace('[RemotePlayer]','[FixturePlayer]')
+ source=(ROOT/'tests/combat/smoke_native_shot_targeting.swift').read_text().replace('// ACTUAL_EMISSION_METHODS',methods).replace('// ACTUAL_PASSIVE_ADMISSION',admission)
  with tempfile.TemporaryDirectory(prefix='zgtasa-shot-targets-') as temporary:
   work=Path(temporary);(work/'verify.swift').write_text(source)
   subprocess.run(['swiftc','-parse-as-library','-j','1','-num-threads','1','-whole-module-optimization','-Onone','-module-cache-path','/private/tmp/zgtasa-core-swift-modules',

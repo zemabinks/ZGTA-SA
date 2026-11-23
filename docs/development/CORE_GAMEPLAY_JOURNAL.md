@@ -1,3 +1,49 @@
+## Core203–205: target admission, jump clearance and reload ownership
+
+Build 205 is the latest verified source batch. Passive-player metadata stays
+independent of buffered movement. Living-target queries require positive
+current and displayed life and an on-foot role. Normal strikes exclude fallen
+bodies; ground strikes retain them. Rendering and radar keep the full roster.
+
+Native jump launch checks raised body clearance after testing an accepted
+climb. Blocked jumps do not enter airborne motion; both animated and fallback
+input paths use the check. Existing launch force and local animation timing
+are retained. The independent server no longer broadcasts temporary reload
+progress as a persistent status message. Inventory state and the action reply
+still report the real reload, while durable action notes and errors remain.
+
+Both fresh native SDK builds pass. A later presentation-test API correction
+changes only independent test scaffolding; exact native, build and dependency
+inputs establish that those SDK products remain current. The uninterrupted
+current physics/audio/transport chain passes. Real native physics and local
+animation fixtures cover jump clearance and climb precedence at multiple
+frame rates, with actual preceding-owner differences retained separately.
+
+Retained normal-SDK actor cases cover join, reactions/fire, crouching and
+restoration. The new normal-control pistol/shotgun case covers aimed and hip
+fire, crouched hull claims, reload completion, grouped hits, actual target
+health loss and single ammunition/acknowledgement ownership. The previously
+observed persistent reload notice is checked in this run. Saved captures are
+reviewed after every owned app and service closes. The compiled UI runner is
+reused with the actual SDK app; no private menu constructor or binary state
+injection is used.
+
+These results have explicit fixture boundaries: authored inventory, calibrated
+targets, compact vehicle hull rows and compatibility-state projections. Tracer
+submission does not prove GPU completion or audible effects. Original special
+jump exceptions, all climb surfaces, moving handholds, foot planting, ambient
+and police systems, remaining resources, external-server acceptance, device
+performance and original-PC fidelity remain open. No campaign or 1:1 claim.
+Original data, raw measurements, captures, accounts and private history stay
+local.
+
+Historical failures remain recorded separately. The preceding normal
+combat run exposed the stale reload status and stopped before its final
+checks. The first current source run then found a missing query declaration
+in a presentation-only test boundary. That boundary now rejects accidental
+geometry queries and delegates geometry acceptance to the actual-physics
+gate. Neither historical failure is relabelled as passing.
+
 # Core gameplay audit journal
 
 ## Core202 precise armour reactions and authoritative NPC fire

@@ -6,7 +6,7 @@ final class NativeAppSettings {static let shared=NativeAppSettings()}
 class HarnessBase {init(nibName:String?,bundle:Bundle?){}}
 protocol NativeLegacyWorldConnection:AnyObject {}
 final class HarnessLegacy:NativeLegacyWorldConnection {}
-struct HarnessPlayer {let id:String;let position:SIMD3<Float>}
+struct HarnessPlayer {let id:String;let position:SIMD3<Float>;var passive=false;var life:Double=100;var code="s7";var ridingVehicleID:String?}
 struct HarnessAmbient {let targetID:String;let position:SIMD3<Double>;let dead:Bool}
 final class NativeMultiplayerClient {
  enum Flavor {case selfHost;case originalWorld(build:String,deviceID:String)}
@@ -46,6 +46,8 @@ final class NativeGameAudio {
 }
 final class NativeWorldRenderer {
  var presentedRemotePlayers:[HarnessPlayer]=[.init(id:"peer",position:SIMD3(0,10,0))]
+ var remotePlayers:[HarnessPlayer]{presentedRemotePlayers}
+ // ACTUAL_PASSIVE_ADMISSION
  var presentedAmbientPedestrians:[HarnessAmbient]=[]
  struct Muzzle {let origin:SIMD3<Float>,safetyOrigin:SIMD3<Float>}
  var swimming=false,isChuting=false,isClimbing=false,crouching=false

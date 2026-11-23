@@ -5,11 +5,18 @@ import Foundation
 import simd
 
 final class SwiftRapierWorld {
+    struct ColliderInfo {}
     var legacyGravityAcceleration: Double?
     var steps = 0
     func step() { steps += 1 }
     static func gtaToRapier(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, p.z, -p.y) }
     static func rapierToGTA(_ p: SIMD3<Float>) -> SIMD3<Float> { SIMD3(p.x, -p.z, p.y) }
+    func sphereIntersections(center: SIMD3<Float>, radius: Float,
+                             groups: UInt32? = nil, flags: UInt32 = 0,
+                             excludingColliders: Set<UInt64> = [],
+                             excludingBodies: Set<UInt64> = []) -> [ColliderInfo] {
+        fatalError("Collision queries are outside this presentation gate; use the actual Rapier jump-clearance gate")
+    }
 }
 final class NativeRapierCharacterQueries {
     let walker: UInt64 = 1, probe: UInt64 = 2

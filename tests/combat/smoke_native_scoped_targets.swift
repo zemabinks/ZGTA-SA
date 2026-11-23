@@ -7,6 +7,7 @@ private struct Person {
  let id:String,position:SIMD3<Float>
  var code="s7",skin=7,life:Float=100,heading:Float=0,crouching=false
  var ridingVehicleID:String?,vehicleID:String?
+ var passive=false
 }
 private struct NPC {
  struct State{let mood:Int}
@@ -35,6 +36,7 @@ private final class Renderer {
  func worldRay(from:SIMD3<Float>,direction:SIMD3<Float>,distance:Float,groups:UInt32,excluding:Set<UInt64>)->World{.clear}
  // ACTUAL_FOOT_ROLE
  // ACTUAL_DRAW_RADIUS
+ // ACTUAL_PASSIVE_ADMISSION
  // ACTUAL_RESOLVE
  func demandedModels()->Set<String>{var names=Set<String>();
  // ACTUAL_RESOURCE_DEMAND
@@ -60,6 +62,11 @@ private final class Renderer {
    let frame=renderer.resolveLocalShot(input())
    check(frame?.claims.contains{$0.target?.id=="far"}==true,"Actual resolver discarded a loaded scoped human at \(distance)")
   }
+  renderer.presentedRemotePlayers=[Person(id:"protected",position:SIMD3(0,20,0),passive:true)]
+  check(renderer.resolveLocalShot(input())?.claims.allSatisfy{$0.target==nil}==true,"Actual ordinary resolver selected a passive human")
+  check(renderer.presentedRemotePlayers.count==1 && renderer.canDraw(renderer.presentedRemotePlayers[0]) && renderer.demandedModels()==["authored"],"Protection removed visual/resource admission")
+  renderer.presentedRemotePlayers[0].passive=false
+  check(renderer.resolveLocalShot(input())?.claims.contains{$0.target?.id=="protected"}==true,"Actual ordinary resolver retained cleared protection")
   renderer.presentedRemotePlayers=[Person(id:"outside",position:SIMD3(0,900,0))]
   check(renderer.resolveLocalShot(input())?.claims.allSatisfy{$0.target==nil}==true,"Scope invented a target beyond its ray")
   renderer.presentedRemotePlayers=[Person(id:"far",position:SIMD3(0,200,0))]

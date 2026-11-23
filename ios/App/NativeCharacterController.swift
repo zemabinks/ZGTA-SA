@@ -65,6 +65,24 @@ final class NativeCharacterController {
         get { motor.otherColliders }
         set { motor.otherColliders = newValue }
     }
+    /// Check launch clearance at the committed feet, after a possible climb
+    /// has been admitted. The normal pedestrian's three body spheres are
+    /// raised .75 from its origin, which is one unit above our feet anchor.
+    /// Querying copies leaves the live motor/colliders and their contacts intact.
+    /// Special original ped collision exceptions still need retail comparison.
+    func hasJumpClearance(feet: SIMD3<Float>) -> Bool {
+        guard Self.finite(feet) else { return false }
+        let origin = SwiftRapierWorld.gtaToRapier(feet) + SIMD3<Float>(0, 1.75, 0)
+        let excluded: Set<UInt64> = [queries.walker, queries.probe]
+        let excludeSensors: UInt32 = 1 << 3
+        for height in [Float(-0.2), 0.2, 0.6] {
+            if !world.sphereIntersections(center: origin + SIMD3(0, height, 0),
+                radius: 0.3, flags: excludeSensors, excludingColliders: excluded).isEmpty {
+                return false
+            }
+        }
+        return true
+    }
     /// Resets pending movement for teleports and transitions into/out of cars.
     func reset(feet: SIMD3<Float>, active: Bool = true, grounded: Bool = false) {
         guard Self.finite(feet) else { return }

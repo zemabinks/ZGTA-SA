@@ -30,22 +30,22 @@ def main():
     common+='\n'+block(actor,'struct NativePedestrianMotion {')
     common+='\n'+'\n'.join(block(melee,n)for n in ['struct NativeMeleeProbe {','struct NativeMeleeEvent {','enum NativeMeleeTargeting {'])
     packet=block(network,'    private func updateRows(').replace('ProcessInfo.processInfo.systemUptime','receiptTime')
-    fields=renderer[renderer.index('    var remotePlayers: [RemotePlayer]'):renderer.index('    var presentedRemotePlayers: [RemotePlayer]')]+'\n'+block(renderer,'    var presentedRemotePlayers: [RemotePlayer]')
+    fields=renderer[renderer.index('    var remotePlayers: [RemotePlayer]'):renderer.index('    var presentedRemotePlayers: [RemotePlayer]')]+'\n'+block(renderer,'    var presentedRemotePlayers: [RemotePlayer]')+'\n'+block(renderer,'    var nonPassiveRemotePlayers:')+'\n'+block(renderer,'    var livingRemotePlayers:')
     scene=fields+'\n'+block(renderer,'    private func recordLocalShotPlayerOwners()')+'\n'+'\n'.join(block(renderer,n)for n in ['    private static func remoteAppearanceIsFoot(','    private func resetRemoteFootPresentation()','    private func recordRemoteFootPackets()','    func advanceRemoteFootPresentation('])
     # UIKit/Metal/attachment seams are explicit spies. Packet codec, scene
     # admission, frame sampling and target factories are literal source.
     draw=next(line.strip()for line in renderer.splitlines()if line.strip().startswith('let footPosition=remoteSupportPosition(player) ?? player.position'))
     assert 'for player in presentedRemotePlayers {\n            // A passenger' in renderer
-    assert 'people: presentedRemotePlayers.map { NativeWeaponEffects.Target' in renderer
+    assert 'people: livingRemotePlayers.map { NativeWeaponEffects.Target' in renderer
     tick=block(controller,'    @objc private func tick(')
     assert tick.index('advanceRemoteFootPresentation(')<tick.index('attack()')
     assert 'renderer.presentedRemotePlayers.map' in controller[controller.index('gameHUD.radar.players ='):][:150]
     hookup=block(controller,'        network.onPlayers =')
     candidate=block(controller,'    private var meleeCandidates:')
     emit=block(controller,'    private func emitWeaponShot(')
-    start=emit.index('let candidates=renderer.presentedRemotePlayers.map')
+    start=emit.index('let candidates=renderer.livingRemotePlayers.map')
     stream=block(emit[start:],'let candidates=')
-    instant=block(emit[emit.index('let candidates=renderer.presentedRemotePlayers.map',start+len(stream)):],'let candidates=')
+    instant=block(emit[emit.index('let candidates=renderer.livingRemotePlayers.map',start+len(stream)):],'let candidates=')
     legacy=paths[7].read_text();adapter=paths[8].read_text()
     assert 'player.receivedAt=ProcessInfo.processInfo.systemUptime;players[id]=player;publishedPlayers()' in legacy
     assert 'packetReceivedAt:p.receivedAt' in adapter

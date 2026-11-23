@@ -16,10 +16,12 @@ func collision(rectangles:[(Float,Float,Float,Float,Float)])->WorldCollision {
     return try! WorldCollision(data:data)
 }
 
-struct FixturePlayer {let id:String;let position:SIMD3<Float>}
+struct FixturePlayer {let id:String;let position:SIMD3<Float>;var passive=false;var life:Double=100;var code="s7";var ridingVehicleID:String?}
 struct FixtureAmbient {let targetID:String;let position:SIMD3<Double>;let dead:Bool}
 final class FixtureRenderer {
     var presentedRemotePlayers:[FixturePlayer]=[],presentedAmbientPedestrians:[FixtureAmbient]=[]
+    var remotePlayers:[FixturePlayer]{presentedRemotePlayers}
+    // ACTUAL_PASSIVE_ADMISSION
     var localConfig:NativeLocalShots.Input?
     var localPeople:[NativeLocalShots.Person]=[]
     var localWorld=NativeLocalShots.World.clear

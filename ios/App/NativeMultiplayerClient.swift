@@ -114,6 +114,7 @@ struct RemotePlayer {
     var latencyMilliseconds:Float = 0
     var life:Double = 100
     var armour:Double = 0
+    var passive = false
     var swimState:Int { let base=action&63;return (10...16).contains(base) ? base-9:0 }
     var burning:Bool {action&64 != 0}
 }
@@ -1810,7 +1811,8 @@ final class NativeMultiplayerClient {
                                        packetClockMilliseconds:row.count>16 ? (row[16] as? NSNumber)?.doubleValue ?? 0:0,
                                        latencyMilliseconds:row.count>23 ? (row[23] as? NSNumber)?.floatValue ?? 0:0,
                                        life:life,
-                                       armour:row.count>30 ? NativeOriginalWorldCommands.number(row[30]) ?? 0:0)
+                                       armour:row.count>30 ? NativeOriginalWorldCommands.number(row[30]) ?? 0:0,
+                                       passive:row.count>48 && NativeOriginalWorldCommands.number(row[48]) == 1)
             if let vehicleID, var vehicle = vehicles[vehicleID] {
                 vehicle.position = SIMD3(x, y, z)
                 vehicle.heading = row.count > 6 ? -((row[6] as? NSNumber)?.floatValue ?? 0) : 0
