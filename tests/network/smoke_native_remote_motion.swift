@@ -74,6 +74,98 @@ private struct KernelReference:Decodable {
 @main private enum Main {
     static func main(){do{try run()}catch{fputs("FAIL \(error)\n",stderr);exit(1)}}
     static func run()throws {
+        // Living protection and fallen-body admission are separate. Exercise
+        // the actual decoder, presented roster, VC property and ground query,
+        // including the controller's no-renderer fallback.
+        for life in [-1.0,0,0.5,100] {for passive in [false,true] {for useScene in [false,true] {
+            let owner=ControllerOwner()
+            if !useScene {owner.renderer=nil}
+            var packet=row(10,1000,velocity:0)
+            packet += [Any](repeating:NSNull(),count:49-packet.count)
+            packet[18]=life;packet[48]=passive ? 1:0
+            owner.network.receive([packet],at:1000)
+            owner.renderer?.advanceRemoteFootPresentation(at:1000,active:true)
+            let candidates=owner.melee(),wanted = !passive || life<=0
+            try check(candidates.count==(wanted ? 1:0),"Melee protection discarded a corpse or admitted protected life")
+            if let candidate=candidates.first {
+                try check(candidate.dead==(life<=0),"Melee corpse classification disagrees with the selected life")
+                try check(close(candidate.feet,SIMD3(10,-1738,13)),"Corpse query changed the displayed root")
+            }
+            let probe=NativeMeleeProbe(weapon:0,feet:SIMD3(10,-1738.5,13),heading:0,range:1.5,radius:0.5)
+            let ground=NativeMeleeTargeting.groundTarget(probe:probe,candidates:candidates,visible:{_,_ in true})
+            try check((ground?.id=="walk")==((life<=0)),"Protected fallen body lost the ground-strike selection")
+            if let scene=owner.renderer {
+                try check(scene.presentedRemotePlayers.count==1,"Interaction protection hid the rendered actor")
+                if passive {
+                    try check(scene.nonPassiveRemotePlayers.isEmpty && owner.instant().isEmpty && owner.stream().isEmpty,"Corpse admission leaked back into living shot queries")
+                }
+            }
+        }}}
+        // Current and displayed life jointly admit living targets. The existing
+        // motion identity resets on death/revival; preserve that ownership
+        // while keeping fallen-body admission separate from shooting.
+        var deadFrames=0,livingFrames=0
+        for hz in [30,60,120] {
+            let owner=ControllerOwner(),scene=owner.renderer!
+            for frame in 0...hz*2 {
+                let elapsed=Double(frame)/Double(hz),now=1000+elapsed
+                if frame%(hz/5)==0 {
+                    var packet=row(10+Float(elapsed),now,velocity:1)
+                    packet[18]=(elapsed>=0.4 && elapsed<1.0) ? 0:100
+                    owner.network.receive([packet],at:now)
+                }
+                scene.advanceRemoteFootPresentation(at:now,active:true)
+                let shown=scene.presentedRemotePlayers[0],latest=owner.network.players["walk"]!
+                let live=latest.life>0 && shown.life>0
+                try check(owner.instant().count==(live ? 1:0) && owner.stream().count==(live ? 1:0),"A dead/latest or dead/displayed actor entered a living shot query")
+                try check(owner.melee().count==((shown.life<=0 || live) ? 1:0),"Melee confused buffered life with current living admission")
+                try check(scene.presentedRemotePlayers.count==1,"Death admission removed the displayed actor")
+                if shown.life<=0 {deadFrames+=1}else{livingFrames+=1}
+                try check((latest.life<=0)==(shown.life<=0),"Death/revival retained the previous life identity")
+            }
+        }
+        try check(deadFrames>0 && livingFrames>0,"Authored trace did not exercise both death and recovery")
+        for code in ["s7","420.0.0.0."] {for passenger in [false,true] {
+            let owner=ControllerOwner(),scene=owner.renderer!
+            var packet=row(10,1000,code:code,velocity:0)
+            if passenger {packet[34]=["car",1]}
+            packet[43]=100
+            owner.network.receive([packet],at:1000);scene.advanceRemoteFootPresentation(at:1000,active:true)
+            let live=code.hasPrefix("s") && !passenger
+            try check(scene.livingRemotePlayers.count==(live ? 1:0),"Vehicle occupant entered the on-foot living provider")
+            try check(owner.instant().count==(live ? 1:0) && owner.stream().count==(live ? 1:0),"Vehicle occupant bypassed fallback living-target admission")
+        }}
+        // Protection arrives independently of the buffered pose clock. Use
+        // literal decoder/scene/controller owners for each admission path.
+        let passiveValues:[(String,Any,Bool)]=[("integer",1,true),("double",1.0,true),("zero",0,false),("negative",-1,false),("other",2,false),("fraction",0.5,false),("boolean",true,false),("false",false,false),("text","1",false),("null",NSNull(),false),("nan",Double.nan,false),("infinite",Double.infinity,false),("array",[1],false),("object",["value":1],false)]
+        for code in ["s7","420.0.0.0."] {
+            let packets=PacketOwner()
+            for (index,item)in passiveValues.enumerated(){
+                var value=row(10,1000+Double(index),code:code);value += [Any](repeating:NSNull(),count:49-value.count)
+                value[43]=100;value[48]=item.1;packets.receive([value],at:1000+Double(index))
+                try check(packets.players["walk"]?.passive==item.2,"Passive primitive admission differs for \(code)/\(item.0)")
+            }
+            packets.receive([row(10,2000,code:code)],at:2000)
+            try check(packets.players["walk"]?.passive==false,"Missing passive column retained prior protection")
+        }
+        for hz in [30,60,120] {
+            let protected=ControllerOwner(),scene=protected.renderer!
+            protected.network.receive([row(10,1000)],at:1000)
+            protected.network.receive([row(10.32,1000.2)],at:1000.2)
+            scene.advanceRemoteFootPresentation(at:1000.25,active:true)
+            var flag=row(99,1000.3,clock:1050200);flag += [Any](repeating:NSNull(),count:49-flag.count);flag[48]=1
+            protected.network.receive([flag],at:1000.3)
+            for frame in 0..<hz/10 {
+                scene.advanceRemoteFootPresentation(at:1000.3+Double(frame)/Double(hz),active:true)
+                try check(scene.presentedRemotePlayers.count==1 && scene.presentedRemotePlayers[0].passive,"Protected actor disappeared or inherited stale visual protection")
+                try check(scene.presentedRemotePlayers[0].position.x<11,"Metadata-only duplicate clock warped displayed feet")
+                try check(scene.nonPassiveRemotePlayers.isEmpty && protected.instant().isEmpty && protected.stream().isEmpty && protected.melee().isEmpty,"Protected buffered actor remained an interaction candidate")
+            }
+            flag[3] = -999;flag[48]=0;protected.network.receive([flag],at:1000.5)
+            scene.advanceRemoteFootPresentation(at:1000.5,active:true)
+            try check(scene.nonPassiveRemotePlayers.count==1 && protected.instant().count==1 && protected.stream().count==1 && protected.melee().count==1,"Cleared protection waited for a changed sender clock")
+            try check(scene.presentedRemotePlayers[0].position.x>9 && scene.presentedRemotePlayers[0].position.x<11,"Cleared protection replaced displayed feet with rejected raw position")
+        }
         let retired=SceneOwner()
         let packet=NativeHumanShots.Packet(["from":"gone","w":31,"o":[0,0,1.3],"h":[0,4,1.3],"ht":0])!
         _=retired.humanShots.receive(packet,footAppearance:true,at:1)

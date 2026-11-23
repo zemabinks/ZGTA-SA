@@ -3204,7 +3204,9 @@ class LocalGame {
         h: home.out[3], g: 1},{source:'home.visit',context:home.id});
       message = `Travelling to ${home.name}.`;
     } else throw new Error('Unknown action.');
-    this.note(player, message);
+    // Reload progress already belongs to the inventory state and initiating
+    // HTTP response. A timeless socket note survives the completed reload.
+    if (action !== 'weapon.reload') this.note(player, message);
     return {ok: true, message, state: this.gameplayState(player)};
   }
 
@@ -3875,6 +3877,7 @@ class LocalGame {
     row[41] = walking && !riding && typeof s.anim === 'string' ? s.anim.slice(0, 96) : null;
     row[42] = driving && Array.isArray(s.kit) ? s.kit.slice(0, 16).map(value => rounded(value)) : null;
     row[43] = driving ? peer.player.health : 0;
+    row[48] = peer.player.passive === true ? 1 : 0;
     return row;
   }
 

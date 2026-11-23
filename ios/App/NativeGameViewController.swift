@@ -1657,7 +1657,12 @@ final class NativeGameViewController: UIViewController {
     }
 
     private var meleeCandidates:[NativeMeleeTargeting.Candidate] {
-        let people:[NativeMeleeTargeting.Candidate]=(renderer?.presentedRemotePlayers ?? network.orderedPlayers).filter {$0.code.hasPrefix("s") && $0.ridingVehicleID == nil}.map {
+        // Protection excludes living targets. Fallen bodies remain available
+        // to the ground-strike selector using their displayed pose.
+        let living=Set((renderer?.livingRemotePlayers ?? network.orderedPlayers.filter{!$0.passive && $0.life>0}).map(\.id))
+        let people:[NativeMeleeTargeting.Candidate]=(renderer?.presentedRemotePlayers ?? network.orderedPlayers).filter {
+            ($0.life <= 0 || living.contains($0.id)) && $0.code.hasPrefix("s") && $0.ridingVehicleID == nil
+        }.map {
             NativeMeleeTargeting.Candidate(id:$0.id,feet:$0.position,heading:$0.heading,crouching:$0.crouching,
                 down:$0.down != 0,dead:$0.life <= 0)
         }
@@ -1768,7 +1773,7 @@ final class NativeGameViewController: UIViewController {
         }
         audio.shot(weapon: weapon)
         if NativeStreamShotTargets.weapons.contains(weapon) {
-            let candidates=renderer.presentedRemotePlayers.map {
+            let candidates=renderer.livingRemotePlayers.map {
                 NativeShotTargeting.Candidate(id:$0.id,point:$0.position+SIMD3(0,0,0.9))
             } + renderer.presentedAmbientPedestrians.filter{!$0.dead}.map{
                 NativeShotTargeting.Candidate(id:$0.targetID,point:SIMD3<Float>($0.position)+SIMD3(0,0,0.9))
@@ -1778,7 +1783,7 @@ final class NativeGameViewController: UIViewController {
             network.sendWeaponShot(weapon:weapon,from:ray.origin,to:ray.end,player:nil,ticket:ticket,streamPlayers:targets)
             return
         }
-        let candidates=renderer.presentedRemotePlayers.map {
+        let candidates=renderer.livingRemotePlayers.map {
             NativeShotTargeting.Candidate(id:$0.id,point:NativeShotTargeting.torso(feet:$0.position))
         } + renderer.presentedAmbientPedestrians.filter{!$0.dead}.map{
             NativeShotTargeting.Candidate(id:$0.targetID,point:NativeShotTargeting.torso(feet:SIMD3<Float>($0.position)))

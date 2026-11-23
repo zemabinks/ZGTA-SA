@@ -18,6 +18,7 @@ def main():
  frozen={str(p):hashlib.sha256(p.read_bytes()).hexdigest()for p in paths}
  carrier=carrier.replace('// ACTUAL_FOOT_ROLE',block(source,'    private static func remoteAppearanceIsFoot('))
  carrier=carrier.replace('// ACTUAL_DRAW_RADIUS',block(renderer,'    private var remoteDrawDistance:'))
+ carrier=carrier.replace('// ACTUAL_PASSIVE_ADMISSION',(block(renderer,'    var nonPassiveRemotePlayers:')+'\n'+block(renderer,'    var livingRemotePlayers:')).replace('[RemotePlayer]','[Person]'))
  carrier=carrier.replace('// ACTUAL_RESOLVE',block(source,'    func resolveLocalShot('))
  start=source.index('        for player in remotePlayers where simd_distance(',source.index('    private func synchronizeStockPedDemand('))
  carrier=carrier.replace('// ACTUAL_RESOURCE_DEMAND',block(source[start:],'        for player in remotePlayers where simd_distance('))

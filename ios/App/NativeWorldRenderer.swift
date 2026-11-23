@@ -1033,7 +1033,26 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             if let support=remoteSupportPosition(player) {
                 var attached=player;attached.position=support;return attached
             }
-            return remoteFootPresentation[player.id] ?? player
+            var presented=remoteFootPresentation[player.id] ?? player
+            // Protection is current metadata, independent of buffered motion
+            // and the sender clock used to suppress duplicate pose samples.
+            presented.passive=player.passive
+            return presented
+        }
+    }
+    /// Living-target owners share current passive admission. Rendering, radar,
+    /// visible effects and fallen-body melee keep the full presented roster.
+    /// Each consumer still applies its role, life, range and resource checks.
+    var nonPassiveRemotePlayers:[RemotePlayer] {
+        presentedRemotePlayers.filter{!$0.passive}
+    }
+    /// A buffered living pose is not targetable after the newest row is dead;
+    /// a new living row also waits for its displayed pose to recover. Vehicle
+    /// occupants have their separate body/seat queries.
+    var livingRemotePlayers:[RemotePlayer] {
+        let latestLiving=Set(remotePlayers.filter{$0.life>0}.map(\.id))
+        return nonPassiveRemotePlayers.filter {
+            $0.life>0 && latestLiving.contains($0.id) && $0.code.hasPrefix("s") && $0.ridingVehicleID==nil
         }
     }
     private var remoteDrawDistance:Float {
@@ -1372,7 +1391,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         let physical=(groundVehicle?.otherColliders ?? []).union(groundVehicle?.chassisColliders ?? []).union(ambientTrafficBodies?.colliders ?? [])
         let hasUnresolvedVehicleCover = !physical.subtracting(excluded).isEmpty
-        let people=presentedRemotePlayers.filter {
+        let people=livingRemotePlayers.filter {
             Self.remoteAppearanceIsFoot(code:$0.code,ridingVehicleID:$0.ridingVehicleID) && $0.life>0 &&
                 simd_distance(SIMD3<Double>($0.position),input.feet)<targetDistance && actorName(code:$0.code).flatMap{skeletalActors[$0]} != nil
         }.map { player in
@@ -2233,7 +2252,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         } else { swimAnimation = "";swimAnimationElapsed = 0 }
         loadNearby()
         weaponEffects.advance(delta: Double(delta),
-            people: presentedRemotePlayers.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) },
+            people: livingRemotePlayers.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) },
             vehicles: remoteVehicles.map { NativeWeaponEffects.Target(id:$0.id,position:$0.position) })
     }
 
@@ -2331,7 +2350,10 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             return
         }
         crouching = false
-        if characterActive { pendingNativeJump = 6.07; verticalSpeed = 6.07 }
+        if characterActive {
+            if let character, !character.hasJumpClearance(feet: character.state.feet) { return }
+            pendingNativeJump = 6.07; verticalSpeed = 6.07
+        }
         else { verticalSpeed = 5.5 }
     }
 
@@ -2546,7 +2568,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
                     if beginClimb(state:state,extended:true) {
                         return climbingMotion(delta:delta,state:state,intended:motion,advance:false) ?? motion
                     }
-                    motion.jump = 6.07;jumping = true
+                    if character?.hasJumpClearance(feet: state.feet) != false {
+                        motion.jump = 6.07;jumping = true
+                    }
                 }
             } else { footLaunchRemaining = remaining-delta;motion.jump = 0 }
         }

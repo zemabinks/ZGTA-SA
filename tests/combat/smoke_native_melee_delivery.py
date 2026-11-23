@@ -33,7 +33,7 @@ enum NativeResourceTransport {
 }
 struct RemotePlayer {
  var id:String;var name="Fixture";var position:SIMD3<Float>;var heading:Float=0
- var code="s7";var ridingVehicleID:String?;var crouching=false;var down=0;var life=100
+ var code="s7";var ridingVehicleID:String?;var crouching=false;var down=0;var life=100;var passive=false
 }
 class Network {
  var usesClientOwnedWeapons=false
@@ -49,6 +49,8 @@ class Network {
 class Renderer {
  var people:()->[RemotePlayer]={[]}
  var presentedRemotePlayers:[RemotePlayer]{people()}
+ var remotePlayers:[RemotePlayer]{people()}
+ // ACTUAL_PASSIVE_ADMISSION
  var presentedAmbientPedestrians:[NativeAmbientPedestrians.Frame]=[]
  var isChuting=false,swimming=false,isClimbing=false,wearingJetpack=false,crouching=false
  // These are observed public Renderer outputs. The real eligibility and
@@ -138,6 +140,10 @@ h.renderer!.presentedAmbientPedestrians=[.init(id:1,skin:14,seed:1,flags:9,posit
 // ground strikes. A claim is not server health authority; dead-actor damage
 // rejection is exercised by the server task/backend gates.
 check(h.meleeCandidates.first?.dead==true && NativeMeleeTargeting.groundTarget(probe:event.probe,candidates:h.meleeCandidates,visible:h.renderer!.hasClearShot)?.id=="p1","NPC corpse lost distinct ground-target state")
+let beforeCorpseNormal=h.network.hits.count,beforeCorpseSounds=h.audio.hits
+check(h.consumeFootMeleeHit(event) && h.network.hits.count==beforeCorpseNormal && h.audio.hits==beforeCorpseSounds,"Normal melee reused the separate corpse provider")
+let corpseGround=NativeMeleeEvent(weapon:0,attack:-1,aside:"ground",feet:.zero,heading:0,range:1,radius:0.3,simulationTime:1)
+check(h.consumeFootMeleeHit(corpseGround) && h.network.hits.count==beforeCorpseNormal+1 && h.network.hits.last=="p1","Ground strike lost its separate fallen-body query")
 h.renderer!.presentedAmbientPedestrians=[]
 h.weapons.apply(["revision":2,"selected":22,"weapons":[["id":22,"clip":17,"rest":10]]])
 check(!h.consumeFootMeleeHit(event) && h.weapons.rounds==17,"Switched weapon accepted stale melee marker")
@@ -152,7 +158,9 @@ print("PASS: \(checks) actual VC melee dispatch/state/targeting checks;100 rejec
 def run():
     folder=OUT/('snapshot-'+str(time.time_ns()));folder.mkdir()
     folder=pathlib.Path(folder)
-    source=folder/'main.swift';source.write_text(profile+'\n'+stub+methods+'\n}\n'+tests)
+    from tests.network.smoke_native_remote_motion import block
+    admission=block((ROOT/'ios/App/NativeWorldRenderer.swift').read_text(),'    var nonPassiveRemotePlayers:')+'\n'+block((ROOT/'ios/App/NativeWorldRenderer.swift').read_text(),'    var livingRemotePlayers:')
+    source=folder/'main.swift';source.write_text(profile+'\n'+stub.replace('// ACTUAL_PASSIVE_ADMISSION',admission)+methods+'\n}\n'+tests)
     files=['NativeInventoryPrediction.swift','NativeOriginalWorldArsenal.swift','NativeWeaponState.swift','NativeMelee.swift','NativeAmbientPedestrianProtocol.swift','NativeAmbientPedestrianPaths.swift','NativeAmbientPedestrians.swift']
     binary=folder/'verify'
     subprocess.run(['xcrun','swiftc','-Onone','-whole-module-optimization','-num-threads','1','-module-cache-path',str(OUT/'modules'),*[str(ROOT/'ios/App'/p) for p in files],str(source),'-o',str(binary)],check=True)
@@ -160,6 +168,6 @@ def run():
     (folder/'runtime.log').write_text(result.stdout+result.stderr)
     (folder/'result.json').write_text(json.dumps(dict(status='PASS'if result.returncode==0 else'FAIL',exitCode=result.returncode),indent=2)+'\n')
     print(result.stdout,end='');print(result.stderr,end='');result.check_returncode()
-    tracked=['tests/combat/smoke_native_melee_delivery.py','ios/App/NativeGameViewController.swift','ios/App/NativeGunAnimation.swift',*[f'ios/App/{p}' for p in files]]
+    tracked=['tests/combat/smoke_native_melee_delivery.py','ios/App/NativeWorldRenderer.swift','ios/App/NativeGameViewController.swift','ios/App/NativeGunAnimation.swift',*[f'ios/App/{p}' for p in files]]
     (OUT/'report.json').write_text(json.dumps({'pass':True,'sourceSHA256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in tracked},'result':result.stdout,'retailRuntimeParity':False,'transportBoundary':'Fail-fast test-only dataTask; any call preconditionFails. Actual catalog constructor/inventory/VC/attack logic compiled; resource loading is not exercised or replaced with successful data.'},indent=2)+'\n')
 run()

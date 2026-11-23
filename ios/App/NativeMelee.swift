@@ -91,7 +91,7 @@ enum NativeMeleeTargeting {
         guard valid(event.probe) else{return nil}
         let origin=SIMD3<Double>(event.feet),heading=Double(event.heading),forward=SIMD2(sin(heading),cos(heading))
         var selected:Candidate?,nearest=Double(event.range+event.radius)
-        for item in candidates where eligible(item) {
+        for item in candidates where eligible(item) && !item.dead {
             let offset=SIMD3<Double>(item.feet)-origin,distance=hypot(offset.x,offset.y)
             guard distance<=nearest,abs(offset.z)<=1.5,
                   distance<=0.3 || simd_dot(SIMD2(offset.x,offset.y),forward)/distance>=0.5 else{continue}
