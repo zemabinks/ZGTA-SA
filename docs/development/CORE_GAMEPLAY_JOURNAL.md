@@ -1,5 +1,57 @@
 # Core gameplay audit journal
 
+## Core202 precise armour reactions and authoritative NPC fire
+
+Native build 202 is the latest verified source batch.
+
+Remote armour retains finite fractions, with zero for missing or invalid
+primitive values and no life-style upper cap. The literal renderer snapshot
+and existing remote animation controller preserve fractional hit reactions
+without local input stun. The legacy adapter converts its integer armour
+explicitly. Local and server damage authority remain separate.
+
+Non-dead submitted NPC occurrences reach the existing data-driven fire
+particle owner at their displayed feet. Down posture lowers the origin;
+the dead bit separately excludes emission. The shared origin parameter now
+describes posture for both human and NPC callers. This adds no new ignition,
+damage, task goal, run-over prediction or multiplayer ownership authority.
+
+Actual preceding-source witnesses reproduce eighteen admission discrepancies
+across thirty-two selected records, a suppressed 0.5 to 0.25 armour reaction
+through the real row/snapshot/animation owners, and missing NPC fire through
+the actual append/occurrence/particle path. Current default authored armour
+checks cover both foot and driver admission, invalid primitives, missing
+columns and actual damage/no-damage reactions at 30/60/120 Hz. Optional private
+scalar comparisons and all 179 occurrence checks pass. The retained movement,
+contact, connection, frame and project gates pass. Both SDK builds pass
+against 269 frozen native inputs, and the full current physics/audio/transport
+chain passes in one uninterrupted run with 1,572 frozen inputs.
+
+The first full-chain attempt stops at an existing rider-pose compiler's
+240-second timeout with no diagnostic. Its generated input is byte-identical
+to the preceding passing build. The unchanged gate passes under its original
+limit, and the full current chain is rerun. The failure remains recorded.
+All tracked and native inputs remain identical, so the verified SDK products
+are reused by exact input identity without another app build.
+
+Three normal-SDK Simulator UI cases cover join, actor checks and normal
+restoration. There is no private menu constructor or altered app binary.
+A real independent backend and source-admitted NPC use production codecs,
+normal touch controls, supported teleport and actual server NPC damage.
+Private fractional row and scripted NPC burning projections are explicit
+compatibility-fixture boundaries; the production independent backend still
+does not simulate NPC ignition. Saved captures are reviewed after owned
+apps and services close. The exact normal SDK app, installed resources and
+meaningful preferences are verified after the cases.
+
+The authored CLP tests establish controller behavior, not full rendered-rig
+or retail fidelity. NPC run-over prediction, complete protection/ghost and
+contagion admission, per-actor spatial fire audio, full original assets,
+ambient/police behavior, world materials, traffic handling, external-server
+acceptance, classic-PC comparison and physical-device performance remain
+open. No campaign or 1:1 claim. Original resources, raw private evidence
+and private Git ancestry stay local.
+
 ## Core201 remote actor life, fire and frame heat
 
 Native build 201 is the latest verified source batch.
