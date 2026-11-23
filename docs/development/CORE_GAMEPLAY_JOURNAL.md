@@ -1,3 +1,42 @@
+## Core206: entity-relative native climb handholds
+
+Build 206 is the latest verified source batch. An admitted physical handhold
+now retains entity-local position and heading, follows the current pose and
+point velocity, and ends when its owner disappears. A vehicle's live entity
+can retain a replacement solver; a despawned/recreated vehicle ID or imported
+object generation cannot inherit its task. Heading stays continuous through
+the angle wrap. Static phase timing and the existing initial query policy
+are retained.
+
+Actual unchanged owners reproduce the moving/removal failures. Current native
+physics checks cover translation, rotation, point velocity, query-to-task
+resolver replacement and moving phase completion at several display rates.
+Static stand/vault phase traces exactly match the preceding controller.
+Separate real Renderer/scene checks exercise vehicle solver replacement and
+imported-object generation lifetime; retained jump admission checks pass.
+
+Both fresh SDK builds and the uninterrupted current physics/audio/transport
+chain pass. A normal-SDK Simulator case covers crouching, three jetpack cycles,
+ground handoff, an ordinary jump and subsequent walking. The exact compiled
+UI runner is reused with the actual SDK app. Captures are reviewed after every
+owned app and service closes, with installed resources and preferences held.
+This general input regression does not establish rendered moving-climb parity.
+
+Already-admitted authored carriers are a fixture boundary. Original train,
+boat and surface eligibility, exact exit velocity/caller ordering, rendered
+foot planting and moving-handhold presentation remain open. Original-PC and
+physical-device fidelity, other resources and remaining sandbox systems are
+also incomplete. No campaign or 1:1 claim. Original resources, raw evidence,
+account data and private Git history stay local.
+
+The initial completion oracle compared a pre-jump query and a later
+body tick; the logical-removal oracle could stop before a physical tick at
+high refresh rates. Those actual failed attempts remain recorded separately.
+The reference/tick observations were corrected without relaxing their native
+assertions. A separate classic-source review confirms that abort resets
+horizontal velocity, so generic carrier momentum must not be added to every
+release. Exit-velocity differences still require their own runtime witness.
+
 ## Core203–205: target admission, jump clearance and reload ownership
 
 Build 205 is the latest verified source batch. Passive-player metadata stays

@@ -36,6 +36,7 @@ final class SupportRuntime {
   character!.update(delta:delta,displacement:.zero,jump:jump,geometryReady:ready)
  }
  func remoteAt(_ player:RemotePlayer)->SIMD3<Float>?{remoteSupportPosition(player)}
+ func boundClimbBody(_ body:UInt64)->(()->UInt64?)?{climbBodyResolver(for:body)}
  func installAuthoredObject(_ id:UInt16=900)throws->NativeRenderWareCollisionWorld.Handle {
   let surface=NativeRenderWareCollision.Surface(material:0,flags:nil,brightness:nil,lighting:255)
   let mesh=NativeRenderWareCollision.Mesh(vertices:[SIMD3(-4,-4,0),SIMD3(4,-4,0),SIMD3(4,4,0),SIMD3(-4,4,0)],
@@ -197,6 +198,29 @@ final class SupportRuntime {
    }
    stepped.removeAuthoredObject()
   }
-  print("PASS native support runtime: \(checks) physical/controller/Renderer dispatch checks across five display rates plus authored object translate/rotate/remove/reuse carry and 120 fixed kinematic ticks at seven display rates")
+  do {
+   let app=try SupportRuntime(root),ground=app.groundVehicle!
+   app.sync("carrier",model:"403")
+   let original=ground.supportFrames().first!.body,resolve=app.boundClimbBody(original)!
+   check(resolve()==original,"Actual Renderer/delegate lost its live vehicle carrier")
+   // Use the production ownership transition, which can replace its solver.
+   ground.synchronizeOtherVehicles([.init(id:"carrier",code:"403",position:SIMD3(0,0,3),heading:0,pitch:0,roll:0,occupied:false)],excluding:nil,near:.zero,delta:1/60)
+   let before=ground.supportFrames().first!.body
+   guard let hauled=ground.haulOtherVehicle(id:"carrier"),let replacement=hauled.body else{preconditionFailure("Actual production haul must first be accepted")}
+   check(replacement != before && ground.world.bodyState(before)==nil,"Fixture did not actually replace its solver")
+   check(resolve()==replacement,"Renderer carrier failed same-entry solver replacement")
+   check(ground.removeOtherVehicle(id:"carrier"),"Actual vehicle removal failed")
+   app.sync("carrier",model:"403")
+   check(resolve()==nil,"Renderer retained a removed/recreated vehicle with the same string ID")
+   let handle=try app.installAuthoredObject(),scene=app.legacyCollisionWorld!,body=scene.bodyID(for:handle.entityID)!
+   let object=app.boundClimbBody(body)!
+   check(object()==body,"Actual Renderer did not bind an imported object's existing handle")
+   try app.moveAuthoredObject(handle,x:1,yaw:0.2);_=app.tick()
+   check(object()==body,"Ordinary object movement invalidated a bound handhold")
+   app.removeAuthoredObject();let newer=try app.installAuthoredObject()
+   check(newer.generation != handle.generation && object()==nil,"Reused object ID inherited an old generation's task")
+   check(app.boundClimbBody(scene.bodyID(for:newer.entityID)!)?()==scene.bodyID(for:newer.entityID),"New object generation cannot acquire its own handhold")
+  }
+  print("PASS native support runtime: \(checks) physical/controller/Renderer dispatch checks across five display rates plus authored object carry, exact logical climb-carrier generation, and fixed kinematic ticks at seven display rates")
  }
 }

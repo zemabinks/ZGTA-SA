@@ -58,6 +58,7 @@ final class NativeGroundVehicle {
         let configuration:CouplingDefinition?
     }
     func supportFrames()->[SupportFrame]{others.supportFrames(configurations:couplingDefinitions)}
+    func bodyResolver(for body:SwiftRapierWorld.BodyID)->(()->SwiftRapierWorld.BodyID?)?{others.bodyResolver(for:body)}
     struct WorkingFrame {
         let value:Int,preciseValue:Double,kitValue:Double,localTowAnchor:SIMD3<Double>?,canAcquireTow:Bool,dropRequested:Bool
     }

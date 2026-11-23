@@ -356,6 +356,16 @@ final class NativeOtherVehicles {
         }
     }
     func bodyID(_ id:String)->SwiftRapierWorld.BodyID?{entries[id]?.bodyID}
+    /// A solver replacement can retain an entity; despawn/recreate cannot.
+    /// Weak exact-entry identity prevents a reused string ID inheriting tasks.
+    func bodyResolver(for body:SwiftRapierWorld.BodyID)->(()->SwiftRapierWorld.BodyID?)? {
+        guard let entry=order.compactMap({entries[$0]}).first(where:{$0.bodyID==body})else{return nil}
+        return {[weak self,weak entry]in
+            guard let self,let entry,self.entries[entry.id] === entry,
+                  let current=entry.bodyID,self.world.bodyState(current) != nil else{return nil}
+            return current
+        }
+    }
     func colliderIDs(_ id:String)->Set<SwiftRapierWorld.ColliderID>{entries[id]?.colliderIDs ?? []}
     func bodyState(_ id:String)->SwiftRapierWorld.BodyState?{entries[id]?.bodyID.flatMap{world.bodyState($0)}}
     func supportFrames(configurations:[String:NativeGroundVehicle.CouplingDefinition])->[NativeGroundVehicle.SupportFrame] {
