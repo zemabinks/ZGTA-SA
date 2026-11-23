@@ -16,7 +16,7 @@ from tests.movement.smoke_native_climb_runtime import function
 ROOT=Path(__file__).resolve().parents[2]
 JS=r'''
 const fs=require('node:fs'),crypto=require('node:crypto');
-const load=require(process.cwd()+'/smoke_vehicle_dynamics').archivedModules();
+const load=require(process.cwd()+'/tests/vehicles/smoke_vehicle_dynamics').archivedModules();
 const source=load.factories[19737].toString();
 const start=source.indexOf('(er>18.75'),suffix=',{weapon:54})',end=source.indexOf(suffix,start)+suffix.length;
 if(start<0 || end<=start)throw Error('Actual archived landing expression is unavailable');

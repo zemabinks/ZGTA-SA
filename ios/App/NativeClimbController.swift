@@ -32,6 +32,9 @@ final class NativeClimbController {
     private(set) var feet:V
     private(set) var part:Part
     private(set) var heading:Double
+    /// Rapier-world metres/second for the first free motor tick. A normal
+    /// abort clears carrier momentum; only an unsettled timeout pushes back.
+    private(set) var releaseVelocity:V?
     private var ledge:Ledge
     private let durations:Durations
     private let localHold:V?,localHeading:Double?
@@ -82,15 +85,20 @@ final class NativeClimbController {
         return distance<0.316
     }
     private func select(_ part:Part) {self.part=part;elapsed=0}
+    private func finish(_ end:End,timedOut:Bool=false)->End {
+        let speed:Double=end == .top ? 2.5:end == .over ? 1:timedOut ? -5:0
+        releaseVelocity=V(-sin(heading)*speed,end == .top ? -0.5:-2.5,-cos(heading)*speed)
+        return end
+    }
     func step(delta:Double,pull:Bool,drop:Bool)->End? {
         elapsed += delta
-        if drop {return .drop}
-        if !followCarrier(delta:delta) {return .drop}
+        if drop {return finish(.drop)}
+        if !followCarrier(delta:delta) {return finish(.drop)}
         switch part {
         case .jump,.hang:
             let close=approach(hanging,delta)
             unsettled=close ? 0:unsettled+delta
-            if unsettled>(part == .jump ? 1+durations.jump:0.5) {return .drop}
+            if unsettled>(part == .jump ? 1+durations.jump:0.5) {return finish(.drop,timedOut:true)}
             if part == .jump && elapsed>=durations.jump && close {
                 if pull {feet=hanging}
                 select(pull ? .pull:.hang)
@@ -102,11 +110,11 @@ final class NativeClimbController {
         case .edge:
             if approach(edge,delta) && simd_length(displacement)<0.06 {
                 feet=edge;select(ledge.vault ? .vault:.stand)
-            } else if elapsed>1 {return .drop}
+            } else if elapsed>1 {return finish(.drop,timedOut:true)}
         case .stand:
-            if elapsed>=durations.stand {feet=standing;return .top}
+            if elapsed>=durations.stand {feet=standing;return finish(.top)}
         case .vault:
-            if elapsed>=durations.vault {feet=over;return .over}
+            if elapsed>=durations.vault {feet=over;return finish(.over)}
         }
         return nil
     }
