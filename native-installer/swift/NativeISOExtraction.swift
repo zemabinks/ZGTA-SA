@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Foundation
+import Darwin
 import CZGTAInstaller
 
 /// Synchronous worker API. The caller retains any Files security scope and
@@ -29,6 +30,18 @@ final class NativeISOExtraction {
     private let handle:OpaquePointer,context:Context
     let entries:[Entry]
     let cancellation:Cancellation
+    static func withCoordinatedRead<T>(of url: URL, _ read: (URL) throws -> T) throws -> T {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        var error: NSError?
+        var result: Result<T, Error>?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: .withoutChanges, error: &error) { file in
+            result = Result { try read(file) }
+        }
+        if let result { return try result.get() }
+        throw error ?? CocoaError(.fileReadUnknown)
+    }
+
     init(source:URL,limits:zgta_installer_limits=zgta_installer_default_limits(),cancellation:Cancellation=Cancellation())throws{
         guard source.isFileURL else{throw Failure.invalid("Select a local original ISO file.")}
         self.cancellation=cancellation;let context=Context(cancellation);self.context=context
@@ -70,9 +83,18 @@ final class NativeISOExtraction {
     func extract(indices:[Int],to newStage:URL,progress:((Progress)->Void)?=nil)throws{
         guard newStage.isFileURL,!indices.isEmpty,indices.count<=Int(UInt32.max),indices.allSatisfy({$0>=0 && $0<entries.count}) else{throw Failure.invalid("Choose valid catalogue entries and a new app-owned staging folder.")}
         // Resolve only the parent; never follow an existing final destination.
-        let destination=newStage.deletingLastPathComponent().resolvingSymlinksInPath().appendingPathComponent(newStage.lastPathComponent)
+        // Foundation may normalize /private/var back to /var, while the C
+        // descriptor API requires libc's canonical spelling on Apple platforms.
+        let parent = newStage.deletingLastPathComponent().path
+        guard let canonical = realpath(parent, nil) else { throw Failure.invalid("The app staging directory could not be resolved.") }
+        defer { free(canonical) }
+        let resolved = String(cString: canonical)
+        guard resolved == parent || (parent.hasPrefix("/var/") && resolved == "/private" + parent) else {
+            throw Failure.invalid("Staging requires an app-owned directory without symlinked ancestors.")
+        }
+        let destination = resolved + "/" + newStage.lastPathComponent
         let selected=indices.map(UInt32.init);context.progress=progress;defer{context.progress=nil}
-        let status=destination.path.withCString{path in selected.withUnsafeBufferPointer{values in
+        let status=destination.withCString{path in selected.withUnsafeBufferPointer{values in
             zgta_installer_extract(handle,values.baseAddress,UInt32(values.count),path,nativeISOExtractionProgress,Unmanaged.passUnretained(context).toOpaque())
         }}
         if status==ZGTA_INSTALLER_CANCELLED{throw Failure.cancelled}

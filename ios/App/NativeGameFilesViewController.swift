@@ -74,8 +74,22 @@ final class NativeGameFilesViewController:NativeDEPanelViewController,UIDocument
         checkNavigationButton.accessibilityIdentifier="gamefiles.checkNavigation";sourceButtons.append(checkNavigationButton)
         configure(rawDetail);rawDetail.accessibilityIdentifier="gamefiles.rawStatus"
         configure(inspection);inspection.isHidden=true
+        let model=menuButton("INSTALL / VIEW ORIGINAL MODEL"){[weak self] in
+            guard let self,self.active,!self.coordinator.state.busy,self.presentedViewController==nil else{return}
+            let screen=NativeISOModelViewController()
+            screen.modalPresentationStyle = .fullScreen
+            self.present(screen,animated:!self.menuMotionReduced)
+        }
+        model.accessibilityIdentifier="gamefiles.installISOModel";sourceButtons.append(model)
+        let region=menuButton("INSTALL / VIEW EAST LOS SANTOS"){[weak self] in
+            guard let self,self.active,!self.coordinator.state.busy,self.presentedViewController==nil else{return}
+            let screen=NativeISOModelViewController(showsRegion:true)
+            screen.modalPresentationStyle = .fullScreen
+            self.present(screen,animated:!self.menuMotionReduced)
+        }
+        region.accessibilityIdentifier="gamefiles.installISORegion";sourceButtons.append(region)
         column.addArrangedSubview(panel("ORIGINAL GAME SOURCE",[
-            note("Select your own original San Andreas ISO in Files. You can transfer it to ZGTA:SA through Finder file sharing, or place it in On My iPhone > ZGTA:SA. Extraction saves and checks original game resources; it leaves the ISO unchanged and excludes Windows components. Supported original radio packs can be read locally alongside a prepared native installation. World, models and other raw resources still require native conversion; extraction alone does not enable gameplay."),extract,verifyRawButton,checkNavigationButton,rawDetail,inspect,inspection]))
+            note("Choose your San Andreas PC ISO in Files. Install the textured plant model or a section of East Los Santos for local viewing. Raw extraction also saves resources for inspection and supported local radio playback. A complete playable world still requires a prepared installation."),model,region,extract,verifyRawButton,checkNavigationButton,rawDetail,inspect,inspection]))
 
         progressPanel.axis = .vertical;progressPanel.spacing=8
         progressTitle.font=menuFont(size:23);progressTitle.textColor = .white;progressTitle.numberOfLines=0

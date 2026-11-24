@@ -23,6 +23,11 @@ def main():
     spec.loader.exec_module(guard)
     assert not guard.allowed('smoke_selfhost_vehicle_seats_browser.js')
     assert not guard.allowed('tests/smoke_selfhost_vehicle_seats_browser.js')
+    for name in ('NativeWorldPlacement', 'NativeWorldStreamIPL'):
+        assert guard.allowed(f'native-installer/swift/{name}.swift')
+    for name in ('disc.iso', 'models/gta3.img', 'ios/App/geometry.dff',
+                 'ios/App/paint.txd', 'ios/App/surface.col', 'local-only/installed-lae-section-v1.zgta'):
+        assert not guard.allowed(name), name
     assert guard.allowed('native-audio/vendor/libvorbis-1.3.7/COPYING')
     assert guard.allowed('native-audio/vendor/libvorbis-1.3.7/lib/sharedbook.c')
     assert guard.allowed('native-audio/vendor/provenance.json')

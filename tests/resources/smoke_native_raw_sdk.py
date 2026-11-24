@@ -12,6 +12,10 @@ ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'local-only/research/raw-resource-sdk'
 NAMES=['NativeResourceManifest','NativeResourceStore','NativeRawResourceLease','NativeRawResourceStore','NativeGameSourceInspector','NativeOriginalPathQuery','NativeOriginalNavigationLoader','NativeGameFilesCoordinator']
 PANEL='''import UIKit
+class NativeISOModelViewController:UIViewController {
+ init(showsRegion:Bool=false){super.init(nibName:nil,bundle:nil)}
+ required init?(coder:NSCoder){fatalError()}
+}
 class NativeDEPanelViewController:UIViewController {
  let contentView=UIView();var menuMotionReduced:Bool{false}
  init(title:String){super.init(nibName:nil,bundle:nil)}
