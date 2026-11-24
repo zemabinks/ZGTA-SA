@@ -99,7 +99,13 @@ assignment, passenger publication to a second client, removal and return to
 foot sync for both legacy profiles. The test drives the actual network API
 with scripted input. Rendered and touch acceptance for this path remain open.
 
-Known incomplete areas include player-initiated legacy passenger boarding, drive-by, incoming aim and bullet presentation,
+The local passenger request also follows the standard legacy entry
+notification and then sends position sync for the selected seat. A repeated
+request while seated is declined. Loopback open.mp confirms client boarding
+and exit on both legacy profiles. Local publication precedes the server's
+broadcast, as the entry notification has no separate acceptance packet.
+
+Known incomplete areas include drive-by, incoming aim and bullet presentation,
 complete combat damage and attribution, full server RPC/pickup/checkpoint coverage,
 stock and supplemental object assets, sprite/model-preview TextDraws,
 all server menus, client-specific anti-cheat/CEF/voice integrations, large-ammo

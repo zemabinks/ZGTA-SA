@@ -66,7 +66,7 @@ struct NativeVehicleSeatSession {
         return nil
     }
     mutating func cancel()->Entry?{let old=pending;pending=nil;return old}
-    mutating func assignServerPassenger(vehicle: String, seat: Int) -> Bool {
+    mutating func setLegacyPassenger(vehicle: String, seat: Int) -> Bool {
         guard Self.validID(vehicle), (1...15).contains(seat) else { return false }
         let assignment = Seat(vehicle: vehicle, index: seat)
         guard passenger != assignment else { return false }
@@ -597,7 +597,7 @@ final class NativeMultiplayerClient {
                     if seat == 0 {
                         self.vehicleSeats.clearOccupancy()
                         self.onEnter?(id, true)
-                    } else if self.vehicleSeats.assignServerPassenger(vehicle: id, seat: seat) {
+                    } else if self.vehicleSeats.setLegacyPassenger(vehicle: id, seat: seat) {
                         self.onPassengerEnter?(id, seat, true)
                     }
                 }
@@ -874,8 +874,24 @@ final class NativeMultiplayerClient {
 
     @discardableResult func requestEnter(_ vehicle: RemoteVehicle,seat:Int=0)->Bool {
         guard isReady,(0...15).contains(seat)else{return false}
-        if seat>0,(legacy != nil || usesOriginalWorldProtocol){onStatus?("PASSENGER CONTROL IS NOT AVAILABLE ON THIS SERVER ADAPTER YET");return false}
-        if let legacy{let accepted=legacy.send(["t":"enter","v":vehicle.id]);onEnter?(vehicle.id,accepted);return accepted}
+        if seat > 0, usesOriginalWorldProtocol {
+            onStatus?("PASSENGER CONTROL IS NOT AVAILABLE ON THIS SERVER ADAPTER YET")
+            return false
+        }
+        if let legacy {
+            guard vehicleSeats.passenger == nil else { return false }
+            let queued = legacy.send(["t": "enter", "v": vehicle.id, "seat": seat])
+            if seat == 0 {
+                onEnter?(vehicle.id, queued)
+                return queued
+            }
+            // Legacy boarding starts locally after the notification is queued.
+            // Actual seat publication comes from passenger sync, not an ACK.
+            guard queued, isReady, vehicles[vehicle.id] != nil,
+                  vehicleSeats.setLegacyPassenger(vehicle: vehicle.id, seat: seat) else { return false }
+            onPassengerEnter?(vehicle.id, seat, true)
+            return true
+        }
         if usesOriginalWorldProtocol{send(["t":"enter","v":vehicle.id]);return true}
         guard let entry=vehicleSeats.request(vehicle:vehicle.id,seat:seat)else{return false}
         var packet:[String:Any]=["t":"enter","v":vehicle.id,"seat":seat,"request":entry.request]

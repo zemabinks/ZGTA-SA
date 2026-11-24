@@ -158,6 +158,22 @@ func exercise(_ version:NativeSAMPProtocol.Version)throws->[String:Any] {
                                       heading: 0, action: 0, velocity: .zero, paused: false)
     transmit(0.25){foot(.init())}
     try wait(4, until: { observer.players[targetID].map { $0.passenger == nil } == true })
+    try begin("passenger_request")
+    try require(multiplayer.requestEnter(car, seat: 1), "Local passenger notification did not queue")
+    try require(!multiplayer.requestEnter(car, seat: 1) && passengerEntries.count == 2,
+                "A second local request must not duplicate the active passenger")
+    transmit(0.6) {
+        multiplayer.sendPassengerPosition(NativeSAMPPedCoordinates.feet(seatPoint),
+                                          heading: 0, action: 0, velocity: .zero, paused: false)
+    }
+    try wait(4, until: {
+        guard let player = observer.players[targetID],
+              case .seated(let vehicle, let seat) = player.passenger else { return false }
+        return vehicle == passengerVehicle && seat == 1 && player.vehicle == nil
+    })
+    try begin("passenger_leave")
+    multiplayer.sendPassengerExit(NativeSAMPPedCoordinates.feet(seatPoint), heading: 0)
+    try wait(4, until: { observer.players[targetID].map { $0.passenger == nil } == true })
     try require(presence.last?["count"]as?Int==2,"Full-server roster lost the local or observer player")
     try require((presence.last?["names"]as?[String])?.filter{$0==nickname}.count==1,"Local roster member duplicated")
     phase="stream_far";multiplayer.sendChat("/qa_far")

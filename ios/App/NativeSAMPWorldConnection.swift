@@ -237,6 +237,20 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
             return client.sendSpectatorPosition(point,keys:keys,axes:axes)
         case "enter":
             guard let text=message["v"]as?String,let id=UInt16(text)else{return false}
+            let seat = message["seat"] as? Int ?? 0
+            guard (0...15).contains(seat) else { return false }
+            if seat > 0 {
+                let occupied = client.players.values.contains { player in
+                    guard player.id != client.localID,
+                          case .seated(let vehicle, let index) = player.passenger else { return false }
+                    return vehicle == id && index == seat
+                }
+                guard !occupied else {
+                    onStatus?("PASSENGER SEAT UNAVAILABLE")
+                    return false
+                }
+                return client.enterVehicle(id, passenger: true)
+            }
             guard !client.players.values.contains(where:{$0.id != client.localID && $0.vehicle==id})else{
                 onStatus?("VEHICLE OCCUPIED — NATIVE JACKING IS NOT AVAILABLE YET");return false
             }
