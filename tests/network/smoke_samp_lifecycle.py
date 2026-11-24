@@ -26,7 +26,7 @@ def main():
   actor=before['ios/App/NativeActorAnimation.swift'].decode();motion=actor[actor.index('struct NativePedestrianMotion {'):actor.index('struct NativeWeaponAnimation {')]
   (work/'PedestrianMotion.swift').write_text('import Foundation\nimport simd\n'+motion);sources.append(str(work/'PedestrianMotion.swift'))
   (work/'main.swift').write_bytes(before['tests/network/smoke_samp_lifecycle.swift'])
-  result=subprocess.run(['xcrun','swiftc','-Onone','-module-cache-path',str(out/'modules'),'-I',str(ROOT/'native-samp/include'),*sources,str(work/'main.swift'),'-L',str(ROOT/('local-only/native-samp/macos-'+platform.machine())),'-lzgtasa_samp','-lresolv','-framework','CoreFoundation','-framework','Security','-o',str(work/'verify')],capture_output=True,text=True)
+  result=subprocess.run(['xcrun','swiftc','-Onone','-j','1','-num-threads','1','-module-cache-path',str(out/'modules'),'-I',str(ROOT/'native-samp/include'),*sources,str(work/'main.swift'),'-L',str(ROOT/('local-only/native-samp/macos-'+platform.machine())),'-lzgtasa_samp','-lresolv','-framework','CoreFoundation','-framework','Security','-o',str(work/'verify')],capture_output=True,text=True)
   (out/'compile.log').write_text(result.stdout+result.stderr)
   if result.returncode:print(result.stdout+result.stderr);result.check_returncode()
   result=subprocess.run([str(work/'verify')],capture_output=True,text=True);same=all((ROOT/p).read_bytes()==b for p,b in before.items())

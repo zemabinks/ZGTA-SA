@@ -47,8 +47,9 @@ have been tested. Original archives, indexes and converted files stay local.
 The app exposes a real server-address/profile form, class selection, spawn,
 chat/commands, weapon/health/interior commands, streamed players/vehicles,
 on-foot and driver synchronization, dialogs, basic TextDraws and click replies.
-The asset origin remains the owner's prepared Mac server. It is distinct from
-the selected UDP gameplay destination. See [HOSTING.md](../../HOSTING.md) for required
+The join screen in installed mode verifies the legacy catalogues through the local
+resource store and uses the selected UDP server for gameplay. Development mode
+uses the configured Mac resource server. See [HOSTING.md](../../HOSTING.md) for required
 skin and weapon sidecars and [NATIVE_BUILD.md](../../NATIVE_BUILD.md) for Go/Rust/SDK
 requirements.
 
@@ -91,7 +92,20 @@ handles, queues, packets and asynchronous close. Host race tests, actual C ABI
 links and iPhone/universal Simulator SDK links are separate gates. No ReSA code
 or original website implementation is included in the public source.
 
-Known incomplete areas include passenger/drive-by/incoming aim and bullet presentation,
+Server-assigned passenger seats now reach the native passenger controller.
+Passenger sync carries the seat and player vitals without claiming the driver
+slot. The observer follows the shared vehicle. An owned open.mp server verified
+assignment, passenger publication to a second client, removal and return to
+foot sync for both legacy profiles. The test drives the actual network API
+with scripted input. Rendered and touch acceptance for this path remain open.
+
+The local passenger request also follows the standard legacy entry
+notification and then sends position sync for the selected seat. A repeated
+request while seated is declined. Loopback open.mp confirms client boarding
+and exit on both legacy profiles. Local publication precedes the server's
+broadcast, as the entry notification has no separate acceptance packet.
+
+Known incomplete areas include drive-by, incoming aim and bullet presentation,
 complete combat damage and attribution, full server RPC/pickup/checkpoint coverage,
 stock and supplemental object assets, sprite/model-preview TextDraws,
 all server menus, client-specific anti-cheat/CEF/voice integrations, large-ammo

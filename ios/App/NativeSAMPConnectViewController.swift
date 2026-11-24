@@ -4,21 +4,28 @@ import UIKit
 /// whose first-run keyboard overlays can prevent editing and dismissal.
 final class NativeSAMPConnectViewController:NativeDEPanelViewController {
     private let assets:ServerAddress,joinCode:String
+    private let installed: Bool
     private let serverField=UITextField(),nameField=UITextField(),passwordField=UITextField()
     private let profile=UISegmentedControl(items:["0.3.7 / OPEN.MP","0.3.DL"])
     private let joinButton=UIButton(type:.system),message=UILabel()
     private var account:NativeMenuProfileClient?
     private var busy=false,active=false
-    private var metadataTasks:[URLSessionDataTask]=[]
+    private var metadataTasks:[NativeResourceTask]=[]
     private var metadataGeneration:UInt64=0
     var onConnection:((NativeSAMPWorldConnection)->Void)?
-    init(assets:ServerAddress,joinCode:String){self.assets=assets;self.joinCode=joinCode;super.init(title:"SA-MP / OPEN.MP")}
+    init(assets: ServerAddress, joinCode: String, installed: Bool) {
+        self.assets = assets
+        self.joinCode = joinCode
+        self.installed = installed
+        super.init(title: "SA-MP / OPEN.MP")
+    }
     required init?(coder:NSCoder){fatalError("Programmatic connection menu")}
     override func viewDidLoad(){
         super.viewDidLoad();let scroll=NativeMenuScrollView();scroll.translatesAutoresizingMaskIntoConstraints=false
         scroll.keyboardDismissMode = .interactive;contentView.addSubview(scroll)
         let column=scroll.column;column.axis = .vertical;column.spacing=12
-        let info=UILabel();info.text="GAME FILES: \(assets.display)\nSERVER ACCOUNTS AND RULES STILL APPLY."
+        let info=UILabel()
+        info.text = installed ? "USING INSTALLED GAME FILES" : "GAME FILES: \(assets.display)"
         info.font=bodyFont(size:14);info.textColor = .lightGray;info.numberOfLines=0;column.addArrangedSubview(info)
         configure(serverField,title:"SERVER ADDRESS",placeholder:"server.example:7777",secret:false,column:column)
         serverField.keyboardType = .URL;serverField.accessibilityLabel="SA-MP server address"
@@ -58,7 +65,7 @@ final class NativeSAMPConnectViewController:NativeDEPanelViewController {
         metadataGeneration &+= 1;let epoch=metadataGeneration;var remaining=2,valid=true
         for path in ["game/native/samp-skins.json","game/native/original-weapons.json"] {
             let request=URLRequest(url:assets.path(path),cachePolicy:.reloadIgnoringLocalCacheData,timeoutInterval:8)
-            let task=URLSession.shared.dataTask(with:request){[weak self] data,response,_ in
+            let task=NativeResourceTransport.boundedDataTask(with:request, maximumBytes:2_000_000){[weak self] data,response,_ in
                 DispatchQueue.main.async {
                     guard let self,self.active,self.metadataGeneration==epoch else{return}
                     var accepted=false
@@ -78,23 +85,53 @@ final class NativeSAMPConnectViewController:NativeDEPanelViewController {
         guard active,!busy,let server=NativeSAMPAddress(serverField.text ?? ""),let name=nameField.text else{message.text="ENTER A VALID SERVER ADDRESS AND PLAYER NAME.";return}
         let version:NativeSAMPProtocol.Version=profile.selectedSegmentIndex==1 ? .dl:.v037,id=NativeSAMPIdentity.installation()
         guard (try?NativeSAMPProtocol.join(version:version,nickname:name,installationID:id,challenge:0)) != nil else{message.text="PLAYER NAMES MUST USE 3–24 ASCII CHARACTERS.";return}
-        busy=true;joinButton.isEnabled=false;view.endEditing(true);message.text="CONNECTING TO YOUR GAME FILES SERVER…"
-        let client=NativeMenuProfileClient(server:assets);account=client;let password=passwordField.text ?? ""
+        let binding = NativeResourceStore.shared.runtimeBinding
+        if installed && (binding.mode != .installed || !binding.playable) {
+            message.text = "VERIFY YOUR INSTALLED GAME FILES BEFORE CONNECTING."
+            return
+        }
+        busy = true
+        joinButton.isEnabled = false
+        view.endEditing(true)
+        let password = passwordField.text ?? ""
+        let verifyAndConnect = { [weak self] in
+            guard let self, self.active else { return }
+            self.message.text = "CHECKING GAME FILES…"
+            self.verifyRuntime { [weak self] ready in
+                guard let self, self.active else { return }
+                self.busy = false
+                self.joinButton.isEnabled = true
+                let sameInstallation = !self.installed || NativeResourceStore.shared.runtimeBinding == binding
+                guard ready, sameInstallation else {
+                    self.message.text = self.installed
+                        ? "VERIFY OR REPAIR THE INSTALLED PACK. IT NEEDS THE LEGACY SKIN AND WEAPON DATA."
+                        : "PREPARE THE SKIN AND WEAPON DATA ON YOUR MAC BEFORE CONNECTING."
+                    return
+                }
+                UserDefaults.standard.set(server.display, forKey: "nativeSAMP.server")
+                UserDefaults.standard.set(name, forKey: "nativeSAMP.nickname")
+                self.message.text = "CONNECTING TO \(server.display)…"
+                let transport = NativeSAMPClient(address: server.display, nickname: name,
+                                                 version: version, installationID: id, password: password)
+                self.onConnection?(NativeSAMPWorldConnection(client: transport, assetServer: self.assets))
+            }
+        }
+        if installed {
+            verifyAndConnect()
+            return
+        }
+        message.text = "CONNECTING TO YOUR GAME FILES SERVER…"
+        let client = NativeMenuProfileClient(server: assets)
+        account = client
         client.connect(joinCode:joinCode){[weak self,weak client]result in
             guard let self,self.active,self.account === client else{return}
-            self.busy=false;self.joinButton.isEnabled=true
             switch result{
-            case .failure(let error):self.message.text=error.message
+            case .failure(let error):
+                self.busy = false
+                self.joinButton.isEnabled = true
+                self.message.text = error.message
             case .success:
-                UserDefaults.standard.set(server.display,forKey:"nativeSAMP.server");UserDefaults.standard.set(name,forKey:"nativeSAMP.nickname")
-                self.message.text="CONNECTING TO \(server.display)…"
-                self.busy=true;self.joinButton.isEnabled=false
-                self.verifyRuntime { [weak self] ready in
-                    guard let self,self.active else{return};self.busy=false;self.joinButton.isEnabled=true
-                    guard ready else{self.message.text="PREPARE THE SAN ANDREAS SKIN AND WEAPON DATA ON YOUR MAC BEFORE CONNECTING.";return}
-                    let transport=NativeSAMPClient(address:server.display,nickname:name,version:version,installationID:id,password:password)
-                    self.onConnection?(NativeSAMPWorldConnection(client:transport,assetServer:self.assets))
-                }
+                verifyAndConnect()
             }
         }
     }

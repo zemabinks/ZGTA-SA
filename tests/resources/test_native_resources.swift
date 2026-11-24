@@ -242,6 +242,18 @@ enum NativePreparedRuntimeVerifier {
                 _=try await control(b,["action":"stopA"]);checks.notes.append("Asset listenerA closed before installed GET/HEAD; API listenerB remains reachable")
                 let localGet=await response(local,a.appendingPathComponent(payload));checks.check(localGet.error==nil&&localGet.data==bytesA&&localGet.response?.value(forHTTPHeaderField:"X-ZGTA-Resource-Source")=="installed","installed GET succeeds without asset listener")
                 let localHead=await response(local,a.appendingPathComponent(payload),"HEAD");checks.check(localHead.error==nil&&localHead.data==nil&&localHead.response?.value(forHTTPHeaderField:"Content-Length")==String(bytesA.count),"installed HEAD returns exact local metadata without asset listener")
+                let localOrigin = ServerAddress.installedResources
+                let originGet = await response(local, localOrigin.path(payload))
+                checks.check(originGet.data == bytesA && originGet.response?.value(forHTTPHeaderField: "X-ZGTA-Resource-Source") == "installed",
+                             "local-only origin resolves the pack without an asset host")
+                let originAPI = await response(local, localOrigin.path("api/local/status"))
+                checks.check(originAPI.error is NativeResourceStore.Failure && originAPI.response == nil,
+                             "local-only origin never sends a network API request")
+                try installed.setMode(.development)
+                let unavailable = await response(local, localOrigin.path(payload))
+                checks.check(unavailable.error is NativeResourceStore.Failure && unavailable.response == nil,
+                             "local-only origin never falls back to network after a mode change")
+                try installed.setMode(.installed)
                 let badInstalledURL=URL(string:b.absoluteString+"/game/native/space%20asset.bin")!
                 checks.rejects("direct installed data reader rejects invalid static path"){_ = try installed.localResource(for:badInstalledURL)}
                 checks.rejects("direct installed file reader rejects invalid static path"){_ = try installed.installedURL(for:badInstalledURL)}
@@ -285,7 +297,7 @@ private extension NativeResourceRegression {
             else if path.hasSuffix(".png"){bytes=Data([137,80,78,71,13,10,26,10])+Data("authored image carrier".utf8)}
             else if path.hasSuffix("clips.bin"){bytes=Data("CLP1 authored transaction carrier".utf8)}
             else if path.hasSuffix("synthetic.bin"){bytes=Data("WRL2 authored transaction carrier".utf8)}
-            else{bytes=Data("authored immutable payload bytes".utf8)}
+            else{bytes=Data(repeating: 0x76, count: 1_024 * 1_024 + 37)}
             let digest=hash(bytes);try bytes.write(to:package.appendingPathComponent("blobs/"+digest))
             rows.append(.init(path:path,bytes:Int64(bytes.count),sha256:digest,required:true))
         }
@@ -303,6 +315,32 @@ private extension NativeResourceRegression {
             try store.setMode(.installed);return(store,root)
         }
         func reopened(_ root:URL)->NativeResourceStore{NativeResourceStore(root:root,validationIdentity:syntheticIdentity,runtimeValidator:validateSynthetic)}
+        let cancelGate = ResourceIOGate()
+        let cancelValidator: NativeResourceStore.RuntimeValidator = { manifest, resolve in
+            try validateSynthetic(manifest, resolve)
+            _ = try cancelGate.pauseIfArmed()
+        }
+        let (cancelledStore, cancelledRoot) = try await make("cancel-verification", validator: cancelValidator)
+        let existingReceipt = try receipt(cancelledRoot)["admissionID"] as? String
+        cancelGate.arm()
+        let cancelled = await operation { completion in
+            let handle = ResourceCancelHandle(cancelledStore.verifyInstalled(progress: { _ in }, completion: completion))
+            Task {
+                let entered = await gateEntered(cancelGate)
+                checks.check(entered, "verification reached the runtime gate before cancellation")
+                handle.operation.cancel()
+                cancelGate.release.signal()
+            }
+            return handle.operation
+        }
+        if case .failure(NativeResourceStore.Failure.cancelled) = cancelled {
+            checks.check(true, "verification cancellation completes")
+        } else {
+            checks.check(false, "verification cancellation completes")
+        }
+        checks.check(cancelledStore.snapshot.hasPlayableInstallation, "cancelling verification preserves the active installation")
+        checks.check(try cancelledStore.localResource(for: url)?.0 == good, "existing installed bytes remain available immediately")
+        checks.check(try receipt(cancelledRoot)["admissionID"] as? String == existingReceipt, "cancelled verification does not replace the receipt")
         let (store,root)=try await make("checksum")
         let originalID=try receipt(root)["admissionID"]as!String
         try bad.write(to:blob(root),options:.atomic)

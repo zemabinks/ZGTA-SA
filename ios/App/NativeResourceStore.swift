@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import Foundation
 import CryptoKit
+import Darwin
 
 /// Persistent content-addressed resource storage shared by installation and
 /// development streaming. App updates do not change the Application Support root.
@@ -84,6 +85,10 @@ final class NativeResourceStore {
         let generation:UUID
         let key:String?
         let file:FileIdentity?
+    }
+    private enum InstallationSource {
+        case local(URL)
+        case download(URL)
     }
     static let shared: NativeResourceStore = {
         let parent = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
@@ -212,19 +217,29 @@ final class NativeResourceStore {
               values.isRegularFile == true, values.isSymbolicLink != true, let n = values.fileSize else { return nil }
         return Int64(n)
     }
-    private func digest(_ url: URL, operation: Operation? = nil) throws -> (Int64,String) {
+    private func digest(_ url: URL, expectedBytes: Int64, operation: Operation?,
+                        copyingTo output: FileHandle? = nil) throws -> (Int64,String) {
         guard Self.size(url) != nil else { throw Failure.missing(url.lastPathComponent) }
         let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
         var hash = SHA256(), bytes: Int64 = 0
-        while let data = try file.read(upToCount: 1_024 * 1_024), !data.isEmpty {
-            try operation?.check(); bytes += Int64(data.count); hash.update(data: data)
+        while bytes < expectedBytes {
+            try operation?.check()
+            let limit = Int(min(1_024 * 1_024, expectedBytes - bytes))
+            guard let data = try file.read(upToCount: limit), !data.isEmpty else { break }
+            try output?.write(contentsOf: data)
+            bytes += Int64(data.count)
+            hash.update(data: data)
+        }
+        try operation?.check()
+        if let extra = try file.read(upToCount: 1), !extra.isEmpty {
+            return (bytes + 1, "")
         }
         return (bytes,hash.finalize().map { String(format: "%02x",$0) }.joined())
     }
     private func matches(_ item: NativeResourceManifest.Resource, at url: URL, operation: Operation?) throws -> Bool {
         guard Self.size(url) == item.bytes else { return false }
         do {
-            let actual = try digest(url, operation: operation)
+            let actual = try digest(url, expectedBytes: item.bytes, operation: operation)
             return actual.0 == item.bytes && actual.1 == item.sha256
         } catch {
             try operation?.check()
@@ -411,12 +426,11 @@ final class NativeResourceStore {
                               completion: @escaping(Result<Snapshot,Error>)->Void) -> Operation {
         perform(progress:progress,completion:completion) { operation,update in
             let manifestURL = folder.appendingPathComponent(NativeResourceManifest.filename)
-            guard Self.size(manifestURL) != nil else { throw Failure.missing(NativeResourceManifest.filename) }
+            guard let manifestSize = Self.size(manifestURL) else { throw Failure.missing(NativeResourceManifest.filename) }
+            guard manifestSize <= 64 * 1_024 * 1_024 else { throw Failure.invalid("Resource catalogue is too large") }
             let manifest = try NativeResourceManifest.decode(Data(contentsOf: manifestURL))
             try self.install(manifest,origin:nil,operation:operation,update:update) { item in
-                let source = folder.appendingPathComponent("blobs").appendingPathComponent(item.sha256)
-                guard try self.matches(item,at:source,operation:operation) else { throw Failure.checksum(item.path) }
-                return source
+                .local(folder.appendingPathComponent("blobs").appendingPathComponent(item.sha256))
             }
         }
     }
@@ -431,19 +445,22 @@ final class NativeResourceStore {
             defer { try? self.files.removeItem(at:temporary) }
             let manifest = try NativeResourceManifest.decode(Data(contentsOf:temporary))
             try self.install(manifest,origin:base.absoluteString,operation:operation,update:update) { item in
-                try self.download(base.appendingPathComponent("game/native/resource-blobs/\(item.sha256)"),maximum:item.bytes,operation:operation)
+                .download(try self.download(base.appendingPathComponent("game/native/resource-blobs/\(item.sha256)"),maximum:item.bytes,operation:operation))
             }
         }
     }
     private func install(_ manifest: NativeResourceManifest, origin:String?, operation: Operation,
                          update: @escaping(Progress)->Void,
-                         acquire: (NativeResourceManifest.Resource)throws->URL) throws {
+                         acquire: (NativeResourceManifest.Resource)throws->InstallationSource) throws {
         var completed: Int64 = 0
         let staging = root.appendingPathComponent("staging")
+        let totalBytes = manifest.totalBytes
         for (index,item) in manifest.resources.enumerated() {
             try operation.check()
-            update(Progress(phase:"Verifying resources",completedFiles:index,totalFiles:manifest.resources.count,
-                            completedBytes:completed,totalBytes:manifest.totalBytes,currentPath:item.path))
+            if index % 32 == 0 {
+                update(Progress(phase:"Verifying resources",completedFiles:index,totalFiles:manifest.resources.count,
+                                completedBytes:completed,totalBytes:totalBytes,currentPath:item.path))
+            }
             let target = blobURL(item.sha256)
             lock.lock()
             let activeRead:(NativeResourceManifest.Resource,ReadAdmission)?
@@ -453,20 +470,28 @@ final class NativeResourceStore {
             lock.unlock()
             if !(try matches(item,at:target,operation:operation)) {
                 if let activeRead{runtimeFault(activeRead.0,read:activeRead.1)}
-                let source = try acquire(item)
-                let copy = staging.appendingPathComponent(UUID().uuidString+".partial")
-                defer { try? files.removeItem(at:copy) }
-                // Streaming downloads already live under this app-owned staging root.
-                let downloaded = source.deletingLastPathComponent().standardizedFileURL == staging.standardizedFileURL
-                defer { if downloaded { try? files.removeItem(at:source) } }
-                try copyResource(from:source,to:copy,operation:operation)
-                guard try matches(item,at:copy,operation:operation) else { throw Failure.checksum(item.path) }
+                let staged: URL
+                switch try acquire(item) {
+                case .local(let source):
+                    staged = staging.appendingPathComponent(UUID().uuidString + ".partial")
+                    do { try stageResource(item, from: source, to: staged, operation: operation) }
+                    catch { try? files.removeItem(at: staged); throw error }
+                case .download(let source):
+                    staged = source
+                    do {
+                        guard try matches(item, at: staged, operation: operation) else { throw Failure.checksum(item.path) }
+                    } catch { try? files.removeItem(at: staged); throw error }
+                }
+                defer { try? files.removeItem(at: staged) }
                 try operation.check()
-                if files.fileExists(atPath:target.path) { try files.removeItem(at:target) }
-                try files.moveItem(at:copy,to:target)
+                // A verified sibling replaces the old blob in one filesystem operation.
+                guard rename(staged.path, target.path) == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
             }
-            lock.lock(); cacheSizes[item.sha256] = item.bytes; let sizes = cacheSizes; lock.unlock()
-            if index % 32 == 0 || index == manifest.resources.count-1 {
+            lock.lock(); cacheSizes[item.sha256] = item.bytes; lock.unlock()
+            if index % 512 == 0 || index == manifest.resources.count-1 {
+                lock.lock(); let sizes = cacheSizes; lock.unlock()
                 try JSONEncoder().encode(sizes).write(to:root.appendingPathComponent("cache-index.json"),options:.atomic)
                 try JSONSerialization.data(withJSONObject:["contentID":manifest.contentID,"verifiedFiles":index+1,"totalFiles":manifest.resources.count]).write(to:root.appendingPathComponent("checkpoint.json"),options:.atomic)
             }
@@ -475,14 +500,14 @@ final class NativeResourceStore {
         try operation.check()
         try validateBootstrap(manifest)
         update(Progress(phase:"Validating native resource graph",completedFiles:manifest.resources.count,totalFiles:manifest.resources.count,
-                        completedBytes:completed,totalBytes:manifest.totalBytes,currentPath:nil))
+                        completedBytes:completed,totalBytes:totalBytes,currentPath:nil))
         let validatedBy=try validateRuntime(manifest,operation:operation)
         try operation.check()
         // Catalogue and origin change at one commit point. A failed/cancelled
         // import cannot make an older host use a different package's entries.
         try commitAdmission(manifest,origin:origin,validatedBy:validatedBy)
         update(Progress(phase:"Prepared installation verified",completedFiles:manifest.resources.count,totalFiles:manifest.resources.count,
-                        completedBytes:completed,totalBytes:manifest.totalBytes,currentPath:nil))
+                        completedBytes:completed,totalBytes:totalBytes,currentPath:nil))
     }
     private func commitAdmission(_ manifest:NativeResourceManifest,origin:String?,validatedBy:String,
                                  expected:(UUID,UInt64)?=nil,verifiedSizes:[String:Int64]=[:])throws {
@@ -539,13 +564,13 @@ final class NativeResourceStore {
         })
         return identity
     }
-    private func copyResource(from source:URL,to target:URL,operation:Operation) throws {
-        let input=try FileHandle(forReadingFrom:source);defer{try? input.close()}
+    private func stageResource(_ item: NativeResourceManifest.Resource, from source: URL, to target: URL,
+                               operation: Operation) throws {
+        guard Self.size(source) == item.bytes else { throw Failure.checksum(item.path) }
         guard files.createFile(atPath:target.path,contents:nil) else {throw Failure.invalid("Cannot create staged resource")}
         let output=try FileHandle(forWritingTo:target);defer{try? output.close()}
-        while let data=try input.read(upToCount:1_024*1_024),!data.isEmpty {
-            try operation.check();try output.write(contentsOf:data)
-        }
+        let (bytes, digest) = try digest(source, expectedBytes: item.bytes, operation: operation, copyingTo: output)
+        guard bytes == item.bytes, digest == item.sha256 else { throw Failure.checksum(item.path) }
         try output.synchronize()
     }
     private func validateBootstrap(_ manifest: NativeResourceManifest) throws {
@@ -566,6 +591,7 @@ final class NativeResourceStore {
         perform(progress:progress,completion:completion) { operation,update in
             self.lock.lock(); let manifest = self.catalogue,expected=(self.admissionGeneration,self.faultRevision); self.lock.unlock()
             guard let manifest else { throw Failure.invalid("No prepared installation has been committed") }
+            let totalBytes = manifest.totalBytes
             var bytes: Int64 = 0, failures: [String] = []
             var verifiedSizes=[String:Int64]()
             for (index,item) in manifest.resources.enumerated() {
@@ -574,16 +600,17 @@ final class NativeResourceStore {
                 if !(try self.matches(item,at:self.blobURL(item.sha256),operation:operation)) { failures.append(item.path);self.runtimeFault(item,read:read) }
                 else{verifiedSizes[item.sha256]=item.bytes}
                 bytes += item.bytes
-                update(Progress(phase:"Checking installed resources",completedFiles:index+1,totalFiles:manifest.resources.count,
-                                completedBytes:bytes,totalBytes:manifest.totalBytes,currentPath:item.path))
+                if index % 32 == 0 || index == manifest.resources.count-1 {
+                    update(Progress(phase:"Checking installed resources",completedFiles:index+1,totalFiles:manifest.resources.count,
+                                    completedBytes:bytes,totalBytes:totalBytes,currentPath:item.path))
+                }
             }
-            self.lock.lock(); self.usable = false; self.issues = failures; self.lock.unlock()
             guard failures.isEmpty else { throw Failure.invalid("Repair required: "+failures.prefix(12).joined(separator:", ")) }
             let validatedBy:String
             do {
                 try self.validateBootstrap(manifest)
                 update(Progress(phase:"Validating native resource graph",completedFiles:manifest.resources.count,totalFiles:manifest.resources.count,
-                                completedBytes:bytes,totalBytes:manifest.totalBytes,currentPath:nil))
+                                completedBytes:bytes,totalBytes:totalBytes,currentPath:nil))
                 validatedBy=try self.validateRuntime(manifest,operation:operation)
                 try operation.check()
             }catch{

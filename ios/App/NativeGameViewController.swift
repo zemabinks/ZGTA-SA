@@ -494,9 +494,21 @@ final class NativeGameViewController: UIViewController {
                 }
                 self.status.text="PASSENGER SEAT UNAVAILABLE";return
             }
-            guard let vehicle=self.network.vehicles[id],renderer.enterPassenger(vehicle,seat:seat,kind:self.vehicleModelType(vehicle))else{
-                self.network.sendPassengerExit(renderer.position,heading:renderer.direction);self.status.text="PASSENGER RESOURCES ARE NOT READY";return
+            guard let vehicle = self.network.vehicles[id] else { return }
+            if self.network.legacy != nil, self.currentVehicle != nil {
+                renderer.revokeVehicleForServerPlacement()
+                self.currentVehicle = nil
+                self.setDrivingControls(false)
+                self.vehicleButton.setTitle("ENTER CAR", for: .normal)
+                self.gameHUD.updateVehicle(name: nil, speed: 0)
+                self.radio.stop()
             }
+            guard renderer.enterPassenger(vehicle, seat: seat, kind: self.vehicleModelType(vehicle)) else {
+                self.network.sendPassengerExit(renderer.position, heading: renderer.direction)
+                self.status.text = "PASSENGER RESOURCES ARE NOT READY"
+                return
+            }
+            self.trafficVehicleEntry.cancel()
             self.currentVehicle=vehicle;self.vehicleButton.setTitle("EXIT CAR",for:.normal)
             self.audio.cancelReload()
             self.status.text="PASSENGER · \(self.vehicleModelName(vehicle).uppercased())"

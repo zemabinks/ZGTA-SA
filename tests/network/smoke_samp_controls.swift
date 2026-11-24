@@ -20,12 +20,14 @@ func exercise(_ version:NativeSAMPProtocol.Version)throws->[String:Any] {
     let observerAdapter=coordinates.map{NativeSAMPWorldConnection(client:observer,vehicleCoordinates:$0)}
     var nativeVehicleSamples=[[String:Any]]()
     var events=[[String:Any]](),samples=[[String:Any]](),notes=[String](),states=[String](),enters=[String](),presence=[[String:Any]]()
+    var passengerEntries = [(id: String, seat: Int, accepted: Bool)]()
     var gameplayEvents=[NativeSAMPGameplayCommands.Event]()
     var observerPoint=SIMD3<Float>(1510,-1720,13.5),subjectPoint=SIMD3<Float>(1510,-1720,13.5),phase="joining",lastObserver=Date.distantPast,lastSubject=Date.distantPast
     observerAdapter?.onVehicles={vehicles in for vehicle in vehicles{nativeVehicleSamples.append(["phase":phase,"id":vehicle.id,"position":[vehicle.position.x,vehicle.position.y,vehicle.position.z],"heading":vehicle.heading,"pitch":vehicle.pitch,"roll":vehicle.roll])}}
     multiplayer.onStatus={notes.append($0)}
     multiplayer.onConnectionState={states.append(String(describing:$0))}
     multiplayer.onEnter={id,accepted in enters.append("\(id):\(accepted)")}
+    multiplayer.onPassengerEnter = { passengerEntries.append(($0, $1, $2)) }
     multiplayer.onPresence={count,names in presence.append(["count":count,"names":names,"phase":phase])}
     multiplayer.onLegacyEvent={event in
         let tag=event["t"]as?String ?? "?";events.append(["event":tag,"phase":phase,"at":Date().timeIntervalSince1970])
@@ -131,15 +133,49 @@ func exercise(_ version:NativeSAMPProtocol.Version)throws->[String:Any] {
     try begin("exit_foot");transmit(0.7){foot(.init())}
     try require(samples.contains{$0["phase"]as?String=="exit_foot" && $0["vehicle"]as?Int == -1 && $0["weapon"]as?Int==24},"Observer retained driver after exit and real on-foot sync")
     try require(enters.count==1,"Driver callback repeated during firstInCar/exit")
+    let targetID=try wire.localID.unwrap("Real local player ID missing")
+    try begin("passenger_sync")
     phase="forced_passenger";multiplayer.sendChat("/qa_passenger")
-    try wait(4,until:{notes.contains{$0.contains("PASSENGER SEATS REQUIRE")}})
-    try require(enters.count==1,"Unsupported server passenger command entered the driver controller")
+    try wait(4, until: { passengerEntries.contains { $0.id == car.id && $0.seat == 1 && $0.accepted } })
+    try require(enters.count == 1 && passengerEntries.count == 1,
+                "Server passenger assignment must board exactly one passenger and no driver")
+    let passengerVehicle = try UInt16(car.id).unwrap("Invalid passenger test vehicle")
+    let seatPoint = try wire.vehicles[passengerVehicle].unwrap("Missing passenger test vehicle").position
+    let expectedHealth = multiplayer.health, expectedArmour = multiplayer.armour
+    transmit(0.7) {
+        multiplayer.sendPassengerPosition(NativeSAMPPedCoordinates.feet(seatPoint),
+                                          heading: 0, action: 0, velocity: .zero, paused: false)
+    }
+    try wait(4, until: {
+        guard let passenger = observer.players[targetID],
+              case .seated(let vehicle, let seat) = passenger.passenger else { return false }
+        return vehicle == passengerVehicle && seat == 1 && passenger.vehicle == nil
+            && passenger.health == expectedHealth && passenger.armour == expectedArmour && passenger.weapon == 0
+    })
     phase="forced_unseat";multiplayer.sendChat("/qa_unseat")
     try wait(4,until:{events.contains{$0["phase"]as?String=="forced_unseat" && $0["event"]as?String=="exitForced"}})
+    multiplayer.sendPassengerPosition(NativeSAMPPedCoordinates.feet(seatPoint),
+                                      heading: 0, action: 0, velocity: .zero, paused: false)
     transmit(0.25){foot(.init())}
+    try wait(4, until: { observer.players[targetID].map { $0.passenger == nil } == true })
+    try begin("passenger_request")
+    try require(multiplayer.requestEnter(car, seat: 1), "Local passenger notification did not queue")
+    try require(!multiplayer.requestEnter(car, seat: 1) && passengerEntries.count == 2,
+                "A second local request must not duplicate the active passenger")
+    transmit(0.6) {
+        multiplayer.sendPassengerPosition(NativeSAMPPedCoordinates.feet(seatPoint),
+                                          heading: 0, action: 0, velocity: .zero, paused: false)
+    }
+    try wait(4, until: {
+        guard let player = observer.players[targetID],
+              case .seated(let vehicle, let seat) = player.passenger else { return false }
+        return vehicle == passengerVehicle && seat == 1 && player.vehicle == nil
+    })
+    try begin("passenger_leave")
+    multiplayer.sendPassengerExit(NativeSAMPPedCoordinates.feet(seatPoint), heading: 0)
+    try wait(4, until: { observer.players[targetID].map { $0.passenger == nil } == true })
     try require(presence.last?["count"]as?Int==2,"Full-server roster lost the local or observer player")
     try require((presence.last?["names"]as?[String])?.filter{$0==nickname}.count==1,"Local roster member duplicated")
-    let targetID=try wire.localID.unwrap("Real local player ID missing")
     phase="stream_far";multiplayer.sendChat("/qa_far")
     try wait(4,until:{subjectPoint.x==2500})
     transmit(0.7){multiplayer.sendPosition(subjectPoint,heading:0,moving:false,running:false,weapon:24)}

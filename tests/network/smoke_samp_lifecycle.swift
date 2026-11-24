@@ -16,6 +16,12 @@ func remoteCar(_ id:UInt16,_ point:SIMD3<Float>)->Data{
     for _ in 0..<3{w.integer(0,size:2)};for _ in 0..<4{w.bit(false)};for _ in 0..<3{w.integer(0,size:2)}
     w.vector(point);w.float(0);w.integer(900,size:2);w.integer(255,size:1);w.integer(28,size:1);return w.data
 }
+func remotePassenger(seat: UInt8 = 2) -> Data {
+    // Tag 211, player 22, vehicle 1, seat/cuffed/drive-by flags, packed
+    // weapon and key, separate health and armour, axes/keys, then position.
+    Data([211, 22, 0, 1, 0, 0xc0 | seat, 0x9c, 93, 34, 0x80, 0xff, 0, 0, 4, 0,
+          0, 0, 0x20, 0x41, 0, 0, 0xa0, 0x41, 0, 0, 0xf0, 0x41])
+}
 for version in [NativeSAMPProtocol.Version.v037,.dl]{
     let client=NativeSAMPClient(address:"127.0.0.1:1",nickname:"Local_QA",version:version,installationID:"A")
     let adapter=NativeSAMPWorldConnection(client:client)
@@ -65,6 +71,59 @@ for version in [NativeSAMPProtocol.Version.v037,.dl]{
     check(client.players[21]?.vehicle==1 && client.players[21]?.weapon==28,"Real decoded car sync lost driver/weapon")
     check(client.players[21]?.customSkin==(version == .dl ? 20001:nil),"InCar sync discarded custom skin")
     if version == .dl{check(actors.last?.first?.position==SIMD3(104,205,306),"Remote driver body received pedestrian correction")}
+
+    func passengerRow() -> RemotePlayer? { actors.last?.first { $0.id == "22" } }
+    func vehicle(_ at: SIMD3<Float>) throws {
+        try rpc(client,164) { w in
+            w.integer(1,size:2);w.integer(411,size:4);w.vector(at);w.float(0)
+            w.integer(1,size:1);w.integer(1,size:1);w.float(900)
+        }
+    }
+    try join(22,"Passenger_QA")
+    try client.receive(remotePassenger())
+    check(client.players[22] == nil && passengerRow() == nil, "Passenger sync spawned an offstream player")
+    try stream(22,base:0,custom:20002)
+    try client.receive(remotePassenger())
+    let passengerSkin = version == .dl ? 20002 : 0
+    check(passengerRow()?.code == "s\(passengerSkin)" && passengerRow()?.vehicleID == nil,
+          "Passenger rendered as a second driver")
+    check(passengerRow()?.ridingVehicleID == "1" && passengerRow()?.ridingSeat == 2,
+          "Packed flags changed the passenger seat identity")
+    check(passengerRow()?.life == 93 && passengerRow()?.armour == 34 && passengerRow()?.weapon == 28,
+          "Passenger health, armour or weapon fields were decoded incorrectly")
+    check(passengerRow()?.position == SIMD3(104,205,306) && client.players[22]?.position == SIMD3(10,20,30),
+          "Passenger did not use the shared vehicle origin")
+    try client.receive(remoteCar(21,SIMD3(110,205,306)))
+    check(passengerRow()?.position == SIMD3(110,205,306), "Driver movement did not carry the passenger")
+    do {
+        try client.receive(remotePassenger(seat: 0))
+        preconditionFailure("Seat zero accepted as passenger sync")
+    } catch NativeSAMPProtocol.Error.invalid {}
+    do {
+        try client.receive(Data(remotePassenger().dropLast()))
+        preconditionFailure("Truncated passenger sync accepted")
+    } catch NativeSAMPProtocol.Error.truncated {}
+    check(passengerRow()?.ridingSeat == 2, "Invalid packet mutated a valid seat")
+    try rpc(client,165) { $0.integer(1,size:2) }
+    check(passengerRow() == nil, "Vehicle removal retained passenger appearance")
+    try client.receive(remotePassenger())
+    try vehicle(SIMD3(200,201,202))
+    check(passengerRow() == nil, "Reused vehicle ID revived an old passenger sync")
+    try client.receive(remotePassenger(seat: 1))
+    check(passengerRow()?.ridingSeat == 1 && passengerRow()?.position == SIMD3(200,201,202),
+          "Fresh passenger sync did not attach to the replacement vehicle")
+    try client.receive(remoteFoot(22,SIMD3(201,202,203)))
+    check(passengerRow()?.ridingVehicleID == nil && passengerRow()?.position == SIMD3(201,202,202),
+          "Foot sync did not clear the seat and restore pedestrian coordinates")
+    try client.receive(remotePassenger())
+    try client.receive(remoteFoot(21,SIMD3(200,200,200)))
+    try client.receive(remoteCar(22,SIMD3(203,204,205)))
+    check(passengerRow()?.ridingVehicleID == nil && passengerRow()?.vehicleID == "1",
+          "Driver sync retained the earlier passenger attachment")
+    try rpc(client,138) { $0.integer(22,size:2) }
+    try client.receive(remotePassenger())
+    check(client.players[22] == nil && passengerRow() == nil, "Disconnected passenger was revived")
+
     let countBefore=presence.count
     try rpc(client,163){$0.integer(21,size:2)}
     check(client.players.isEmpty && client.roster[21]=="Persistent_Name","163 removed persistent metadata or retained streamed actor")
@@ -117,4 +176,4 @@ for z:Float in [-100,0,9.8203125,1006.171875,1051.53125]{
     let feet=SIMD3<Float>(12,34,z),root=NativeSAMPPedCoordinates.root(feet)
     check(root.z==z+1 && NativeSAMPPedCoordinates.feet(root)==feet,"Ped coordinate boundary failed exact roundtrip")
 }
-print("PASS: \(checks) actual client/adapter roster, stream lifecycle and DL custom-skin regressions")
+print("PASS: \(checks) actual client/adapter roster, stream lifecycle, passenger sync and DL custom-skin regressions")

@@ -38,6 +38,10 @@ def validate_server(lines,cases):
             assert any(row['phase']==phase and row['event']=='update' and abs(row['z']-expected_z)<0.0001 for row in own),'Nativefeet/modelroot conversion disagrees with actualserverposition'
         for phase,state in [('foot_released',1),('car_released',2),('exit_foot',1)]:
             assert any(row['phase']==phase and row['event']=='update' and row['state']==state and row['keys']==row['lr']==row['ud']==0 for row in own),(case['profile'],phase,own)
+        assert any(row['phase']=='passenger_sync' and row['event']=='update' and row['state']==3 and row['weapon']==0 for row in own),'No actual server passenger update'
+        assert any(row['phase']=='passenger_request' and row['event']=='enter_rpc' for row in own),'No actual client passenger entry notification'
+        assert any(row['phase']=='passenger_request' and row['event']=='update' and row['state']==3 for row in own),'Local passenger request never became a server seat'
+        assert any(row['phase']=='passenger_leave' and row['event']=='exit_rpc' for row in own),'No actual passenger exit notification'
         assert any(row['phase']=='frozen'and row['event']=='update'and row['keys']==row['lr']==row['ud']==0 for row in own),'Server freeze leaked held controls'
         assert any(row['phase']=='spectating'and row['state']==9 and abs(row['z']-20)<0.0001 and row['keys']==8 and row['lr']==-128 and row['ud']==128 for row in own),'Actual spectator212 camera/axes did not reach server unchanged'
         assert sum(row['event']=='spawn'for row in own)==3,'Each of two spectator exits must complete exactlyone server spawn'
@@ -45,8 +49,8 @@ def validate_server(lines,cases):
         driver=next(i for i,row in enumerate(own)if i>enter and row['state']==2)
         leave=next(i for i,row in enumerate(own)if i>driver and row['event']=='exit_rpc')
         foot=next(i for i,row in enumerate(own)if i>leave and row['state']==1)
-        assert sum(row['event']=='enter_rpc'for row in own)==2,'Each of two driver episodes must notify enter exactlyonce'
-        assert sum(row['event']=='exit_rpc'for row in own)==2,'Each of two driver episodes must notify exit exactlyonce'
+        assert sum(row['event']=='enter_rpc'for row in own)==3,'Each driver episode and the local passenger must notify enter once'
+        assert sum(row['event']=='exit_rpc'for row in own)==3,'Each driver episode and the local passenger must notify exit once'
         for phase,point,hp in [('cache_driver',case['cachePoses']['driver'],875),('cache_exit',case['cachePoses']['final'],840),('cache_respawn',case['cachePoses']['final'],840)]:
             assert any(row['phase']==phase and all(abs(row[k]-v)<.001 for k,v in zip(['carX','carY','carZ'],point))and row['carHP']==hp for row in own),(phase,point,hp,own)
         results.append({'profile':case['profile'],'status':'PASS','serverRows':own,
@@ -76,7 +80,7 @@ def main():
         (work/'PedestrianMotion.swift').write_text('import Foundation\nimport simd\n'+motion);sources.append(str(work/'PedestrianMotion.swift'))
         (work/'main.swift').write_bytes(before['tests/network/smoke_samp_controls.swift'])
         if metadata is not None:(work/'vehicle-metadata.json').write_bytes(metadata)
-        command=['xcrun','swiftc','-Onone','-module-cache-path',str(out/'modules'),'-I',str(ROOT/'native-samp/include'),
+        command=['xcrun','swiftc','-Onone','-j','1','-num-threads','1','-module-cache-path',str(out/'modules'),'-I',str(ROOT/'native-samp/include'),
                  *sources,str(work/'main.swift'),'-L',str(ROOT/('local-only/native-samp/macos-'+platform.machine())),
                  '-lzgtasa_samp','-lresolv','-framework','CoreFoundation','-framework','Security','-o',str(work/'verify')]
         compiled=subprocess.run(command,capture_output=True,text=True);(out/'compile.log').write_text(compiled.stdout+compiled.stderr)

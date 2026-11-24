@@ -183,6 +183,50 @@ enum NativeSAMPProtocol {
         for v in [frame.playerHealth,frame.armour,frame.weapon | (frame.specialKeys << 6),frame.siren,frame.gear]{w.integer(UInt32(v),size:1)}
         w.integer(UInt32(frame.trailer),size:2);w.float(frame.trainSpeed);return w.data
     }
+    struct RemotePassenger {
+        let playerID: UInt16
+        let vehicleID: UInt16
+        let seat: Int
+        let health: Int
+        let armour: Int
+        let weapon: Int
+        let position: SIMD3<Float>
+    }
+
+    static func passenger(vehicleID: UInt16, seat: Int, position: SIMD3<Float>,
+                          health: UInt8, armour: UInt8) throws -> Data {
+        guard vehicleID > 0, (1...63).contains(seat),
+              [position.x, position.y, position.z].allSatisfy(\.isFinite) else { throw Error.invalid }
+        var writer = Writer()
+        writer.integer(211, size: 1)
+        writer.integer(UInt32(vehicleID), size: 2)
+        writer.integer(UInt32(seat), size: 2)
+        writer.integer(UInt32(health), size: 1)
+        writer.integer(UInt32(armour), size: 1)
+        for _ in 0..<3 { writer.integer(0, size: 2) } // No drive-by controls.
+        writer.vector(position)
+        return writer.data
+    }
+
+    /// Server broadcast layout from open.mp v1.6.7.3218 Shared/NetCode/vehicle.hpp.
+    static func remotePassenger(_ data: Data) throws -> RemotePassenger {
+        var reader = try Reader(data)
+        guard try reader.integer(1) == 211 else { throw Error.unsupported }
+        let playerID = UInt16(try reader.integer(2))
+        let vehicleID = UInt16(try reader.integer(2))
+        let flags = try reader.integer(2)
+        let seat = Int(flags & 0x3f)
+        guard vehicleID > 0, seat > 0 else { throw Error.invalid }
+        let health = Int(try reader.integer(1))
+        let armour = Int(try reader.integer(1))
+        for _ in 0..<3 { _ = try reader.integer(2) } // LR, UD and keys.
+        let position = try reader.vector()
+        guard reader.remaining == 0 else { throw Error.invalid }
+        return RemotePassenger(playerID: playerID, vehicleID: vehicleID, seat: seat,
+                               health: health, armour: armour, weapon: Int((flags >> 8) & 0x3f),
+                               position: position)
+    }
+
     static func bullet(weapon:Int,origin:SIMD3<Float>,hit:SIMD3<Float>,target:UInt16?,offset:SIMD3<Float> = .zero)throws->Data{
         guard (0...46).contains(weapon),[origin,hit,offset].allSatisfy({$0.x.isFinite && $0.y.isFinite && $0.z.isFinite})else{throw Error.invalid}
         var w=Writer();w.integer(206,size:1);w.integer(target == nil ? 0:1,size:1);w.integer(UInt32(target ?? 65535),size:2)
