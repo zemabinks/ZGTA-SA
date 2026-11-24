@@ -104,6 +104,32 @@ links the real C ABI against their SDKs. Cached libraries alone do not establish
 server interoperability. See [server compatibility](docs/development/SERVER_COMPATIBILITY.md)
 for the separately verified join/gameplay boundaries.
 
+### Install original models from Files
+
+In the native app, open **Game → Game Files → Original Game Source**. Choose
+**Install / View Original Model** for the textured plant or **Install / View
+East Los Santos** for the bridge and road section. Tap **Select ISO** and pick
+your compatible original San Andreas PC installer disc image in Files. The app
+reads the installer cabinet on the phone. The map section temporarily extracts
+the disc’s world archive, so leave enough free space for that archive during
+import.
+
+The map viewer places both models at their authored positions and rotations,
+loads their material textures and registers their original collision geometry.
+Drag to orbit and pinch to zoom. Each viewer reopens its own verified local
+installation after closing the app. You can disconnect the Mac and move the
+source ISO after a successful import. A complete free-roam world still requires
+a prepared installation.
+
+The placement regression uses generated text and binary fixtures. The second
+command also exercises a compatible disc and its matching, locally extracted
+world archive. Keep both inputs outside the source checkout.
+
+```sh
+python3 tests/resources/smoke_native_world_placement.py
+python3 tests/resources/smoke_native_iso_region.py /path/to/disc.iso /path/to/models/gta3.img
+```
+
 Mac server launchers prepare runtime data separately with
 `prepare_native_runtime.sh`; game assets remain under local-only.
 

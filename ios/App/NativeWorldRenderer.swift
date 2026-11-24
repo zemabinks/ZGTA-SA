@@ -1070,6 +1070,33 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
     var objective: SIMD2<Float>?
     var onStatus: ((String) -> Void)?
     var onFrame: (() -> Void)?
+    private var installedSection: NativeInstalledWorldSection?
+    private var installedSectionCollision: NativeInstalledSectionCollision?
+    private var installedSectionCompletion: ((Result<Void,Error>) -> Void)?
+
+    /// Game Files creates its own renderer for the locally installed map section.
+    /// No server or resource origin is attached to that renderer.
+    func showInstalledSection(_ section: NativeInstalledWorldSection, completion: @escaping (Result<Void,Error>) -> Void) {
+        do {
+            installedSectionCollision = try section.registerCollision(in: groundVehicle?.world)
+        } catch {
+            completion(.failure(error))
+            return
+        }
+        installedSection = section
+        installedSectionCompletion = completion
+        view.setNeedsDisplay()
+    }
+
+    func orbitInstalledSection(horizontal: Float, vertical: Float) {
+        installedSection?.orbit(horizontal: horizontal, vertical: vertical)
+        view.setNeedsDisplay()
+    }
+
+    func zoomInstalledSection(by scale: Float) {
+        installedSection?.magnify(by: scale)
+        view.setNeedsDisplay()
+    }
 
     init?(preferredDevice: MTLDevice? = MTLCreateSystemDefaultDevice()) {
         guard let device = preferredDevice,
@@ -5235,7 +5262,9 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         encoder.setRenderPipelineState(pipeline);encoder.setDepthStencilState(depth)
     }
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
+    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        if installedSection != nil { view.setNeedsDisplay() }
+    }
 
     func draw(in view: MTKView) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -5290,7 +5319,8 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             }
         }catch{legacyCameraSample=nil;onStatus?("SERVER CAMERA UNAVAILABLE: \(error)")}
         prefetchScopedShotCoverage()
-        let pose=legacyCameraSample?.pose ?? normal,eye=pose.eye,target=pose.target
+        let cameraFov = gameCameraFrame?.verticalFov ?? 55.41293
+        let pose=installedSection?.camera(aspect:aspect,verticalFov:cameraFov) ?? legacyCameraSample?.pose ?? normal,eye=pose.eye,target=pose.target
         if legacyCameraSample?.active == true{loadNearby()}
         let viewMatrix = Self.lookAt(eye:eye,target:target,up:pose.up)
         let forward = -SIMD3(viewMatrix.columns.0.z,viewMatrix.columns.1.z,viewMatrix.columns.2.z)
@@ -5315,7 +5345,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         ownCameraVisibility.update(eye:eye,feet:camera,nearPlane:planes.near,
             attachmentRadius:personalFlight.worn ? 0.2:0,presentationClearance:1)
-        let projection=Self.perspective(aspect:aspect,verticalFov:gameCameraFrame?.verticalFov ?? 55.41293,near:planes.near,far:planes.far)
+        let projection=Self.perspective(aspect:aspect,verticalFov:cameraFov,near:planes.near,far:planes.far)
         let matrix=projection*viewMatrix
         night = NativeWorldEnvironment.nightShare(hour: hour)
         if let conditions {
@@ -5349,6 +5379,23 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         }
         encoder.setDepthStencilState(depth)
         drawWorldMeshes(matrix: matrix,encoder: encoder)
+        if let installedSection {
+            let completion = installedSectionCompletion
+            installedSectionCompletion = nil
+            do {
+                try installedSection.encode(encoder:encoder,matrix:matrix,eye:eye)
+                if let completion {
+                    command.addCompletedHandler { buffer in
+                        let result:Result<Void,Error> = buffer.error.map { .failure($0) } ?? .success(())
+                        DispatchQueue.main.async { completion(result) }
+                    }
+                }
+            } catch {
+                completion?(.failure(error))
+            }
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setDepthStencilState(depth)
+        }
         particleDrawDelta=Double(delta)
         // Gameplay runs after this draw. Only this frame's submitted vehicle
         // occurrences may contribute heat, including when none remain.
@@ -6906,7 +6953,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
         simd_float4x4(columns: (SIMD4(cos(a),sin(a),0,0), SIMD4(-sin(a),cos(a),0,0), SIMD4(0,0,1,0), SIMD4(0,0,0,1)))
     }
 
-    private static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>,up referenceUp:SIMD3<Float> = SIMD3(0,0,1)) -> simd_float4x4 {
+    static func lookAt(eye: SIMD3<Float>, target: SIMD3<Float>,up referenceUp:SIMD3<Float> = SIMD3(0,0,1)) -> simd_float4x4 {
         var forward = target-eye
         if simd_length_squared(forward) == 0 { forward = SIMD3(0,1,0) }
         forward = simd_normalize(forward)
@@ -6926,7 +6973,7 @@ final class NativeWorldRenderer: NSObject, MTKViewDelegate {
             SIMD4(-simd_dot(right, eye), -simd_dot(up, eye), simd_dot(forward, eye), 1)))
     }
 
-    private static func perspective(aspect: Float, zoom: Float = 1, verticalFov: Float = 60, near: Float = 0.15, far: Float = 3000) -> simd_float4x4 {
+    static func perspective(aspect: Float, zoom: Float = 1, verticalFov: Float = 60, near: Float = 0.15, far: Float = 3000) -> simd_float4x4 {
         let scale: Float = zoom / tan(verticalFov * .pi / 360)
         return simd_float4x4(columns: (
             SIMD4(scale / aspect, 0, 0, 0),
