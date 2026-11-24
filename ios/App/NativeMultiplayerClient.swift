@@ -66,6 +66,14 @@ struct NativeVehicleSeatSession {
         return nil
     }
     mutating func cancel()->Entry?{let old=pending;pending=nil;return old}
+    mutating func assignServerPassenger(vehicle: String, seat: Int) -> Bool {
+        guard Self.validID(vehicle), (1...15).contains(seat) else { return false }
+        let assignment = Seat(vehicle: vehicle, index: seat)
+        guard passenger != assignment else { return false }
+        pending = nil
+        passenger = assignment
+        return true
+    }
     mutating func leavePassenger()->Seat?{let old=passenger;passenger=nil;return old}
     mutating func remove(vehicle:String){if pending?.seat.vehicle==vehicle{pending=nil};if passenger?.vehicle==vehicle{passenger=nil}}
     // A TP changes placement on the SAME peer. Keep its request namespace so
@@ -563,7 +571,11 @@ final class NativeMultiplayerClient {
         legacy.onVehicles = { [weak self] rows in
             guard let self else{return};let removed=Set(self.vehicleOrder).subtracting(rows.map(\.id))
             self.vehicles=Dictionary(uniqueKeysWithValues:rows.map{($0.id,$0)});self.vehicleOrder=rows.map(\.id)
-            for id in removed{self.onVehicleRemoved?(id)};self.onVehicles?(rows)
+            for id in removed {
+                self.vehicleSeats.remove(vehicle: id)
+                self.onVehicleRemoved?(id)
+            }
+            self.onVehicles?(rows)
         }
         legacy.onEvent = { [weak self] message in
             guard let self else{return}
@@ -580,9 +592,21 @@ final class NativeMultiplayerClient {
             case "vitals":
                 if self.legacyVitals.seed(health:(message["health"]as?NSNumber)?.doubleValue,armour:(message["armour"]as?NSNumber)?.doubleValue){self.publishLegacyVitals()}
             case "enter":
-                if (message["seat"]as?Int ?? 0)==0,let id=message["id"]as?String{self.onEnter?(id,true)}
-                else{self.onStatus?("PASSENGER SEATS REQUIRE THE NATIVE PASSENGER CONTROLLER")}
-            case "spawn":self.legacyVitals.reset();self.publishLegacyVitals()
+                if let id = message["id"] as? String, let seat = message["seat"] as? Int,
+                   self.isReady, self.vehicles[id] != nil {
+                    if seat == 0 {
+                        self.vehicleSeats.clearOccupancy()
+                        self.onEnter?(id, true)
+                    } else if self.vehicleSeats.assignServerPassenger(vehicle: id, seat: seat) {
+                        self.onPassengerEnter?(id, seat, true)
+                    }
+                }
+            case "exitForced":
+                self.vehicleSeats.clearOccupancy()
+            case "spawn":
+                self.vehicleSeats.clearOccupancy()
+                self.legacyVitals.reset()
+                self.publishLegacyVitals()
             default:break
             }
             self.onLegacyEvent?(message)

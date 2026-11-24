@@ -121,6 +121,8 @@ final class NativeBoundedResourceTask:NSObject,NativeResourceTask,URLSessionData
 
 struct ServerAddress: Equatable {
     let url: URL
+    /// Names local resource paths without linking them to a multiplayer host.
+    static let installedResources = ServerAddress("https://installed-resources.invalid")!
 
     init?(_ raw: String) {
         var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)

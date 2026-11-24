@@ -107,8 +107,13 @@ final class HomeViewController: NativeDEPanelViewController, UITextFieldDelegate
     @objc private func connectLegacyWorld() {
         guard active,!checking,presentedViewController==nil else{return}
         guard requireInstalledResources() else{return}
-        guard let assets=ServerAddress(address.text ?? "")else{status.text="ENTER YOUR MAC'S GAME FILES SERVER ABOVE FIRST.";return}
-        let form=NativeSAMPConnectViewController(assets:assets,joinCode:code.text ?? "");form.modalPresentationStyle = .fullScreen
+        let installed = NativeResourceStore.shared.snapshot.mode == .installed
+        guard let assets = installed ? ServerAddress.installedResources : ServerAddress(address.text ?? "") else {
+            status.text = "ENTER YOUR MAC'S GAME FILES SERVER ABOVE FIRST."
+            return
+        }
+        let form = NativeSAMPConnectViewController(assets: assets, joinCode: code.text ?? "", installed: installed)
+        form.modalPresentationStyle = .fullScreen
         form.onConnection = { [weak self,weak form] connection in
             guard let self,let form,self.presentedViewController === form else{return}
             form.dismiss(animated:false){[weak self]in

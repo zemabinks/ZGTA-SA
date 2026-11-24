@@ -60,6 +60,10 @@ final class NativeResourceSession {
             if let maximumBytes,!NativeBoundedResourceTask.validMaximum(maximumBytes){task.finish(nil,nil,NativeBoundedResourceTask.Failure.invalidMaximum);return}
             guard let url=request.url else{task.finish(nil,nil,URLError(.badURL));return}
             func sendNetwork(){
+                guard NativeResourceStore.origin(url) != ServerAddress.installedResources.url else {
+                    task.finish(nil, nil, NativeResourceStore.Failure.missing(url.path))
+                    return
+                }
                 let remote:NativeResourceTask
                 if let maximumBytes{
                     remote=NativeBoundedResourceTask(request:request,maximumBytes:maximumBytes,configuration:network.configuration,completion:{task.finish($0,$1,$2)})

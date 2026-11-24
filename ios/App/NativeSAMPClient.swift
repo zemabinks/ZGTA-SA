@@ -7,7 +7,24 @@ import ZGTASAMPTransport
 final class NativeSAMPClient {
     enum State: String { case stopped, connecting, accepted, selecting, spawning, spawned, wasted, failed }
     struct Vehicle {let id:UInt16,model:Int;var position:SIMD3<Float>;var heading:Float;var health:Float;let colors:[Int];var pitch:Float=0,roll:Float=0}
-    struct Player {let id:UInt16;var name:String;var skin:Int=7;var customSkin:Int?;var position=SIMD3<Float>.zero;var heading:Float=0,pitch:Float=0,roll:Float=0;var health:Int=100,armour:Int=0,weapon:Int=0;var velocity=SIMD3<Float>.zero;var vehicle:UInt16?;var action:Int=0;var receivedAt:Double=0}
+    enum PassengerAttachment {
+        case seated(vehicle: UInt16, seat: Int)
+        case awaitingPosition
+    }
+    struct Player {
+        let id: UInt16
+        var name: String
+        var skin = 7
+        var customSkin: Int?
+        var position = SIMD3<Float>.zero
+        var heading: Float = 0, pitch: Float = 0, roll: Float = 0
+        var health = 100, armour = 0, weapon = 0
+        var velocity = SIMD3<Float>.zero
+        var vehicle: UInt16? // Driver ownership only.
+        var passenger: PassengerAttachment?
+        var action = 0
+        var receivedAt: Double = 0
+    }
     let address:String,nickname:String,version:NativeSAMPProtocol.Version,installationID:String
     private let password:String
     private var handle:UInt64=0
@@ -150,6 +167,15 @@ final class NativeSAMPClient {
         return true
     }
     @discardableResult func sendSpectatorPosition(_ point:SIMD3<Float>,keys:UInt16=0,axes:SIMD2<Int16> = .zero)->Bool{guard joined,spectating,let data=try?NativeSAMPGameplayCommands.spectator(position:point,keys:controllable ? keys:0,axes:controllable ? axes:.zero)else{return false};return send(data,reliability:7,channel:1)}
+    @discardableResult
+    func sendPassenger(vehicleID: UInt16, seat: Int, position: SIMD3<Float>,
+                       health: UInt8, armour: UInt8) -> Bool {
+        guard state == .spawned, !spectating, vehicles[vehicleID] != nil,
+              let data = try? NativeSAMPProtocol.passenger(vehicleID: vehicleID, seat: seat,
+                                                          position: position, health: health, armour: armour)
+        else { return false }
+        return send(data, reliability: 7, channel: 1)
+    }
     @discardableResult func reportDeath(reason:UInt8=255,killer:UInt16=65535)->Bool{
         guard state == .spawned else{return false};var w=NativeSAMPProtocol.Writer();w.integer(UInt32(reason),size:1);w.integer(UInt32(killer),size:2)
         guard sendRPC(53,w)else{return false};health=0;setState(.wasted);return true
@@ -176,6 +202,7 @@ final class NativeSAMPClient {
             if send(try NativeSAMPProtocol.join(version:version,nickname:nickname,installationID:installationID,challenge:challenge)){joined=true;setState(.accepted)}
         case 207:try remoteFoot(data)
         case 200:try remoteCar(data)
+        case 211:try remotePassenger(data)
         case 20,40:
             let rpc=try NativeSAMPProtocol.rpc(data);receivedRPCs.insert(rpc.id);try handleRPC(rpc)
         case 32,33:fail("SERVER CLOSED THE LEGACY SESSION (\(tag))")
@@ -261,7 +288,7 @@ final class NativeSAMPClient {
         case 32:
             let id=UInt16(try r.integer(2));_=try r.integer(1);let skin=Int(try r.integer(4));let custom=version == .dl ? Int(Int32(bitPattern:try r.integer(4))):nil
             let point=try r.vector(),angle=try r.float();_=try r.integer(4)
-            var player=players[id] ?? Player(id:id,name:roster[id] ?? "Player \(id)");player.skin=skin;player.customSkin=custom.flatMap{(20001...30000).contains($0) ? $0:nil};player.position=point;player.heading = -angle * .pi/180;player.receivedAt=ProcessInfo.processInfo.systemUptime;streamedPlayers.insert(id);players[id]=player;publishedPlayers()
+            var player=players[id] ?? Player(id:id,name:roster[id] ?? "Player \(id)");player.skin=skin;player.customSkin=custom.flatMap{(20001...30000).contains($0) ? $0:nil};player.position=point;player.heading = -angle * .pi/180;player.receivedAt=ProcessInfo.processInfo.systemUptime;player.passenger=nil;streamedPlayers.insert(id);players[id]=player;publishedPlayers()
         case 163:
             let id=UInt16(try r.integer(2));streamedPlayers.remove(id);players.removeValue(forKey:id);publishedPlayers()
         case 153:
@@ -275,7 +302,15 @@ final class NativeSAMPClient {
             let id=UInt16(try r.integer(2)),model=Int(try r.integer(4)),point=try r.vector(),angle=try r.float(),c1=Int(try r.integer(1)),c2=Int(try r.integer(1)),hp=try r.float()
             guard (400...611).contains(model)else{onStatus?("CUSTOM VEHICLE MODEL NEEDS AN IMPORTER");return}
             vehicles[id]=Vehicle(id:id,model:model,position:point,heading:-angle * .pi/180,health:hp,colors:[c1,c2]);publishedVehicles()
-        case 165:vehicles.removeValue(forKey:UInt16(try r.integer(2)));publishedVehicles()
+        case 165:
+            let id = UInt16(try r.integer(2))
+            vehicles.removeValue(forKey: id)
+            for playerID in Array(players.keys) {
+                if case .seated(let vehicle, _) = players[playerID]?.passenger, vehicle == id {
+                    players[playerID]?.passenger = .awaitingPosition
+                }
+            }
+            publishedVehicles()
         case 147:let id=UInt16(try r.integer(2)),hp=try r.float();vehicles[id]?.health=hp;publishedVehicles()
         default:onRawRPC?(rpc)
         }
@@ -288,7 +323,7 @@ final class NativeSAMPClient {
         var player=players[id] ?? Player(id:id,name:"Player \(id)");player.position=point
         let angles=NativeSAMPProtocol.nativeAngles(q);player.heading=angles.heading;player.pitch=angles.pitch;player.roll=angles.roll
         func life(_ n:UInt32)->Int{n==15 ? 100:Int(n)*7}
-        player.health=life(hp>>4);player.armour=life(hp&15);player.weapon=weapon;player.action=action;player.velocity=velocity*50;player.vehicle=nil
+        player.health=life(hp>>4);player.armour=life(hp&15);player.weapon=weapon;player.action=action;player.velocity=velocity*50;player.vehicle=nil;player.passenger=nil
         player.receivedAt=ProcessInfo.processInfo.systemUptime;players[id]=player;publishedPlayers()
     }
     private func remoteCar(_ data:Data)throws{
@@ -298,10 +333,29 @@ final class NativeSAMPClient {
         let q=try r.quaternion(),point=try r.vector(),velocity=try r.compressedVector(),hp=try r.integer(2),life=try r.integer(1),weapon=Int(try r.integer(1))&63
         let angles=NativeSAMPProtocol.nativeAngles(q),heading=angles.heading
         var player=players[playerID] ?? Player(id:playerID,name:"Player \(playerID)")
-        player.position=point;player.heading=heading;player.pitch=angles.pitch;player.roll=angles.roll;player.vehicle=vehicleID;player.velocity=velocity*50;player.weapon=weapon
+        player.position=point;player.heading=heading;player.pitch=angles.pitch;player.roll=angles.roll;player.vehicle=vehicleID;player.passenger=nil;player.velocity=velocity*50;player.weapon=weapon
         player.health=life>>4==15 ? 100:Int(life>>4)*7;player.armour=life&15==15 ? 100:Int(life&15)*7
         player.receivedAt=ProcessInfo.processInfo.systemUptime;players[playerID]=player
         if var vehicle=vehicles[vehicleID]{vehicle.position=point;vehicle.heading=heading;vehicle.pitch=angles.pitch;vehicle.roll=angles.roll;vehicle.health=Float(hp);vehicles[vehicleID]=vehicle}
         publishedPlayers();publishedVehicles()
+    }
+
+    private func remotePassenger(_ data: Data) throws {
+        let frame = try NativeSAMPProtocol.remotePassenger(data)
+        guard streamedPlayers.contains(frame.playerID), var player = players[frame.playerID] else { return }
+        player.vehicle = nil
+        player.position = frame.position
+        player.health = frame.health
+        player.armour = frame.armour
+        player.weapon = frame.weapon
+        player.velocity = .zero
+        player.action = 0
+        player.receivedAt = ProcessInfo.processInfo.systemUptime
+        // Wait for a fresh sync if the vehicle is missing. A reused ID cannot
+        // revive a seat assignment from a removed vehicle.
+        player.passenger = vehicles[frame.vehicleID] == nil
+            ? .awaitingPosition : .seated(vehicle: frame.vehicleID, seat: frame.seat)
+        players[frame.playerID] = player
+        publishedPlayers()
     }
 }

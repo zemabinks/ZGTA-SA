@@ -147,15 +147,40 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
                 guard let skin=NativeSAMPSkinCatalog.canonicalSkin(legacyID:p.skin,customID:p.customSkin,catalog:self.skinCatalog)else{
                     if self.skinCatalog != nil,self.unsupportedSkins.insert(p.skin).inserted{self.onStatus?("SKIN \(p.skin) NEEDS ITS ORIGINAL MODEL ASSETS")};return nil
                 }
-                let vehicle=p.vehicle.flatMap{self.client.vehicles[$0]}
-                if p.vehicle != nil,vehicle==nil{return nil}
-                let code=vehicle.map{"\($0.model).\($0.colors[0]).\($0.colors[1]).0."} ?? "s\(skin)"
+                let vehicleID: UInt16?
+                let passengerSeat: Int?
+                switch p.passenger {
+                case .seated(let id, let seat):
+                    vehicleID = id
+                    passengerSeat = seat
+                case .awaitingPosition:
+                    return nil
+                case nil:
+                    vehicleID = p.vehicle
+                    passengerSeat = nil
+                }
+                let vehicle = vehicleID.flatMap { self.client.vehicles[$0] }
+                if vehicleID != nil, vehicle == nil { return nil }
+                let code = passengerSeat == nil
+                    ? vehicle.map { "\($0.model).\($0.colors[0]).\($0.colors[1]).0." } ?? "s\(skin)"
+                    : "s\(skin)"
                 let speed=sqrt(p.velocity.x*p.velocity.x+p.velocity.y*p.velocity.y)
                 let position:SIMD3<Float>
+                let heading = passengerSeat == nil ? p.heading : vehicle?.heading ?? p.heading
+                let pitch = passengerSeat == nil ? p.pitch : vehicle?.pitch ?? p.pitch
+                let roll = passengerSeat == nil ? p.roll : vehicle?.roll ?? p.roll
                 if let vehicle {
-                    guard let body=self.nativeVehiclePosition(p.position,model:vehicle.model,heading:p.heading,pitch:p.pitch,roll:p.roll)else{return nil};position=body
+                    let root = passengerSeat == nil ? p.position : vehicle.position
+                    guard let body = self.nativeVehiclePosition(root, model: vehicle.model,
+                                                                heading: heading, pitch: pitch, roll: roll) else { return nil }
+                    position = body
                 }else{position=NativeSAMPPedCoordinates.feet(p.position)}
-                return RemotePlayer(id:String(p.id),name:p.name,position:position,code:code,heading:p.heading,pitch:p.pitch,roll:p.roll,speed:speed,steer:0,skin:skin,animation:speed>0.15 ? "run_player/l/1":"idle_stance/l/1",animationStarted:ProcessInfo.processInfo.systemUptime,weapon:p.weapon,vehicleID:p.vehicle.map(String.init),vehicleHealth:vehicle.map{Int(max(0,min(1000,$0.health)))} ?? 1000,movementRatio:min(3,speed/2),velocity:p.velocity,packetReceivedAt:p.receivedAt,life:Double(p.health),armour:Double(p.armour))
+                var row = RemotePlayer(id:String(p.id),name:p.name,position:position,code:code,heading:heading,pitch:pitch,roll:roll,speed:speed,steer:0,skin:skin,animation:speed>0.15 ? "run_player/l/1":"idle_stance/l/1",animationStarted:ProcessInfo.processInfo.systemUptime,weapon:p.weapon,vehicleID:p.vehicle.map(String.init),vehicleHealth:vehicle.map{Int(max(0,min(1000,$0.health)))} ?? 1000,movementRatio:min(3,speed/2),velocity:p.velocity,packetReceivedAt:p.receivedAt,life:Double(p.health),armour:Double(p.armour))
+                if let passengerSeat {
+                    row.ridingVehicleID = vehicleID.map(String.init)
+                    row.ridingSeat = passengerSeat
+                }
+                return row
             };self.onPlayers?(rows)
         }
         client.onVehicles = { [weak self] values in
@@ -246,6 +271,15 @@ final class NativeSAMPWorldConnection:NativeLegacyWorldConnection {
         case "me":
             guard state == .ready else{return false}
             let position=SIMD3(number("x"),number("y"),number("z"));point=position
+            if let riding = message["riding"] as? String {
+                guard let id = UInt16(riding), let seat = message["seat"] as? Int else { return false }
+                let health = byte("health")
+                let sent = client.sendPassenger(vehicleID: id, seat: seat,
+                                                position: NativeSAMPPedCoordinates.root(position),
+                                                health: health, armour: byte("armour"))
+                deathAfterSync(sent, health: health)
+                return sent
+            }
             let velocity=SIMD3(number("vx"),number("vy"),number("vz"))/50
             let keys=UInt16(max(0,min(65535,number("keys")))),lr=Int16(max(-128,min(128,number("lr")))),ud=Int16(max(-128,min(128,number("ud"))))
             let special=UInt8(max(0,min(3,number("specialKeys"))))
