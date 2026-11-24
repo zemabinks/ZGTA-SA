@@ -66,6 +66,15 @@ resource store or declare the game playable.
 
 ## Builds and checks
 
+`NativeVER2Archive` inspects aligned VER2 directory metadata through a bounded
+range reader. It preserves physical rows, including duplicate names. The
+standalone regression covers allocation ranges, malformed records and chunking.
+
+```sh
+xcrun swiftc -parse-as-library native-installer/swift/NativeVER2Archive.swift tests/resources/smoke_native_ver2_archive.swift -o /tmp/zgta-ver2-test
+/tmp/zgta-ver2-test
+```
+
 ```sh
 python3 build_installer_bridge.py
 python3 tests/resources/smoke_native_installer_bridge.py

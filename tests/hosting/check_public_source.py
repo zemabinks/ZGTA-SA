@@ -26,6 +26,7 @@ BAD_PARTS = {'local-only', '_next', 'node_modules', 'DerivedData', 'build',
 # In particular, admitting its two provenance/patch JSON files must not admit
 # archive inventories, owner fixtures, assets or additional vendored payloads.
 NATIVE_INSTALLER_SOURCE = {
+    'swift/NativeVER2Archive.swift',
     'README.md', 'NOTICE.md',
     'include/module.modulemap', 'include/zgtasa_installer.h',
     'src/zgtasa_installer.c', 'src/md5/global.h', 'src/md5/md5.h',
